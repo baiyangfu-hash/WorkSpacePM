@@ -1,0 +1,343 @@
+== run 1 15:33:15
+....................F.............................................................................................F.................................F........................................... [ 85%]
+.................................                                                                                                                                                                [100%]
+============================================================================================== FAILURES ===============================================================================================
+____________________________________________________________ test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] ____________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B6BE629730>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8240/test_a_recovery_command_is_nev0')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_recovery_command_is_never_refused_by_the_identity(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        result, asked, touched = _invoke(command, monkeypatch, tmp_path, refuse=True)
+    
+        assert asked == [RECOVERY[command]]
+        # it went on to use the service: the identity did not stop it
+>       assert touched, f"{command} did not reach its service"
+E       AssertionError: lease record-holder did not reach its service
+E       assert []
+
+tests\cli\test_continuity_runtime_identity.py:195: AssertionError
+__________________________________________________________ test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] __________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B6BE6906E0>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8240/test_every_warn_only_command_p5')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_every_warn_only_command_puts_the_warning_in_its_receipt(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       receipt = _receipt_of(command, monkeypatch, tmp_path, conflicts=("发布指针与载入包不一致",))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001B6B8EA4230>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+________________________________________________________ test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] ________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B6BE49D190>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8240/test_a_warn_only_command_witho6')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_warn_only_command_without_a_conflict_has_no_warning_field(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       assert "runtime_identity_warnings" not in _receipt_of(command, monkeypatch, tmp_path, conflicts=())
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:310: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001B6B8EA4230>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+======================================================================================= short test summary info =======================================================================================
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] - AssertionError: lease record-holder did not reach its service
+FAILED tests/cli/test_continuity_runtime_identity.py::test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 colum...
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 c...
+3 failed, 222 passed in 280.34s (0:04:40)
+exit=1
+== run 2 15:37:58
+....................F.............................................................................................F.................................F........................................... [ 85%]
+.................................                                                                                                                                                                [100%]
+============================================================================================== FAILURES ===============================================================================================
+____________________________________________________________ test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] ____________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B433303BC0>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8241/test_a_recovery_command_is_nev0')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_recovery_command_is_never_refused_by_the_identity(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        result, asked, touched = _invoke(command, monkeypatch, tmp_path, refuse=True)
+    
+        assert asked == [RECOVERY[command]]
+        # it went on to use the service: the identity did not stop it
+>       assert touched, f"{command} did not reach its service"
+E       AssertionError: lease record-holder did not reach its service
+E       assert []
+
+tests\cli\test_continuity_runtime_identity.py:195: AssertionError
+__________________________________________________________ test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] __________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B43337E690>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8241/test_every_warn_only_command_p5')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_every_warn_only_command_puts_the_warning_in_its_receipt(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       receipt = _receipt_of(command, monkeypatch, tmp_path, conflicts=("发布指针与载入包不一致",))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001B42DBF4260>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+________________________________________________________ test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] ________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B4331789E0>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8241/test_a_warn_only_command_witho6')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_warn_only_command_without_a_conflict_has_no_warning_field(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       assert "runtime_identity_warnings" not in _receipt_of(command, monkeypatch, tmp_path, conflicts=())
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:310: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x000001B42DBF4260>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+======================================================================================= short test summary info =======================================================================================
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] - AssertionError: lease record-holder did not reach its service
+FAILED tests/cli/test_continuity_runtime_identity.py::test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 colum...
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 c...
+3 failed, 222 passed in 275.77s (0:04:35)
+exit=1
+== run 3 15:42:35
+....................F.............................................................................................F.................................F........................................... [ 85%]
+.................................                                                                                                                                                                [100%]
+============================================================================================== FAILURES ===============================================================================================
+____________________________________________________________ test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] ____________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000199AC75C260>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8242/test_a_recovery_command_is_nev0')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_recovery_command_is_never_refused_by_the_identity(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        result, asked, touched = _invoke(command, monkeypatch, tmp_path, refuse=True)
+    
+        assert asked == [RECOVERY[command]]
+        # it went on to use the service: the identity did not stop it
+>       assert touched, f"{command} did not reach its service"
+E       AssertionError: lease record-holder did not reach its service
+E       assert []
+
+tests\cli\test_continuity_runtime_identity.py:195: AssertionError
+__________________________________________________________ test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] __________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000199AC7BA570>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8242/test_every_warn_only_command_p5')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_every_warn_only_command_puts_the_warning_in_its_receipt(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       receipt = _receipt_of(command, monkeypatch, tmp_path, conflicts=("发布指针与载入包不一致",))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x00000199A6F74260>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+________________________________________________________ test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] ________________________________________________________
+
+command = 'lease record-holder', monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000199AC585A60>
+tmp_path = WindowsPath('C:/Users/fubai/AppData/Local/Temp/pytest-of-fubai/pytest-8242/test_a_warn_only_command_witho6')
+
+    @pytest.mark.parametrize("command", sorted(RECOVERY))
+    def test_a_warn_only_command_without_a_conflict_has_no_warning_field(
+        command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+>       assert "runtime_identity_warnings" not in _receipt_of(command, monkeypatch, tmp_path, conflicts=())
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\cli\test_continuity_runtime_identity.py:310: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\cli\test_continuity_runtime_identity.py:295: in _receipt_of
+    return cast(dict[str, object], json.loads(result.stdout))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x00000199A6F74260>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\json\decoder.py:356: JSONDecodeError
+======================================================================================= short test summary info =======================================================================================
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] - AssertionError: lease record-holder did not reach its service
+FAILED tests/cli/test_continuity_runtime_identity.py::test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 colum...
+FAILED tests/cli/test_continuity_runtime_identity.py::test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 c...
+3 failed, 222 passed in 286.50s (0:04:46)
+exit=1
+ALLDONE

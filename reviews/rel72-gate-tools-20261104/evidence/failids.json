@@ -1,0 +1,10 @@
+{
+ "cli": [],
+ "infrastructure": [
+  "FAILED tests/infrastructure/test_memory_gate_in_cockpit.py::test_setup_env_installs_the_gate_as_step_5_with_a_skip_switch_and_without_paren_blocks - FileNotFoundError: [Errno 2] No such file or dir...",
+  "FAILED tests/infrastructure/test_memory_gate_in_cockpit.py::test_a_file_with_an_empty_acl_is_found_and_an_installed_tree_with_one_is_refused - AssertionError: assert (7 == 7 and '\\u6743\\u9650\\u662f\\u7a7a\\u7684' in '\\ufffd\\ufffd..."
+ ],
+ "core": [
+  "ERROR tests/core/test_cockpit_rules_approval.py"
+ ]
+}

@@ -1,0 +1,55 @@
+"""Non-governed pre-gate measurement on REAL checkouts (the claude station, detached at each commit; has .git and the repo-root files, so no extraction artifacts).
+Per regression group: the changed test files (cand: added or modified; base: modified only) run on both commits; the candidate also runs the whole tests/cli once (order dependence check).
+usage: python -B real_measure.py <base_sha> <cand_sha>"""
+import json, os, re, subprocess, sys
+R = r"C:\Users\fubai\Documents\My_Workspace"
+ST = os.path.join(R, ".auto-pm", "worktrees", "claude")
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+PROJ = os.path.join(ST, *P.split("/"))
+PY = os.path.join(R, ".venv", "Scripts", "python.exe")
+OUT = os.path.join(R, ".auto-pm", "reports", "m3-rel72")
+base, cand = sys.argv[1:3]
+IGN = {"tests/e2e/test_closure_drill.py", "tests/e2e/test_closure_drill_agent_misconduct.py", "tests/e2e/test_release_pycache_drill.py", "tests/e2e/test_trial_run_drill.py"}
+GROUP = {"tests/cli/": "cli", "tests/core/": "core", "tests/infrastructure/": "infrastructure", "tests/e2e/": "rest", "tests/test_": "rest"}
+
+
+def git(*a, cwd=R):
+    return subprocess.run(["git", "-C", cwd, "-c", "core.quotepath=false", *a], capture_output=True, check=True).stdout.decode("utf-8")
+
+
+changed = []
+for ln in git("diff", "--name-status", base, cand, "--", P + "/tests").splitlines():
+    st, path = ln.split("\t")[0], ln.split("\t")[-1]
+    rel = path[len(P) + 1:]
+    if st[0] in "AM" and rel.endswith(".py") and "conftest" not in rel and rel not in IGN:
+        g = next((v for k, v in GROUP.items() if rel.startswith(k)), "other")
+        changed.append((rel, g, st[0]))
+print("changed", len(changed), [c for c in changed if c[1] == "other"], flush=True)
+
+
+def run(args, tag):
+    p = subprocess.run([PY, "-B", "-m", "pytest", "-o", "addopts=", "--no-cov", "-p", "no:cacheprovider", "--color=no", "-q", "-rfEs", *args], cwd=PROJ, capture_output=True, timeout=7200)
+    text = p.stdout.decode("utf-8", errors="replace")
+    open(os.path.join(OUT, f"real_{tag}.txt"), "w", encoding="utf-8").write(text)
+    line = ([x for x in text.splitlines() if re.search(r"\d+ (passed|failed|skipped|error)", x)] or [""])[-1]
+    num = lambda w: int(m.group(1)) if (m := re.search(r"(\d+) " + w, line)) else 0  # noqa: E731
+    r = {"passed": num("passed"), "failed": num("failed"), "skipped": num("skipped"), "xfailed": num("xfailed"), "error": num("error"), "exit": p.returncode, "line": line,
+         "bad": [x[:220] for x in text.splitlines() if x.startswith(("FAILED", "ERROR"))]}
+    print(tag, json.dumps({k: v for k, v in r.items() if k != "bad"}, ensure_ascii=False), r["bad"][:5], flush=True)
+    return r
+
+
+res = {"base": base, "cand": cand, "groups": {}}
+for label, sha in (("cand", cand), ("base", base)):
+    git("switch", "--detach", sha, cwd=ST)
+    assert git("rev-parse", "HEAD", cwd=ST).strip().startswith(sha[:12]), "station not at the commit"
+    for g in ("infrastructure", "rest", "core", "cli"):
+        files = [c[0] for c in changed if c[1] == g and (label == "cand" or c[2] == "M")]
+        if files:
+            res["groups"].setdefault(g, {})[label] = run(files, f"{label}_{g}")
+    if label == "cand":
+        res["cli_full"] = run(["tests/cli"], "cand_cli_full")
+git("switch", "--detach", cand, cwd=ST)
+res["changed"] = changed
+json.dump(res, open(os.path.join(OUT, "real_measure.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print("DONE", flush=True)

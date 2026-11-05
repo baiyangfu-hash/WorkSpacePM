@@ -1,0 +1,11 @@
+PASS  pin positive (got True): pin check: HEAD start 26157a48f64a end 26157a48f64a expected 26157a48f64a; origin/main start 26157a48f64a end 26157a48f64a (main == frozen: True; product files differing main vs frozen: 0) -> OK
+PASS  pin: HEAD differs at the end (got False): pin check: HEAD start 26157a48f64a end 000000000000 expected 26157a48f64a; origin/main start 26157a48f64a end 26157a48f64a (main == frozen: True; product files differing main vs frozen: ?) -> 
+PASS  pin: origin/main moved, NO payload change (docs only) (got True): pin check: HEAD start 26157a48f64a end 26157a48f64a expected 26157a48f64a; origin/main start ac44fa9cc1b9 end 4101cb7e7f35 (main == frozen: False; product files differi
+PASS  pin: origin/main moved WITH a payload change (got False): pin check: HEAD start 26157a48f64a end 26157a48f64a expected 26157a48f64a; origin/main start d56329317184 end ac44fa9cc1b9 (main == frozen: False; product files differing main 
+PASS  pin: end file missing (got False): pin check: HEAD start 26157a48f64a end ? expected 26157a48f64a; origin/main start 26157a48f64a end ? (main == frozen: True; product files differing main vs frozen: 0) -> FAIL
+PASS  pin: origin/main empty (got False): pin check: HEAD start 26157a48f64a end 26157a48f64a expected 26157a48f64a; origin/main start  end  (main == frozen: False; product files differing main vs frozen: ?) -> FAIL
+PASS  sleep positive (got True): sleep check: 130 heartbeat samples, largest gap 30s (limit 120s), covers core run True, power evidence files True -> OK
+PASS  sleep: a 400 s gap in the heartbeat (got False): sleep check: 110 heartbeat samples, largest gap 430s (limit 120s), covers core run True, power evidence files True -> FAIL
+PASS  sleep: heartbeat does not cover the core run (got False): sleep check: 18 heartbeat samples, largest gap 30s (limit 120s), covers core run False, power evidence files True -> FAIL
+PASS  sleep: power evidence missing (got False): sleep check: 130 heartbeat samples, largest gap 30s (limit 120s), covers core run True, power evidence files False -> FAIL
+PASS  sleep: no heartbeat at all (got False): sleep check: 0 heartbeat samples, largest gap 1000000000s (limit 120s), covers core run False, power evidence files True -> FAIL

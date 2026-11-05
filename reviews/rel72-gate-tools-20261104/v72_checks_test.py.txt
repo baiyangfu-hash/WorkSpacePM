@@ -1,0 +1,66 @@
+"""Non-governed rehearsal of the pin and sleep judge checks of card 221 on a temporary gates folder: positive cases and negative variants,
+including the relaxed pin rule (origin/main may move without a payload change, never with one).  usage: python -B v72_checks_test.py"""
+import importlib.util
+import os
+import shutil
+import sys
+import tempfile
+import time
+
+ROOT = "C:/Users/fubai/Documents/My_Workspace"
+tmp = tempfile.mkdtemp(prefix="v72chk_")
+os.environ["PG_G"] = tmp
+os.environ.pop("PG_REHEARSAL", None)
+spec = importlib.util.spec_from_file_location("g", ROOT + "/.auto-pm/reports/m3-rel72/rel72_gates.py")
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+res = []
+# two real commits with NO payload difference between them (docs only) and two with one (before and after the memory gate and backup landed)
+NO_PAYLOAD_A, NO_PAYLOAD_B = "ac44fa9cc1b9e00d21e0bc799eb8e87128b541f5", "4101cb7e7f35"
+PAYLOAD_A, PAYLOAD_B = "d563293171847124e609469b5371c5d8b9688443", "ac44fa9cc1b9e00d21e0bc799eb8e87128b541f5"
+
+
+def fresh():
+    shutil.rmtree(tmp + "/g2_candidate", ignore_errors=True)
+    os.makedirs(tmp + "/g2_candidate")
+    now = time.time()
+    for n in ("core.txt", "core.exit", "core.started", "core.finished", "ALL_DONE"):
+        open(f"{tmp}/g2_candidate/{n}", "w").write("x\n")
+    os.utime(f"{tmp}/g2_candidate/core.started", (now - 3600, now - 3600))
+    os.utime(f"{tmp}/g2_candidate/core.finished", (now - 60, now - 60))
+    open(tmp + "/pin_start.txt", "w").write(f"HEAD={g.BASE}\nORIGIN_MAIN={g.BASE}\nMAIN_PRODUCT_DIFF=0\n")
+    shutil.copy(tmp + "/pin_start.txt", tmp + "/pin_end.txt")
+    open(tmp + "/heartbeat.log", "w").write("".join(f"{int(now - 3700 + 30 * i)} t\n" for i in range(130)))
+    for n in ("power_start.txt", "power_end.txt"):
+        open(f"{tmp}/{n}", "w").write("lid\n")
+
+
+def case(name, mut, fn, want):
+    fresh()
+    mut()
+    ok, line = fn()
+    res.append((name, ok == want, ok, line))
+
+
+def pins(start_main, end_main, end_head=None):
+    def f():
+        open(tmp + "/pin_start.txt", "w").write(f"HEAD={g.BASE}\nORIGIN_MAIN={start_main}\n")
+        open(tmp + "/pin_end.txt", "w").write(f"HEAD={end_head or g.BASE}\nORIGIN_MAIN={end_main}\n")
+    return f
+
+
+case("pin positive", lambda: None, g.pin_check, True)
+case("pin: HEAD differs at the end", pins(g.BASE, g.BASE, "0" * 40), g.pin_check, False)
+case("pin: origin/main moved, NO payload change (docs only)", pins(NO_PAYLOAD_A, NO_PAYLOAD_B), g.pin_check, True)
+case("pin: origin/main moved WITH a payload change", pins(PAYLOAD_A, PAYLOAD_B), g.pin_check, False)
+case("pin: end file missing", lambda: os.remove(tmp + "/pin_end.txt"), g.pin_check, False)
+case("pin: origin/main empty", pins("", ""), g.pin_check, False)
+case("sleep positive", lambda: None, g.sleep_check, True)
+case("sleep: a 400 s gap in the heartbeat", lambda: open(tmp + "/heartbeat.log", "w").write("".join(f"{int(time.time() - 3700 + 30 * i + (400 if i > 60 else 0))} t\n" for i in range(110))), g.sleep_check, False)
+case("sleep: heartbeat does not cover the core run", lambda: open(tmp + "/heartbeat.log", "w").write("".join(f"{int(time.time() - 600 + 30 * i)} t\n" for i in range(18))), g.sleep_check, False)
+case("sleep: power evidence missing", lambda: os.remove(tmp + "/power_end.txt"), g.sleep_check, False)
+case("sleep: no heartbeat at all", lambda: os.remove(tmp + "/heartbeat.log"), g.sleep_check, False)
+out = [f"{'PASS' if r else 'FAIL'}  {n} (got {got}): {line}" for n, r, got, line in res]
+print("\n".join(out))
+shutil.rmtree(tmp, ignore_errors=True)
+sys.exit(0 if all(r for _, r, _, _ in res) else 1)

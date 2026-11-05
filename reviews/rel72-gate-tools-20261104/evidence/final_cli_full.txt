@@ -1,0 +1,32 @@
+............................................................s................................................................................................................................... [ 18%]
+................................................................................................................................................................................................ [ 37%]
+................................................................................................................................................................................................ [ 56%]
+................................................................................................................................................................................................ [ 75%]
+................................................................................................s..............................................................s................................ [ 94%]
+.........................................................                                                                                                                                        [100%]
+========================================================================================== warnings summary ===========================================================================================
+tests/cli/test_plc_language_service.py::test_cx03_a_missing_plugin_is_a_warning_not_a_pass
+tests/cli/test_project.py::test_project_create_single_machine_generates_week2_template_assets
+tests/cli/test_plc.py::test_plc_init_default_mode
+tests/cli/test_plc.py::test_plc_init[standard-project]
+tests/cli/test_plc_language_service.py::test_cx04_the_flag_switches_the_layer_off
+tests/cli/test_plc_language_service.py::test_cx01_a_passing_language_service_keeps_the_exit_code_zero
+tests/cli/test_project.py::TestDocRefresh::test_doc_refresh_after_project_create
+tests/cli/test_plc_language_service.py::test_cx02_a_failing_language_service_makes_the_exit_code_one
+  C:\Users\fubai\Documents\My_Workspace\.venv\Lib\site-packages\copier\_user_data.py:44: FutureWarning: 'now' will be removed in a future release of Copier.
+  Please use this instead: {{ '%Y-%m-%d %H:%M:%S' | strftime }}
+  strftime format reference https://strftime.org/
+    warnings.warn(
+
+tests/cli/test_plc_language_service.py: 64 warnings
+tests/cli/test_project.py: 32 warnings
+tests/cli/test_plc.py: 32 warnings
+  C:\Users\fubai\Documents\My_Workspace\.venv\Lib\site-packages\copier\_user_data.py:50: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================================================================================= short test summary info =======================================================================================
+SKIPPED [1] tests\cli\test_project_create_destination.py:129: no symlink support here
+SKIPPED [1] tests\cli\test_caller_path_string_options.py:75: a file *name* placed in the project's prototype folder, never a location
+SKIPPED [1] tests\cli\test_git_hook.py:112: Windows has no execute bit; Git for Windows runs any hook file
+1014 passed, 3 skipped, 136 warnings in 2875.01s (0:47:55)

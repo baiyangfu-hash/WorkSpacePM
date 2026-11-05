@@ -1,0 +1,13 @@
+"""Heartbeat: one line '<epoch seconds> <UTC time>' every 30 s into <log>, until <donefile> exists (or 8 h).  A gap above 120 s in this log = the machine slept or stalled.
+usage: python -B heartbeat.py <log> <donefile>"""
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+t0 = time.time()
+with open(sys.argv[1], "a", encoding="utf-8", buffering=1) as f:
+    while not Path(sys.argv[2]).exists() and time.time() - t0 < 8 * 3600:
+        now = time.time()
+        f.write(f"{now:.0f} {datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        time.sleep(30)

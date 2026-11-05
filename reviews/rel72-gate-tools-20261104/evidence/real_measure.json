@@ -1,0 +1,264 @@
+{
+ "base": "d671611a13bc15536047769fdb0498666c414044",
+ "cand": "0288a30c4fc7395ea40bb83921b7f9b4cc220d7e",
+ "groups": {
+  "infrastructure": {
+   "cand": {
+    "passed": 252,
+    "failed": 0,
+    "skipped": 9,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "252 passed, 9 skipped in 104.11s (0:01:44)",
+    "bad": []
+   },
+   "base": {
+    "passed": 35,
+    "failed": 0,
+    "skipped": 4,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "35 passed, 4 skipped in 20.65s",
+    "bad": []
+   }
+  },
+  "rest": {
+   "cand": {
+    "passed": 90,
+    "failed": 0,
+    "skipped": 4,
+    "xfailed": 1,
+    "error": 0,
+    "exit": 0,
+    "line": "90 passed, 4 skipped, 1 xfailed in 116.96s (0:01:56)",
+    "bad": []
+   },
+   "base": {
+    "passed": 78,
+    "failed": 0,
+    "skipped": 4,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "78 passed, 4 skipped in 93.13s (0:01:33)",
+    "bad": []
+   }
+  },
+  "core": {
+   "cand": {
+    "passed": 198,
+    "failed": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "198 passed in 363.36s (0:06:03)",
+    "bad": []
+   },
+   "base": {
+    "passed": 97,
+    "failed": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "97 passed in 462.73s (0:07:42)",
+    "bad": []
+   }
+  },
+  "cli": {
+   "cand": {
+    "passed": 222,
+    "failed": 3,
+    "skipped": 0,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 1,
+    "line": "3 failed, 222 passed in 299.45s (0:04:59)",
+    "bad": [
+     "FAILED tests/cli/test_continuity_runtime_identity.py::test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] - AssertionError: lease record-holder did not reach its service",
+     "FAILED tests/cli/test_continuity_runtime_identity.py::test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 colum...",
+     "FAILED tests/cli/test_continuity_runtime_identity.py::test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 c..."
+    ]
+   },
+   "base": {
+    "passed": 183,
+    "failed": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "error": 0,
+    "exit": 0,
+    "line": "183 passed in 282.87s (0:04:42)",
+    "bad": []
+   }
+  }
+ },
+ "cli_full": {
+  "passed": 1011,
+  "failed": 3,
+  "skipped": 3,
+  "xfailed": 0,
+  "error": 0,
+  "exit": 1,
+  "line": "3 failed, 1011 passed, 3 skipped, 136 warnings in 1189.39s (0:19:49)",
+  "bad": [
+   "FAILED tests/cli/test_continuity_runtime_identity.py::test_every_warn_only_command_puts_the_warning_in_its_receipt[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 colum...",
+   "FAILED tests/cli/test_continuity_runtime_identity.py::test_a_recovery_command_is_never_refused_by_the_identity[lease record-holder] - AssertionError: lease record-holder did not reach its service",
+   "FAILED tests/cli/test_continuity_runtime_identity.py::test_a_warn_only_command_without_a_conflict_has_no_warning_field[lease record-holder] - json.decoder.JSONDecodeError: Expecting value: line 1 c..."
+  ]
+ },
+ "changed": [
+  [
+   "tests/cli/test_continuity_runtime_identity.py",
+   "cli",
+   "M"
+  ],
+  [
+   "tests/cli/test_long_run_cli.py",
+   "cli",
+   "A"
+  ],
+  [
+   "tests/cli/test_plc_ingest_path.py",
+   "cli",
+   "A"
+  ],
+  [
+   "tests/cli/test_plc_python_runtime_identity.py",
+   "cli",
+   "M"
+  ],
+  [
+   "tests/cli/test_pm_inbox.py",
+   "cli",
+   "M"
+  ],
+  [
+   "tests/cli/test_pm_orient.py",
+   "cli",
+   "M"
+  ],
+  [
+   "tests/cli/test_pm_triage.py",
+   "cli",
+   "A"
+  ],
+  [
+   "tests/cli/test_pm_verify_memory_preflight.py",
+   "cli",
+   "A"
+  ],
+  [
+   "tests/cli/test_run_start_other_executor.py",
+   "cli",
+   "A"
+  ],
+  [
+   "tests/cli/test_runtime_identity_guard.py",
+   "cli",
+   "M"
+  ],
+  [
+   "tests/contract/__init__.py",
+   "other",
+   "A"
+  ],
+  [
+   "tests/contract/test_interlock_matrix.py",
+   "other",
+   "A"
+  ],
+  [
+   "tests/core/test_cockpit_rules_approval.py",
+   "core",
+   "A"
+  ],
+  [
+   "tests/core/test_continuity_resume_service.py",
+   "core",
+   "M"
+  ],
+  [
+   "tests/core/test_github_collector.py",
+   "core",
+   "M"
+  ],
+  [
+   "tests/core/test_long_regression.py",
+   "core",
+   "A"
+  ],
+  [
+   "tests/core/test_pm_recover_command.py",
+   "core",
+   "M"
+  ],
+  [
+   "tests/core/test_pm_triage_service.py",
+   "core",
+   "A"
+  ],
+  [
+   "tests/e2e/test_exit_drill.py",
+   "rest",
+   "A"
+  ],
+  [
+   "tests/e2e/test_long_gate.py",
+   "rest",
+   "M"
+  ],
+  [
+   "tests/infrastructure/test_lease_wallet.py",
+   "infrastructure",
+   "M"
+  ],
+  [
+   "tests/infrastructure/test_long_run_core.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/infrastructure/test_memory_gate.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/infrastructure/test_memory_gate_in_cockpit.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/infrastructure/test_memory_preflight.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/infrastructure/test_powershell_script_rules.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/infrastructure/test_process_probe.py",
+   "infrastructure",
+   "M"
+  ],
+  [
+   "tests/infrastructure/test_run_control_root_guard_ratchet.py",
+   "infrastructure",
+   "M"
+  ],
+  [
+   "tests/infrastructure/test_state_backup.py",
+   "infrastructure",
+   "A"
+  ],
+  [
+   "tests/test_subprocess_timeout_guard.py",
+   "rest",
+   "M"
+  ]
+ ]
+}

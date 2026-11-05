@@ -1,0 +1,18 @@
+"""Rehearsal helper: apply the expected deltas (passed) and expected skips (skipped) to the last summary line of synthetic group outputs.   usage: python -B adjust_counts.py <group output dir> <config json>"""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+out, cfg = Path(sys.argv[1]), json.load(open(sys.argv[2], encoding="utf-8"))
+for group in sorted(set(cfg["expected_deltas"]) | set(cfg["expected_skips"])):
+    delta, skips = cfg["expected_deltas"].get(group, 0), cfg["expected_skips"].get(group, 0)
+    f = out / f"{group}.txt"
+    lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+    idx = max(i for i, ln in enumerate(lines) if re.search(r"\d+ passed", ln))
+    lines[idx] = re.sub(r"(\d+) passed", lambda m: f"{int(m.group(1)) + delta} passed", lines[idx], count=1)
+    if skips:
+        lines[idx] = re.sub(r"(\d+) skipped", lambda m: f"{int(m.group(1)) + skips} skipped", lines[idx], count=1)
+    f.write_text(chr(10).join(lines) + chr(10), encoding="utf-8", newline=chr(10))
+    print(group, "+", delta, "skips", skips, "->", lines[idx].strip("= "))
