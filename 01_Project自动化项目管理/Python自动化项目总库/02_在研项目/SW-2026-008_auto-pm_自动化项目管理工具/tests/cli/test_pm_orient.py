@@ -161,3 +161,88 @@ def test_both_commands_check_the_answer_again_and_print_nothing_when_it_is_broke
         assert shown.exit_code != 0 and ("未通过校验" in shown.output or "缺少 query" in shown.output)
         assert answer.evidence_id not in shown.output and "continuity-resume.v2" not in shown.output  # no half of a success payload
     assert _snapshot(tmp_path) == before
+
+
+def test_orient_adds_one_read_only_memory_gate_line_without_touching_the_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Memory gate merged into the cockpit: text mode prints the line on stdout, JSON mode on stderr so stdout stays pure JSON; resume does not print it."""
+
+    from auto_pm.infrastructure import memory_gate_status
+
+    _workspace(tmp_path)
+    monkeypatch.setattr(
+        memory_gate_status, "read_gate_status", lambda **kwargs: memory_gate_status.GateStatus("running", installed_bundle="a" * 64, pinned_bundle="b" * 64)
+    )
+    before = _snapshot(tmp_path)
+
+    text = _run(tmp_path, "orient", PROJECT)
+    as_json = _run(tmp_path, "orient", PROJECT, "--json")
+    resumed = _run(tmp_path, "resume", PROJECT)
+
+    assert text.exit_code == 0 and "总闸: 运行中" in text.stdout and "有新版本" in text.stdout
+    assert as_json.exit_code == 0 and "总闸" not in as_json.stdout and "总闸: 运行中" in as_json.stderr
+    json.loads(as_json.stdout)  # stdout is still one JSON document
+    assert "总闸" not in resumed.output
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()
+
+
+def test_orient_prints_nothing_about_the_gate_where_the_gate_does_not_apply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.infrastructure import memory_gate_status
+
+    _workspace(tmp_path)
+    monkeypatch.setattr(memory_gate_status, "read_gate_status", lambda **kwargs: None)
+
+    assert "总闸" not in _run(tmp_path, "orient", PROJECT).output
+
+
+def test_a_failing_gate_reader_never_stops_orient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.infrastructure import memory_gate_status
+
+    def broken(**kwargs: object) -> None:
+        raise PermissionError("denied")
+
+    _workspace(tmp_path)
+    monkeypatch.setattr(memory_gate_status, "read_gate_status", broken)
+    result = _run(tmp_path, "orient", PROJECT)
+
+    assert result.exit_code == 0 and "未能读取总闸状态" in result.output
+
+
+def test_orient_adds_one_read_only_state_backup_line_from_the_local_marker_only(tmp_path: Path) -> None:
+    """Ledger off-site backup: no marker -> a warning with the command; a fresh marker -> the age.  Text on stdout, JSON mode on stderr; resume prints nothing."""
+
+    from datetime import UTC, datetime, timedelta
+
+    _workspace(tmp_path)
+    before = _snapshot(tmp_path)
+
+    none = _run(tmp_path, "orient", PROJECT)
+    none_json = _run(tmp_path, "orient", PROJECT, "--json")
+    resumed = _run(tmp_path, "resume", PROJECT)
+
+    assert none.exit_code == 0 and "还没有做过异地备份" in none.stdout and "pm state-backup push" in none.stdout
+    assert none_json.exit_code == 0 and "异地备份" not in none_json.stdout and "还没有做过异地备份" in none_json.stderr
+    json.loads(none_json.stdout)  # stdout is still one JSON document
+    assert "异地备份" not in resumed.output
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()  # looking writes nothing
+
+    marker = tmp_path / ".auto-pm" / "cache" / "state-backup-last.json"
+    marker.parent.mkdir(parents=True)
+    pushed = datetime.now(UTC) - timedelta(hours=2)
+    marker.write_text(
+        json.dumps({"schema_version": "state-backup-marker.v1", "pushed_at": pushed.isoformat(), "events": 202}), encoding="utf-8"
+    )
+    fresh = _run(tmp_path, "orient", PROJECT)
+    assert fresh.exit_code == 0 and "[账本异地备份] 最近一次 2 小时前" in fresh.stdout and "202 条事件" in fresh.stdout
+
+
+def test_a_failing_state_backup_reader_never_stops_orient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auto_pm.ui.cli.pm as pm_module
+
+    def broken(_root: object) -> None:
+        raise PermissionError("denied")
+
+    _workspace(tmp_path)
+    monkeypatch.setattr(pm_module, "read_state_backup_status", broken)
+    result = _run(tmp_path, "orient", PROJECT)
+
+    assert result.exit_code == 0 and "未能读取备份记录" in result.output

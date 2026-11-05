@@ -17,6 +17,7 @@
 | 跨技能公共契约 | `roles/shared/refs/skill_coordination.md` |
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
+| 持续演进路线（M3 验收后下一期选什么、遗留问题；后续接手迭代的基准） | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M3后持续演进规划_20261008/V1.0_20261104/01_现行路线_V1.0_PM.md`（遗留问题见同目录 `02_M3遗留问题_V1.0_PM.md`；这是“选什么”的菜单，状态仍以上一行 39 号计划“当前投影”为准） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
@@ -31,7 +32,7 @@
 - **PM 治理角色**：负责事实核验、CHG、Decision、Work 授权与验收；不得使用 `pm-workflow`，不得把 PM_SESSION、handoff.v1 或聊天文字视为执行真源。
 - **plc-electrical-engineer**：PLC 工程执行主力，全面遵循 Siemens LSP 扩展生态及 LSP-905~908 规范（语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、.plc.json 依赖）与汽车制造级标准（STD-830 OMAC 状态机、STD-840 典型设备块、STD-850 步进链、STD-860 首出诊断）
 - **fullstack-engineer**：Python/高级语言全栈执行主力，全面遵循 DEV-300（Google SRE 零崩溃/白盒日志/黄金信号）与 DEV-210/DEV-216/DEV-218（PySide6+QML 5 层整洁架构、Bridge/DTO、QRunnable 线程模型、Ruff+Mypy）
-- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改
+- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改。Trae 里的 AI 想改 `.trae/` 也要先有用户原话，不得自改自合
 
 ## 强制协同铁律（澄清-报批-执行-验收 四阶段）
 
@@ -41,9 +42,9 @@
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的发布版本 1.3.3-d8f7c8b 还没有 `pm orient`，新克隆的工作区在发布指针更新前改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
+     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的现行发布版本 1.3.3-d563293 已有 `pm orient`；若本机报 `No such command 'orient'`，说明本机生效的发布版本更旧，改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
-2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
+2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）。一档小卡（只改测试、文档或单个文件的小修，且不碰受保护路径、安全区、PLC 项目、发布载荷）可不报批直接做，做完告知；其余仍先报批；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
 4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，报用户验收；IDE 里的 agent 用 `main.py pm verify --mission-id <ID> --lease-wallet` 做质量验证（不写临时脚本）；用户验收后由用户在驾驶舱界面点“确认验收”（已启用批准口令时改为用户本人在终端运行 `main.py pm accept --mission-id <ID>` 并输入口令；批准范围同样由用户在 `pm approve` 的提示里输入口令，agent 绝不索要、代填或绕过口令），它记下验收并走 `close_accepted` 一步收口（隔离工作树里验收过的文件按字节并回控制根、不替用户提交，推进 Run、Work 和 Mission，把证据写进变更单；已验收未收口的用 `main.py pm close --mission-id <ID>` 重试（终端里 `main.py pm accept` 只记下验收、停在 ACCEPTED，之后要再跑 `main.py pm close` 才收口；一步收口只发生在驾驶舱界面的“确认验收”按钮）；变更单再用 `change transition … --pid <PID>` 推到 completed），**不得单独用 `continuity run/work/mission transition` 推 Run、Work 或 Mission 的状态**，收口后执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
 
@@ -95,7 +96,7 @@
 
 **开工位 / 收工位（在控制根里）：**
 
-> 生效时间：`main.py worktree …` 已合进 `main`（PR #87），但当前部署的发布版还没有，要等下一次发版切换后才能在控制根使用；在那之前，下面“手工命令”照旧。
+> 生效时间：`main.py worktree …` 已合进 `main`（PR #87），仓库记录的现行发布版本 1.3.3-d563293 已有（`worktree open/list/close/sweep` 实测都在）；若本机报 `No such command 'worktree'`，说明本机生效的发布版本更旧，在那之前用下面的“手工命令”。
 
 ```
 main.py worktree open <agent> <卡号>    # 开工：从最新 origin/main 建工位和 <前缀><卡号> 分支

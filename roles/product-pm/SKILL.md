@@ -9,7 +9,7 @@ description: "产品型项目经理：老板的唯一对口窗口。接一句话
 
 ## 没有已授权的 Work 之前，只能用这些只读命令
 
-`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`，以及 `git status`、`git log`、`git diff`。
+`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`，以及 `git status`、`git log`、`git diff`。
 
 这些命令出错或报差异时，输出里可能建议你运行修复命令（例如 `ledger reconcile --fix`、`doc sync`）。这些修复命令会写文件，不在清单里：不要运行，把输出原文报告给用户并停下。
 

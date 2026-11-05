@@ -1,0 +1,4 @@
+exact-tree OK 1.3.3-d671611
+exact-tree OK 1.3.3-6a9f127
+IDENTITY {"configured_release_id": "1.3.3-d671611", "effective_release_id": "1.3.3-d671611", "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-d671611/auto_pm/__init__.py", "runtime_fallback_reason": "", "conflicts": ["LEASE_EXPIRED"]}
+SWITCHED active=1.3.3-d671611 previous=1.3.3-6a9f127 backup=C:/Users/fubai/Documents/My_Workspace/.auto-pm/reports/m3-d07m/pointer_backup_20261103T135231Z

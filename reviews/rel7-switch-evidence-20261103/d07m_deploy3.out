@@ -1,0 +1,9 @@
+== 0. Bindings and read-only preflight
+pointers, manifest and the two installed releases as frozen; active=1.3.3-6a9f127
+identity before: {"configured_release_id": "1.3.3-6a9f127", "effective_release_id": "1.3.3-6a9f127", "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-6a9f127/auto_pm/__init__.py", "runtime_fallback_reason": "", "conflicts": ["LEASE_EXPIRED"]}
+== 0b. The user's confirmation
+== 1. Deploy CHG
+== 2. Decision DEC-20261103-M3D07M01 (4 paths)
+== 3. Work and Run on the control root
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-6a9f127
+Error: 控制根里范围内的文件与本 Run 起点不一致（多半是上一单收口并回、还没提交）：00_Infrastructure/auto_pm/deployment_manifest.json；请先把它们提交，再从新的提交建隔离工作树，否则收口时无法并回

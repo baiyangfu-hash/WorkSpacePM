@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import click
@@ -48,7 +49,9 @@ from auto_pm.contracts.pm_facade import PlanningExecutionGrant, PlanningScopeCar
 from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.decision_service import DecisionError, DecisionService
+from auto_pm.infrastructure import memory_gate_status
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.state_backup import read_state_backup_status
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
 from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
 from auto_pm.ui.cli.runtime_identity_guard import (
@@ -1274,6 +1277,8 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
     click.echo(f"下一合法动作: {payload.next_legal_action or '-'}")
     for conflict in payload.conflicts:
         click.echo(f"冲突: {conflict}")
+    for hint in payload.exit_hints:
+        click.echo(f"出口: {hint}")
     for warning in payload.hold_warnings:
         click.echo(f"🔴 {warning}")
     if payload.run is not None and payload.run.state.value == "RUNNING":
@@ -1292,6 +1297,7 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
                 f"  {brief.item_id} [{brief.kind.value}] {brief.title}"
                 f"（{brief.status.value}，建议 {brief.disposition.value}）"
             )
+        click.echo("建议顺序和每条的下一步: python main.py pm triage <项目编号>（只读）")
     for path in payload.read_set:
         click.echo(f"证据: {path}")
     query = payload.query
@@ -1352,6 +1358,39 @@ def orient_pm(
         raise click.ClickException(str(error)) from error
     _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
+    _memory_gate_line(ctx, as_json)
+    _state_backup_line(ctx, as_json)
+
+
+def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
+    """One read-only line about the memory gate (Windows only): running or not, and whether the installed version is the pinned one.
+
+    stdout in text mode, stderr next to the other hints in JSON mode (stdout stays pure JSON).  It never installs anything and never fails the command.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        status = memory_gate_status.read_gate_status(workspace_root=Path(app_ctx.workspace_root))
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [总闸] 未能读取总闸状态：{type(error).__name__}", err=True)
+        return
+    if status is not None:
+        click.echo(status.line(), err=as_json)
+
+
+def _state_backup_line(ctx: click.Context, as_json: bool) -> None:
+    """One read-only line about the ledger's off-site backup: when it was last pushed from this computer (a local marker file, no network).
+
+    Same placement rule as the memory gate line (stdout in text mode, stderr in JSON mode); it never pushes anything and never fails the command.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        status = read_state_backup_status(Path(app_ctx.control_root))
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [账本异地备份] 未能读取备份记录：{type(error).__name__}", err=True)
+        return
+    click.echo(status.line(), err=as_json)
 
 
 def _emit_context(ctx: click.Context, project_id: str, start_path: str | None) -> None:
@@ -1429,3 +1468,8 @@ from auto_pm.ui.cli.pm_recover import recover_pm, recover_status_pm  # noqa: E40
 
 pm_group.add_command(recover_status_pm)
 pm_group.add_command(recover_pm)
+
+# Read-only triage desk: open cards and inbox items in suggested order (TD-SW008-066, full version).
+from auto_pm.ui.cli.pm_triage import triage_pm  # noqa: E402
+
+pm_group.add_command(triage_pm)

@@ -1,14 +1,20 @@
 ---
-version: "V2.0.0"
-status: "正式发布"
+version: "V2.0.1"
+status: "学习参考（局部更新）"
 created: "2026-09-07"
-updated: "2026-09-07"
+updated: "2026-10-09"
 spec_id: "GUIDE_W3_D11"
 project_id: "SW-2026-008"
 title: "Day 11：Handoff 契约化移交总线与物理隔离"
 ---
 
 # Day 11：Handoff 契约化移交总线与物理隔离
+
+> **历史内容提示（2026-10-09）**：本次只补说明，以下正文保留 2026-09-07 的旧版设计与命令，不能直接作为当前操作指令。尤其旧 `handoff create/list/preflight`、`python -m auto_pm`、`PYTHONPATH` 配置和 result.json 用法，不应照抄执行，也不能作为当前授权或完成依据。
+>
+> 当前交接以工作区根 `AGENTS.md` 及其引用的 Continuity v2 规则为准，通过根 `.venv\\Scripts\\python.exe main.py` 入口核验；本次没有验证具体命令参数。你只需确认“哪项任务、在哪个目录、做到哪里、检查结果、下一步”，不需要手写 JSON、租约或数据库记录。
+>
+> 文件隔离和版本概念先看[Git 与 GitHub：日常维护够用指南](../Git与GitHub_日常维护够用指南.md)。工作树只分开文件操作现场，不自动隔离数据库和外部进程；本章也不代表驾驶舱必须替你启动模型。
 
 > 🎯 **今日目标**：理解多智能体（Multi-Agent）协作中的 Handoff 契约协议，掌握主控 PM 与领域执行技能（PLC / 全栈）的物理隔离法则。  
 > ⏱️ **预计耗时**：50 分钟  

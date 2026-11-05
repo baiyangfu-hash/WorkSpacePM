@@ -12,12 +12,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from auto_pm.application.core import long_regression
 from auto_pm.application.core.acceptance_runner import (
     AcceptanceScan,
     AcceptanceScanFinding,
     mismatch_lines,
     refusal_reason,
-    run_acceptance_checks,
     worktree_environment,
     write_report,
 )
@@ -1305,10 +1305,14 @@ class PmFacadeService:
             return "批准时没有登记验收命令（旧批准），验收命令未执行", False
         if not checks:
             return "", False
-        runs = run_acceptance_checks(
+        # A long pytest regression is not run here (900 s per command, and the machine's memory): its ``long-run`` record is the evidence.
+        runs = long_regression.run_checks(
             checks,
             cwd=self._store.workspace_root,
             extra_env=worktree_environment(run.worktree_path, self._store.workspace_root),
+            worktree=str(run.worktree_path),
+            run_id=str(run.run_id),
+            run_started=str(getattr(run, "created_at", "") or ""),
         )
         try:
             report = write_report(self._store.workspace_root, run.run_id, runs)

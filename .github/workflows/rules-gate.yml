@@ -1,0 +1,125 @@
+# 规则文件批准检查（可设为必过检查）：PR 改到规则文件（AGENTS.md、.trae/、规范库、roles/ 等，清单见 reviews/tools/rules_approval_check.py）时，
+# 必须有用户本人在 PR 页面评论的一行“规则批准 <头提交号>”，否则本检查（任务名 rules-approval）报红。没改规则文件的 PR 直接通过。
+# 说明见 reviews/规则文件批准检查_说明.md。
+#
+# 为什么需要：第二账号（Write 权限）只要检查全绿就能自己合并改规则文件的 PR；规则集里没有“必须某人批准”这一条。
+#
+# 两个任务：
+# - rules-approval（pull_request_target）：判定。裁判全部来自 main，PR 改不了它（与 pr-gate 同一套做法）：
+#   使用 main 上的这份工作流；脚本取自 main 的检出；PR 头只拉成 git 对象当数据读，不检出、不导入、不执行；
+#   PR 评论由 gh api 取成 JSON 文件交给脚本，评论内容不进入任何命令行。
+# - rerun（issue_comment）：用户评论（或改、删评论）之后，把该 PR 头提交上最近一次 rules-approval 运行重跑一遍，
+#   让结果落在 PR 的头提交上。issue_comment 触发的任务自己不挂到 PR 上，所以不能在这里判定。只响应用户本人的评论。
+# 不设 paths 过滤：必过检查必须对每个 PR 都报告结果。
+name: rules-gate
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+
+jobs:
+  rules-approval:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: rules-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # 裁判是 main 的当前状态，不是事件里可能过期的 base.sha（与 pr-gate 同理）
+      - name: Check out main (the judge)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 数据：PR 头只拉成 git 对象，不检出
+      - name: Fetch the PR head and comments as data
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
+          # 取不到评论就让任务失败（检查报红），不当成“没有批准”也不当成“放行”
+          gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+
+      - name: Rules approval check
+        env:
+          # git 全程关掉 Git LFS，PR 的 .gitattributes 不能启动 git-lfs
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: filter.lfs.smudge
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: filter.lfs.process
+          GIT_CONFIG_VALUE_1: ""
+          GIT_CONFIG_KEY_2: filter.lfs.required
+          GIT_CONFIG_VALUE_2: "false"
+        run: |
+          set +e
+          python3 -I "$GITHUB_WORKSPACE/reviews/tools/rules_approval_check.py" \
+            --base "$(git rev-parse HEAD)" --head "$HEAD_SHA" --repo "$GITHUB_WORKSPACE" \
+            --comments "$RUNNER_TEMP/comments.json" | tee "$RUNNER_TEMP/verdict.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          { echo '### 规则文件批准检查'; cat "$RUNNER_TEMP/verdict.txt"; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+  rerun:
+    # 只响应用户本人在打开着的 PR 上的评论；别人的评论不触发（判定本身仍由上面的任务做）
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && github.event.issue.state == 'open'
+      && github.event.comment.user.id == 246858089
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    concurrency:
+      group: rules-gate-rerun-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Re-run the latest rules-approval run on the PR head
+        run: |
+          head_sha="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .head.sha)"
+          # 判定运行可能还在跑（刚推过提交）：等它结束再重跑，最多约 10 分钟
+          for _ in $(seq 1 30); do
+            line="$(gh api "repos/$REPO/actions/workflows/rules-gate.yml/runs?head_sha=$head_sha&event=pull_request_target&per_page=1" \
+              --jq '.workflow_runs[0] | select(. != null) | "\(.id) \(.status)"')"
+            if [ -z "$line" ]; then
+              echo "::error::PR #$PR_NUMBER 的头提交 ${head_sha:0:12} 上还没有 rules-gate 运行记录，无法重跑"
+              exit 1
+            fi
+            run_id="${line% *}"
+            status="${line#* }"
+            if [ "$status" = "completed" ]; then
+              gh run rerun "$run_id" --repo "$REPO"
+              echo "已重跑 rules-gate 运行 $run_id（头提交 ${head_sha:0:12}）"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::等了约 10 分钟，rules-gate 运行 $run_id 仍未结束，没有重跑"
+          exit 1

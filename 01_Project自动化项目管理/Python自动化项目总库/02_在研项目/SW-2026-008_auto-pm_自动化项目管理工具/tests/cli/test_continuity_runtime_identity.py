@@ -60,6 +60,7 @@ EXEMPT = frozenset(
         "restore-backup",
         "verify-backup",
         "mission show",
+        "recovery plan",  # prints an exit chain from the interlock matrix; reads, never writes
         "work adjudication-evidence",
         "run legacy-terminal-evidence",
     }
@@ -95,6 +96,7 @@ def test_every_continuity_command_is_classified() -> None:
 EXTRA_ARGS = {
     "lease renew": ["--lease-wallet"],
     "lease extend-hold": ["--approval-evidence-ref", "user-confirmation:2026-10-29-16:00"],
+    "lease record-holder": ["--holder-pid", "4242"],  # an explicit pid: "auto" looks for a non-shell host process, which a detached gate run does not have
     "lease run-with-renewal": ["--lease-wallet", "--", "true"],
 }
 
