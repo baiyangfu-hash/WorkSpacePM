@@ -1,0 +1,78 @@
+"""Derive the switch card D07p V1.1 (CARD-SW008-M3-D07P V1.1) and its deploy script from V1.0 (m3-d07p, audited, run once on 2026-11-05 06:25 MST and rolled back automatically).
+
+V1.0 installed 1.3.3-dd8b192, switched, and its post-switch check failed on `pm orient SW-2026-008` = ["LIVE_RUN_UNDER_FINISHED_WORK"] (a new interlock of the 7.2 runtime; 6 old Runs in SW-2026-008, 2 in SYS-2026-001);
+the script rolled the pointers back (active = 1.3.3-d563293 again).  V1.1 is the same switch, to run only after card SETTLE72 has settled those Runs:
+ * new ids: Work/Run/Checkpoint D07P-002, Decision suffix M3D07P02, owner claude:m3d07p2, idempotency keys d07p2-*, evidence folder m3-d07p2; the change request CHG-SCPT-2026-479 of V1.0 is reused;
+ * new preconditions: SETTLE72 finished (settle_result.txt), no Run under a finished Work in SW-2026-008 or SYS-2026-001 (the 7.2 runtime's own SQL), V1.0's Run D07P-001 and the REL72-002 Run CANCELLED;
+ * new post-switch check: `pm orient SYS-2026-001` conflicts must be empty too;
+ * a NEW audit reference is required (switch_audit_ref.txt is NOT copied from V1.0); the user's standing authorization record is copied.
+usage: python -B derive_d07p2.py       (writes only under .auto-pm/reports/m3-d07p2/; nothing here is governed)
+"""
+
+import hashlib
+import re
+import shutil
+from pathlib import Path
+
+ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+R = ROOT / ".auto-pm" / "reports"
+SRC, EV = R / "m3-d07p", R / "m3-d07p2"
+EV.mkdir(parents=True, exist_ok=True)
+NL = chr(10)
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sw(t: str, a: str, b: str, n: int = 1) -> str:
+    assert t.count(a) == n, (a[:110], t.count(a), n)
+    return t.replace(a, b)
+
+
+def ren(t: str) -> str:
+    t = t.replace(".auto-pm/worktrees/m3-d07p", "@@WT@@")
+    t = t.replace("m3-d07p", "m3-d07p2")
+    t = t.replace("@@WT@@", ".auto-pm/worktrees/m3-d07p")
+    t = t.replace("D07P-001", "D07P-002").replace("M3D07P01", "M3D07P02").replace("claude:m3d07p", "claude:m3d07p2")
+    t = t.replace("d07p-", "d07p2-")
+    t = t.replace("CARD-SW008-M3-D07P V1.0", "CARD-SW008-M3-D07P V1.1")
+    return t
+
+
+shutil.copy2(SRC / "d07p_chg.txt", EV / "d07p_chg.txt")  # V1.1 continues the change request of V1.0 (CHG-SCPT-2026-479)
+shutil.copy2(SRC / "user_switch_confirmation.txt", EV / "user_switch_confirmation.txt")  # the user's standing authorization record; switch_audit_ref.txt is deliberately NOT copied
+
+s = ren((SRC / "d07p_deploy.sh").read_text(encoding="utf-8"))
+s = sw(s, "# M3-D07P (card D07p_card.md V1.0)", "# M3-D07P (card D07p_card.md V1.1)")
+# new preconditions (after the worktree-count guard that V1.0 already has)
+guard = 'nwt="$(ls -1 "$REAL/.auto-pm/worktrees" | wc -l)"'
+i = s.index(guard)
+j = s.index(NL, i)
+extra = NL.join([
+    '[[ "$(cat "$REAL/.auto-pm/reports/m3-settle72/settle_result.txt" 2>/dev/null)" == SETTLE72_DONE* ]] || die "card SETTLE72 has not finished (m3-settle72/settle_result.txt)"',
+    'for rr in RUN-SW008-M3-D07P-001 RUN-SW008-M3-REL72-002; do [[ "$(q "select state from run_items where run_id=?" "$rr")" == CANCELLED ]] || die "$rr is not CANCELLED (card SETTLE72)"; done',
+    'for pj in SW-2026-008 SYS-2026-001; do [[ "$("$PY" -B -c \'import sqlite3,sys;c=sqlite3.connect("file:.auto-pm/continuity.db?mode=ro",uri=True);print(c.execute("SELECT count(*) FROM run_items r JOIN work_items w ON w.work_id=r.work_id WHERE w.subject_project_id=? AND r.state NOT IN (\'SUCCEEDED\',\'FAILED\',\'CANCELLED\') AND w.state IN (\'ACCEPTED\',\'CLOSED\',\'CANCELLED\')",(sys.argv[1],)).fetchone()[0])\' "$pj")" == 0 ]] || die "$pj still has a Run under a finished Work (the 7.2 interlock would fail the switch again)"; done',
+])
+s = s[: j + 1] + extra + NL + s[j + 1:]
+# new post-switch check: the same orient conflict check for SYS-2026-001
+anchor = 'echo "smoke: pm orient conflicts=$oc"; [[ "$oc" == "[]" ]] || { echo "FAIL smoke orient conflicts"; fail=1; }'
+assert s.count(anchor) == 1
+s = s.replace(anchor, anchor + NL + '  oc2="$(cli pm orient SYS-2026-001 --json 2>/dev/null | "$PY" -B -c \'import sys,json;t=sys.stdin.read();d=json.JSONDecoder().raw_decode(t[t.index("{"):])[0];print(json.dumps(d.get("conflicts")))\' 2>/dev/null)"; echo "smoke: pm orient SYS-2026-001 conflicts=$oc2"; [[ "$oc2" == "[]" ]] || { echo "FAIL smoke orient conflicts SYS-2026-001"; fail=1; }')
+s = re.sub(r"^CARD_SHA=.*$", "CARD_SHA=__CARD_SHA__", s, count=1, flags=re.M)
+(EV / "d07p_deploy.sh").write_bytes(s.encode("utf-8"))
+
+# the card
+c = (SRC / "D07p_card.md").read_text(encoding="utf-8")
+c = ren(c)
+c = c.replace("# D07p｜切换到发版 7.2 候选（M3-D07P）", "# D07p V1.1｜切换到发版 7.2 候选（M3-D07P）", 1)
+c = sw(c, "本卡把 D07n 的切换再做一次，", "V1.0（2026-11-05 06:25 MST 跑，已审计放行）切到 `1.3.3-dd8b192` 后，切换后核验只有一项不过：新运行时的互锁 `LIVE_RUN_UNDER_FINISHED_WORK` 在 `pm orient SW-2026-008` 报冲突（账本里 6 条旧 Run 挂在已结束的 Work 下；SYS-2026-001 另有 2 条），脚本按设计自动回退了指针（现行仍是 `1.3.3-d563293`，已确认）。V1.1 是同一个切换，要等卡 SETTLE72（结算这 8 条旧 Run 和 7.2 两次失败尝试遗留的 2 条 Run）完成后才运行；沿用 V1.0 的变更单 `CHG-SCPT-2026-479`（仍为 implementing），Work/Run/Checkpoint 取 `-002`（`D07P-001` 已被 SETTLE72 结算为 CANCELLED），Decision 取 `DEC-<当天>-M3D07P02`，owner `claude:m3d07p2`，幂等键前缀 `d07p2-`，证据目录 `.auto-pm/reports/m3-d07p2/`。发布目录 `1.3.3-dd8b192` 已在 `releases/` 里并在清单里登记（V1.0 装好的、没被回退动过；字节与门禁时的载荷逐字节一致由脚本再核一次）。\n\n本卡把 D07n 的切换再做一次，")
+c = sw(c, "切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：", "新增前置条件（V1.1）：卡 SETTLE72 已完成（`m3-settle72/settle_result.txt` 以 `SETTLE72_DONE` 开头）；`RUN-SW008-M3-D07P-001` 与 `RUN-SW008-M3-REL72-002` 已是 CANCELLED；用 7.2 运行时自己的 SQL 查，SW-2026-008 与 SYS-2026-001 都没有挂在已结束 Work 下的 Run；独立审计对本卡 V1.1 另行放行，放行引用写入 `switch_audit_ref.txt`（V1.0 的引用不沿用）。\n\n切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：")
+c = sw(c, "`pm orient SW-2026-008 --json` 的冲突列表为空；", "`pm orient SW-2026-008 --json` 与 `pm orient SYS-2026-001 --json` 的冲突列表都为空；")
+(EV / "D07p_card.md").write_bytes(c.encode("utf-8"))
+CARD_SHA = sha(c.encode("utf-8"))
+s = s.replace("CARD_SHA=__CARD_SHA__", f"CARD_SHA={CARD_SHA}", 1)
+(EV / "d07p_deploy.sh").write_bytes(s.encode("utf-8"))
+print("card sha", CARD_SHA, "| deploy script sha", sha(s.encode("utf-8")))
+left = sorted(set(re.findall(r"D07P-001|M3D07P01|claude:m3d07p(?!2)|d07p-|m3-d07p(?![2])", s)))
+print("leftover V1.0 identifiers in the script (expected: only the worktree path m3-d07p and the V1.0 Run in the new precondition):", left)

@@ -1,0 +1,40 @@
+PROJECT SW-2026-008 [('RUN-SW008-A2-201-01', 'BLOCKED', 'WORK-SW008-A2-201'), ('RUN-SW008-A2-201-03', 'RUNNING', 'WORK-SW008-A2-201-R2'), ('RUN-SW008-A2-201-04', 'VERIFYING', 'WORK-SW008-A2-201-R2'), ('RUN-SW008-PMF-C03REC-002', 'VERIFYING', 'WORK-SW008-PMF-C03REC-001'), ('RUN-SW008-PMF-E01-001', 'BLOCKED', 'WORK-SW008-PMF-E01-001'), ('RUN-SW008-PMF-G10-001', 'BLOCKED', 'WORK-SW008-PMF-G10-002')]
+PROJECT SYS-2026-001 [('RUN-SYS001-PMF-WBS24-001', 'VERIFYING', 'WORK-SYS001-PMF-WBS24-001'), ('RUN-SYS001-PMF-WBS25-001', 'VERIFYING', 'WORK-SYS001-PMF-WBS25-001')]
+
+状态 LIVE_RUN_UNDER_FINISHED_WORK: a Run is still live but its Work is already accepted, closed or cancelled
+探测: ledger-wide scan (run_items joined to work_items), independent of the Mission-Work-Run tree orient walks
+谁能做: user | 切换发版时可放行: 是 | 最低代码版本: the version that carries the scan (this change); settling needs #496
+出口（按顺序；<大写> 是要你填的值；本命令只打印，不执行）:
+  1. recovery change order: create and take it to approved  (谁: any_agent)
+     $ python main.py change create --pid SW-2026-008 --domain SCPT --nature DEF --scope LOCAL --applicant <APPLICANT> --background <BACKGROUND> --necessity <NECESSITY>
+     前提: identity=clean
+     注: then `change transition --to approved` for that order (agent sessions need the user's words as --approval-evidence-ref)
+  2. recovery Decision naming the target (user words or PIN)  (谁: user)
+     $ python main.py decision create --change-id <RECOVERY_CHANGE> --approver <APPROVER> --pid SW-2026-008 --file .auto-pm/continuity.db --decision-id <RECOVERY_DECISION> --allow-runtime-action settle_expired_run --target-run-id RUN-SW008-A2-201-03 --allow-outcome CANCELLED
+     前提: identity=clean, operator=user
+  3. commit the Decision file in the control root  (谁: any_agent)
+     $ git add <DECISION_FILE> && git commit -m <MESSAGE>
+     前提: workspace=control_root
+     注: HEAD is pinned from here to the first settlement (G-HEAD-PIN): do not sync or commit again until it is done
+  4. [人工] implementation card for the recovery Work  (谁: any_agent)
+     注: card file whose path table lists `.auto-pm/continuity.db` as 计划新增 (not 存在: it is not in the git baseline)
+  5. create the recovery Work (scope covers .auto-pm/continuity.db)  (谁: any_agent)
+     $ python main.py continuity work create --work-id <RECOVERY_WORK> --pid SW-2026-008 --kind GOVERNANCE --title <TITLE> --owner <AGENT> --scope .auto-pm/continuity.db --idempotency-key <KEY1> --card-file <CARD_FILE>
+     前提: identity=clean
+  6. authorize the recovery Work with the recovery Decision  (谁: any_agent)
+     $ python main.py continuity work authorize --work-id <RECOVERY_WORK> --decision-id <RECOVERY_DECISION> --idempotency-key <KEY2>
+     前提: identity=clean
+  7. recovery Work to IN_PROGRESS  (谁: any_agent)
+     $ python main.py continuity work transition --work-id <RECOVERY_WORK> --to IN_PROGRESS --idempotency-key <KEY3>
+     前提: identity=clean
+  8. start the recovery Run in the control root  (谁: any_agent)
+     $ python main.py continuity run start --run-id <RECOVERY_RUN> --work-id <RECOVERY_WORK> --executor <AGENT> --adapter codex --owned .auto-pm/continuity.db --declared-dirty .auto-pm/continuity.db --lease-token <TOKEN> --lease-seconds 900 --idempotency-key <KEY4> --recovery-change <RECOVERY_CHANGE>
+     前提: identity=clean, decision=committed_clean, git=head_pinned
+  9. recovery Run to RUNNING  (谁: any_agent)
+     $ python main.py continuity run transition --run-id <RECOVERY_RUN> --to RUNNING --owner <AGENT> --lease-token <TOKEN> --idempotency-key <KEY5>
+     前提: identity=clean, lease=valid
+  10. settle the abandoned Run as CANCELLED  (谁: any_agent)
+     $ python main.py continuity run settle-expired --target-run-id RUN-SW008-A2-201-03 --recovery-run-id <RECOVERY_RUN> --recovery-owner <AGENT> --recovery-lease-token <TOKEN> --decision-id <RECOVERY_DECISION> --outcome CANCELLED --reason <REASON> --idempotency-key <KEY6>
+     前提: workspace=control_root, decision=committed_clean, git=head_pinned, decision=canonical
+  11. verify  (谁: any_agent)
+     $ python main.py pm orient SW-2026-008 && python main.py ledger reconcile SW-2026-008

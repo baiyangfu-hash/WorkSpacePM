@@ -1,0 +1,9 @@
+== 0. Preconditions
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-d563293
+  摘要: 台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-d563293
+  摘要: 台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条
+-- before: Runs under finished Work: SW-2026-008 = 6 RUN-SW008-A2-201-01 RUN-SW008-A2-201-03 RUN-SW008-A2-201-04 RUN-SW008-PMF-C03REC-002 RUN-SW008-PMF-E01-001 RUN-SW008-PMF-G10-001; SYS-2026-001 = 2 RUN-SYS001-PMF-WBS24-001 RUN-SYS001-PMF-WBS25-001
+-- no process may use the target worktrees or Runs
+no matching process
+CHECK_ONLY_OK: the preconditions hold; nothing was written

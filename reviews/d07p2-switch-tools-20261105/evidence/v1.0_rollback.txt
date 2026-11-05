@@ -1,0 +1,2 @@
+IDENTITY {"configured_release_id": "1.3.3-d563293", "effective_release_id": "1.3.3-d563293", "runtime_load_path": "00_Infrastructure/auto_pm/releases/1.3.3-d563293/auto_pm/__init__.py", "runtime_fallback_reason": "", "conflicts": []}
+ROLLED_BACK active=1.3.3-d563293
