@@ -657,7 +657,7 @@
       "title": "PLC项目配置规范",
       "number": "907",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/907_项目配置规范_LSP.md",
-      "version": "V1.4.0",
+      "version": "V1.5.0",
       "type_prefix": "LSP",
       "domain": "plc",
       "lifecycle": "stable",
