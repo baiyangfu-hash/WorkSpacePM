@@ -1,0 +1,20 @@
+﻿// ============================================================================
+// DB_TwoHandStartTest: 双手启动功能块测试实例数据块
+// 描述: 只放测试激励/结果变量 (TIA 全局 DB 不能放 FB 实例, 实例在 FB_9001 测试台里),
+//       激励由 .scltest 写入, 结果供 .scltest 断言与上位机读取。
+// ============================================================================
+
+DATA_BLOCK DB_TwoHandStartTest
+{ S7_Optimized_Block := 'TRUE' }
+VERSION : 1.0
+
+VAR
+    s_bStartLeft    : BOOL := FALSE;  // 测试激励: 左启动按钮
+    s_bStartRight   : BOOL := FALSE;  // 测试激励: 右启动按钮
+    s_dSyncWindowMs : DINT := 500;    // 同步窗口毫秒值, 500 = 0.5s
+    s_bStartOutput  : BOOL;           // 结果: 双手启动输出
+    s_bSyncFault    : BOOL;           // 结果: 同步故障
+END_VAR
+
+BEGIN
+END_DATA_BLOCK
