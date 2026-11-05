@@ -1,0 +1,155 @@
+"""Derive the release 7.2 switch card (CARD-SW008-M3-D07P V1.0) and its deploy script from the audited 7.1 switch (m3-d07n: D07n_card.md, d07n_deploy.sh).
+
+Same steps as D07n (the D06-drilled ops script, pointer backup, post-switch checks with automatic pointer rollback, Checkpoint, closure).  Changes, each with its reason:
+ * the gates are card 221 V1.1 (RUN-SW008-M3-REL72-003): all nine gates must be PASS in gate_verdict.json (D07n had the one G2 exception; there is none now);
+ * the user's authorization is the standing one of 2026-11-05 04:04:33Z; it does not name this card's SHA (the card did not exist), so the card-SHA line of the confirmation is replaced by
+   an independent-audit reference that must be present (the audit thread's PASS for card 221 V1.1 and this card);
+ * the station: the control root's manifest and pointers now equal main (step M of card 221 V1.1 removed the 16 stray folders, the 7.1 PR #528 trimmed the manifest), so the station
+   commit of D07n usually has nothing to stage; the script reuses nothing, but refuses to start when `.auto-pm/worktrees` already holds 7 folders (the doctor's pre-release cap is 7 and the
+   station is one more);
+ * release 7.2 = commit dd8b192f, release id 1.3.3-dd8b192, active := it, previous := 1.3.3-d563293 (the current active), the older previous 1.3.3-d671611 stays installed and verified.
+
+usage: python -B derive_d07p.py       (writes only under .auto-pm/reports/m3-d07p/; nothing here is governed)
+"""
+
+import hashlib
+import json
+import re
+from pathlib import Path
+
+ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+R = ROOT / ".auto-pm" / "reports"
+SRC, EV = R / "m3-d07n", R / "m3-d07p"
+EV.mkdir(parents=True, exist_ok=True)
+C = ROOT / "00_Infrastructure" / "auto_pm"
+FROZEN = "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642"
+RID, OLD, OLDER = "1.3.3-dd8b192", "1.3.3-d563293", "1.3.3-d671611"
+NL = chr(10)
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sw(t: str, a: str, b: str, n: int = 1) -> str:
+    assert t.count(a) == n, (a[:110], t.count(a), n)
+    return t.replace(a, b)
+
+
+def sw_line(t: str, startswith: str, new: str) -> str:
+    lines = t.split(NL)
+    hit = [i for i, ln in enumerate(lines) if ln.startswith(startswith)]
+    assert len(hit) == 1, (startswith[:80], len(hit))
+    lines[hit[0]] = new
+    return NL.join(lines)
+
+
+assert json.load(open(C / "active_release.json", encoding="utf-8"))["release_id"] == OLD
+assert json.load(open(C / "previous_release.json", encoding="utf-8"))["release_id"] == OLDER
+OLD_ACTIVE_SHA = sha((C / "active_release.json").read_bytes())
+OLD_PREV_SHA = sha((C / "previous_release.json").read_bytes())
+OLD_MANIFEST_SHA = sha((C / "deployment_manifest.json").read_bytes())
+
+s = (SRC / "d07n_deploy.sh").read_text(encoding="utf-8")
+# ---- header
+s = sw_line(s, "# M3-D07N (card D07n_card.md V1.0)", "# M3-D07P (card D07p_card.md V1.0): switch the real active release to the build of main at dd8b192f (release 7.2, card 221 V1.1 gated, all nine gates PASS), same steps as D07n; changes: strict PASS verdict (no exception), the user's standing authorization of 2026-11-05T04:04:33Z plus the independent-audit reference, a worktree-count guard.")
+s = sw(s, "#   4  install 1.3.3-4845857 from the frozen commit 48458577 with the D06-drilled ops script (pmf_release_ops.sh, same bytes);", "#   4  install 1.3.3-dd8b192 from the frozen commit dd8b192f with the D06-drilled ops script (pmf_release_ops.sh, same bytes);")
+s = sw(s, "#   5  switch (previous := 1.3.3-4b5c630);", "#   5  switch (previous := 1.3.3-d563293);")
+# ---- bindings
+s = sw(s, 'EV="$ROOT/.auto-pm/reports/m3-d07n"', 'EV="$ROOT/.auto-pm/reports/m3-d07p"')
+s = sw(s, 'CARD="$EV/D07n_card.md"', 'CARD="$EV/D07p_card.md"')
+s = sw_line(s, "CARD_SHA=", "CARD_SHA=__CARD_SHA__")
+s = sw(s, 'D176_VERDICT="$REAL/.auto-pm/reports/m3-rel71/gates/gate_verdict.json"', 'D176_VERDICT="$REAL/.auto-pm/reports/m3-rel72b/gates/gate_verdict.json"')
+s = sw_line(s, "CARD176=", f"CARD176={FROZEN}")
+s = sw_line(s, "FROZEN=", f"FROZEN={FROZEN}")
+s = sw_line(s, "RID=", f"RID={RID}")
+s = sw_line(s, "OLD=", f"OLD={OLD}")
+s = sw_line(s, "OLDER=", f"OLDER={OLDER}")
+s = sw_line(s, "OLD_ACTIVE_SHA=", f"OLD_ACTIVE_SHA={OLD_ACTIVE_SHA}")
+s = sw_line(s, "OLD_PREV_SHA=", f"OLD_PREV_SHA={OLD_PREV_SHA}")
+s = sw_line(s, "OLD_MANIFEST_SHA=", f"OLD_MANIFEST_SHA={OLD_MANIFEST_SHA}")
+s = sw(s, 'DEC="DEC-$TODAY-M3D07N01"', 'DEC="DEC-$TODAY-M3D07P01"')
+s = sw(s, "WORK=WORK-SW008-M3-D07N-001", "WORK=WORK-SW008-M3-D07P-001")
+s = sw(s, "RUN=RUN-SW008-M3-D07N-001", "RUN=RUN-SW008-M3-D07P-001")
+s = sw(s, "OWNER=claude:m3d07n", "OWNER=claude:m3d07p")
+s = sw(s, "CKPT=CKPT-SW008-M3-D07N-001", "CKPT=CKPT-SW008-M3-D07P-001")
+s = sw(s, 'STATE="$EV/d07n_chg.txt"', 'STATE="$EV/d07p_chg.txt"')
+# ---- the delegation text and the confirmation
+deleg = ('DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里授权（2026-11-05T04:04:33Z “不过不切换，过了自己切换。门禁已经授权了。”，消息编号与原话记在 '
+         '.auto-pm/reports/m3-d07p/user_switch_confirmation.txt，这是常设授权，不点名本卡 SHA）；条件：卡 221 V1.1 的 G1～G9 全部 PASS（没有例外）、独立审计放行卡 221 V1.1 与本卡（引用记在 switch_audit_ref.txt）、'
+         '候选产品子树等于卡 221 V1.1 门禁时测过的冻结提交、任一切换后核验失败即自动回退指针、不回滚数据库"')
+s = sw_line(s, 'DELEG="委托执行', deleg)
+# ---- 0: the strict verdict instead of the G2 exception
+s = sw_line(s, 'EXC_DIR="$REAL/.auto-pm/reports/m3-rel71b/exception"', ':  # D07p: no exception record; the verdict must be nine PASS')
+s = sw_line(s, '"$PY" -B -c \'import json,sys;v=json.load(open(sys.argv[1],encoding="utf-8"))["gates"]',
+            '"$PY" -B -c \'import json,sys;d=json.load(open(sys.argv[1],encoding="utf-8"));v=d["gates"];sys.exit(0 if d.get("card")=="CARD-SW008-M3-REL72 V1.1" and d.get("base")==sys.argv[2] and d.get("run_id")=="RUN-SW008-M3-REL72-003" and len(v)==9 and all(g["verdict"]=="PASS" for g in v.values()) else 1)\' "$(cygpath -w "$D176_VERDICT")" "$FROZEN" || die "card 221 V1.1: gate_verdict.json is not nine PASS for the frozen commit"')
+s = sw_line(s, '[[ "$(cat "$EXC_DIR/rerun.exit")" == "0" ]]', ':')
+s = sw_line(s, 'git -C "$REAL" cat-file -e "$EXC_COMMIT:reviews/rel71b-gate-tools-20261103/README.md"', ':')
+s = sw_line(s, 'echo "precondition: card 220 gate_verdict has G2 FAIL', 'echo "precondition: card 221 V1.1 gate_verdict is nine PASS for the frozen commit (no exception)"\n'
+            '[[ "$(q "select state from run_items where run_id=?" RUN-SW008-M3-REL72-003)" == SUCCEEDED ]] || die "RUN-SW008-M3-REL72-003 is not SUCCEEDED (the gate closure is not finished)"\n'
+            '[[ -s "$EV/switch_audit_ref.txt" ]] || die "no independent-audit reference (switch_audit_ref.txt): the audit PASS for card 221 V1.1 and this card is required"\n'
+            'nwt="$(ls -1 "$REAL/.auto-pm/worktrees" | wc -l)"; [[ -d "$REAL/.auto-pm/worktrees/m3-d07p" || "$nwt" -le 6 ]] || die "$nwt workstation folders: the station for this Run would be the 8th, over the doctor cap of 7"')
+s = sw(s, 'precheck "$CARD"', 'precheck "$CARD"', 0)
+s = sw(s, 'grep -q \'^CONFIRMED_BY_USER_IN_THREAD=cmsg_\' "$EV/user_switch_confirmation.txt" 2>/dev/null || die "waiting for the user\'s one-line confirmation in the thread (user_switch_confirmation.txt)"',
+       'grep -q \'^CONFIRMED_BY_USER_IN_THREAD=cmsg_\' "$EV/user_switch_confirmation.txt" 2>/dev/null || die "no record of the user\'s standing switch authorization (user_switch_confirmation.txt)"')
+s = sw_line(s, 'grep -q "^CARD_SHA256=$CARD_SHA$" "$EV/user_switch_confirmation.txt"', 'grep -q "^USER_TEXT=" "$EV/user_switch_confirmation.txt" || die "the confirmation file has no USER_TEXT line (the user\'s own words)"')
+# ---- CHG / Decision / Work / Run texts
+s = sw(s, "M3-D07N：把 PR 514 的合并提交 ${FROZEN:0:8}（发版 7.1 的发版点，卡 220 门禁）用它自己的 pmf_build.py 安装为 $RID 并切换为有效版本",
+       "M3-D07P：把 PR 550 的合并提交 ${FROZEN:0:8}（发版 7.2 的发版点，卡 221 V1.1 门禁）用它自己的 pmf_build.py 安装为 $RID 并切换为有效版本")
+s = sw(s, "1.3.3-d671611 之后合进 main 的 12 个合并提交（长任务守卫 long-run、内存预检等）只有切换为有效版本后才生效", "1.3.3-d563293 之后合进 main 的合并提交（总闸、账本备份、分诊台与长回归等）只有切换为有效版本后才生效")
+s = sw(s, 'CARD-SW008-M3-D07N V1.0；CARD_SHA256=$CARD_SHA；FROZEN=$FROZEN；RELEASE=$RID；OPS_SHA256=$OPS_SHA；CARD220=$CARD176；G2_EXCEPTION=cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu；EXCEPTION_COMMIT=$EXC_COMMIT；$DELEG',
+       'CARD-SW008-M3-D07P V1.0；CARD_SHA256=$CARD_SHA；FROZEN=$FROZEN；RELEASE=$RID；OPS_SHA256=$OPS_SHA；CARD221=CARD-SW008-M3-REL72 V1.1；$DELEG')
+s = sw(s, "提交 D07B", "提交 D07P")
+s = sw(s, "卡 220 门禁 G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS，且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用",
+       "卡 221 V1.1 门禁九项全部 PASS，且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用；独立审计引用已记录")
+s = sw(s, "M3-D07N 有效版本切换到 $RID", "M3-D07P 有效版本切换到 $RID")
+s = sw(s, ".auto-pm/reports/m3-d07n/D07n_card.md", ".auto-pm/reports/m3-d07p/D07p_card.md", 2)
+s = sw(s, 'WTD="$ROOT/.auto-pm/worktrees/m3-d07n"', 'WTD="$ROOT/.auto-pm/worktrees/m3-d07p"')
+s = sw(s, "# the control root's scope files must equal the station start: record the manifest bytes of the control root (it carries 16 local-only intermediate entries) through the normal hook, once",
+       "# the control root's scope files must equal the station start: after step M of card 221 V1.1 they normally equal main, so nothing is staged; if a pointer or the manifest differs, its bytes are recorded through the normal hook, once")
+s = sw(s, "record the control root's release files in the D07n station so the Run starts from them", "record the control root's release files in the D07p station so the Run starts from them")
+# ---- 4: the installed payload must equal the payload the gates built
+s = sw(s, "# the 016 report commit does not exist (G2 exception): the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit",
+       "# the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit")
+s = sw(s, 'GATE_PAYLOAD="$REAL/.auto-pm/reports/m3-rel71/gates/d04/build_a"', 'GATE_PAYLOAD="$REAL/.auto-pm/reports/m3-rel72b/gates/d04/build_a"')
+s = sw(s, 'echo "payload bytes equal the gate-time payload (exception route, released after G2 exception)"', 'echo "payload bytes equal the gate-time payload"')
+# ---- post checks, closure, receipt
+s = sw(s, 'D07n_card.md', 'D07p_card.md', 0) if False else s
+s = s.replace("m3-d07n", "m3-d07p").replace("d07n-", "d07p-").replace("D07N", "D07P").replace("D07n", "D07p").replace("d07n", "d07p")
+s = sw(s, "（委托验收，切换按用户 2026-11-03T19:33:23Z（12:33 MST）的预授权）", "（委托验收，切换按用户 2026-11-05T04:04:33Z（11-04 21:04 MST）的授权）")
+s = sw(s, "（PR #514 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA）", "（PR #550 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA）")
+s = sw(s, 'for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui" "long-run"; do', 'for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui" "long-run" "pm state-backup" "pm triage"; do')
+(EV / "d07p_deploy.sh").write_bytes(s.encode("utf-8"))
+
+# ---- the card
+card = f"""# D07p｜切换到发版 7.2 候选（M3-D07P）
+
+> 卡片编号：`CARD-SW008-M3-D07P V1.0`
+> 隔离基线：`{FROZEN}`（`main` 上 PR #550 的合并提交，发版 7.2 的发版点）
+> 路径根：`.`
+> 档次：核心档
+
+本卡把 D07n 的切换再做一次，让 `{OLD}` 之后合进 `main` 的发布载荷改动在本机生效（总闸 #519/#530/#531、账本备份 #533/#534、分诊台与长回归等；详见卡 221 V1.1 §1）。候选 `{RID}` 由合并提交 `{FROZEN[:8]}` 用它自己的 `scripts/pmf_build.py` 安装；就是发版点本身（卡 221 V1.1 的门禁提交一栏填的冻结提交，切换基线就是它）。卡 221 V1.1 的十组回归与 G1～G9 必须在 `.auto-pm/reports/m3-rel72b/gates/gate_verdict.json` 里全部 PASS（没有例外，与 D07n 的 G2 例外不同），其 Run `RUN-SW008-M3-REL72-003` 已 SUCCEEDED。切换与回退用 D06 演练过、D07～D07n 用过的同一份 `.auto-pm/reports/m3-d06/pmf_release_ops.sh`（SHA-256 `fe331979d463d4de32209bfb32c7eca8db1e17ee60a39622a92cd8c7be53e8de`）。切换后 `previous` 为现行的 `{OLD}`，更早的 `{OLDER}` 仍保留并校验。
+
+| 路径 | 基线状态 | 用途 |
+|---|---|---|
+| `00_Infrastructure/auto_pm/releases/{RID}` | 计划新增 | 候选发布的载荷 |
+| `00_Infrastructure/auto_pm/deployment_manifest.json` | 存在 | 追加候选的清单条目 |
+| `00_Infrastructure/auto_pm/active_release.json` | 存在 | 有效版本改为 `{RID}` |
+| `00_Infrastructure/auto_pm/previous_release.json` | 存在 | 上一版改为 `{OLD}` |
+
+授权：用户 2026-11-05 04:04:33 UTC（11-04 21:04 MST）在本项目线程里亲口说：“不过不切换，过了自己切换。门禁已经授权了。”（原话与消息编号记入 `user_switch_confirmation.txt`；这是常设授权，写在本卡存在之前，所以不点名本卡 SHA）。条件：卡 221 V1.1 的 G1～G9 全 PASS 且 Run 已 SUCCEEDED；独立审计放行卡 221 V1.1 与本卡，放行的引用记入 `switch_audit_ref.txt`（没有这份记录脚本不会切换）；候选产品子树等于门禁时测过的冻结提交；任一切换后核验失败即自动回退指针；不回滚数据库。任一不过则不切换、保持 `{OLD}`。切换前脚本用 SQLite 备份接口把账本原样复制一份留作证据（不用于恢复）。
+
+起点：Run 的工位 `.auto-pm/worktrees/m3-d07p` 从最新 `origin/main` 建。步骤 M（卡 221 V1.1）已把 16 个未登记的旧发布目录移出 `releases/`，控制根里的清单与指针现在等于 `main`，所以 D07n 里“把控制根清单字节提交进工位”一步通常没有东西可提交；若有差别仍按 D07n 的做法经正常 Hook 提交一次。**工位数守卫**：`.auto-pm/worktrees` 里已有 7 个目录时不启动（发版体检的机器上限是 7，本卡工位是第 8 个）；卡 221 V1.1 收口会移除它的候选工位 `m3-rel72b`，之后是 6 个。
+
+切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：配置版本 = 实际加载版本 = `{RID}`、从发布目录加载、无回落、**冲突列表必须为空（没有例外）**；`pm handoff`、`pm takeover`、`pm orient`、`continuity run reclaim`、`continuity lease record-holder`、`gui`、`long-run`、`pm state-backup`、`pm triage` 入口能应答（冒烟）；`pm orient SW-2026-008 --json` 的冲突列表为空；本卡在新运行时下通过机器预检；全部注册项目对账 0/0/0；真实 pre-commit 钩子经新运行时退出 0；新版本读真实数据库副本时事件链无断点、Run 活动全部可读；新、现行、上一版三个发布逐文件校验通过。切换后另跑一次 `continuity backup` 与 `verify-backup`（0 条链断裂）。批准、决策、验收三处命令都带用户消息 id 作为 `--approval-evidence-ref`。
+不在本卡：发版 PR（把发布目录 `{RID}`、三个指针文件和只多一项的清单入库，同 #528 的做法，另走小卡）；`pm state-backup push` 到远端（外发动作，切换后只确认入口可用）。
+禁止：回滚或覆盖数据库（切换前的数据库副本只作证据）、改历史发布/事件/Checkpoint、改源码、合并 main、推送。脚本：`.auto-pm/reports/m3-d07p/d07p_deploy.sh`（`--check-only` 只读预检，可在任何时候运行）。
+"""
+(EV / "D07p_card.md").write_bytes(card.encode("utf-8"))
+CARD_SHA = sha(card.encode("utf-8"))
+s = s.replace("CARD_SHA=__CARD_SHA__", f"CARD_SHA={CARD_SHA}", 1)
+(EV / "d07p_deploy.sh").write_bytes(s.encode("utf-8"))
+print("card sha", CARD_SHA, "| deploy script sha", sha(s.encode("utf-8")))
+left = [m.group(0) for m in re.finditer(r"d563293[0-9a-f]*|1\.3\.3-4845857|D07N|G2 exception|EXC_COMMIT|EXC_DIR|c31934b9|rel71", s)]
+print("leftover 7.1 identifiers in the script:", sorted(set(left)))

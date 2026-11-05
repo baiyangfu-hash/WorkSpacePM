@@ -1,0 +1,97 @@
+2c2
+< # M3-X (card X_card.md V1.0): switch the real active release to the build of main at d5632931 (#514 merge commit, release 7.1, card 220 gated), same steps as D07m; changes: station from origin/main + manifest bytes committed through the hook, strict identity, smoke checks.
+---
+> # M3-X (card X_card.md V1.0): switch the real active release to the build of main at dd8b192f (release 7.2, card 221 V1.1 gated, all nine gates PASS), same steps as X; changes: strict PASS verdict (no exception), the user's standing authorization of 2026-11-05T04:04:33Z plus the independent-audit reference, a worktree-count guard.
+6,7c6,7
+< #   4  install 1.3.3-4845857 from the frozen commit 48458577 with the D06-drilled ops script (pmf_release_ops.sh, same bytes);
+< #   5  switch (previous := 1.3.3-4b5c630); 6 post-switch checks - ANY failure rolls the pointers back with the same script and stops;
+---
+> #   4  install 1.3.3-dd8b192 from the frozen commit dd8b192f with the D06-drilled ops script (pmf_release_ops.sh, same bytes);
+> #   5  switch (previous := 1.3.3-d563293); 6 post-switch checks - ANY failure rolls the pointers back with the same script and stops;
+21c21
+< CARD_SHA=ed8b39228600219e1f013ac240a646b93bf1efff29ad9d036ce4617d7c501243
+---
+> CARD_SHA=987d40264e047cc35e1fa90f99bc90a984c52233c8dcb6dc7bfb80e657842a1f
+25,33c25,33
+< D176_VERDICT="$REAL/.auto-pm/reports/m3-rel71/gates/gate_verdict.json"
+< CARD176=d563293171847124e609469b5371c5d8b9688443
+< FROZEN=d563293171847124e609469b5371c5d8b9688443
+< RID=1.3.3-d563293
+< OLD=1.3.3-d671611
+< OLDER=1.3.3-6a9f127
+< OLD_ACTIVE_SHA=c408423f4cf520e15c7470b32e4ced997a4653fe746e4d00328df81526d935b6
+< OLD_PREV_SHA=a997bf622f4f81aa6d76c25165e333ca760ce8487765306aeaf036a749c569d7
+< OLD_MANIFEST_SHA=e0fb9f2fde7ec3398ee9c02b3aa5816b8b8d6b8066dff55105a09acf7434baaa
+---
+> D176_VERDICT="$REAL/.auto-pm/reports/m3-rel72b/gates/gate_verdict.json"
+> CARD176=dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642
+> FROZEN=dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642
+> RID=1.3.3-dd8b192
+> OLD=1.3.3-d563293
+> OLDER=1.3.3-d671611
+> OLD_ACTIVE_SHA=bade7381d9e081573907f3c21a9817c28e9fff1ce149f7e3a2709c782cdbb095
+> OLD_PREV_SHA=85b4cde8d71e4d6b89dae7040ad636fcde54886dfe08dd2b0f7733a4fff11a3d
+> OLD_MANIFEST_SHA=c71e1b5b9f4b06b183fd653787da7fa33c925ea3c39f763009b0fe08710bf2fd
+45c45
+< DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里预授权（2026-11-03T19:33:23Z “今天 #514 合并后，以 main 最新提交打发版 7.1，全量门禁和审计都过就切换；任一不过则不切、保持 1.3.3-d671611。切换后如果驾驶舱启动或冒烟检查失败，自动回切到 1.3.3-d671611。”，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7tKDxhSnLfp7mWBPVGmAc3TB，原话与消息编号记在 .auto-pm/reports/m3-x/user_switch_confirmation.txt）；条件：卡 220 的 G1～G9 全 PASS，唯一例外是 G2（用户 2026-11-04T03:35:09Z 例外放行，消息 cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu，证据提交 c31934b9）、独立审计放行本卡与卡 220、候选产品子树等于卡 220 门禁时测过的冻结提交（G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS）、任一切换后核验失败即自动回退指针、不回滚数据库"
+---
+> DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里授权（2026-11-05T04:04:33Z “不过不切换，过了自己切换。门禁已经授权了。”，消息编号与原话记在 .auto-pm/reports/m3-x/user_switch_confirmation.txt，这是常设授权，不点名本卡 SHA）；条件：卡 221 V1.1 的 G1～G9 全部 PASS（没有例外）、独立审计放行卡 221 V1.1 与本卡（引用记在 switch_audit_ref.txt）、候选产品子树等于卡 221 V1.1 门禁时测过的冻结提交、任一切换后核验失败即自动回退指针、不回滚数据库"
+61,64c61,64
+< EXC_DIR="$REAL/.auto-pm/reports/m3-rel71b/exception"; EXC_COMMIT=c31934b9074b79452bfe3279d17bc68e8526140b
+< "$PY" -B -c 'import json,sys;v=json.load(open(sys.argv[1],encoding="utf-8"))["gates"];bad=sorted(k for k,g in v.items() if g["verdict"]!="PASS");sys.exit(0 if len(v)==9 and bad==["G2"] else 1)' "$(cygpath -w "$D176_VERDICT")" || die "card 220: anything other than exactly the G2 exception is not allowed"
+< [[ "$(cat "$EXC_DIR/rerun.exit")" == "0" ]] && grep -q "2 passed" "$EXC_DIR/rerun.txt" && grep -q "test_a_keep_list_agent_can_still_close_its_own_finished_station_and_open_the_next_card PASSED" "$EXC_DIR/rerun.txt" && grep -q "test_a_dispatch_run_is_held_to_one_lease_per_project_inside_the_transaction PASSED" "$EXC_DIR/rerun.txt" && grep -q "cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu" "$EXC_DIR/EXCEPTION.md" || die "the G2 exception evidence (rerun of the two cases, user message id) is not intact"
+< git -C "$REAL" cat-file -e "$EXC_COMMIT:reviews/rel71b-gate-tools-20261103/README.md" 2>/dev/null || die "the exception evidence commit is not in the repository"
+---
+> :  # X: no exception record; the verdict must be nine PASS
+> "$PY" -B -c 'import json,sys;d=json.load(open(sys.argv[1],encoding="utf-8"));v=d["gates"];sys.exit(0 if d.get("card")=="CARD-SW008-M3-REL72 V1.1" and d.get("base")==sys.argv[2] and d.get("run_id")=="RUN-SW008-M3-REL72-003" and len(v)==9 and all(g["verdict"]=="PASS" for g in v.values()) else 1)' "$(cygpath -w "$D176_VERDICT")" "$FROZEN" || die "card 221 V1.1: gate_verdict.json is not nine PASS for the frozen commit"
+> :
+> :
+79c79,82
+< echo "precondition: card 220 gate_verdict has G2 FAIL, released by the user own typed words (G2 exception, message cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu); this card recognises the exception record, not a PASS verdict"
+---
+> echo "precondition: card 221 V1.1 gate_verdict is nine PASS for the frozen commit (no exception)"
+> [[ "$(q "select state from run_items where run_id=?" RUN-SW008-M3-REL72-003)" == SUCCEEDED ]] || die "RUN-SW008-M3-REL72-003 is not SUCCEEDED (the gate closure is not finished)"
+> [[ -s "$EV/switch_audit_ref.txt" ]] || die "no independent-audit reference (switch_audit_ref.txt): the audit PASS for card 221 V1.1 and this card is required"
+> nwt="$(ls -1 "$REAL/.auto-pm/worktrees" | wc -l)"; [[ -d "$REAL/.auto-pm/worktrees/m3-x" || "$nwt" -le 6 ]] || die "$nwt workstation folders: the station for this Run would be the 8th, over the doctor cap of 7"
+90,91c93,94
+< grep -q '^CONFIRMED_BY_USER_IN_THREAD=cmsg_' "$EV/user_switch_confirmation.txt" 2>/dev/null || die "waiting for the user's one-line confirmation in the thread (user_switch_confirmation.txt)"
+< grep -q "^CARD_SHA256=$CARD_SHA$" "$EV/user_switch_confirmation.txt" || die "the confirmation does not name this card SHA"
+---
+> grep -q '^CONFIRMED_BY_USER_IN_THREAD=cmsg_' "$EV/user_switch_confirmation.txt" 2>/dev/null || die "no record of the user's standing switch authorization (user_switch_confirmation.txt)"
+> grep -q "^USER_TEXT=" "$EV/user_switch_confirmation.txt" || die "the confirmation file has no USER_TEXT line (the user's own words)"
+101,103c104,106
+<     --background "M3-X：把 PR 514 的合并提交 ${FROZEN:0:8}（发版 7.1 的发版点，卡 220 门禁）用它自己的 pmf_build.py 安装为 $RID 并切换为有效版本（active=$RID，previous=$OLD），用 D06/D07 同一份操作脚本；切换后核验（含冒烟）任一失败即自动回退指针" \
+<     --necessity "1.3.3-d671611 之后合进 main 的 12 个合并提交（长任务守卫 long-run、内存预检等）只有切换为有效版本后才生效" \
+<     --references "CARD-SW008-M3-X V1.0；CARD_SHA256=$CARD_SHA；FROZEN=$FROZEN；RELEASE=$RID；OPS_SHA256=$OPS_SHA；CARD220=$CARD176；G2_EXCEPTION=cmsg_01AfNxhPWkgwWYuL1EVfYC7t7ArBXS4AXC393MHjk5J7Cu；EXCEPTION_COMMIT=$EXC_COMMIT；$DELEG" --urgency normal)"
+---
+>     --background "M3-X：把 PR 550 的合并提交 ${FROZEN:0:8}（发版 7.2 的发版点，卡 221 V1.1 门禁）用它自己的 pmf_build.py 安装为 $RID 并切换为有效版本（active=$RID，previous=$OLD），用 D06/D07 同一份操作脚本；切换后核验（含冒烟）任一失败即自动回退指针" \
+>     --necessity "1.3.3-d563293 之后合进 main 的合并提交（总闸、账本备份、分诊台与长回归等）只有切换为有效版本后才生效" \
+>     --references "CARD-SW008-M3-X V1.0；CARD_SHA256=$CARD_SHA；FROZEN=$FROZEN；RELEASE=$RID；OPS_SHA256=$OPS_SHA；CARD221=CARD-SW008-M3-REL72 V1.1；$DELEG" --urgency normal)"
+113,114c116,117
+<     draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交 D07B" >/dev/null ;;
+<     submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 卡 220 门禁 G2 FAIL 经用户 2026-11-04T03:35:09Z 例外放行，其余 PASS，且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用" >/dev/null ;;
+---
+>     draft)        cli change transition "$chg" --pid SW-2026-008 --to submitted    --approver fubai --comment "[$DELEG] 提交 X" >/dev/null ;;
+>     submitted)    cli change transition "$chg" --pid SW-2026-008 --to under_review --approver fubai --comment "[$DELEG] 卡 221 V1.1 门禁九项全部 PASS，且候选产品子树与之相同；指针与清单字节等于冻结值；操作脚本字节等于 D06/D07 所用；独立审计引用已记录" >/dev/null ;;
+142c145
+< # the control root's scope files must equal the station start: record the manifest bytes of the control root (it carries 16 local-only intermediate entries) through the normal hook, once
+---
+> # the control root's scope files must equal the station start: after step M of card 221 V1.1 they normally equal main, so nothing is staged; if a pointer or the manifest differs, its bytes are recorded through the normal hook, once
+164,165c167,168
+< # the 016 report commit does not exist (G2 exception): the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit
+< GATE_PAYLOAD="$REAL/.auto-pm/reports/m3-rel71/gates/d04/build_a"
+---
+> # the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit
+> GATE_PAYLOAD="$REAL/.auto-pm/reports/m3-rel72b/gates/d04/build_a"
+167c170
+< echo "payload bytes equal the gate-time payload (exception route, released after G2 exception)"
+---
+> echo "payload bytes equal the gate-time payload"
+183c186
+<   for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui" "long-run"; do
+---
+>   for c in "pm handoff" "pm takeover" "pm orient" "continuity run reclaim" "continuity lease record-holder" "gui" "long-run" "pm state-backup" "pm triage"; do
+233c236
+<     accepting)          cli change transition "$chg" --pid SW-2026-008 --to completed --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --verification-conclusion "[$DELEG] 验收通过（委托验收，切换按用户 2026-11-03T19:33:23Z（12:33 MST）的预授权）。有效版本 active=$RID（PR #514 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA），previous=$OLD；无回落、无冲突；新命令可用；真实钩子经新运行时退出 0；全部注册项目对账 0/0/0；事件链无断点；三个发布逐文件校验通过；回退命令记在回执里；数据库未回滚" >/dev/null ;;
+---
+>     accepting)          cli change transition "$chg" --pid SW-2026-008 --to completed --approver fubai --approval-evidence-ref "user-confirmation:$GO_REF" --verification-conclusion "[$DELEG] 验收通过（委托验收，切换按用户 2026-11-05T04:04:33Z（11-04 21:04 MST）的授权）。有效版本 active=$RID（PR #550 合并提交 ${FROZEN:0:8}，清单条目 $ENTRY_SHA），previous=$OLD；无回落、无冲突；新命令可用；真实钩子经新运行时退出 0；全部注册项目对账 0/0/0；事件链无断点；三个发布逐文件校验通过；回退命令记在回执里；数据库未回滚" >/dev/null ;;
