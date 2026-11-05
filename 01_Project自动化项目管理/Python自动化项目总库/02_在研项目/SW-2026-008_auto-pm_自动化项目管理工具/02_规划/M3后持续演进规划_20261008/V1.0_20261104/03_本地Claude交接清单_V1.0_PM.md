@@ -43,7 +43,7 @@
   - **阶段 1 修缺陷**：① `long_gate.py` 拒绝文案在中文 Windows GBK 管道下 `UnicodeEncodeError`，改降级输出；②③ `tests/e2e/test_long_gate.py` 两个时序敏感用例（冻结点 30 轮失败 8 轮；CI 上 `KeyError: 'child_pid'`）；④ 把 `gate_status.py` 收进产品 `scripts/gate_status.py`，空退出码不再抛错。
   - **阶段 2 机械护栏**：⑤ 删除工位的两层护栏：产品层（`worktree close/sweep` 是唯一允许删工位的路径，只删登记为 agent 建、干净、已推送、无符号链接或联接点的工位）；会话层（新增 PreToolUse 钩子 `.claude/hooks/guard-worktree-delete.py`，**要改 `.claude/settings.json`，必须用户亲口同意**，没有这句话会话层不做，产品层照做）。
   - **阶段 3 发版流程**：A／⑥ 长门禁改走产品自带的 `long_gate.py launch`，加余量守护和脱离会话的自动收口；B 控制根同步脚本 `scripts/control_root_ff.py`（`--plan` 只读，`--apply` 只在用户当场说“同步”后运行，永不 stash、reset、clean 或删除）；C 发版记录 PR 的路径表卡生成器 `scripts/release_record_card.py`（`core.quotePath=false`，超过上限走卡）；D 固定入口的允许规则，**只给文本，由用户自己加到 `.claude/settings.local.json`，不含任何删除类规则**，也不放行 `--apply`。
-- 卡的 owned paths 一共 14 条，出现第 14 条以外的候选变更即停止；`scripts/` 属发布载荷，合并后要再走一次发版才在运行的驾驶舱里生效，本卡不切换版本。
+- 卡的 owned paths 一共 13 条，出现第 14 条候选变更即停止；`scripts/` 属发布载荷，合并后要再走一次发版才在运行的驾驶舱里生效，本卡不切换版本。
 - 没覆盖到的：各发版卡的推导工具（`derive_*.py` 等）还在 `.auto-pm/reports/`，没入库，留给下一张发版卡。
 - 开工前：卡要先独立审计、用户批准（批准消息写出本卡定稿后 SHA-256 的前 12 位，并说明是否同意改 `.claude/settings.json`）。
 
