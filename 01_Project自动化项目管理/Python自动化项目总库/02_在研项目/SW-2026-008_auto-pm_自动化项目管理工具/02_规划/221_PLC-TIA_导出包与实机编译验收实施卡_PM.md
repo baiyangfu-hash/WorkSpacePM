@@ -67,7 +67,7 @@
 
 ## 6. 硬停止
 
-出现第 10 项候选变更、需要改 `.github/workflows/*`、或需要删除任何文件时停止并报协调者；删除只由用户自己执行。`plc export-tia` 不得写 PLC 项目目录之外的仓库位置（输出只落 `.auto-pm/tia-export/`）。
+出现 §4 之外的候选变更、需要改 `.github/workflows/*`、或需要删除任何文件时停止并报协调者；删除只由用户自己执行。`plc export-tia` 不得写 PLC 项目目录之外的仓库位置（输出只落 `.auto-pm/tia-export/`）。
 
 ## 7. 限制与后续
 
