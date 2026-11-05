@@ -23,13 +23,14 @@
 
 **让任何 agent 或用户都只能走一条路把 PLC 源码送进 TIA，且“TIA 实机编译 0 错误”成为 PLC 卡的机器可判验收条件。**
 
-完成 = 下面 5 项全部由命令和测试证明，不靠口头：
+完成 = 下面 6 项全部由命令和测试证明，不靠口头：
 
 | # | 交付 | 机器可判的验收 |
 |---|---|---|
-| 1 | `main.py plc export-tia <DJ号>` | 先跑 `plc check`，任何失败不出包（退出码非 0，不留半成品目录）；通过则在 `.auto-pm/tia-export/<DJ号>/<提交号>/` 生成：`.scl` 一律 UTF-8 带 BOM（已有 BOM 不重复加）、按依赖排序编号（UDT → FB → DB → OB，同类按被调用关系）、`导入步骤.md`（外部源文件 → 从源生成块、编译顺序、期望结果）、`manifest.json`（文件列表 + SHA-256 + 源仓库提交号）；再打成同名 `.zip`。同一提交重复导出字节相同。 |
+| 1 | `main.py plc export-tia <DJ号>` | 先跑 `plc check`，任何失败不出包（退出码非 0，不留半成品目录）；通过则在 `.auto-pm/tia-export/<DJ号>/<提交号>/` 生成：`.scl` 一律 UTF-8 带 BOM（已有 BOM 不重复加）、按依赖排序编号（UDT → FB → DB → OB，同类按被调用关系）、`导入步骤.md`（外部源文件 → 从源生成块、编译顺序（全局 DB → 被测 FB → 测试台 FB → 背景 DB → OB）、期望结果、OB 可改名改号或只复制调用行）、`manifest.json`（文件列表 + SHA-256 + 源仓库提交号）；再打成同名 `.zip`。同一提交重复导出字节相同。 |
 | 2 | 类型与指令白名单检查并入 `plc check` | 读 LSP-905 §4.9 白名单（以规范文件为真源，不在代码里复制清单）；源码里出现不在白名单、且仓库里也没有定义的类型 → 失败，报“文件:行:类型名”。`FB_TON`、`IEC_Timer_0_DB` 单实例写法必须被抓到。 |
 | 3 | `SclLinter` 修 BOM 误报 | BOM 开头且首行是代码的文件，不再报 `LSP-905-STRUCT-NO-BLOCK`；另加一条检查：导入 TIA 的 `.scl` 缺 BOM 一律失败（和 CI 的 `plc_ci.py` 同判据，二者共用一份实现或互相对拍的测试）。 |
+| 3b | TIA 块结构检查并入 `plc check` | ① 全局 `DATA_BLOCK` 的 `VAR` 里出现 FB 类型成员（如 `fb_x : FB_某某;`）→ 失败，报“文件:行:成员名”，提示“改为测试台 FB 多重实例或背景 DB”；② 程序循环 OB 的块号：文件名或声明里的编号既不是 1 也不是 ≥123（S7-1200）→ 失败；块名为 `Main` 的 OB 在导出包里报警（可能与用户项目的 OB1 冲突）。依据 LSP-905 §4.11、LSP-906 §7.3/7.4（2026-11-05 DJ-2026-011 实测：全局 DB 含 FB 实例导致 TIA 连环报错）。 |
 | 4 | `main.py plc record-tia-compile <DJ号> --errors N --warnings M --tia V19 --evidence <截图路径> [--package-sha <manifest 的 SHA>]` | 把用户实机编译结果记为验收证据（写入项目目录下的受控位置并进账本，不是聊天文字）；`--package-sha` 必须等于当前提交导出的包，否则拒收（防止拿旧包的结果顶替）；证据文件必须存在。 |
 | 5 | PLC 卡验收门 | `pm verify`/收口读第 4 项的记录：没有“本提交号 + errors=0”的记录，PLC 卡不能结；有 errors>0 的记录，明确报“TIA 编译未通过”。记录里的 warnings 数写进验收报告，不阻断。**LSP 全绿不再等于可交付。** |
 
@@ -63,7 +64,8 @@
 1. 新增测试全绿，且至少包含这些反例：缺 BOM 导出前自动补 BOM；含 `FB_TON` 的项目不出包；同提交两次导出字节相同；`--package-sha` 不匹配被拒；无证据文件被拒；errors>0 的记录让 PLC 卡验收失败；errors=0 的记录让它通过。
 2. 对 DJ-2026-011 实跑 `plc export-tia`，产出的包与用户当天在 TIA 里导入成功的那批文件逐字节一致（BOM 之外）。
 3. `main.py plc check DJ-2026-011`、`main.py doc check`、`ruff`、`mypy` 退出码 0；`pytest tests/plc tests/cli` 分组全绿。
-4. 同类排查：全库搜“拷贝 .scl 给用户”“导入 TIA”的说明文字（`docs/handover/10 §七`、AGENTS.md 第 4 条边界、`roles/plc-electrical-engineer`、项目模板 `templates/`），改成指向这两个命令（受保护文件的改动各自列入可改范围并取规则批准）；模板里生成的 `.scl` 骨架默认带 BOM 且不含自写库类型。
+4. 白名单与块结构检查各有反例：含 `FB_TON` 类型的 FB、全局 DB 里放 FB 实例（DJ-2026-011 旧版 `DB_TwoHandStartTest.scl` 即是反例，须被抓到）、OB 号 2 或 100。
+5. 同类排查：全库搜“拷贝 .scl 给用户”“导入 TIA”的说明文字（`docs/handover/10 §七`、AGENTS.md 第 4 条边界、`roles/plc-electrical-engineer`、项目模板 `templates/`），改成指向这两个命令（受保护文件的改动各自列入可改范围并取规则批准）；模板里生成的 `.scl` 骨架默认带 BOM 且不含自写库类型。
 
 ## 6. 硬停止
 
