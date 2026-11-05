@@ -17,7 +17,8 @@
 1. **起因**：DJ-2026-011 的三个 FB 在 TIA V19 实机导入，暴露三件事：自写库类型（`FB_TON` 等）TIA 里不存在；UTF-8 无 BOM 的 `.scl` 被当 ANSI 读，中文注释乱码；“LSP 全绿”不等于 TIA 能编译。规范已改（LSP-903/905/906），但**只靠规范，下一个人还会踩**。用户原话：“不仅仅是规范固化，通过脚本固化工作流”。
 2. **今天已经有的**：`reviews/tools/plc_ci.py` 在 CI 里检查“同项目其它 .scl 带 BOM，这个没有”（随 #539 入库）；`main.py plc check <PID>` 只有 Siemens LSP 诊断、结构规则、命名与禁用语法规则、文档一致性。**没有**：类型白名单检查、导出包、实机编译结果的记录与验收门。
 3. **TIA 导入方式**（用户实测）：整段粘进 FB 编辑器的变量声明区不行；用“外部源文件 → 从源生成块”导入。依赖顺序错会报找不到类型。
-4. **未核实**：Siemens LSP 是否认 `TON_TIME`/`R_TRIG`/BOM（等 #539 的 `plc check`/`plc test` 原文）；`SclLinter` 对 BOM 开头文件曾误报 `LSP-905-STRUCT-NO-BLOCK`（#539 夹具里复现过，源码在受保护的 `auto_pm/**`）；GUI 的 PLC 卡页代码位置、验收条件读取点还没勘测，开工第一步先只读勘测并把落点补进 §4。
+4. **为什么旧版 011 的两个问题 LSP 没拦住（已核实的部分来自仓库记录）**：① `FB_TON`：011 的 `.plc.json` 引用了 `../01_SharedLibraries/SysLib`，SysLib 里有 `FB_TON` 的源码定义，LSP 按库解析成功，所以不报“类型不存在”；而 TIA 导入的是 011 单个项目，没有 SysLib，该类型不存在。② 全局 DB 里放 FB 实例：CHG-PLC-2026-002 的验收记录（2026-10-22）显示这种写法下 `plc check DJ-2026-011` 退出码 0（Pass=18 Warn=1 Fail=0）、插件 test 12/12——LSP 的 DB 语义检查和仿真运行时没有“全局 DB 不能含 FB 类型成员”这条 TIA 规则，仿真还把 `fb_x` 当成可寻址成员，所以连用例都跑得通。结论：**LSP 是“Siemens 语言的子集模拟器”，不是 TIA 编译器**，凡是 TIA 独有的限制（块结构、OB 号、库依赖是否随包导入）都只能靠我们自己的规则和 TIA 实机编译兜住。③ 另有交付流程上的缺口：这次把包交给用户导入之前，云端没有驾驶舱环境、没有跑 `plc check/test`，而 PR 正文只在证据栏写了“未核实”，没有对用户明说“未经 LSP 检查”——见 §5 第 6 条。
+5. **未核实**：Siemens LSP 是否认 `TON_TIME`/`R_TRIG`/BOM（等 #539 的 `plc check`/`plc test` 原文）；`SclLinter` 对 BOM 开头文件曾误报 `LSP-905-STRUCT-NO-BLOCK`（#539 夹具里复现过，源码在受保护的 `auto_pm/**`）；GUI 的 PLC 卡页代码位置、验收条件读取点还没勘测，开工第一步先只读勘测并把落点补进 §4。
 
 ## 2. 单一目标与完成定义
 
@@ -65,7 +66,9 @@
 2. 对 DJ-2026-011 实跑 `plc export-tia`，产出的包与用户当天在 TIA 里导入成功的那批文件逐字节一致（BOM 之外）。
 3. `main.py plc check DJ-2026-011`、`main.py doc check`、`ruff`、`mypy` 退出码 0；`pytest tests/plc tests/cli` 分组全绿。
 4. 白名单与块结构检查各有反例：含 `FB_TON` 类型的 FB、全局 DB 里放 FB 实例（DJ-2026-011 旧版 `DB_TwoHandStartTest.scl` 即是反例，须被抓到）、OB 号 2 或 100。
-5. 同类排查：全库搜“拷贝 .scl 给用户”“导入 TIA”的说明文字（`docs/handover/10 §七`、AGENTS.md 第 4 条边界、`roles/plc-electrical-engineer`、项目模板 `templates/`），改成指向这两个命令（受保护文件的改动各自列入可改范围并取规则批准）；模板里生成的 `.scl` 骨架默认带 BOM 且不含自写库类型。
+5. **库依赖随包检查**（补上面 ① 的缺口）：`plc export-tia` 对项目 `.plc.json` 的 `libraries` 里被源码实际用到的每个类型，要么来自白名单，要么其源码文件随包一起导出并排在被依赖者之前；用到了库类型却没带源码 → 不出包。TIA 里并不存在“公共库自动可见”。
+6. **交付纪律（机器与流程各一条）**：① `export-tia` 的 `导入步骤.md` 与 manifest 头部必须写入本次 `plc check`、插件 `check/test` 的退出码与摘要原文（含时间与提交号）；没有这些记录就不出包。② 云端或没有驾驶舱的环境交付 PLC 源码给用户导入时，消息第一行固定写“未经 LSP 检查”，用户可据此决定是否先等笔记本跑完。
+7. 同类排查：全库搜“拷贝 .scl 给用户”“导入 TIA”的说明文字（`docs/handover/10 §七`、AGENTS.md 第 4 条边界、`roles/plc-electrical-engineer`、项目模板 `templates/`），改成指向这两个命令（受保护文件的改动各自列入可改范围并取规则批准）；模板里生成的 `.scl` 骨架默认带 BOM 且不含自写库类型。
 
 ## 6. 硬停止
 
