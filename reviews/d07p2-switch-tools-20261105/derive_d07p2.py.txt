@@ -19,6 +19,7 @@ R = ROOT / ".auto-pm" / "reports"
 SRC, EV = R / "m3-d07p", R / "m3-d07p2"
 EV.mkdir(parents=True, exist_ok=True)
 NL = chr(10)
+RID = "1.3.3-dd8b192"
 
 
 def sha(b: bytes) -> str:
@@ -59,6 +60,68 @@ s = s[: j + 1] + extra + NL + s[j + 1:]
 anchor = 'echo "smoke: pm orient conflicts=$oc"; [[ "$oc" == "[]" ]] || { echo "FAIL smoke orient conflicts"; fail=1; }'
 assert s.count(anchor) == 1
 s = s.replace(anchor, anchor + NL + '  oc2="$(cli pm orient SYS-2026-001 --json 2>/dev/null | "$PY" -B -c \'import sys,json;t=sys.stdin.read();d=json.JSONDecoder().raw_decode(t[t.index("{"):])[0];print(json.dumps(d.get("conflicts")))\' 2>/dev/null)"; echo "smoke: pm orient SYS-2026-001 conflicts=$oc2"; [[ "$oc2" == "[]" ]] || { echo "FAIL smoke orient conflicts SYS-2026-001"; fail=1; }')
+# ---- step M2: V1.0 left the installed release folder (untracked) and its manifest entry (uncommitted) in the control root; the runtime refuses a Run whose owned range has such drift
+# (_reject_control_root_drift).  Put both back to the main state with a reversible move (same idea as step M of card 221 V1.1), then start the Run FIRST and install afterwards, as in V1.0.
+old_chk = '''  if [[ "$(entry_sha)" == NONE ]]; then
+    [[ "$(sha256sum < "$C/deployment_manifest.json" | cut -d' ' -f1)" == "$OLD_MANIFEST_SHA" ]] || die "manifest drifted"
+    [[ ! -e "$C/releases/$RID" ]] || die "release slot exists without a manifest entry"
+  fi'''
+s = sw(s, old_chk, '  bash "$REAL/.auto-pm/reports/m3-d07p2/d07p2_0_move_back_installed.sh" check || die "step M2 check failed (the installed 1.3.3-dd8b192 folder and its manifest entry left by V1.0)"')
+s = sw(s, 'echo "== 3. Work and Run on the control root"', 'echo "== 2b. Step M2: put the V1.0 leftovers (installed release folder + manifest entry) back to the main state"\nbash "$REAL/.auto-pm/reports/m3-d07p2/d07p2_0_move_back_installed.sh" move | tee "$EV/stepM2.out"\n\necho "== 3. Work and Run on the control root"')
+s = sw(s, 'if [[ "$(entry_sha)" == NONE ]]; then bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"; fi',
+      'if [[ "$(rid_of "$C/active_release.json")" == "$OLD" ]]; then\n  [[ "$(entry_sha)" == NONE && ! -e "$C/releases/$RID" ]] || die "$RID is already present before the install (V1.1 starts from a clean state; step M2 should have removed the V1.0 leftovers)"\n  bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"\nfi')
+m2 = f'''#!/usr/bin/env bash
+# M3-D07P V1.1, step M2.  V1.0 installed releases/1.3.3-dd8b192 (untracked) and added its manifest entry (uncommitted) in the control root, then rolled the pointers back.  The runtime refuses to start a Run
+# whose owned range has such control-root drift, so BEFORE the Run starts this script puts both back to the main state with a reversible move: the folder is renamed to
+# .auto-pm/archive/releases_installed_20261105/ (no byte changes, nothing deleted) and deployment_manifest.json is restored to the bytes of the control-root HEAD (its current bytes are backed up first).
+# The release is then installed again after the Run has started (step 4 of the deploy script), exactly as in V1.0.
+# usage: d07p2_0_move_back_installed.sh check   read-only: either the clean state already holds, or the leftovers are EXACTLY the V1.0 ones
+#        d07p2_0_move_back_installed.sh move    check, then back up, move, restore, verify; undo = stepM2/UNDO_M2.sh
+set -euo pipefail
+export PATH="/usr/bin:/mingw64/bin:$PATH" PYTHONIOENCODING=utf-8 PYTHONUTF8=1
+ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-d07p2"; PY="$ROOT/.venv/Scripts/python.exe"
+C=00_Infrastructure/auto_pm; RID={RID}; OLD_MANIFEST_SHA=__OLD_MANIFEST_SHA__
+REL="$ROOT/$C/releases/$RID"; MAN="$ROOT/$C/deployment_manifest.json"; DEST="$ROOT/.auto-pm/archive/releases_installed_20261105"
+die() {{ printf 'ERROR: %s\\n' "$*" >&2; exit 1; }}
+MODE="${{1:-check}}"; [[ "$MODE" == check || "$MODE" == move ]] || die "usage: check | move"
+cd "$ROOT"
+msha="$(sha256sum < "$MAN" | cut -d' ' -f1)"
+if [[ ! -e "$REL" && "$msha" == "$OLD_MANIFEST_SHA" ]]; then echo "STEP_M2: clean start already holds (no installed $RID, the manifest equals the frozen bytes)"; exit 0; fi
+[[ -d "$REL" && ! -L "$REL" ]] || die "the installed folder is missing or not a plain directory while the manifest differs from the frozen bytes"
+[[ ! -e "$DEST" ]] || die "the target already exists: $DEST"
+git ls-files --error-unmatch -- "$C/releases/$RID" > /dev/null 2>&1 && die "$RID is tracked by Git: not a V1.0 leftover"
+"$PY" -B -I - "$MAN" "$REL" <<'EOF' || die "the leftovers are not exactly the V1.0 ones"
+import json, os, stat, subprocess, sys
+man, rel = sys.argv[1:3]
+rid = os.path.basename(rel)
+head = json.loads(subprocess.run(["git", "show", "HEAD:00_Infrastructure/auto_pm/deployment_manifest.json"], capture_output=True, check=True).stdout.decode("utf-8"))
+work = json.load(open(man, encoding="utf-8"))
+assert sorted(set(work["releases"]) - set(head["releases"])) == [rid] and not (set(head["releases"]) - set(work["releases"])), "manifest differs from HEAD by more than the one entry"
+assert {{k: v for k, v in work.items() if k != "releases"}} == {{k: v for k, v in head.items() if k != "releases"}}, "manifest top level differs"
+assert {{k: v for k, v in work["releases"].items() if k != rid}} == head["releases"], "other manifest entries differ"
+for dp, dn, fn in os.walk(rel):
+    for x in dn + fn:
+        s2 = os.lstat(os.path.join(dp, x))
+        assert not stat.S_ISLNK(s2.st_mode) and not (getattr(s2, "st_file_attributes", 0) & 0x400), ("link or junction inside", x)
+print("leftovers are exactly the V1.0 ones: the folder", rid, "and its one manifest entry; no links or junctions")
+EOF
+HEADSHA="$(git show "HEAD:$C/deployment_manifest.json" | sha256sum | cut -d' ' -f1)"
+[[ "$HEADSHA" == "$OLD_MANIFEST_SHA" ]] || die "the HEAD manifest bytes differ from the frozen value"
+[[ "$MODE" == move ]] || {{ echo "STEP_M2_CHECK_OK: nothing was written"; exit 0; }}
+OUT="$EV/stepM2"; mkdir -p "$OUT"
+cp "$MAN" "$OUT/deployment_manifest.json.before"
+find "$REL" -type f | wc -l > "$OUT/file_count_before.txt"
+{{ echo '#!/usr/bin/env bash'; echo '# undo of step M2: puts the installed folder and the V1.0 manifest bytes back'; echo 'set -euo pipefail'; printf 'mv -- "%s" "%s"\\n' "$DEST/$RID" "$REL"; printf 'cp -- "%s" "%s"\\n' "$OUT/deployment_manifest.json.before" "$MAN"; }} > "$OUT/UNDO_M2.sh"
+mkdir -p "$DEST"
+mv -- "$REL" "$DEST/$RID"
+[[ "$(find "$DEST/$RID" -type f | wc -l)" == "$(cat "$OUT/file_count_before.txt")" ]] || die "file count differs after the move (UNDO_M2.sh puts everything back)"
+git show "HEAD:$C/deployment_manifest.json" > "$MAN"
+[[ "$(sha256sum < "$MAN" | cut -d' ' -f1)" == "$OLD_MANIFEST_SHA" ]] || die "the restored manifest does not equal the frozen bytes (UNDO_M2.sh puts everything back)"
+[[ -z "$(git status --porcelain -- "$C/deployment_manifest.json" "$C/releases")" ]] || die "the release files are still dirty after step M2: $(git status --porcelain -- "$C/deployment_manifest.json" "$C/releases" | head -3)"
+echo "STEP_M2_OK: the installed $RID folder moved to $DEST, the manifest restored to the HEAD bytes, release files clean"
+'''
+OLD_MANIFEST_SHA = re.search(r"^OLD_MANIFEST_SHA=(\S+)$", s, re.M).group(1)
+(EV / "d07p2_0_move_back_installed.sh").write_bytes(m2.replace("__OLD_MANIFEST_SHA__", OLD_MANIFEST_SHA).encode("utf-8"))
 s = re.sub(r"^CARD_SHA=.*$", "CARD_SHA=__CARD_SHA__", s, count=1, flags=re.M)
 (EV / "d07p_deploy.sh").write_bytes(s.encode("utf-8"))
 
@@ -66,7 +129,7 @@ s = re.sub(r"^CARD_SHA=.*$", "CARD_SHA=__CARD_SHA__", s, count=1, flags=re.M)
 c = (SRC / "D07p_card.md").read_text(encoding="utf-8")
 c = ren(c)
 c = c.replace("# D07p｜切换到发版 7.2 候选（M3-D07P）", "# D07p V1.1｜切换到发版 7.2 候选（M3-D07P）", 1)
-c = sw(c, "本卡把 D07n 的切换再做一次，", "V1.0（2026-11-05 06:25 MST 跑，已审计放行）切到 `1.3.3-dd8b192` 后，切换后核验只有一项不过：新运行时的互锁 `LIVE_RUN_UNDER_FINISHED_WORK` 在 `pm orient SW-2026-008` 报冲突（账本里 6 条旧 Run 挂在已结束的 Work 下；SYS-2026-001 另有 2 条），脚本按设计自动回退了指针（现行仍是 `1.3.3-d563293`，已确认）。V1.1 是同一个切换，要等卡 SETTLE72（结算这 8 条旧 Run 和 7.2 两次失败尝试遗留的 2 条 Run）完成后才运行；沿用 V1.0 的变更单 `CHG-SCPT-2026-479`（仍为 implementing），Work/Run/Checkpoint 取 `-002`（`D07P-001` 已被 SETTLE72 结算为 CANCELLED），Decision 取 `DEC-<当天>-M3D07P02`，owner `claude:m3d07p2`，幂等键前缀 `d07p2-`，证据目录 `.auto-pm/reports/m3-d07p2/`。发布目录 `1.3.3-dd8b192` 已在 `releases/` 里并在清单里登记（V1.0 装好的、没被回退动过；字节与门禁时的载荷逐字节一致由脚本再核一次）。\n\n本卡把 D07n 的切换再做一次，")
+c = sw(c, "本卡把 D07n 的切换再做一次，", "V1.0（2026-11-05 06:25 MST 跑，已审计放行）切到 `1.3.3-dd8b192` 后，切换后核验只有一项不过：新运行时的互锁 `LIVE_RUN_UNDER_FINISHED_WORK` 在 `pm orient SW-2026-008` 报冲突（账本里 6 条旧 Run 挂在已结束的 Work 下；SYS-2026-001 另有 2 条），脚本按设计自动回退了指针（现行仍是 `1.3.3-d563293`，已确认）。V1.1 是同一个切换，要等卡 SETTLE72（结算这 8 条旧 Run 和 7.2 两次失败尝试遗留的 2 条 Run）完成后才运行；沿用 V1.0 的变更单 `CHG-SCPT-2026-479`（仍为 implementing），Work/Run/Checkpoint 取 `-002`（`D07P-001` 已被 SETTLE72 结算为 CANCELLED），Decision 取 `DEC-<当天>-M3D07P02`，owner `claude:m3d07p2`，幂等键前缀 `d07p2-`，证据目录 `.auto-pm/reports/m3-d07p2/`。**步骤 M2（V1.1 新增）**：V1.0 装好的发布目录 `releases/1.3.3-dd8b192`（未入库）和它在 `deployment_manifest.json` 里的清单条目（未提交）还留在控制根里，运行时对 Run 的 owned 范围做控制根漂移检查（`_reject_control_root_drift`）时会拒绝，所以在 Run 启动**之前**由 `d07p2_0_move_back_installed.sh move` 可逆地退回 main 状态：目录整个改名到 `.auto-pm/archive/releases_installed_20261105/`（不改字节、不删），清单还原为控制根 `HEAD` 的字节（还原前先备份当前字节），随后与 V1.0 一样**先起 Run、再重新安装**，装好的载荷仍须与门禁时的载荷逐字节一致（脚本再核一次）。V1.1 的安装步骤不再因“清单里已有条目”而跳过：切换前清单里或磁盘上已有 `1.3.3-dd8b192` 即停下。反向操作：`bash .auto-pm/reports/m3-d07p2/stepM2/UNDO_M2.sh`（同样的 mv 移回、清单字节还原）。脚本先 `check`（只读）再 `move`；`check` 只接受“已经是干净起点”或“恰好是 V1.0 的遗留”两种状态。\n\n本卡把 D07n 的切换再做一次，")
 c = sw(c, "切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：", "新增前置条件（V1.1）：卡 SETTLE72 已完成（`m3-settle72/settle_result.txt` 以 `SETTLE72_DONE` 开头）；`RUN-SW008-M3-D07P-001` 与 `RUN-SW008-M3-REL72-002` 已是 CANCELLED；用 7.2 运行时自己的 SQL 查，SW-2026-008 与 SYS-2026-001 都没有挂在已结束 Work 下的 Run；独立审计对本卡 V1.1 另行放行，放行引用写入 `switch_audit_ref.txt`（V1.0 的引用不沿用）。\n\n切换后核验（任一失败立即用同一脚本自动回退指针并停下，回切后写回执）：")
 c = sw(c, "`pm orient SW-2026-008 --json` 的冲突列表为空；", "`pm orient SW-2026-008 --json` 与 `pm orient SYS-2026-001 --json` 的冲突列表都为空；")
 (EV / "D07p_card.md").write_bytes(c.encode("utf-8"))

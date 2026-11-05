@@ -18,7 +18,7 @@ PY="$REAL/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
 EV="$ROOT/.auto-pm/reports/m3-d07p2"
 CARD="$EV/D07p_card.md"
-CARD_SHA=6ea633dbed9a99fb08f7f01ba9899d094ff8e533ed6286005a1cdd5f7490e401
+CARD_SHA=cfbaaca80f3f394fd317b275c4552f39349624d11f6304ea674123733b15b5ed
 OPS="$REAL/.auto-pm/reports/m3-d06/pmf_release_ops.sh"
 OPS_SHA=fe331979d463d4de32209bfb32c7eca8db1e17ee60a39622a92cd8c7be53e8de
 DRILLPY="$REAL/.auto-pm/reports/m3-d06/drill.py"
@@ -69,10 +69,7 @@ if [[ "$ACTIVE" == "$OLD" ]]; then
   [[ "$(sha256sum < "$C/active_release.json" | cut -d' ' -f1)" == "$OLD_ACTIVE_SHA" ]] || die "active pointer drifted"
   [[ "$(sha256sum < "$C/previous_release.json" | cut -d' ' -f1)" == "$OLD_PREV_SHA" ]] || die "previous pointer drifted"
   [[ "$(rid_of "$C/previous_release.json")" == "$OLDER" ]] || die "previous is not $OLDER"
-  if [[ "$(entry_sha)" == NONE ]]; then
-    [[ "$(sha256sum < "$C/deployment_manifest.json" | cut -d' ' -f1)" == "$OLD_MANIFEST_SHA" ]] || die "manifest drifted"
-    [[ ! -e "$C/releases/$RID" ]] || die "release slot exists without a manifest entry"
-  fi
+  bash "$REAL/.auto-pm/reports/m3-d07p2/d07p2_0_move_back_installed.sh" check || die "step M2 check failed (the installed 1.3.3-dd8b192 folder and its manifest entry left by V1.0)"
 elif [[ "$ACTIVE" != "$RID" ]]; then die "active is neither $OLD nor $RID"; fi
 for r in "$OLD" "$OLDER"; do bash "$OPS" verify "$ROOT" "$r" > /dev/null || die "exact-tree $r fails before the switch"; done
 echo "pointers, manifest and the two installed releases as frozen; active=$ACTIVE"
@@ -135,6 +132,9 @@ if [[ ! -f ".auto-pm/decisions/$DEC.json" ]]; then
   [[ -f ".auto-pm/decisions/$DEC.json" ]] || die "Decision $DEC was not created"
 fi
 
+echo "== 2b. Step M2: put the V1.0 leftovers (installed release folder + manifest entry) back to the main state"
+bash "$REAL/.auto-pm/reports/m3-d07p2/d07p2_0_move_back_installed.sh" move | tee "$EV/stepM2.out"
+
 echo "== 3. Work and Run on the control root"
 S=(); O=(); for p in "${PATHS[@]}"; do S+=(--scope "$p"); O+=(--owned "$p" --declared-dirty "$p"); done
 [[ "$(q "select state from work_items where work_id=?" "$WORK")" != NONE ]] || cli continuity work create --work-id "$WORK" --pid SW-2026-008 --kind WBS \
@@ -164,7 +164,10 @@ TOKEN_FILE="$EV/lease_token.txt"; [[ -f "$TOKEN_FILE" ]] || openssl rand -hex 16
 [[ "$(q "select state from work_items where work_id=?" "$WORK")" != READY ]] || cli continuity work transition --work-id "$WORK" --to IN_PROGRESS --idempotency-key d07p2-work-inprogress-1 | grep '"state"'
 
 echo "== 4. Install $RID"
-if [[ "$(entry_sha)" == NONE ]]; then bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"; fi
+if [[ "$(rid_of "$C/active_release.json")" == "$OLD" ]]; then
+  [[ "$(entry_sha)" == NONE && ! -e "$C/releases/$RID" ]] || die "$RID is already present before the install (V1.1 starts from a clean state; step M2 should have removed the V1.0 leftovers)"
+  bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"
+fi
 ENTRY_SHA="$(entry_sha)"; [[ "$ENTRY_SHA" != NONE ]] || die "no manifest entry for $RID after the install"
 bash "$OPS" verify "$ROOT" "$RID"
 # the installed payload must equal, byte for byte, the payload the gates built and tested at the frozen commit

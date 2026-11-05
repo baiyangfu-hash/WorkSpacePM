@@ -1,34 +1,29 @@
 2,11c2,10
-< # M3-X (card X_recovery_card.md V1.0) - failure-record disposal of RUN-SW008-M3-REL5-001 (card 214 V1.0, project SW-2026-008),
+< # M3-S (card S_recovery_card.md V1.0) - failure-record disposal of RUN-SW008-M3-REL5-001 (card 214 V1.0, project SW-2026-008),
 < # G2 failed only on 3 environment-dependent cli tests, no closure, lease released and expired; settled through the same recovery chain as the M3 settlement precedents. The canonical .auto-pm/continuity.db lives in the control root
 < # only (git-ignored), so the chain runs in the control root; dirty files elsewhere are irrelevant (only the database and the staged index are checked).
 < #   0. preconditions (approval receipt with the card SHA, empty index, target RUNNING or already CANCELLED, no process using the target worktree);
-< #   1. one recovery CHG in the target's project (created and walked to implementing; closed later by X_2_chg_close.sh on acceptance);
+< #   1. one recovery CHG in the target's project (created and walked to implementing; closed later by S_2_chg_close.sh on acceptance);
 < #   2. the recovery Decision (settle_expired_run / CANCELLED / target Run);
 < #   3. ONE commit that binds exactly the two Decision files (original + recovery) to the control-root HEAD (Git binding required by settle_expired_run);
 < #   4. recovery Work/Run in the control root, settle-expired -> CANCELLED, the old lease token must be dead, the target Work -> CANCELLED, the recovery chain closed.
 < # No SQL, no compensation scripts. Resumable: each step checks the current state first. NOTHING else is disposed of (BLOCKED Works and implementing CHGs stay as they are).
 < # `--check-only` stops after the preconditions without writing anything.  SETTLE_ROOT may name a throw-away rehearsal root (marker file .settle-rehearsal-root).
 ---
-> # M3-X (card X_recovery_card.md V1.0) - settle the Runs that trigger LIVE_RUN_UNDER_FINISHED_WORK under the release 7.2 runtime (6 in SW-2026-008, 2 in SYS-2026-001)
+> # M3-S (card S_recovery_card.md V1.0) - settle the Runs that trigger LIVE_RUN_UNDER_FINISHED_WORK under the release 7.2 runtime (6 in SW-2026-008, 2 in SYS-2026-001)
 > # and the two leftover Runs of the failed 7.2 attempts, through the same recovery chain as the M2/M3 precedents (settle10).  The canonical .auto-pm/continuity.db lives in the control root
 > # only (git-ignored), so the chain runs in the control root.
 > #   0. preconditions (approval receipt with the card SHA, empty index, every target non-terminal or already CANCELLED, original Decision files present, no process using the target worktrees);
-> #   1. one recovery CHG per project (SW-2026-008 SCPT, SYS-2026-001 DOCU), walked to implementing (closed later by X_2_chg_close.sh on acceptance);
+> #   1. one recovery CHG per project (SW-2026-008 SCPT, SYS-2026-001 DOCU), walked to implementing (closed later by S_2_chg_close.sh on acceptance);
 > #   2. one recovery Decision per project (settle_expired_run / CANCELLED / the project's target Runs);
 > #   3. ONE commit that binds exactly the Decision files (original ones not yet in Git + the two recovery Decisions) to the control-root HEAD (required by settle_expired_run);
 > #   4. per target: recovery Work/Run in the control root, settle-expired -> CANCELLED, the old lease token must be dead (when a token file exists), the target Work -> CANCELLED if it is still IN_PROGRESS or BLOCKED, the recovery chain closed.
 > # No SQL, no compensation scripts. Resumable: each step checks the current state first. NOTHING else is disposed of.  `--check-only` stops after the preconditions without writing anything.
-15,16c14
-< ROOT="${SETTLE_ROOT:-$REAL}"
-< if [[ "$ROOT" != "$REAL" ]]; then [[ -f "$ROOT/.settle-rehearsal-root" ]] || { echo "SETTLE_ROOT is not a rehearsal root"; exit 1; }; fi
----
-> ROOT="$REAL"
-23c21
+23c22
 < CARD_SHA=15e74282e4e3685fa6337bd9760dc166b1c1cfbe582f4c764b9066cd28178963
 ---
-> CARD_SHA=ec4bc4a5116a1e7088ce4b16246b8244ad37268334ff60e9ebba400eebc849ad
-26,42c24,40
+> CARD_SHA=cbb172bd1b14c612f82f28fad674441b5cc1f9b9778267076833e9245555edee
+26,42c25,41
 < # target: index 0 = the card 214 V1.0 run (SW-2026-008)
 < TAG=(rel5)
 < PID=(SW-2026-008)
@@ -42,8 +37,8 @@
 < T_OWNER=(claude:m3rel5)
 < T_TOKEN=("$REAL/.auto-pm/reports/m3-rel5/lease_token.txt")
 < R_DEC=(DEC-20261031-SETLREL6)
-< R_WORK=(WORK-SW008-M3-X-REL5-001)
-< R_RUN=(RUN-SW008-M3-X-REL5-001)
+< R_WORK=(WORK-SW008-M3-S-REL5-001)
+< R_RUN=(RUN-SW008-M3-S-REL5-001)
 < REASON=("卡 214 V1.0（第五次发版候选）的正式 Run：2026-10-30 21:04 至 2026-10-30 23:40 MST 跑完，九组无失败；cli 组 3 个 record-holder 测试因笔记本夜间隐藏进程链下找不到持有者进程而失败（GitHub 与单独运行通过）；判卷 G2 判不过，其余全 PASS；未收口，租约释放后过期；用户 2026-10-31T13:01:51Z“同意”后前向取消")
 < BACKGROUND=("RUN-SW008-M3-REL5-001 的 lease 已过期且无法续期（卡 214 V1.0，九组无失败，cli 组 3 个环境相关失败，G2 判不过，未收口），前向结算为 CANCELLED，对应 Work 转 CANCELLED；CHG-SCPT-2026-465 由卡 214 V1.1 继续使用")
 ---
@@ -64,7 +59,7 @@
 > T_TOKEN=("" "" "" "" "" "" "" "" "$REAL/.auto-pm/reports/m3-rel72/lease_token.txt" "$REAL/.auto-pm/reports/m3-d07p/lease_token.txt")
 > T_WHAT=("A2-201 第一次运行（BLOCKED），其 Work 已 CANCELLED" "A2-201-R2 第三次运行（RUNNING），其 Work 已 ACCEPTED" "A2-201-R2 第四次运行（VERIFYING），其 Work 已 ACCEPTED" "C03REC 第二次运行（VERIFYING），其 Work 已 CANCELLED" "PMF-E01 运行（BLOCKED），其 Work 已 ACCEPTED" "PMF-G10 运行（BLOCKED），其 Work 已 ACCEPTED" "WBS24 运行（VERIFYING），其 Work 已 CANCELLED（项目 SYS-2026-001）" "WBS25 运行（VERIFYING），其 Work 已 ACCEPTED（项目 SYS-2026-001）" "卡 221 V1.0 的失败 Run（RUNNING，租约已过期），其 Work 在 IN_PROGRESS" "切换卡 D07p V1.0 的回退 Run（RUNNING，租约 07:26 MST 到期），其 Work 在 IN_PROGRESS")
 > N=10
-56c54,62
+56c55,63
 < chg_status() { awk -F'|' '/^\|[[:space:]]*变更状态[[:space:]]*\|/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3; exit}' "${CHG_DIR[$1]}/${CHG[$1]}.md"; }
 ---
 > lease_exp()  { sq "select expires_at from execution_leases where run_id=?" "$1"; }
@@ -76,32 +71,36 @@
 > print(len(rows), " ".join(r[0] for r in rows))
 > EOF
 > }
-62c68
+62c69,71
 < for i in 0; do
 ---
+> GO_REF="$(grep -m1 '^GO_REF=' "$EV/approval_receipt.txt" | cut -d= -f2- | tr -d '\r')"
+> [[ "$GO_REF" =~ ^user-confirmation:cmsg_[A-Za-z0-9]{20,80}$ ]] || die "approval_receipt.txt has no valid GO_REF line (user-confirmation:cmsg_<the user's message id>)"
 > for ((i=0;i<N;i++)); do
-64c70
+64c73
 <   [[ "$s" == RUNNING || "$s" == CANCELLED ]] || die "unexpected state of ${T_RUN[$i]}: $s"
 ---
 >   case "$s" in RUNNING|VERIFYING|BLOCKED|READY|CANCELLED) ;; *) die "unexpected state of ${T_RUN[$i]}: $s" ;; esac
-65a72
+65a75
 >   [[ "$(work_state "${T_WORK[$i]}")" != NONE ]] || die "target Work ${T_WORK[$i]} is missing"
-68c75
+68c78
 < [[ "$(git branch --show-current)" == main || "$ROOT" != "$REAL" ]] || die "the control root is not on the expected branch"
 ---
 > [[ "$(git branch --show-current)" == main ]] || die "the control root is not on the expected branch"
-69a77,78
+69a80,83
 > cli ledger reconcile SYS-2026-001 | grep 摘要
 > echo "-- before: Runs under finished Work: SW-2026-008 = $(orphans SW-2026-008); SYS-2026-001 = $(orphans SYS-2026-001)"
-71c80
+> echo "-- the 10 targets: state, lease expiry (UTC; the script settles only a target whose lease has expired, and stops at the first one that has not)"
+> for ((i=0;i<N;i++)); do echo "   ${T_RUN[$i]} state=$(run_state "${T_RUN[$i]}") lease_expires_at=$(lease_exp "${T_RUN[$i]}") work=${T_WORK[$i]} work_state=$(work_state "${T_WORK[$i]}")"; done
+71c85
 < powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.ProcessId -ne \$PID -and (\$_.CommandLine -like '*REL5-001*' -or \$_.CommandLine -like '*worktrees/m3-rel5*') } | Select-Object ProcessId,Name,CommandLine | Format-List" > "$EV/process_check.txt" 2>&1 || true
 ---
 > powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.ProcessId -ne \$PID -and (\$_.CommandLine -like '*REL72-002*' -or \$_.CommandLine -like '*D07P-001*' -or \$_.CommandLine -like '*worktrees/m3-rel72*' -or \$_.CommandLine -like '*worktrees/m3-d07p*') } | Select-Object ProcessId,Name,CommandLine | Format-List" > "$EV/process_check.txt" 2>&1 || true
-76c85
-< DELEG="用户 2026-10-31T13:01:51Z 在线程回复“同意”；用户 2026-10-18 预授权 Claude 自行收口推送；本卡（SHA-256 $CARD_SHA）已先在线程报出；由 Claude 代为运行脚本；回执 .auto-pm/reports/m3-X/approval_receipt.txt"
+76c90
+< DELEG="用户 2026-10-31T13:01:51Z 在线程回复“同意”；用户 2026-10-18 预授权 Claude 自行收口推送；本卡（SHA-256 $CARD_SHA）已先在线程报出；由 Claude 代为运行脚本；回执 .auto-pm/reports/m3-S/approval_receipt.txt"
 ---
-> DELEG="用户在线程里亲口批准本卡（回执 .auto-pm/reports/m3-X/approval_receipt.txt，含本卡 SHA-256 $CARD_SHA 的前 12 位）；用户 2026-10-18 预授权 Claude 自行收口推送；由 Claude 代为运行脚本"
-78,86c87,94
+> DELEG="用户在线程里亲口批准本卡（回执 .auto-pm/reports/m3-S/approval_receipt.txt，含本卡 SHA-256 $CARD_SHA 的前 12 位）；用户 2026-10-18 预授权 Claude 自行收口推送；由 Claude 代为运行脚本"
+78,86c92,99
 < echo "== 1. Recovery CHGs (one per target project)"
 < for i in 0; do
 <   [[ ! -f "${STATEF[$i]}" ]] || IFS= read -r "CHG[$i]" < "${STATEF[$i]}"
@@ -109,7 +108,7 @@
 <     out="$(cli change create --pid "${PID[$i]}" --domain "${DOM[$i]}" --nature CFG --scope MODULE --applicant fubai \
 <       --background "${BACKGROUND[$i]}" \
 <       --necessity "现有服务不允许 RUNNING 直接取消，过期 lease 不能续期；只有独立恢复授权下的 settle-expired 能合法收口，且恢复 CHG 必须与目标 Run 同项目。不处置会让过期 Run 长期显示为 RUNNING，污染看板与对账" \
-<       --references "CARD-SW008-M3-X V1.0；CARD_SHA256=$CARD_SHA；$DELEG；TARGET=${T_RUN[$i]}；先例 M2-SETTLE、BL02、U07A 恢复链" \
+<       --references "CARD-SW008-M3-S V1.0；CARD_SHA256=$CARD_SHA；$DELEG；TARGET=${T_RUN[$i]}；先例 M2-SETTLE、BL02、U07A 恢复链" \
 <       --urgency normal)"
 ---
 > echo "== 1. Recovery CHGs (one per project)"
@@ -119,8 +118,8 @@
 >     out="$(cli change create --pid "${G_PID[$g]}" --domain "${G_DOM[$g]}" --nature CFG --scope MODULE --applicant fubai \
 >       --background "发版 7.2 的运行时新增互锁 LIVE_RUN_UNDER_FINISHED_WORK；项目 ${G_PID[$g]} 里有挂在已结束 Work 下的旧 Run（以及 7.2 两次失败尝试的遗留 Run），切换卡 D07p 的切换后核验因此不过并自动回退；这些 Run 的租约都已过期或到期，前向结算为 CANCELLED，Work 仍在 IN_PROGRESS/BLOCKED 的转 CANCELLED，已 ACCEPTED/CANCELLED 的原样不动" \
 >       --necessity "现有服务不允许 RUNNING/VERIFYING/BLOCKED 直接取消，过期 lease 不能续期；只有独立恢复授权下的 settle-expired 能合法收口，且恢复 CHG 必须与目标 Run 同项目。不处置会让 7.2 切换后 pm orient 永远报冲突并拦住后续操作" \
->       --references "CARD-SW008-M3-X V1.0；CARD_SHA256=$CARD_SHA；$DELEG；先例 M3-SETTLE10、M2-SETTLE、BL02、U07A 恢复链" --urgency normal)"
-88,90c96,98
+>       --references "CARD-SW008-M3-S V1.0；CARD_SHA256=$CARD_SHA；$DELEG；先例 M3-SETTLE10、M2-SETTLE、BL02、U07A 恢复链" --urgency normal)"
+88,90c101,103
 <     CHG[$i]="$(printf '%s\n' "$out" | grep -oE "CHG-${DOM[$i]}-2026-[0-9]+" | tail -n 1)"
 <     [[ -n "${CHG[$i]}" ]] || die "cannot parse a new recovery CHG id for ${TAG[$i]}"
 <     printf '%s\n' "${CHG[$i]}" > "${STATEF[$i]}"
@@ -128,7 +127,7 @@
 >     G_CHG[$g]="$(printf '%s\n' "$out" | grep -oE "CHG-${G_DOM[$g]}-2026-[0-9]+" | tail -n 1)"
 >     [[ -n "${G_CHG[$g]}" ]] || die "cannot parse a new recovery CHG id for group $g"
 >     printf '%s\n' "${G_CHG[$g]}" > "${G_STATEF[$g]}"
-93,97c101,105
+93,97c106,110
 <     case "$(chg_status "$i")" in
 <       draft)        cli change transition "${CHG[$i]}" --pid "${PID[$i]}" --to submitted    --approver fubai --comment "[$DELEG] 提交恢复变更" >/dev/null ;;
 <       submitted)    cli change transition "${CHG[$i]}" --pid "${PID[$i]}" --to under_review --approver fubai --comment "[$DELEG] 进入评审" >/dev/null ;;
@@ -138,13 +137,13 @@
 >     case "$(chg_status "$g")" in
 >       draft)        cli change transition "${G_CHG[$g]}" --pid "${G_PID[$g]}" --to submitted    --approver fubai --comment "[$DELEG] 提交恢复变更" >/dev/null ;;
 >       submitted)    cli change transition "${G_CHG[$g]}" --pid "${G_PID[$g]}" --to under_review --approver fubai --comment "[$DELEG] 进入评审" >/dev/null ;;
->       under_review) cli change transition "${G_CHG[$g]}" --pid "${G_PID[$g]}" --to approved     --approver fubai --comment "[$DELEG] 批准恢复变更：仅结算卡 X 表里属于 ${G_PID[$g]} 的目标 Run 并取消仍在 IN_PROGRESS/BLOCKED 的目标 Work，不处置任何其他记录" >/dev/null ;;
+>       under_review) cli change transition "${G_CHG[$g]}" --pid "${G_PID[$g]}" --to approved     --approver fubai --approval-evidence-ref "$GO_REF" --comment "[$DELEG] 批准恢复变更：仅结算卡 S 表里属于 ${G_PID[$g]} 的目标 Run 并取消仍在 IN_PROGRESS/BLOCKED 的目标 Work，不处置任何其他记录" >/dev/null ;;
 >       approved)     cli change transition "${G_CHG[$g]}" --pid "${G_PID[$g]}" --to implementing --approver fubai --comment "[$DELEG] 开始实施" >/dev/null ;;
-99c107
+99c112
 <       *) die "recovery CHG ${CHG[$i]} state not resumable: $(chg_status "$i")" ;;
 ---
 >       *) die "recovery CHG ${G_CHG[$g]} state not resumable: $(chg_status "$g")" ;;
-104,108c112,117
+104,108c117,122
 < echo "== 2. Recovery Decisions"
 < for i in 0; do
 <   if [[ ! -f ".auto-pm/decisions/${R_DEC[$i]}.json" ]]; then
@@ -155,9 +154,9 @@
 > for g in 0 1; do
 >   if [[ ! -f ".auto-pm/decisions/${G_RDEC[$g]}.json" ]]; then
 >     TARGS=(); for ((i=0;i<N;i++)); do if [[ "${GRP[$i]}" == "$g" ]]; then TARGS+=(--target-run-id "${T_RUN[$i]}"); fi; done
->     cli decision create --change-id "${G_CHG[$g]}" --pid "${G_PID[$g]}" --approver fubai --decision-id "${G_RDEC[$g]}" --file "$DB" \
+>     cli decision create --change-id "${G_CHG[$g]}" --pid "${G_PID[$g]}" --approver fubai --approval-evidence-ref "$GO_REF" --decision-id "${G_RDEC[$g]}" --file "$DB" \
 >       --allow-runtime-action settle_expired_run --allow-outcome CANCELLED "${TARGS[@]}" --json-output | grep -E '"decision_id"|"change_id"'
-112,122c121,131
+112,122c126,137
 < echo "== 3. Git-bind the Decision files (exact paths only; one commit per target, both before any recovery Run starts)"
 < for i in 0; do
 <   FILES=(".auto-pm/decisions/${T_DEC[$i]}.json" ".auto-pm/decisions/${R_DEC[$i]}.json")
@@ -174,21 +173,22 @@
 > FILES=(); for ((i=0;i<N;i++)); do FILES+=(".auto-pm/decisions/${T_DEC[$i]}.json"); done; for g in 0 1; do FILES+=(".auto-pm/decisions/${G_RDEC[$g]}.json"); done
 > mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | sort -u)
 > if [[ -n "$(git status --porcelain -- "${FILES[@]}")" ]]; then
->   git add -- "${FILES[@]}"
->   for f in $(git diff --cached --name-only); do [[ " ${FILES[*]} " == *" $f "* ]] || die "staged file outside the Decision set: $f"; done
+>   ADD=(); for f in "${FILES[@]}"; do if [[ -n "$(git status --porcelain -- "$f")" ]]; then ADD+=("$f"); fi; done   # the originals that are already committed stay out of the commit
+>   git add -- "${ADD[@]}"
+>   [[ "$(git diff --cached --name-only | sort | tr '\n' ' ')" == "$(printf '%s\n' "${ADD[@]}" | sort | tr '\n' ' ')" ]] || die "staged set is not exactly the new/changed Decision file(s)"
 >   for g in 0 1; do git diff --cached --name-only | grep -qx ".auto-pm/decisions/${G_RDEC[$g]}.json" || die "recovery Decision ${G_RDEC[$g]} is not staged"; done
 >   git commit -m "chore(governance): [${G_CHG[0]}, ${G_CHG[1]}] bind the settlement decisions of the 7.2 live-run cleanup" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 > fi
 > git ls-files --error-unmatch -- "${FILES[@]}" >/dev/null
 > [[ -z "$(git status --porcelain -- "${FILES[@]}")" ]] || die "Decision files differ from HEAD"
-127c136,139
+127c142,145
 <   local i="$1" tag="${TAG[$1]}" TR="${T_RUN[$1]}" TW="${T_WORK[$1]}" TO="${T_OWNER[$1]}" RD="${R_DEC[$1]}" RW="${R_WORK[$1]}" RR="${R_RUN[$1]}" pid="${PID[$1]}"
 ---
 >   local i="$1" tag="${TAG[$1]}" TR="${T_RUN[$1]}" TW="${T_WORK[$1]}" TO="${T_OWNER[$1]}" g="${GRP[$1]}"
 >   local RD="${G_RDEC[$g]}" pid="${G_PID[$g]}"
->   local RW="WORK-${pid//-/}-M3-X-${tag^^}-001" RR="RUN-${pid//-/}-M3-X-${tag^^}-001"
+>   local RW="WORK-${pid//-/}-M3-S-${tag^^}-001" RR="RUN-${pid//-/}-M3-S-${tag^^}-001"
 >   RW="${RW/WORK-SW2026008/WORK-SW008}"; RR="${RR/RUN-SW2026008/RUN-SW008}"; RW="${RW/WORK-SYS2026001/WORK-SYS001}"; RR="${RR/RUN-SYS2026001/RUN-SYS001}"
-129c141,148
+129c147,154
 <   echo "== 4.$tag Recovery Work and Run (control root, owned $DB)"
 ---
 >   if [[ "$(run_state "$TR")" != CANCELLED ]]; then
@@ -199,78 +199,44 @@
 > EOF
 >   fi
 >   echo "== 4.$tag Recovery Work and Run (control root, owned $DB) for $TR"
-133,134c152,153
-<     --title "过期 Run $TR 结算恢复" --owner "$OWNER" --scope "$DB" --card-file "$(pwd -W)/.auto-pm/reports/m3-X/X_recovery_card.md" --idempotency-key "settle-$tag-work-create-1" | grep '"state"'
-<   [[ "$(work_state "$RW")" != PLANNED ]] || cli continuity work authorize --work-id "$RW" --decision-id "$RD" --idempotency-key "settle-$tag-work-auth-1" | grep '"state"'
+137c162
+<       --owned "$DB" --declared-dirty "$DB" --worktree "$(cygpath -w "$ROOT")" --lease-token "$token" --lease-seconds 1800 --idempotency-key "S-$tag-run-start-1" | grep -E '"state"|"git_head"'
 ---
->     --title "过期 Run $TR 结算恢复" --owner "$OWNER" --scope "$DB" --card-file "$(pwd -W)/.auto-pm/reports/m3-X/X_recovery_card.md" --idempotency-key "X-$tag-work-create-1" | grep '"state"'
->   [[ "$(work_state "$RW")" != PLANNED ]] || cli continuity work authorize --work-id "$RW" --decision-id "$RD" --idempotency-key "X-$tag-work-auth-1" | grep '"state"'
-137c156
-<       --owned "$DB" --declared-dirty "$DB" --worktree "$(cygpath -w "$ROOT")" --lease-token "$token" --lease-seconds 1800 --idempotency-key "settle-$tag-run-start-1" | grep -E '"state"|"git_head"'
----
->       --owned "$DB" --declared-dirty "$DB" --worktree "$(cygpath -w "$ROOT")" --lease-token "$token" --lease-seconds 1800 --idempotency-key "X-$tag-run-start-1" | grep -E '"state"|"git_head"'
-139,140c158,159
-<   [[ "$(run_state "$RR")" != READY ]] || cli continuity run transition --run-id "$RR" --to RUNNING --owner "$OWNER" --lease-token "$token" --idempotency-key "settle-$tag-run-running-1" | grep '"state"'
-<   [[ "$(work_state "$RW")" != READY ]] || cli continuity work transition --work-id "$RW" --to IN_PROGRESS --idempotency-key "settle-$tag-work-inprogress-1" | grep '"state"'
----
->   [[ "$(run_state "$RR")" != READY ]] || cli continuity run transition --run-id "$RR" --to RUNNING --owner "$OWNER" --lease-token "$token" --idempotency-key "X-$tag-run-running-1" | grep '"state"'
->   [[ "$(work_state "$RW")" != READY ]] || cli continuity work transition --work-id "$RW" --to IN_PROGRESS --idempotency-key "X-$tag-work-inprogress-1" | grep '"state"'
-144c163
+>       --owned "$DB" --declared-dirty "$DB" --worktree "$(cygpath -w "$ROOT")" --recovery-change "${G_CHG[$g]}" --lease-token "$token" --lease-seconds 1800 --idempotency-key "S-$tag-run-start-1" | grep -E '"state"|"git_head"'
+144c169
 <   if [[ "$(run_state "$TR")" == RUNNING ]]; then
 ---
 >   if [[ "$(run_state "$TR")" != CANCELLED ]]; then
-147,148c166,167
+147c172
 <       --reason "${REASON[$1]}" \
-<       --idempotency-key "settle-$tag-settle-1" | tee "$EV/settle_output_$tag.json" | grep -E '"state"|"run_id"'
 ---
->       --reason "X：${T_WHAT[$1]}；发版 7.2 运行时的互锁 LIVE_RUN_UNDER_FINISHED_WORK 要求结清；租约已过期，前向取消" \
->       --idempotency-key "X-$tag-settle-1" | tee "$EV/settle_output_$tag.json" | grep -E '"state"|"run_id"'
-152,153c171,172
+>       --reason "S：${T_WHAT[$1]}；发版 7.2 运行时的互锁 LIVE_RUN_UNDER_FINISHED_WORK 要求结清；租约已过期，前向取消" \
+152,153c177,178
 <   echo "== 6.$tag The old lease token must be dead"
 <   local old; old="$(tr -d '\r\n' < "${T_TOKEN[$1]}" 2>/dev/null || true)"
 ---
 >   echo "== 6.$tag The old lease token must be dead (only when a token file exists)"
 >   local old=""; if [[ -n "${T_TOKEN[$1]}" && -f "${T_TOKEN[$1]}" ]]; then old="$(tr -d '\r\n' < "${T_TOKEN[$1]}" 2>/dev/null || true)"; fi
-156c175
-<          --expected-version "$ver" --lease-seconds 60 --idempotency-key "settle-$tag-oldtoken-probe-1" > "$EV/old_token_renew_$tag.txt" 2>&1; then
----
->          --expected-version "$ver" --lease-seconds 60 --idempotency-key "X-$tag-oldtoken-probe-1" > "$EV/old_token_renew_$tag.txt" 2>&1; then
-162c181
+162c187
 <   echo "== 7.$tag Target Work $TW -> CANCELLED"
 ---
 >   echo "== 7.$tag Target Work $TW"
-164,165c183,184
-<     IN_PROGRESS|BLOCKED) cli continuity work transition --work-id "$TW" --to CANCELLED --idempotency-key "settle-$tag-target-work-cancelled-1" | grep '"state"' ;;
+165c190
 <     CANCELLED) ;;
 ---
->     IN_PROGRESS|BLOCKED) cli continuity work transition --work-id "$TW" --to CANCELLED --idempotency-key "X-$tag-target-work-cancelled-1" | grep '"state"' ;;
 >     ACCEPTED|CLOSED|CANCELLED) echo "target Work $TW is already $(work_state "$TW"): left as it is" ;;
-168d186
+168d192
 <   [[ "$(work_state "$TW")" == CANCELLED ]] || die "target Work $TW is not CANCELLED"
-171,172c189,190
-<   [[ "$(run_state "$RR")" != RUNNING ]]   || cli continuity run transition --run-id "$RR" --to VERIFYING --owner "$OWNER" --lease-token "$token" --idempotency-key "settle-$tag-run-verifying-1" | grep '"state"'
-<   [[ "$(run_state "$RR")" != VERIFYING ]] || cli continuity run transition --run-id "$RR" --to SUCCEEDED --owner "$OWNER" --lease-token "$token" --idempotency-key "settle-$tag-run-succeeded-1" | grep '"state"'
----
->   [[ "$(run_state "$RR")" != RUNNING ]]   || cli continuity run transition --run-id "$RR" --to VERIFYING --owner "$OWNER" --lease-token "$token" --idempotency-key "X-$tag-run-verifying-1" | grep '"state"'
->   [[ "$(run_state "$RR")" != VERIFYING ]] || cli continuity run transition --run-id "$RR" --to SUCCEEDED --owner "$OWNER" --lease-token "$token" --idempotency-key "X-$tag-run-succeeded-1" | grep '"state"'
-175c193
-<     cli continuity work transition --work-id "$RW" --to "$s" --idempotency-key "settle-$tag-work-$s-1" | grep '"state"'
----
->     cli continuity work transition --work-id "$RW" --to "$s" --idempotency-key "X-$tag-work-$s-1" | grep '"state"'
-179c197
-<        --expected-version "$(lease_ver "$RR")" --lease-seconds 60 --idempotency-key "settle-$tag-rectoken-probe-1" > "$EV/recovery_token_renew_$tag.txt" 2>&1; then
----
->        --expected-version "$(lease_ver "$RR")" --lease-seconds 60 --idempotency-key "X-$tag-rectoken-probe-1" > "$EV/recovery_token_renew_$tag.txt" 2>&1; then
-184c202
+184c208
 < settle_one 0
 ---
 > for ((i=0;i<N;i++)); do settle_one "$i"; done
-188,189c206,210
+188,189c212,216
 < cli pm resume SW-2026-008 --json | grep -A3 '"conflicts"' | head -4
-< echo "X_DONE chg=${CHG[0]} head=$HEAD_SHA run=$(run_state "${T_RUN[0]}") work=$(work_state "${T_WORK[0]}")" | tee "$EV/settle_result.txt"
+< echo "S_DONE chg=${CHG[0]} head=$HEAD_SHA run=$(run_state "${T_RUN[0]}") work=$(work_state "${T_WORK[0]}")" | tee "$EV/settle_result.txt"
 ---
 > cli ledger reconcile SYS-2026-001 | grep 摘要
 > echo "after: Runs under finished Work: SW-2026-008 = $(orphans SW-2026-008); SYS-2026-001 = $(orphans SYS-2026-001)" | tee "$EV/orphans_after.txt"
 > grep -q "^after: Runs under finished Work: SW-2026-008 = 0 ; SYS-2026-001 = 0 $" "$EV/orphans_after.txt" || die "there are still Runs under finished Work (see orphans_after.txt)"
 > for pid in SW-2026-008 SYS-2026-001; do cli pm orient "$pid" --json 2>/dev/null | "$PY" -B -c 'import sys,json;t=sys.stdin.read();d=json.JSONDecoder().raw_decode(t[t.index("{"):])[0];print(sys.argv[1],"orient conflicts:",json.dumps(d.get("conflicts")))' "$pid" | tee -a "$EV/orient_after.txt"; done
-> echo "X_DONE chg_sw=${G_CHG[0]} chg_sys=${G_CHG[1]} head=$HEAD_SHA targets=$N" | tee "$EV/settle_result.txt"
+> echo "S_DONE chg_sw=${G_CHG[0]} chg_sys=${G_CHG[1]} head=$HEAD_SHA targets=$N" | tee "$EV/settle_result.txt"

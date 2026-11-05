@@ -1,16 +1,32 @@
-# SETTLE72（结算 10 条 Run）与 D07p V1.1（重新切换）：供独立审计
+# SETTLE72（结算 10 条 Run）与 D07p V1.1（重新切换）：供独立审计（第二版，回应上一轮不放行）
 
-背景：D07p V1.0 在 2026-11-05 06:27 MST 切到 `1.3.3-dd8b192`，切换后核验只有一项不过（7.2 运行时新增的互锁 `LIVE_RUN_UNDER_FINISHED_WORK`），脚本自动回退，现行仍是 `1.3.3-d563293`。要先结掉触发这条互锁的旧 Run，再重新切换。**两个包都没有执行过**。
+上一轮审计（AUD-SETTLE72-20261105-2a193f0b、AUD-D07P2-20261105-2a193f0b）不放行，本版逐条改了。**两个包都还没有在真实账本上执行过。**
 
-## 包一：`settle72-tools-20261105/`（结算卡）
-- 卡 `SETTLE72_recovery_card.md`（SHA-256 `ec4bc4a5116a1e7088ce4b16246b8244ad37268334ff60e9ebba400eebc849ad`），恢复脚本 `settle72_1_recovery.sh`（`c42e4e41523d6ab5e9d23620bce6a2f390b642903d176d091708c1e7270ca67c`，内嵌卡 SHA），收口脚本 `settle72_2_chg_close.sh`（`48b682e7420db76a65f1021b4a736697136ebbadbd0b7c6b3019d778b0212b5a`），生成器 `derive_settle72.py.txt`（不是被执行的工具）。
-- 目标 10 条：SW-2026-008 的 8 条（A2-201-01/03/04、PMF-C03REC-002、PMF-E01-001、PMF-G10-001，以及失败尝试留下的 M3-REL72-002、M3-D07P-001）和 SYS-2026-001 的 2 条（PMF-WBS24-001、PMF-WBS25-001）。前 6+2 条是 7.2 运行时自己的扫描（`ContinuityStore.list_live_runs_under_finished_work`）在账本 sqlite 备份副本上只读得出的，原始输出 `evidence/scan_7_2_runtime_on_ledger_copy.txt`；注意我最初凭查询写的 5 条名单是错的，已纠正。
-- 做法：与 `m3-settle10`（已审计、用过）同一条恢复链，改成多目标：每个项目一张恢复变更单（SW 用 SCPT 域、SYS 用 DOCU 域）、每个项目一份恢复 Decision（`--target-run-id` 逐条列出）、一个提交绑定 Decision 文件、每条目标各起恢复 Work/Run、`settle-expired` 到 CANCELLED、目标 Work 仍在 IN_PROGRESS/BLOCKED 的转 CANCELLED（已 ACCEPTED/CANCELLED 的不动，这是相对 settle10 的差别之一）、旧口令探测只对有口令文件的 2 条做。逐行差异：`evidence/settle72_vs_settle10.diff`（先把 settle10/SETTLE10 统一改名再 diff）。
-- **请重点审**：(1) 目标清单与状态是否属实（对照扫描输出和脚本里的 `T_*` 数组）；(2) 一个 Decision 列多个目标、多个恢复 Work 共用它授权，运行时是否允许（`continuity_execution_service.py:1039` 起的逐项校验：目标 Work 绑定 canonical Decision、scope 在原 Decision 批准文件内、租约已过期、恢复链与目标独立）；(3) 第 9 条 `RUN-SW008-M3-D07P-001` 租约 07:26 MST 才到期，脚本遇到未到期的目标会停下并可原处续跑；(4) 提交 Decision 文件那一步在控制根 `main` 上（`main` 落后 `origin/main`，先例的做法是推 PR 分支再 Merge commit 合并）；(5) 恢复链**没有演练过**（先例 settle10 有 `SETTLE_ROOT` 演练根，本脚本没有，只在真实账本上跑了只读预检）。
-- 预检证据：`evidence/settle72_checkonly_output.txt` 是 `--check-only` 在一个只去掉“回执文件”一行的临时副本上的输出（此时没有用户批准回执，没有伪造）；真实脚本现在会在回执处拒绝。
+## 本版相对 2a193f0b 的改动
+### 包一 `settle72-tools-20261105/`（结算卡）
+1. 恢复 Run 启动补 `--recovery-change "${G_CHG[$g]}"`（现行运行时要求；对照最新先例 `m3-settle15` 与 `m3-settle10` 的差别，同时补了下面第 2、3 条）。
+2. 恢复变更单批准与恢复 Decision 补 `--approval-evidence-ref "$GO_REF"`，`GO_REF` 从 `approval_receipt.txt` 的 `GO_REF=user-confirmation:cmsg_<用户消息 id>` 行读取，格式不对就拒；用户批准原话里的消息 id 到时写进去。
+3. 提交 Decision 文件只暂存有变化的文件（`ADD` 数组），目标原 Decision 已入库的不再列入。
+4. `--check-only` 现在打印 10 条目标的状态与租约到期时间（输出见 `evidence/rehearsal_run2_filtered.out` 开头，是在一次性演练根里按真实账本副本打印的；上一版的 `settle72_checkonly_output.txt` 已删除，因为它来自旧脚本）。脚本在目标租约未到期时停下并报到期时间，可原处续跑。
+5. 卡头补 `> 档次：文档档`（演练暴露：现行运行时的卡预检要求档次行，settle15 的卡也有）。
+6. 加 `SETTLE_ROOT` 演练根支持，并新增 `settle72_rehearsal_setup.sh`（改自 `m3-settle2/settle2_rehearsal_setup.sh`：用现行发布 1.3.3-d563293 的运行时、账本 sqlite 副本、真实对象库的只读 alternates，使卡的隔离基线与冻结的档次规则提交可解析）。
+### 演练结果（在一次性控制根里，账本是真实账本的副本，不碰真实目录）
+- 第一次演练暴露两个真实缺陷（隔离基线在演练根不可解析——演练环境问题；卡缺档次行——真缺陷），已修。
+- 第二次演练（`evidence/rehearsal_run2_filtered.out`、`evidence/rehearsal_end_state_after_run2.txt`）：**前 9 个目标全部走完**：9 条目标 Run 全部 CANCELLED，Work 处理符合设计（IN_PROGRESS 的 REL72-002 转 CANCELLED，A2-201-03/04、E01、G10、WBS25 的 ACCEPTED 原样不动，A2-201-01、C03REC、WBS24 本来就是 CANCELLED），9 个恢复 Work 全部 CLOSED，恢复口令与旧口令探测都被拒；第 10 个目标 `RUN-SW008-M3-D07P-001` 的租约要到 07:26 MST 才到期，脚本按设计停下（"has not expired yet"）。第 10 个目标与最后的证据步骤（`orphans_after`、两个项目的 `pm orient`）会在 07:26 之后接着演练，结果补进本目录；**演练未覆盖的只有这最后一段。**
+- 演练用的批准回执是演练专用的假消息 id（`REHEARSALONLY…`），只存在于一次性根里；真实脚本没有回执会拒绝。
 
-## 包二：`d07p2-switch-tools-20261105/`（切换卡 V1.1）
-- 卡 `D07p_card.md`（`6ea633dbed9a99fb08f7f01ba9899d094ff8e533ed6286005a1cdd5f7490e401`），脚本 `d07p_deploy.sh`（`620e8251bb89ebe977a9bf268dbcbc16b0b129bd19ade641524c5a5400f45837`，内嵌卡 SHA），生成器 `derive_d07p2.py.txt`；V1.0 的脚本与失败证据在 `evidence/`；逐行差异 `evidence/d07p2_vs_d07p.diff`。
-- 与 V1.0 的差别：新编号（Work/Run/Checkpoint `-002`、Decision `M3D07P02`、owner `claude:m3d07p2`、幂等键 `d07p2-`、证据目录 `m3-d07p2`）；沿用变更单 CHG-SCPT-2026-479；新前置条件（SETTLE72 已完成、V1.0 的 Run 与 REL72-002 已 CANCELLED、两个项目都没有挂在已结束 Work 下的 Run）；切换后多核 `pm orient SYS-2026-001` 冲突为空；**审计引用需要对 V1.1 另行放行，不沿用 V1.0 的**；用户的常设授权记录（04:04:33Z 原话）原样沿用。
-- 注意风险：V1.0 装好的发布目录 `1.3.3-dd8b192` 仍在 `releases/` 并在清单里登记（未入库的改动），V1.1 的 Run 启动时这些路径是“已声明脏”的，是否被运行时接受要到启动时才知道；被拒就停下，不绕过。
-- `--check-only` 现在会在缺 `switch_audit_ref.txt` 处拒绝（其前面的指针、清单、已装版本核验都通过，说明 V1.0 的回退把指针字节原样还原了）。
+### 包二 `d07p2-switch-tools-20261105/`（切换卡 V1.1）
+1. 新增步骤 M2（`d07p2_0_move_back_installed.sh`）：V1.0 装好的发布目录 `releases/1.3.3-dd8b192`（未入库）与清单条目（未提交）在控制根里会被运行时的控制根漂移检查（`_reject_control_root_drift`）拒绝；在 Run 启动**之前**可逆地退回 main 状态：目录整个 `mv` 到 `.auto-pm/archive/releases_installed_20261105/`（不改字节、不删），清单还原为控制根 `HEAD` 的字节（还原前先备份当前字节，反向脚本 `stepM2/UNDO_M2.sh`）。`check` 只接受“已经是干净起点”或“恰好是 V1.0 的遗留”两种状态；已在真实目录上只读运行过（`evidence/step_M2_check_on_real_tree.txt`，通过）。`move` 没有在真实目录运行过。
+2. 先起 Run、再安装，与 V1.0 相同；安装步骤改成严格：现行版本是 OLD 时，清单里或磁盘上已有 `1.3.3-dd8b192` 就停下，不再“有条目就跳过安装”。
+3. 预检里原来对清单字节和发布槽位的核验改成调用步骤 M2 的 `check`。
+4. 卡里补了步骤 M2 的说明与反向命令。其余同第一版（新编号 -002、`M3D07P02`、`claude:m3d07p2`、幂等键 `d07p2-`、沿用 CHG-SCPT-2026-479、SETTLE72 完成等前置条件、两个项目 orient 都为空、**新的审计引用**）。
+
+## 当前文件哈希（SHA-256）
+- `SETTLE72_recovery_card.md` `cbb172bd1b14c612f82f28fad674441b5cc1f9b9778267076833e9245555edee`
+- `settle72_1_recovery.sh` `b0dd4ea3eac07e3939631f05fb694ab3070010d18d06533a9f2c126a80f34146`（内嵌卡 SHA）
+- `settle72_2_chg_close.sh` `48b682e7420db76a65f1021b4a736697136ebbadbd0b7c6b3019d778b0212b5a`
+- `settle72_rehearsal_setup.sh` `2497c506b8a382b3df15d18059978eb8cf1bd957d06678fa65ce1da0969e8b5d`
+- `D07p_card.md` `cfbaaca80f3f394fd317b275c4552f39349624d11f6304ea674123733b15b5ed`
+- `d07p_deploy.sh` `534b2f14e47894b905db5e11e03e8b252e14fab806e23fafde8091ed0b6dd50a`（内嵌卡 SHA）
+- `d07p2_0_move_back_installed.sh` `3fa5c3aba351cd0840d044670b09f1ffecdfbe8cb6ef272fdd99ec0cb31f1a8c`
+`.py` 生成器为避开提交钩子加了 `.txt` 后缀，不是被执行的工具。

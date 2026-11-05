@@ -1,0 +1,2 @@
+leftovers are exactly the V1.0 ones: the folder 1.3.3-dd8b192 and its one manifest entry; no links or junctions
+STEP_M2_CHECK_OK: nothing was written

@@ -3,6 +3,7 @@
 > 卡片编号：`CARD-SW008-M3-SETTLE72 V1.0`
 > 隔离基线：`26157a48f64a319b0c0e8130292f4d7a07c3b194`
 > 路径根：`.`
+> 档次：文档档
 > 安全回路: 否
 
 发版 7.2 的运行时新增一条检查：非终态的 Run 挂在已 ACCEPTED/CLOSED/CANCELLED 的 Work 下面，`pm orient` 报冲突 `LIVE_RUN_UNDER_FINISHED_WORK`。切换卡 D07p V1.0 在 2026-11-05 06:27 MST 切到 `1.3.3-dd8b192`，切换后核验只有这一项不过，脚本自动回退了指针（现行仍是 `1.3.3-d563293`），切换卡要求冲突必须为空、没有例外。用 7.2 运行时自己的扫描（`list_live_runs_under_finished_work`，在账本的 sqlite 备份副本上只读运行）核实出下面 8 条：项目 SW-2026-008 有 6 条（`pm orient SW-2026-008` 会报）、项目 SYS-2026-001 有 2 条（`pm orient SYS-2026-001` 会报）；另加 7.2 两次失败尝试留下的 2 条（它们的租约已过期或将到期、Work 在 IN_PROGRESS，不是该冲突的触发者，一并结清，账本不留尾巴）。共 10 条目标：
@@ -30,5 +31,5 @@
 
 唯一的 git 写入：一个只含 Decision 文件（目标原 Decision 里未入库的 `DEC-20261104-M3R72A01`、`DEC-20261105-M3D07P01`，加 2 份恢复 Decision `DEC-20261105-SETL72SW`、`DEC-20261105-SETL72SY`）的提交，加在控制根的 `main` 上，随后推到 PR 分支、经审计以 Merge commit 合并，使控制根仍能快进跟上 `origin/main`（控制根 `main` 现在落后 `origin/main`，PR 合并后才快进；合并前不要同步）。
 禁止：直接 SQL、改历史事件、改产品代码、处置其他记录（其他 BLOCKED 的 Work、停在 implementing 的变更单一律原样保留，其中包括 `CHG-SCPT-2026-478`、`CHG-SCPT-2026-479`）、合并、部署、切换发布版本。恢复变更单的收口等用户验收（`settle72_2_chg_close.sh`）。
-授权：待用户亲口批准（见线程里的批准原话，批准后写入 `approval_receipt.txt`，必须含本卡 SHA 的前 12 位）；用户 2026-10-18 预授权 Claude 自行收口推送。依据 PM-042、PM-033。无 UI 改动。
+授权：待用户亲口批准（见线程里的批准原话，批准后写入 `approval_receipt.txt`：必须有 `CARD_SHA256=<本卡完整 SHA-256>` 行和 `GO_REF=user-confirmation:cmsg_<用户那条消息的 id>` 行，后者作为恢复变更单批准与恢复 Decision 的 `--approval-evidence-ref`；恢复 Run 启动带 `--recovery-change`，这两处是现行运行时要求的，沿用 m3-settle15 的做法）；用户 2026-10-18 预授权 Claude 自行收口推送。依据 PM-042、PM-033。无 UI 改动。
 脚本：`.auto-pm/reports/m3-settle72/settle72_1_recovery.sh`（`--check-only` 只读预检，可随时运行）、`settle72_2_chg_close.sh`。

@@ -5,7 +5,7 @@
 21c21
 < CARD_SHA=987d40264e047cc35e1fa90f99bc90a984c52233c8dcb6dc7bfb80e657842a1f
 ---
-> CARD_SHA=6ea633dbed9a99fb08f7f01ba9899d094ff8e533ed6286005a1cdd5f7490e401
+> CARD_SHA=cfbaaca80f3f394fd317b275c4552f39349624d11f6304ea674123733b15b5ed
 38c38
 < OWNER=claude:W
 ---
@@ -14,10 +14,21 @@
 < DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里授权（2026-11-05T04:04:33Z “不过不切换，过了自己切换。门禁已经授权了。”，消息编号与原话记在 .auto-pm/reports/V/user_switch_confirmation.txt，这是常设授权，不点名本卡 SHA）；条件：卡 221 VV 的 G1～G9 全部 PASS（没有例外）、独立审计放行卡 221 VV 与本卡（引用记在 switch_audit_ref.txt）、候选产品子树等于卡 221 VV 门禁时测过的冻结提交、任一切换后核验失败即自动回退指针、不回滚数据库"
 ---
 > DELEG="委托执行：用户 2026-10-18 预授权 Claude 自行收口推送；切换有效版本这一步由用户在本线程里授权（2026-11-05T04:04:33Z “不过不切换，过了自己切换。门禁已经授权了。”，消息编号与原话记在 .auto-pm/reports/m3-X/user_switch_confirmation.txt，这是常设授权，不点名本卡 SHA）；条件：卡 221 VV 的 G1～G9 全部 PASS（没有例外）、独立审计放行卡 221 VV 与本卡（引用记在 switch_audit_ref.txt）、候选产品子树等于卡 221 VV 门禁时测过的冻结提交、任一切换后核验失败即自动回退指针、不回滚数据库"
-82a83,85
+72,75c72
+<   if [[ "$(entry_sha)" == NONE ]]; then
+<     [[ "$(sha256sum < "$C/deployment_manifest.json" | cut -d' ' -f1)" == "$OLD_MANIFEST_SHA" ]] || die "manifest drifted"
+<     [[ ! -e "$C/releases/$RID" ]] || die "release slot exists without a manifest entry"
+<   fi
+---
+>   bash "$REAL/.auto-pm/reports/m3-X/X_0_move_back_installed.sh" check || die "step M2 check failed (the installed 1.3.3-dd8b192 folder and its manifest entry left by VV)"
+82a80,82
 > [[ "$(cat "$REAL/.auto-pm/reports/m3-settle72/settle_result.txt" 2>/dev/null)" == SETTLE72_DONE* ]] || die "card SETTLE72 has not finished (m3-settle72/settle_result.txt)"
 > for rr in RUN-SW008-M3-Y RUN-SW008-M3-REL72-002; do [[ "$(q "select state from run_items where run_id=?" "$rr")" == CANCELLED ]] || die "$rr is not CANCELLED (card SETTLE72)"; done
 > for pj in SW-2026-008 SYS-2026-001; do [[ "$("$PY" -B -c 'import sqlite3,sys;c=sqlite3.connect("file:.auto-pm/continuity.db?mode=ro",uri=True);print(c.execute("SELECT count(*) FROM run_items r JOIN work_items w ON w.work_id=r.work_id WHERE w.subject_project_id=? AND r.state NOT IN ('SUCCEEDED','FAILED','CANCELLED') AND w.state IN ('ACCEPTED','CLOSED','CANCELLED')",(sys.argv[1],)).fetchone()[0])' "$pj")" == 0 ]] || die "$pj still has a Run under a finished Work (the 7.2 interlock would fail the switch again)"; done
+134a135,137
+> echo "== 2b. Step M2: put the VV leftovers (installed release folder + manifest entry) back to the main state"
+> bash "$REAL/.auto-pm/reports/m3-X/X_0_move_back_installed.sh" move | tee "$EV/stepM2.out"
+> 
 138,139c141,142
 <   --title "M3-D07P 有效版本切换到 $RID" --owner "$OWNER" "${S[@]}" --card-file "$(pwd -W)/.auto-pm/reports/V/D07p_card.md" --idempotency-key d07p-work-create-1 | grep '"state"'
 < [[ "$(q "select state from work_items where work_id=?" "$WORK")" != PLANNED ]] || cli continuity work authorize --work-id "$WORK" --decision-id "$DEC" --idempotency-key d07p-work-auth-1 | grep '"state"'
@@ -32,22 +43,29 @@
 >   --worktree "$(cygpath -w "$WTD")" --lease-token "$TOKEN" --lease-seconds 3600 --idempotency-key X-run-start-1 | grep -E '"state"|"git_head"'
 > [[ "$(q "select state from run_items where run_id=?" "$RUN")" != READY ]] || cli continuity run transition --run-id "$RUN" --to RUNNING --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key X-run-running-1 | grep '"state"'
 > [[ "$(q "select state from work_items where work_id=?" "$WORK")" != READY ]] || cli continuity work transition --work-id "$WORK" --to IN_PROGRESS --idempotency-key X-work-inprogress-1 | grep '"state"'
-190c193,194
+164c167,170
+< if [[ "$(entry_sha)" == NONE ]]; then bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"; fi
+---
+> if [[ "$(rid_of "$C/active_release.json")" == "$OLD" ]]; then
+>   [[ "$(entry_sha)" == NONE && ! -e "$C/releases/$RID" ]] || die "$RID is already present before the install (VV starts from a clean state; step M2 should have removed the VV leftovers)"
+>   bash "$OPS" build "$ROOT" "$FROZEN" | tee "$EV/install.txt"
+> fi
+190c196,197
 <   cli implementation-card precheck --card-file "$(pwd -W)/.auto-pm/reports/V/D07p_card.md" > "$EV/precheck_after.json" 2>&1; rc=$?; echo "card precheck with the new runtime exit=$rc"; [[ $rc == 0 ]] || fail=1
 ---
 >   oc2="$(cli pm orient SYS-2026-001 --json 2>/dev/null | "$PY" -B -c 'import sys,json;t=sys.stdin.read();d=json.JSONDecoder().raw_decode(t[t.index("{"):])[0];print(json.dumps(d.get("conflicts")))' 2>/dev/null)"; echo "smoke: pm orient SYS-2026-001 conflicts=$oc2"; [[ "$oc2" == "[]" ]] || { echo "FAIL smoke orient conflicts SYS-2026-001"; fail=1; }
 >   cli implementation-card precheck --card-file "$(pwd -W)/.auto-pm/reports/m3-X/D07p_card.md" > "$EV/precheck_after.json" 2>&1; rc=$?; echo "card precheck with the new runtime exit=$rc"; [[ $rc == 0 ]] || fail=1
-218c222
+218c225
 <     --summary "active release switched to $RID (previous $OLD); post-switch checks passed" "${EVARGS[@]}" --idempotency-key d07p-checkpoint-1 | grep -E '"checkpoint_id"|"git_head"'
 ---
 >     --summary "active release switched to $RID (previous $OLD); post-switch checks passed" "${EVARGS[@]}" --idempotency-key X-checkpoint-1 | grep -E '"checkpoint_id"|"git_head"'
-220,221c224,225
+220,221c227,228
 < [[ "$(q "select state from run_items where run_id=?" "$RUN")" != RUNNING ]] || cli continuity run transition --run-id "$RUN" --to VERIFYING --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key d07p-run-verifying | grep '"state"'
 < [[ "$(q "select state from run_items where run_id=?" "$RUN")" != VERIFYING ]] || cli continuity run transition --run-id "$RUN" --to SUCCEEDED --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key d07p-run-succeeded | grep '"state"'
 ---
 > [[ "$(q "select state from run_items where run_id=?" "$RUN")" != RUNNING ]] || cli continuity run transition --run-id "$RUN" --to VERIFYING --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key X-run-verifying | grep '"state"'
 > [[ "$(q "select state from run_items where run_id=?" "$RUN")" != VERIFYING ]] || cli continuity run transition --run-id "$RUN" --to SUCCEEDED --owner "$OWNER" --lease-token "$TOKEN" --idempotency-key X-run-succeeded | grep '"state"'
-225,227c229,231
+225,227c232,234
 <     IN_PROGRESS) cli continuity work transition --work-id "$WORK" --to VERIFYING --idempotency-key d07p-work-verifying | grep '"state"' ;;
 <     VERIFYING)   cli continuity work transition --work-id "$WORK" --to ACCEPTED  --idempotency-key d07p-work-accepted | grep '"state"' ;;
 <     ACCEPTED)    cli continuity work transition --work-id "$WORK" --to CLOSED    --idempotency-key d07p-work-closed | grep '"state"' ;;
