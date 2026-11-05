@@ -30,3 +30,6 @@
 - `d07p_deploy.sh` `534b2f14e47894b905db5e11e03e8b252e14fab806e23fafde8091ed0b6dd50a`（内嵌卡 SHA）
 - `d07p2_0_move_back_installed.sh` `3fa5c3aba351cd0840d044670b09f1ffecdfbe8cb6ef272fdd99ec0cb31f1a8c`
 `.py` 生成器为避开提交钩子加了 `.txt` 后缀，不是被执行的工具。
+
+## 补充（07:30 MST）：演练补完
+第三次演练（`evidence/rehearsal_run3_filtered.out`）在 07:28 MST 之后接着第二次的现场续跑：第 10 个目标 `RUN-SW008-M3-D07P-001` 也走完（目标 Run 与 Work 都 CANCELLED，恢复链 CLOSED，旧口令与恢复口令探测被拒），第 9 步证据：`orphans_after.txt` = `SW-2026-008 = 0 ; SYS-2026-001 = 0`，`orient_after.txt` 两个项目各一行 `orient conflicts: []`，`settle_result.txt` = `SETTLE72_DONE chg_sw=CHG-SCPT-2026-480 chg_sys=CHG-DOCU-2026-054 … targets=10`，脚本退出码 0（`evidence/rehearsal_end_state_after_run3.txt` 是账本副本的终态）。演练用的脚本只在 `CARD_SHA=` 一行与真实脚本不同（`settle72_rehearsal_setup.sh` 的 sed）；真实脚本字节未变，SHA-256 仍为 `b0dd4ea3eac07e3939631f05fb694ab3070010d18d06533a9f2c126a80f34146`。
