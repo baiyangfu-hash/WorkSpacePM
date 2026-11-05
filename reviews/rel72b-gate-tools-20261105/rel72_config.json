@@ -1,0 +1,47 @@
+{
+  "baseline_g2": ".auto-pm/reports/m3-rel72b/baseline_g2",
+  "plugin": {
+    "version": "2.17.2",
+    "binary": "out/go/windows-amd64/siemens-lsp.exe"
+  },
+  "expected_deltas": {
+    "rest": 12,
+    "infrastructure": 217,
+    "cli": 43,
+    "core": 101
+  },
+  "expected_skips": {
+    "infrastructure": 5
+  },
+  "docs": {
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md": {
+      "deleted_sha256": [],
+      "required_tokens": [
+        "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
+        "本报告的结论由提交本身证明",
+        "0/0/0"
+      ]
+    }
+  },
+  "frozen_commit": "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
+  "projects": [
+    "SYS-2026-001",
+    "SW-2026-008",
+    "SW-2026-009",
+    "DJ-2026-005",
+    "SW-2026-010",
+    "DJ-2026-011"
+  ],
+  "card_id": "CARD-SW008-M3-REL72",
+  "card_version": "V1.1",
+  "label": "CARD-SW008-M3-REL72 V1.1",
+  "run_id": "RUN-SW008-M3-REL72-003",
+  "base": "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
+  "files": {
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md": {
+      "sha256": "9df3cd66788dd50b0f5a26e4e7e169f2cd65c71c132814852efdf04b85f8854c",
+      "bytes": 7014,
+      "base_sha256": null
+    }
+  }
+}

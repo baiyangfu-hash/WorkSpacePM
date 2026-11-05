@@ -1,0 +1,28 @@
+{
+  "schema_version": "implementation-card-precheck.v1",
+  "card": "C:\\Users\\fubai\\Documents\\My_Workspace\\01_Project自动化项目管理\\Python自动化项目总库\\02_在研项目\\SW-2026-008_auto-pm_自动化项目管理工具\\02_规划\\221_M3-REL72_发版7.2候选门禁实施卡_V1.1_PM.md",
+  "card_sha256": "49a1d50cb6c079a0befe3beacdd7dae05fbcd302e2ae8019f8a498608f87d8f8",
+  "baseline": "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
+  "path_root": ".",
+  "passed": true,
+  "paths": [
+    {
+      "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md",
+      "state": "计划新增"
+    },
+    {
+      "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md",
+      "state": "计划新增"
+    }
+  ],
+  "commands": [
+    "doctor",
+    "doctor",
+    "implementation-card precheck",
+    "doctor"
+  ],
+  "card_format": "legacy",
+  "basis": [],
+  "change": "",
+  "findings": []
+}

@@ -1,0 +1,221 @@
+"""Derive card 221 V1.1 (CARD-SW008-M3-REL72 V1.1) and its tools from the V1.0 tools (m3-rel72, audited, used once on 2026-11-04 21:01 MST).
+
+V1.0 stopped at 21:05 MST in the fast stage: `doctor --pre-release` refused the build because 16 release folders under
+00_Infrastructure/auto_pm/releases/ are not registered in deployment_manifest.json.  V1.1 is the same card with: a new Run/Work (-003), a new evidence folder,
+workstation and branch (m3-rel72b, claude/m3-rel72b), a new Decision suffix (M3R72B01), the SAME change request (CHG-SCPT-2026-478, as card 220 V1.1 continued
+V1.0's change request), and ONE new step: move the 16 unregistered folders out of releases/ (a rename, no byte changes, no delete), then `doctor --pre-release`
+must exit 0 before any gate starts.  Everything else is a pure rename of V1.0's audited text.
+
+usage: python -B derive_rel72b.py            (writes only under .auto-pm/reports/m3-rel72b/ and the new V1.1 card file; nothing here is governed)
+"""
+
+import hashlib
+import json
+import re
+import shutil
+from pathlib import Path
+
+ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+R = ROOT / ".auto-pm" / "reports"
+SRC, EV = R / "m3-rel72", R / "m3-rel72b"
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+CARD_OLD = ROOT / P / "02_规划" / "221_M3-REL72_发版7.2候选门禁实施卡_PM.md"
+CARD_NEW = ROOT / P / "02_规划" / "221_M3-REL72_发版7.2候选门禁实施卡_V1.1_PM.md"
+REPORT_REL = f"{P}/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md"
+NL = chr(10)
+UNREG = ["1.3.3-0b72499", "1.3.3-10165f9", "1.3.3-28ac772", "1.3.3-4090f81", "1.3.3-4845857", "1.3.3-4b5c630", "1.3.3-7735ec5", "1.3.3-8b02de5",
+         "1.3.3-8f08c1a", "1.3.3-a4506c3", "1.3.3-a53d9f2", "1.3.3-a808fa8", "1.3.3-ba184ca", "1.3.3-e648e0b", "1.3.3-f462694", "1.3.3-f474b52"]
+assert len(UNREG) == 16 and len(set(UNREG)) == 16
+OLD_AUDIT_BRANCH, NEW_AUDIT_BRANCH = "claude/rel72-gate-tools-20261104", "claude/rel72b-gate-tools-20261105"
+OLD_AUDIT_DIR, NEW_AUDIT_DIR = "reviews/rel72-gate-tools-20261104", "reviews/rel72b-gate-tools-20261105"
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sw(t: str, a: str, b: str, n: int = 1) -> str:
+    assert t.count(a) == n, (a[:100], t.count(a), n)
+    return t.replace(a, b)
+
+
+def ren(t: str) -> str:
+    """Pure renames of V1.0 text into V1.1 text.  Order matters; the base branch name m3-rel72-base stays."""
+    t = t.replace("m3-rel72-base", "@@BASEBRANCH@@")
+    t = t.replace(OLD_AUDIT_BRANCH, NEW_AUDIT_BRANCH).replace(OLD_AUDIT_DIR, NEW_AUDIT_DIR)
+    t = re.sub(r"m3rel72(?!b)", "m3rel72b", t)
+    t = re.sub(r"m3-rel72(?!b)", "m3-rel72b", t)
+    t = t.replace("REL72-002", "REL72-003").replace("rel72-002", "rel72-003").replace("M3R72A01", "M3R72B01")
+    for a, b in (
+        ("CARD-SW008-M3-REL72 V1.0", "CARD-SW008-M3-REL72 V1.1"), ("card 221 V1.0", "card 221 V1.1"), ("Card 221 V1.0", "Card 221 V1.1"), ("卡 221 V1.0", "卡 221 V1.1"),
+        ("reviewed final V1.0", "reviewed final V1.1"), ("precheck_V1.0.json", "precheck_V1.1.json"), ("M3-REL72 V1.0 rehearsal", "M3-REL72 V1.1 rehearsal"),
+        ("221_M3-REL72_发版7.2候选门禁实施卡_PM.md", "221_M3-REL72_发版7.2候选门禁实施卡_V1.1_PM.md"),
+    ):
+        t = t.replace(a, b)
+    return t.replace("@@BASEBRANCH@@", "m3-rel72-base")
+
+
+EV.mkdir(parents=True, exist_ok=True)
+man_old = json.loads((SRC / "reference_manifest.json").read_text(encoding="utf-8"))
+tool_names = [k[len("tools/"):] for k in man_old if k.startswith("tools/")]
+assert "rel72_1_approve_start.sh" not in tool_names  # the approve script embeds the card SHA, so it stays out of the manifest (anchored on the audited branch instead)
+WRITTEN: list[str] = []
+
+
+def put(name: str, text: str, manifest: bool = True) -> None:
+    (EV / name).write_bytes(text.encode("utf-8"))
+    if manifest:
+        WRITTEN.append(name)
+
+
+def rd(name: str) -> str:
+    return (SRC / name).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- the report (the only committed file): same bytes except the card version and the evidence folder
+proto_old = (SRC / "proto" / REPORT_REL).read_text(encoding="utf-8")
+report = ren(proto_old)
+assert "CARD-SW008-M3-REL72 V1.1" in report and "m3-rel72b/gates" in report and "V1.0" not in report
+REP_SHA, REP_BYTES = sha(report.encode("utf-8")), len(report.encode("utf-8"))
+(EV / "proto" / "/".join(REPORT_REL.split("/")[:-1])).mkdir(parents=True, exist_ok=True)
+(EV / "proto" / REPORT_REL).write_bytes(report.encode("utf-8"))
+(EV / "report_017.md").write_bytes(report.encode("utf-8"))
+
+# ---------------------------------------------------------------- config
+cfg = json.loads(rd("rel72_config.json"))
+cfg["baseline_g2"] = ".auto-pm/reports/m3-rel72b/baseline_g2"
+cfg["card_version"], cfg["label"], cfg["run_id"] = "V1.1", "CARD-SW008-M3-REL72 V1.1", "RUN-SW008-M3-REL72-003"
+cfg["files"] = {REPORT_REL: {"sha256": REP_SHA, "bytes": REP_BYTES, "base_sha256": None}}
+put("rel72_config.json", json.dumps(cfg, ensure_ascii=False, indent=2) + NL)
+if not (EV / "baseline_g2").exists():
+    shutil.copytree(SRC / "baseline_g2", EV / "baseline_g2")  # the governed output of RUN-SW008-M3-REL7-001, byte for byte (V1.0 used the same)
+shutil.copy2(SRC / "rel72_chg.txt", EV / "rel72_chg.txt")  # V1.1 continues the change request of V1.0 (CHG-SCPT-2026-478), as card 220 V1.1 continued V1.0's
+
+# ---------------------------------------------------------------- generic tools: pure renames
+for n in tool_names:
+    if n in ("rel72_config.json", "rel72_launch.sh", "rel72_1_approve_start.sh"):
+        continue
+    if n == "rel72_0_move_unregistered.sh":
+        continue
+    put(n, ren(rd(n)))
+
+# ---------------------------------------------------------------- step M: the move of the 16 unregistered release folders, then the doctor must exit 0
+unreg_bash = " ".join(UNREG)
+move_sh = f'''#!/usr/bin/env bash
+# M3-REL72 V1.1, step M.  The control root's releases/ folder holds 16 deployed release folders that deployment_manifest.json does not register (V1.0 failed on exactly these:
+# `doctor --pre-release` -> "发布记录互相核对" FAIL).  This script MOVES them (a rename on the same volume: no byte is changed, nothing is deleted) to
+# .auto-pm/archive/releases_unregistered_20261104/ and then requires `main.py doctor --pre-release` to exit 0.  Undo = the same mv back (UNDO_MOVE.sh, written before the first move).
+# usage: rel72_0_move_unregistered.sh check   read-only: the on-disk-but-unregistered set must equal the 16 names below, the target must not exist, no link or junction
+#        rel72_0_move_unregistered.sh move    check, then record file counts, move, write UNDO_MOVE.sh, verify counts, run the doctor (exit 0 required)
+set -euo pipefail
+export PATH="/usr/bin:/mingw64/bin:$PATH" PYTHONIOENCODING=utf-8 PYTHONUTF8=1
+ROOT=/c/Users/fubai/Documents/My_Workspace; EV="$ROOT/.auto-pm/reports/m3-rel72b"; PY="$ROOT/.venv/Scripts/python.exe"
+REL="$ROOT/00_Infrastructure/auto_pm/releases"; DEST="$ROOT/.auto-pm/archive/releases_unregistered_20261104"
+NAMES=({unreg_bash})
+die() {{ printf 'ERROR: %s\\n' "$*" >&2; exit 1; }}
+MODE="${{1:-check}}"; [[ "$MODE" == check || "$MODE" == move ]] || die "usage: check | move"
+cd "$ROOT"
+"$PY" -B -I - "$ROOT/00_Infrastructure/auto_pm" "${{NAMES[@]}}" <<'EOF' || die "the unregistered release folders differ from the card (section 1 item 17)"
+import json, os, stat, sys
+base, *names = sys.argv[1:]
+man = set(json.load(open(os.path.join(base, "deployment_manifest.json"), encoding="utf-8"))["releases"])
+folder = os.path.join(base, "releases")
+on_disk = {{n for n in os.listdir(folder) if os.path.isdir(os.path.join(folder, n))}}
+extra = sorted(on_disk - man)
+assert extra == sorted(names), ("on-disk-but-unregistered set differs from the 16 names of the card", extra)
+assert not (man - on_disk), ("the manifest registers a folder that is not on disk", sorted(man - on_disk))
+for n in names:
+    p = os.path.join(folder, n)
+    st = os.lstat(p)
+    assert stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode) and not (getattr(st, "st_file_attributes", 0) & 0x400), ("not a plain directory (link or junction)", n)
+    for dp, dn, fn in os.walk(p):
+        for x in dn + fn:
+            s2 = os.lstat(os.path.join(dp, x))
+            assert not stat.S_ISLNK(s2.st_mode) and not (getattr(s2, "st_file_attributes", 0) & 0x400), ("link or junction inside", n, x)
+print("unregistered set equals the 16 names of the card; no links or junctions; the manifest registers", len(man), "folders, all on disk")
+EOF
+[[ ! -e "$DEST" ]] || die "the target already exists: $DEST"
+[[ "$MODE" == move ]] || {{ echo "STEP_M_CHECK_OK: nothing was written"; exit 0; }}
+OUT="$EV/stepM"; mkdir -p "$OUT"
+for n in "${{NAMES[@]}}"; do printf '%s\\t%s\\n' "$n" "$(find "$REL/$n" -type f | wc -l)"; done > "$OUT/moved_manifest_before.tsv"
+"$PY" -B main.py doctor --pre-release > "$OUT/doctor_before_move.txt" 2>&1 && die "the doctor already exits 0 before the move; this card's premise is wrong, stop and report" || echo "doctor before the move: non-zero (expected)"
+mkdir -p "$DEST"
+{{ echo '#!/usr/bin/env bash'; echo '# undo of step M: moves the 16 folders back into releases/ (same volume rename)'; echo 'set -euo pipefail'; }} > "$OUT/UNDO_MOVE.sh"
+for n in "${{NAMES[@]}}"; do printf 'mv -- "%s/%s" "%s/%s"\\n' "$DEST" "$n" "$REL" "$n" >> "$OUT/UNDO_MOVE.sh"; done
+for n in "${{NAMES[@]}}"; do mv -- "$REL/$n" "$DEST/$n"; done
+for n in "${{NAMES[@]}}"; do printf '%s\\t%s\\n' "$n" "$(find "$DEST/$n" -type f | wc -l)"; done > "$OUT/moved_manifest_after.tsv"
+cmp "$OUT/moved_manifest_before.tsv" "$OUT/moved_manifest_after.tsv" || die "file counts differ after the move (UNDO_MOVE.sh puts everything back)"
+ls "$REL" | wc -l > "$OUT/releases_count_after.txt"
+"$PY" -B main.py doctor --pre-release > "$OUT/doctor_after_move.txt" 2>&1 || die "doctor --pre-release is still non-zero after the move: see $OUT/doctor_after_move.txt (the gates are NOT started; UNDO_MOVE.sh puts the folders back)"
+echo "STEP_M_OK: 16 folders moved, file counts equal, doctor --pre-release exit 0"
+'''
+put("rel72_0_move_unregistered.sh", move_sh)
+
+# ---------------------------------------------------------------- launcher: the move comes right after the governed start, before the first renewal and the gates
+ln = ren(rd("rel72_launch.sh"))
+anchor = 'bash "$EV/rel72b_1_approve_start.sh"'
+anchor = 'bash "$EV/rel72_1_approve_start.sh" > "$EV/start2.out" 2>&1 || { echo "START FAILED"; tail -5 "$EV/start2.out"; exit 1; }'
+add = ('\n# V1.1 step M (card section 1 item 17): move the 16 unregistered release folders, then doctor --pre-release must exit 0; otherwise the gates are not started\n'
+       'bash "$EV/rel72_0_move_unregistered.sh" move > "$EV/stepM.out" 2>&1 || { echo "STEP M FAILED"; tail -5 "$EV/stepM.out"; exit 1; }\n'
+       'tail -1 "$EV/stepM.out"')
+ln = sw(ln, anchor, anchor + add)
+put("rel72_launch.sh", ln)
+
+# ---------------------------------------------------------------- approve script: renamed, step M read-only check added to the preconditions (so --check-only covers it), card SHA filled later
+a1 = ren(rd("rel72_1_approve_start.sh"))
+a1 = sw(a1, 'cli implementation-card precheck --card-file', 'bash "$EV/rel72_0_move_unregistered.sh" check || die "step M check failed (the 16 unregistered release folders)"\ncli implementation-card precheck --card-file')
+a1 = sw(a1, "# M3-REL72 (card 221 V1.1, core pipeline", "# M3-REL72 (card 221 V1.1, core pipeline")
+(EV / "rel72_1_approve_start.sh").write_bytes(a1.encode("utf-8"))
+
+# ---------------------------------------------------------------- reference manifest (the card section 5.2 table is filled from it)
+man = {REPORT_REL: REP_SHA}
+for n in sorted(set(WRITTEN)):
+    man[f"tools/{n}"] = sha((EV / n).read_bytes())
+(EV / "reference_manifest.json").write_bytes((json.dumps(man, ensure_ascii=False, indent=1) + NL).encode("utf-8"))
+MAN_SHA = sha((EV / "reference_manifest.json").read_bytes())
+
+# ---------------------------------------------------------------- the card
+c = CARD_OLD.read_text(encoding="utf-8")
+c = ren(c)
+c = sw(c, "# M3-REL72 V1.0｜", "# M3-REL72 V1.1｜")
+c = sw(c, "> 版本：`V1.0`（2026-11-04；最终字节在线程里报出 SHA 后冻结，执行期间不得修改）", "> 版本：`V1.1`（2026-11-04；V1.0 已于 2026-11-04 21:01 MST 起跑并在 21:05 MST 的快速门禁失败，见 §1 第 16 条；最终字节在线程里报出 SHA 后冻结，执行期间不得修改）")
+c = sw(c, "> 状态：`PLANNED / 待独立审计放行 / 待用户批准`（没有预授权；计划 2026-11-04 21:00 MST 开跑，条件见 §7）", "> 状态：`PLANNED / 待独立审计放行 / 待用户批准`（没有预授权；用户批准后连夜重跑，条件见 §7）")
+c = sw(c, "上一张发版卡 7.1 已收口（发布目录、指针、清单已由 #528 入库，有效版本 `1.3.3-d563293`）；启动脚本核验", "上一张发版卡 7.1 已收口（发布目录、指针、清单已由 #528 入库，有效版本 `1.3.3-d563293`）；启动脚本核验；本卡 V1.1 沿用 V1.0 的变更单 `CHG-SCPT-2026-478`（状态仍为 implementing，做法同卡 220 V1.1 沿用 V1.0 的变更单），Work、Run、Decision、工位、分支、证据目录另起（-003、M3R72B01、m3-rel72b）")
+c = sw(c, "`.auto-pm/worktrees` 下的目录数不超过 5（当前 8 个，需要用户亲口批准清理，见线程里的工位清单）", "`.auto-pm/worktrees` 下的目录数不超过 6（当前 6 个：`claude`、`m3-d07n`、`m3-rel71`、`m3-rel72`、`m3-rel7b`、`trae`；加上本卡的候选工位正好等于发版体检的上限 7 个。V1.0 写的“不超过 5”是人为留的余量，用户 11-04 清到了 5 个，V1.0 的候选工位与保留的失败现场使它回到 6 个；本卡不清理工位，清理要用户亲口说“收”，见第 18 条）")
+c = sw(c, "(b) 工位目录数不超过 5；", "(b) 工位目录数不超过 6（第 18 条）；")
+c = sw(c, "清理工位到 5 个以内已由用户于 2026-11-04 亲手完成。本卡只构建与门禁，不切换。", "V1.0 起跑前工位已由用户于 2026-11-04 亲手清到 5 个以内；V1.1 的工位数见 §1 第 18 条。批准本卡即同时批准 §1 第 17 条的目录移动（只改名、不删、不改字节，反向操作是同样的 mv 移回）。本卡只构建与门禁，不切换。")
+c = sw(c, "（租约不超过 3600 秒，续租循环用绝对路径启动并确认续租成功）。", "（租约不超过 3600 秒，续租循环用绝对路径启动并确认续租成功）。V1.1：变更单沿用 CHG-SCPT-2026-478，Decision 取 `DEC-<当天>-M3R72B01`，Work/Run 取 -003；创建 Run 之后、第一次续租之前，执行步骤 M（`rel72_0_move_unregistered.sh move`，第 17 条），随后 `doctor --pre-release` 必须退出码 0，否则不启动门禁。")
+c = sw(c, "（编号取 -002：脚本沿用 7.1 V1.1 的编号规则，实际创建的就是 -002；账本里没有 `-001`，不是漏了，也没有被占用，门禁、续租与延长的幂等键、状态文件都以 -002 为准）",
+       "（编号取 -003：V1.0 创建并用掉了 -002（它失败了，见 §1 第 16 条）；账本里没有 `-001`，不是漏了，也没有被占用；门禁、续租与延长的幂等键、状态文件都以 -003 为准）")
+c = sw(c, "基线、工具/卡/Decision 指纹、冻结文件字节、owner/scope、lease（含续租失败）或 hook 漂移；", "基线、工具/卡/Decision 指纹、冻结文件字节、owner/scope、lease（含续租失败）或 hook 漂移；步骤 M 里“磁盘上有而清单没登记的目录集合”和 §1 第 17 条的 16 个名字不一致、移动目标已存在、移动前后文件数不等、移动后 `doctor --pre-release` 仍非 0；")
+c = sw(c, "| G1 | 基线身份与健康测试 |", "| G0（V1.1 新增，起跑脚本里、门禁前） | 步骤 M：16 个未登记发布目录移走后的发版体检 | `main.py doctor --pre-release` 退出码 0；移动前后每个目录的文件数相等；没有删除、没有字节变化 |\n| G1 | 基线身份与健康测试 |")
+# §5.2 table and manifest hash
+t0 = c.index("| 工具 | SHA-256 |")
+t1 = c.index(NL + NL, t0)
+rows = ["| 工具 | SHA-256 |", "|---|---|"] + [f"| `{n}` | `{sha((EV / n).read_bytes())}` |" for n in sorted(set(WRITTEN))]
+c = c[:t0] + NL.join(rows) + c[t1:]
+c = sw(c, "acea78a1a657717b581ffb3165a724a6d03a1ddfb4ae5a3699b8e7c2b3e4a57d", MAN_SHA)
+c = sw(c, "e0e02b320fd9b274e258e6349153d0fb651ec581df7f5664f6a52e3ec7ebe016", REP_SHA)
+c = sw(c, "由 `derive_rel72.py` 以发版 7.1 最终审计过的工具（`m3-rel71b`）为底派生：去掉所有用户原话与消息 id，十组整跑，保留心跳、电源证据、提交钉住三项检查，并放宽提交钉住（`origin/main` 只有在没有载荷改动时才允许前进）。",
+        "由 `derive_rel72b.py`（随审计分支提供，不是被执行的工具）以 V1.0 的工具（`m3-rel72`，已审计并用过一次）为底派生：只改编号、证据目录、工位与分支名，V1.0 的判据、十组整跑、心跳、电源证据与提交钉住规则一字不改；新增 `rel72_0_move_unregistered.sh`（§1 第 17 条的步骤 M）。")
+c = sw(c, "生成器 `derive_rel72.py` 不是被执行的工具", "生成器 `derive_rel72.py` 与 `derive_rel72b.py` 不是被执行的工具")
+# §1 items 16-18, appended after item 15
+item15_end = c.index(NL + NL + "## 2. 单一目标与完成定义")
+new_items = NL.join([
+    "",
+    f"16. **V1.0 失败记录（2026-11-04）**：`RUN-SW008-M3-REL72-002` 在 21:01 MST 起跑，21:05 MST 在快速门禁里硬停止（`gates/FAILED`：`rel72_gates.py --stage fast`）：G3 的构建被拒，`pmf_build` 开头在控制根跑 `main.py doctor --pre-release`，退出码 1，错误码 `pre-release-check-failed`，唯一失败项是“发布记录互相核对”：16 个发布目录“有载荷目录，但 deployment_manifest.json 没有登记”。十组回归没有开始。同次的其余结果：G1 基线与候选各 27 条通过，真实插件 41 条通过，G4 的 ruff、mypy 干净，各注册项目对账 0/0/0，orient 冲突为空。随后 `rel72_gates.py` 在篡改反例一步因 `gates/d04/build_a` 不存在而抛 FileNotFoundError，那只是连锁错误。证据在 `.auto-pm/reports/m3-rel72/`（`gates/FAILED`、`gates/status/fast.json`、`gates_all.log`、`gates/G3_build_a.txt`、`gates/DOCTOR_PRERELEASE_FAIL_detail_utf8.txt`），失败工位 `.auto-pm/worktrees/m3-rel72`（分支 `claude/m3-rel72`，停在冻结提交）保留作证据。V1.0 的 Run -002 仍是 RUNNING（租约 11-04 22:01 MST 到期，续租已停）、Work -002 仍是 IN_PROGRESS，本卡不处理，与 `WORK-SW008-M3-REL7-001`、`WORK-SW008-M3-REL71-001` 同样留给结算卡。V1.0 的 `HEAVY_GATES_RUNNING` 标记由 V1.1 的启动脚本覆盖。",
+    "17. **根因与修法（步骤 M）**：控制根磁盘上 `00_Infrastructure/auto_pm/releases/` 有 29 个目录，Git 里的 `deployment_manifest.json` 只登记 13 个。16 个未登记的目录是：" + "、".join(f"`{n}`" for n in UNREG) + "；它们都不在 Git 里，也不是 `active_release.json`、`previous_release.json` 指向的版本。来历：提交 `17f53c57`（11-04 09:14）时清单有 29 条，`dedabdbd`（11-04 09:19，CHG-SCPT-2026-473，“清单只保留 main 原有 12 条加 1.3.3-d563293”）把它减到 13 条，控制根拉取后，磁盘上留下了 16 个已部署但不再登记的目录。检查本身不是新规则：`release_consistency.py` 自 10-31（`19c922575`）起存在，发布版 `d563293` 里也有；`check_release_consistency` 对“磁盘上有、清单里没有”的目录无条件判失败（第 202～205 行），`release_annotations.json` 的 `corrections` 只能更正 `source_commit` 值，不能豁免这一项，所以 doctor 提示里的“走 release_annotations.json 更正”对这一项无效（代码证据，没有跑模拟）。**修法**：把这 16 个目录整个改名（同一磁盘卷上的 `mv`，瞬间完成）到 `.auto-pm/archive/releases_unregistered_20261104/`：不改任何字节、不删任何目录、不改 `deployment_manifest.json`、`release_annotations.json` 与两个指针。移动由 `rel72_0_move_unregistered.sh move` 执行，在用户批准之后、门禁启动之前：先核对“磁盘有而清单没登记”的集合恰好等于这 16 个名字、目标不存在、没有链接或联接点；记录每个目录的文件数（`stepM/moved_manifest_before.tsv`），写好反向脚本 `stepM/UNDO_MOVE.sh`，再移动，移动后文件数必须逐个相等，最后 `main.py doctor --pre-release` 必须退出码 0，否则不启动门禁。**反向操作**：`bash .auto-pm/reports/m3-rel72b/stepM/UNDO_MOVE.sh`，就是同样的 `mv` 把 16 个目录移回 `releases/`。代价：这 16 个旧版本不再留在 `releases/` 下；它们本来就没登记、不是指针目标，也从未是回退目标。",
+    "18. **V1.1 与 V1.0 的差别**：Work、Run、Checkpoint 取 `-003`（`WORK-SW008-M3-REL72-003`、`RUN-SW008-M3-REL72-003`、`CKPT-SW008-M3-REL72-003`），幂等键与延长看护键随之改为 -003；Decision 取 `DEC-<当天>-M3R72B01`；变更单沿用 `CHG-SCPT-2026-478`；证据目录 `.auto-pm/reports/m3-rel72b/`、工位 `.auto-pm/worktrees/m3-rel72b`、分支 `claude/m3-rel72b`、owner `claude:m3rel72b`；基线分支 `m3-rel72-base` 仍在冻结提交；报告与 V1.0 相比只有卡版本与证据目录两处文字，字节指纹因此不同；新增步骤 M 与 G0；审计锚点分支改为 `claude/rel72b-gate-tools-20261105`。**工位数**：现在 `.auto-pm/worktrees` 有 6 个（含 V1.0 保留的失败现场 `m3-rel72`），本卡的候选工位使它成为 7 个，等于发版体检的机器上限 7 个，所以本卡把 V1.0 的“不超过 5”放宽为“不超过 6”（这是对 V1.0 人为余量的放宽，请审计与用户知悉）；要回到 5 个，需要用户亲口说“收”并决定清理哪两个，本卡不做。**不变**：十组整跑、容忍规则、预期差值、判据、心跳、提交钉住、防睡眠、硬停止、范围（1 个路径）、不切换。**已知的两个遗留（不影响本卡判定）**：`scripts/long_gate.py` 在中文 Windows 的 GBK 管道下打印含 U+2212 的拒绝文案会抛 UnicodeEncodeError；`gate_status.py` 在阶段的 RUNNING 调用传空退出码时抛 ValueError（被 `|| true` 吞掉，阶段 RUNNING 状态文件写不出来，PASS/FAIL 不受影响）。两处都是冻结工具或载荷，本卡不改，留给门禁后的加固卡；`tests/e2e/test_long_gate.py` 里有两个对时序敏感的用例（`test_renewal_failure_mid_run_is_a_final_hard_stop`、`test_runner_killed_mid_step_resumes_only_the_unfinished_step`），在冻结点的 30 轮探测里失败 8 轮（成簇出现，其余轮数全过），它们在 rest 组里，失败会让 G2 判不过，按本卡不重跑的规则卡停在原地；用户已知并接受这个风险（2026-11-04 夜间决定照常重跑）。",
+])
+c = c[:item15_end] + new_items + c[item15_end:]
+CARD_NEW.write_bytes(c.encode("utf-8"))
+CARD_SHA = sha(c.encode("utf-8"))
+# the approve script carries the card SHA
+a1 = (EV / "rel72_1_approve_start.sh").read_text(encoding="utf-8")
+a1 = re.sub(r"^CARD_SHA=.*$", f"CARD_SHA={CARD_SHA}", a1, count=1, flags=re.M)
+a1 = sw(a1, 'CARD="$P/02_规划/221_M3-REL72_发版7.2候选门禁实施卡_V1.1_PM.md"', 'CARD="$P/02_规划/221_M3-REL72_发版7.2候选门禁实施卡_V1.1_PM.md"')
+(EV / "rel72_1_approve_start.sh").write_bytes(a1.encode("utf-8"))
+print("card", CARD_NEW.name, "sha", CARD_SHA)
+print("report sha", REP_SHA, "bytes", REP_BYTES, "| manifest sha", MAN_SHA, "| tools", len(WRITTEN))
+left = [n for n in sorted(set(WRITTEN)) + ["rel72_1_approve_start.sh"] if re.search(r"REL72-002|rel72-002|M3R72A01|V1\.0|m3-rel72(?!b|-base)", (EV / n).read_text(encoding="utf-8", errors="replace"))]
+print("files that still mention V1.0 identifiers (review each):", left)

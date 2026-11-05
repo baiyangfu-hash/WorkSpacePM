@@ -1,0 +1,75 @@
+{
+ "frozen": "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
+ "build_a_exit": 2,
+ "verify_a_exit": 0,
+ "build_b_exit": 2,
+ "verify_b_exit": 0,
+ "payload_error": "[Errno 2] No such file or directory: 'C:\\\\Users\\\\fubai\\\\Documents\\\\My_Workspace\\\\.auto-pm\\\\reports\\\\m3-rel72\\\\gates\\\\d04\\\\build_a\\\\release_meta.json'",
+ "load_exit": 1,
+ "load_from_payload": false,
+ "payload_cli_help_exit": 1,
+ "ledgers": {
+  "SYS-2026-001": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  },
+  "SW-2026-008": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  },
+  "SW-2026-009": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  },
+  "DJ-2026-005": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  },
+  "SW-2026-010": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  },
+  "DJ-2026-011": {
+   "exit": 0,
+   "counts": [
+    0,
+    0,
+    0
+   ]
+  }
+ },
+ "orient_conflicts": [],
+ "orient_extract": {
+  "run_id": null,
+  "work_id": "WORK-MSN-415BA3D417866398",
+  "work_state": "IN_PROGRESS"
+ },
+ "ledger_expired_running_runs_informational": [
+  "RUN-SW008-A2-201-03"
+ ],
+ "audit": {
+  "ruff_full_exit": 1,
+  "mypy_with_tests_exit": 0,
+  "mypy_with_tests_last": "Success: no issues found in 785 source files"
+ }
+}

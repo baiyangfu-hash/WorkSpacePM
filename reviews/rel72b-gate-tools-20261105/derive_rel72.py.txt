@@ -1,0 +1,250 @@
+"""Derive the gate toolkit of card 221 (CARD-SW008-M3-REL72, release 7.2 candidate) from the FINAL audited tools of card 220 V1.1 (m3-rel71b).
+
+Not a copy-and-sed: the 7.1 tools quote the user's own words (the 2026-11-03 pre-authorization and its message ids).  Those quotes belong to release 7.1 and
+must never be rewritten into release 7.2.  So every user quote is REMOVED here, and the 7.2 approval text, message id and time are read at run time from
+approval_refs.env (GO_SHA, GO_REF, GO_AT, GO_TEXT) that Claude writes only after the user's own go-ahead for the card SHA.
+
+usage: python -B derive_rel72.py <frozen commit> <expected_deltas json> <expected_skips json> <sample-drill CI evidence text>
+Writes only under .auto-pm/reports/m3-rel72/ and creates the local branch m3-rel72-base at the frozen commit.  Run it again after the frozen commit changes.
+Nothing here is governed: no CHG, no Run, no worktree.
+"""
+
+import datetime
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(r"C:\Users\fubai\Documents\My_Workspace")
+R = ROOT / ".auto-pm" / "reports"
+SRC, EV = R / "m3-rel71b", R / "m3-rel72"
+P = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+FROZEN_REV, DELTAS_JSON, SKIPS_JSON, DRILL_CI = sys.argv[1:5]
+NL = chr(10)
+OLD_BASE = "d563293171847124e609469b5371c5d8b9688443"
+OLD_REPORT = f"{P}/05_收尾/016_M3_发版7.1候选构建与全量门禁_REP.md"
+NEW_REPORT = f"{P}/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md"
+OLD_CARD = "220_M3-REL71_发版7.1候选门禁实施卡_V1.1_PM.md"
+NEW_CARD = "221_M3-REL72_发版7.2候选门禁实施卡_PM.md"
+GROUPS = ["rest", "application", "plc", "change", "contracts", "infrastructure", "qml_debounce_alone", "cli", "qml", "core"]
+
+
+def git(*a: str) -> str:
+    return subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotePath=false", *a], capture_output=True, check=True).stdout.decode("utf-8")
+
+
+def sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sw(t: str, a: str, b: str, n: int = 1) -> str:
+    assert t.count(a) == n, (a[:100], t.count(a), n)
+    return t.replace(a, b)
+
+
+def sw_line(t: str, startswith: str, new_line: str) -> str:
+    """Replace the single whole line that starts with *startswith*."""
+    lines = t.split(NL)
+    hit = [i for i, ln in enumerate(lines) if ln.startswith(startswith)]
+    assert len(hit) == 1, (startswith[:80], len(hit))
+    lines[hit[0]] = new_line
+    return NL.join(lines)
+
+
+FROZEN = git("rev-parse", FROZEN_REV).strip()
+TODAY = datetime.date.today().isoformat()
+S8 = FROZEN[:8]
+DELTAS, SKIPS = json.loads(DELTAS_JSON), json.loads(SKIPS_JSON)
+assert set(DELTAS) <= set(GROUPS) and set(SKIPS) <= set(GROUPS)
+subj = git("log", "-1", "--format=%s", FROZEN).strip()
+assert subj.startswith("Merge pull request #"), subj
+assert subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", OLD_BASE, FROZEN]).returncode == 0
+assert subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{FROZEN}:{NEW_REPORT}"], capture_output=True).returncode != 0, "the new report already exists at the frozen commit"
+EV.mkdir(parents=True, exist_ok=True)
+subprocess.run(["git", "-C", str(ROOT), "branch", "-f", "m3-rel72-base", FROZEN], check=True, capture_output=True)
+
+# release 7.2 compares against the governed output of RUN-SW008-M3-REL7-001 (product == 1.3.3-d671611), NOT against 7.1: the 7.1 core group failed once and was waived by an exception.
+BASE_PRODUCT = "d671611a13bc15536047769fdb0498666c414044"
+assert subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", BASE_PRODUCT, FROZEN]).returncode == 0
+merged = [x for x in git("log", "--first-parent", "--merges", "--format=%h %s", f"{BASE_PRODUCT}..{FROZEN}").split(NL) if x]
+prod_changed = [x for x in git("diff", "--name-only", BASE_PRODUCT, FROZEN, "--", f"{P}/auto_pm", f"{P}/templates", f"{P}/scripts").split(NL) if x]
+assert prod_changed
+PROJECTS = [p["project_id"] for p in json.load(open(ROOT / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json", encoding="utf-8"))["projects"]]
+
+
+def ren(t: str) -> str:
+    """Pure renames, applied AFTER every user quote has been removed (see the per-file patches)."""
+    for a, b in (
+        (OLD_CARD, NEW_CARD), (OLD_REPORT, NEW_REPORT), ("016_M3_发版7.1候选构建与全量门禁_REP.md", "017_M3_发版7.2候选构建与全量门禁_REP.md"),
+        ("claude/rel71b-gate-tools-20261103", "claude/rel72-gate-tools-20261104"), ("reviews/rel71b-gate-tools-20261103", "reviews/rel72-gate-tools-20261104"),
+        ("m3-rel71b1-base", "m3-rel72-base"), ("m3rel71b", "m3rel72"), ("m3-rel71b", "m3-rel72"), ("M3R71B01", "M3R72A01"), ("rel71b", "rel72"), ("rel71", "rel72"), ("REL71", "REL72"),
+        ("card 220 V1.1", "card 221 V1.0"), ("Card 220 V1.1", "Card 221 V1.0"), ("卡 220 V1.1", "卡 221 V1.0"), ("card 220", "card 221"), ("CARD-SW008-M3-REL72 V1.1", "CARD-SW008-M3-REL72 V1.0"),
+        ("precheck_V1.1.json", "precheck_V1.0.json"), ("发版 7.1", "发版 7.2"), ("release 7.1", "release 7.2"), (OLD_BASE, FROZEN), ("d5632931", S8), ("M3-REL72 V1.1", "M3-REL72 V1.0"),
+    ):
+        t = t.replace(a, b)
+    return t
+
+
+WRITTEN: list[str] = []  # exactly the frozen tools this script writes; measurement outputs and notes in the same folder are evidence, not tools
+
+
+def put(name: str, text: str, new_name: str | None = None) -> None:
+    out = new_name or name.replace("rel71", "rel72")
+    (EV / out).write_bytes(text.encode("utf-8"))
+    WRITTEN.append(out)
+
+
+def rd(name: str) -> str:
+    return (SRC / name).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- the contract report (the only committed file)
+pr_lines = NL.join(f"| `{x.split()[0]}` | {x.split(' ', 1)[1].replace('|', '/')} |" for x in merged)
+delta_text = "、".join(f"{g} {'+' if DELTAS.get(g, 0) >= 0 else ''}{DELTAS.get(g, 0)}" for g in GROUPS if DELTAS.get(g, 0)) or "全部为 0"
+skip_text = "、".join(f"{g} {'+' if SKIPS[g] >= 0 else ''}{SKIPS[g]}" for g in GROUPS if SKIPS.get(g, 0)) or "全部为 0"
+report = f"""# M3 发版 7.2｜发版候选构建与全量门禁（合同与结论）
+
+> 报告冻结日期：{TODAY}（本文件字节在门禁前冻结，提交日期以 Git 提交为准）；实施卡 `CARD-SW008-M3-REL72 V1.0`；门禁合同与卡 220 相同。
+> **本报告的结论由提交本身证明**：本文件只在下表每一项都通过之后才被提交；任何一项不过，卡停在原地、不提交，本文件不会出现在 `main` 上。原始证据在控制根 `.auto-pm/reports/m3-rel72/gates/`。
+
+## 1. 冻结的合并提交
+
+`{FROZEN}`（`main` 上的 {subj.split(':')[0].split(' from ')[0]}）。十组回归的基线是发版 7 的受治理输出（产品等于 `1.3.3-d671611`，冻结提交 `{BASE_PRODUCT[:8]}`）；两者之间合进 `main` 的提交如下（第一父链）：
+
+| 合并提交 | 说明 |
+|---|---|
+{pr_lines}
+
+产品子树（`auto_pm`、`templates`、`scripts`）共有 {len(prod_changed)} 个文件不同。事先声明的通过数差值：{delta_text}；跳过数差值：{skip_text}。样件联调的 4 个测试文件不在本卡跑，证据：{DRILL_CI}
+
+## 2. 门禁合同与对应检查
+
+| 门禁 | 本卡怎么检查 | 通过标准 |
+|---|---|---|
+| 构建入口自身的测试 | `tests/core/test_pmf_build.py` | 退出码 0，无跳过 |
+| 母体全量 pytest | 十组回归，在冻结提交的隔离工作树里跑 | 每组无失败、无 ERROR，通过数与跳过数等于基线加事先声明的差值 |
+| Ruff/Mypy | `ruff check auto_pm tests`、`mypy --platform win32 auto_pm` | 退出码 0 |
+| 全库 Ruff/Mypy 审计 | `ruff check .`、`mypy auto_pm tests` | 原始结果如实记录，不写“全绿” |
+| 文档检查与本报告 | `doc check`；本报告的逐行合同 | 退出码与基线相同；合同满足 |
+| Git 双 Hook | 真实 pre-commit 钩子对本卡暂存的文件干跑；提交时正常经过钩子 | 退出码 0，无绕过 |
+| Run 执行就绪 | 控制根 `pm orient SW-2026-008 --json` | 冲突列表为空 |
+| 台账 | 全部注册项目（{"、".join(PROJECTS)}）的 `ledger reconcile` | 每个项目 0/0/0 |
+| 可复现构建与加载身份 | 同一提交构建两次，两份载荷逐字节相同、`release_meta.json` 除构建机信息外相同，两份都通过 `verify`；从载荷导入 `auto_pm` 并运行命令行 | 全部成立 |
+| 提交钉住与防睡眠 | 门禁前后工作树 HEAD 都等于冻结提交；心跳无超过 120 秒的缺口；电源证据在 | 全部成立 |
+
+## 3. 不做什么
+
+不切换有效发布版本、不改发布指针（切换另走切换卡，须门禁与独立审计全部通过，且用户亲口说“切换”）；WBS 与台账的回写不在本卡。
+"""
+toks = [FROZEN, "本报告的结论由提交本身证明", "0/0/0"]
+for tk in toks:
+    assert tk in report
+(EV / "report_017.md").write_bytes(report.encode("utf-8"))
+(EV / "proto" / "/".join(NEW_REPORT.split("/")[:-1])).mkdir(parents=True, exist_ok=True)
+(EV / "proto" / NEW_REPORT).write_bytes(report.encode("utf-8"))  # install_files.py installs the frozen report bytes from here
+REP_SHA, REP_BYTES = sha(report.encode("utf-8")), len(report.encode("utf-8"))
+
+# ---------------------------------------------------------------- config
+cfg = json.loads(rd("rel71_config.json"))
+cfg["baseline_g2"] = ".auto-pm/reports/m3-rel72/baseline_g2"
+cfg["expected_deltas"], cfg["expected_skips"] = DELTAS, SKIPS
+cfg["docs"] = {NEW_REPORT: {"deleted_sha256": [], "required_tokens": toks}}
+cfg["frozen_commit"], cfg["base"] = FROZEN, FROZEN
+cfg["projects"] = PROJECTS
+cfg["card_id"], cfg["card_version"], cfg["label"], cfg["run_id"] = "CARD-SW008-M3-REL72", "V1.0", "CARD-SW008-M3-REL72 V1.0", "RUN-SW008-M3-REL72-002"
+cfg["files"] = {NEW_REPORT: {"sha256": REP_SHA, "bytes": REP_BYTES, "base_sha256": None}}
+put("rel71_config.json", json.dumps(cfg, ensure_ascii=False, indent=2) + NL)
+if not (EV / "baseline_g2").exists():
+    shutil.copytree(SRC / "baseline_g2", EV / "baseline_g2")  # the governed output of RUN-SW008-M3-REL7-001 (product 1.3.3-d671611), byte for byte
+
+# ---------------------------------------------------------------- generic tools: copied with renames only
+for n in ("adjust_counts.py", "detach_run.py", "gate_status.py", "gen_project.py", "heartbeat.py", "install_files.py", "keepawake.py", "mem_guard.py", "run_g2.sh",
+          "rel71_3_chg_close.sh", "rel71_4_close_worktree.sh", "rel71_rehearse.sh"):
+    put(n, ren(rd(n)))
+
+# ---------------------------------------------------------------- gates.py: no reuse block, ten full groups, relaxed pin rule (non-payload moves of origin/main are recorded, not failed)
+g = rd("rel71_gates.py")
+i0, i1 = g.index("REUSE = {"), g.index("HB_GAP_MAX")
+g = g[:i0] + g[i1:]  # drops REUSE and V10_RECORDS (release 7.1 V1.1 only)
+j0, j1 = g.index("def reuse_check()"), g.index("def pin_check()")
+g = g[:j0] + g[j1:]
+g = sw(g, "    reuse_ok, reuse_line = reuse_check()\n    g2_lines, g2_ok = [reuse_line], same and reuse_ok\n", "    g2_lines, g2_ok = [], same\n")
+g = sw(g, "the nine regression groups (ten outputs)", "the ten regression groups")
+g = sw(g, "whose product equals the active release 1.3.3-d671611", "whose product equals release 1.3.3-d671611, commit d671611a")
+old_pin = '''    ok = bool(a) and bool(b) and a.get("HEAD") == b.get("HEAD") == BASE and a.get("ORIGIN_MAIN") == b.get("ORIGIN_MAIN") and bool(a.get("ORIGIN_MAIN"))
+'''
+new_pin = '''    moved_ok = True
+    if a and b and a.get("ORIGIN_MAIN") and b.get("ORIGIN_MAIN") and a.get("ORIGIN_MAIN") != b.get("ORIGIN_MAIN"):
+        # card 221 section 1 item 12: origin/main may move during the run only if the move carries no payload change (auto_pm, templates, scripts); a payload move fails
+        d = subprocess.run(["git", "diff", "--name-only", a["ORIGIN_MAIN"], b["ORIGIN_MAIN"], "--", f"{P}/auto_pm", f"{P}/templates", f"{P}/scripts"], capture_output=True, text=True, encoding="utf-8")
+        moved_ok = d.returncode == 0 and not d.stdout.strip()
+    ok = bool(a) and bool(b) and a.get("HEAD") == b.get("HEAD") == BASE and bool(a.get("ORIGIN_MAIN")) and bool(b.get("ORIGIN_MAIN")) and moved_ok
+'''
+g = sw(g, old_pin, new_pin)
+put("rel71_gates.py", ren(g))
+
+# ---------------------------------------------------------------- gates_all.sh: replace the V1.1 reuse block by the plain ten-group call
+ga = rd("rel71_gates_all.sh")
+x0 = ga.index('stage groups; echo "== V1.1: reuse the nine')
+x1 = ga.index('stage transient;')
+ga = ga[:x0] + 'stage groups; echo "== ten regression groups (G2)"' + NL + 'bash "$EV/run_g2.sh" "$PROJ" "$G/g2_candidate" || fail "run_g2.sh"' + NL + ga[x1:]
+put("rel71_gates_all.sh", ren(ga))
+
+# ---------------------------------------------------------------- launcher: drop the quoted 7.1 extension words; the extension reads HOLD_REF.txt only
+ln = rd("rel71_launch.sh")
+ln = sw_line(ln, "# the user's own words (typed in the main-executor thread, message cmsg_",
+             "# The 3 h hold cap is shorter than the ten groups.  The extension needs the user's OWN authorization for THIS card, written to HOLD_REF.txt (the bare message id) before or during the run.")
+ln = sw(ln, "wait 150 minutes", "wait 150 minutes", 0) if False else ln
+put("rel71_launch.sh", ren(ln))
+
+# ---------------------------------------------------------------- approval scripts: no user words baked in; GO_AT (time of the user's go-ahead) comes from approval_refs.env
+a1 = rd("rel71_1_approve_start.sh")
+deleg_new = ('DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 ${GO_AT} 在本线程亲口回复“${GO_TEXT}”（${GO_REF}），门禁卡 SHA ${CARD_SHA}；extend-hold 一次的授权只取自 HOLD_REF.txt（没有则不延长）；'
+             '只构建与门禁，不切换有效发布版本（切换另走切换卡，须门禁与独立审计全部通过，且用户亲口说“切换”）；批准条件：卡字节等于 SHA、机器预检通过、范围不超出卡列路径、任一门禁失败即停下保留现场；'
+             '由 Claude 代为运行脚本；变更单收口按用户在 GO_TEXT 里的委托办理"')
+a1 = sw_line(a1, 'DELEG="委托执行：用户 2026-10-18', deleg_new)
+bg = ("M3-REL72（发版 7.2 候选）：用 main 上的合并提交 " + S8 + " 里已有的 scripts/pmf_build.py 构建两次并比对、两份都通过 verify、载荷可导入且命令行可用；再跑全量门禁：十组回归整组重跑"
+      "（基线为发版 7 的受治理输出 RUN-SW008-M3-REL7-001；差值取自开跑前从 d671611 到冻结提交的逐组收集数和变化测试文件在两棵树上的跑数，只证明没有分组丢收集用例）、静态检查、全库审计如实记录、文档检查、真实钩子、"
+      f"全部注册项目对账、控制根定位无冲突。自发版 7（1.3.3-d671611）以来合入 {len(merged)} 个合并提交，产品子树 {len(prod_changed)} 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。")
+a1 = sw_line(a1, "BACKGROUND=", 'BACKGROUND="' + bg + '"')
+a1 = sw(a1, "reviewed final V1.1", "reviewed final V1.0")
+a1 = sw(a1, "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"", "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; GO_AT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"")
+a1 = sw(a1, "      GO_TEXT|NIGHT_TEXT)", "      GO_AT) [[ \"$val\" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || die \"approval_refs.env: GO_AT format\"; GO_AT=\"$val\" ;;\n      GO_TEXT|NIGHT_TEXT)")
+a1 = sw(a1, '[[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]]', '[[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" && -n "$GO_AT" ]]')
+a1 = sw(a1, "(PREAUTH_M2_20261008.txt, last block); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) (the release 7.1 pre-authorization of 2026-11-03, read from approval_refs.env)",
+        "(GO_REF, GO_AT and GO_TEXT in approval_refs.env); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF)")
+a1 = sw(a1, 'q "select state from run_items where run_id=?" RUN-SW008-M3-REL7-002)" == SUCCEEDED', 'q "select state from run_items where run_id=?" RUN-SW008-M3-REL7-002)" == SUCCEEDED')  # the last governed gate Run that closed cleanly is still REL7-002
+a1 = ren(a1)
+CARD_SHA_ARG = sys.argv[5] if len(sys.argv) > 5 else "__CARD_SHA__"
+a1 = sw_line(a1, "CARD_SHA=", "CARD_SHA=" + CARD_SHA_ARG)
+put("rel71_1_approve_start.sh", a1)
+
+a2 = rd("rel71_2_close_commit.sh")
+a2 = sw(a2, "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"", "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; GO_AT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"")
+a2 = sw(a2, "      GO_TEXT|NIGHT_TEXT)", "      GO_AT) GO_AT=\"$val\" ;;\n      GO_TEXT|NIGHT_TEXT)")
+a2 = sw_line(a2, 'DELEG="委托执行：用户 2026-10-18',
+             'DELEG="委托执行：用户 2026-10-18 预授权自行收口推送；用户 ${GO_AT} 亲口回复“${GO_TEXT}”（${GO_REF}），门禁卡 SHA ${GO_SHA}；只构建与门禁，不切换有效发布版本（切换另走切换卡）；批准条件：卡字节等于 SHA、范围不超出卡列路径、任一门禁失败即停下保留现场；由 Claude 代为运行脚本；变更单收口在用户阅读结果并确认验收之后"')
+put("rel71_2_close_commit.sh", ren(a2))
+
+# ---------------------------------------------------------------- templates (no user words)
+put("approval_refs.env.template",
+    "# written by Claude ONLY after the user typed the go-ahead for this card SHA (message id and time from the thread, text copied verbatim by the server); never edited by hand later" + NL
+    + "GO_SHA=<the card SHA-256 of the audited release 7.2 gate card>" + NL + "GO_REF=user-confirmation:cmsg_<message id of the user's go-ahead>" + NL
+    + "GO_AT=<UTC time of that message, YYYY-MM-DDTHH:MM:SSZ>" + NL + "GO_TEXT=<the user's words, verbatim>" + NL + "# NIGHT_REF / NIGHT_TEXT are not used for release 7.2" + NL)
+cm = rd("commit_msg.template.txt")
+cm = cm.replace("Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>", "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>")
+put("commit_msg.template.txt", ren(cm))
+
+# ---------------------------------------------------------------- manifest of the frozen tools (the card section 5.2 table is filled from this)
+man = {NEW_REPORT: REP_SHA}
+for n in sorted(set(WRITTEN)):
+    if n == "rel72_1_approve_start.sh":
+        continue
+    man[f"tools/{n}"] = sha((EV / n).read_bytes())
+(EV / "reference_manifest.json").write_bytes((json.dumps(man, ensure_ascii=False, indent=1) + NL).encode("utf-8"))  # LF bytes on every platform
+print("frozen", FROZEN, "| merges", len(merged), "| product files", len(prod_changed), "| report sha", REP_SHA, "|", len(man) - 1, "tools")
+leftover = [n for n in sorted(set(WRITTEN)) if re.search(r"cmsg_01Af|2026-11-03T19|发版 7\.1|release 7\.1|rel71|REL71|REL7-00[12]", (EV / n).read_text(encoding="utf-8", errors="replace"))]
+print("files that still mention 7.1 identifiers (review each):", leftover)

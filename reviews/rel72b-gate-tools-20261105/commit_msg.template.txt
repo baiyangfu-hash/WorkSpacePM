@@ -1,0 +1,5 @@
+docs(release): [__CHG__] release 7.2 candidate dd8b192f builds reproducibly and passes the full gate set (M3-REL72)
+
+Card CARD-SW008-M3-REL72. The frozen merge commit was built twice with its own scripts/pmf_build.py; the payloads are byte-identical, release_meta matches apart from the builder, both pass verify, and the payload imports from itself with a working CLI. The full gate set passed on that commit: the ten regression groups (against card 219 V1.0's governed outputs plus the deltas counted before the run), static checks, the raw full-repository audit, the doc check, the real hooks, every registered project's ledger and the control-root orient. This commit adds only the contract report; it exists only because every gate passed. Nothing is switched.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

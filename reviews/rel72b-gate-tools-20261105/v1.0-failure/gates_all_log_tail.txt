@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 35, in <module>
+    main()
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 25, in main
+    code = int(sys.argv[4]) if len(sys.argv) > 4 else None
+           ^^^^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: ''
+== baseline measurements in the fresh candidate (before any edit)
+Traceback (most recent call last):
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 35, in <module>
+    main()
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 25, in main
+    code = int(sys.argv[4]) if len(sys.argv) > 4 else None
+           ^^^^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: ''
+== install the frozen files
+Traceback (most recent call last):
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 35, in <module>
+    main()
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\gate_status.py", line 25, in main
+    code = int(sys.argv[4]) if len(sys.argv) > 4 else None
+           ^^^^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: ''
+== fast gates
+Traceback (most recent call last):
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\rel72_gates.py", line 580, in <module>
+    sys.exit(stage_baseline() if st == "baseline" else stage_judge() if st == "judge" else (stage_fast() or 0))
+                                                                                            ^^^^^^^^^^^^
+  File "C:\Users\fubai\Documents\My_Workspace\.auto-pm\reports\m3-rel72\rel72_gates.py", line 373, in stage_fast
+    shutil.copytree(Path(G) / "d04" / "build_a", tampered)
+  File "C:\Users\fubai\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\shutil.py", line 598, in copytree
+    with os.scandir(src) as itr:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 3] 系统找不到指定的路径。: 'C:\\Users\\fubai\\Documents\\My_Workspace\\.auto-pm\\reports\\m3-rel72\\gates\\d04\\build_a'
+FAILED: rel72_gates.py --stage fast
