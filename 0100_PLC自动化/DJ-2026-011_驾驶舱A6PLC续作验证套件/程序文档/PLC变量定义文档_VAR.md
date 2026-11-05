@@ -8,7 +8,7 @@
 
 ## 1. 变量命名约定
 
-- 功能块实例使用 `fb_` 前缀，测试激励使用 `s_` 前缀，输出结果使用 `s_` 前缀。
+- 功能块实例使用 `fb_` 前缀（TIA 全局 DB 不能放 FB 实例，三个被测块的多重实例都在 `FB_9001_TestBench_DJ2026011` 里，见 INT §7.3），测试激励使用 `s_` 前缀，输出结果使用 `s_` 前缀。
 - 布尔量使用 `b` 类型标识，整型使用 `i` 类型标识，数组使用 `arr` 类型标识。
 - 变量名使用英文小驼峰，注释使用中文与英文半角标点。
 
@@ -16,7 +16,6 @@
 
 | 变量名 | 类型 | 说明 |
 |--------|------|------|
-| fb_TwoHandStart | FB_1091_TwoHandStart_DJ2026011 | 被测功能块实例 |
 | s_bStartLeft | BOOL | 测试激励: 左启动按钮 |
 | s_bStartRight | BOOL | 测试激励: 右启动按钮 |
 | s_dSyncWindowMs | DINT | 同步窗口毫秒值, 500 = 0.5s |
@@ -27,8 +26,7 @@
 
 | 变量名 | 类型 | 说明 |
 |--------|------|------|
-| fb_AlarmSummary | FB_2001_AlarmSummary_DJ2026011 | 被测报警汇总功能块实例 |
-| s_arrAlarms | ARRAY[1..16] OF BOOL | 测试激励: 16 路报警输入, 第 1 路由 OB1 接同步故障 |
+| s_arrAlarms | ARRAY[1..16] OF BOOL | 测试激励: 16 路报警输入, 第 1 路由测试台 FB_9001 接同步故障 |
 | s_bReset | BOOL | 测试激励: 复位按钮 |
 | s_bAlarmLamp | BOOL | 结果: 报警灯 |
 | s_bAnyAlarm | BOOL | 结果: 报警汇总 |
@@ -37,7 +35,6 @@
 
 | 变量名 | 类型 | 说明 |
 |--------|------|------|
-| fb_BatchCounter | FB_2002_BatchCounter_DJ2026011 | 被测批量计数功能块实例 |
 | s_bPhotoSensor | BOOL | 测试激励: 光电传感器信号 |
 | s_dBatchTarget | DINT | 测试激励: 批次设定数量 |
 | s_bReset | BOOL | 测试激励: 复位按钮 |

@@ -148,8 +148,8 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 
 ### 6.4 OB1 集成与数据块映射
 
-- 新建 `DB_AlarmSummaryTest`，内含 `fb_AlarmSummary` 实例、`s_arrAlarms[1..16]` 激励、`s_bReset` 复位激励、`s_bAlarmLamp` 与 `s_bAnyAlarm` 结果。
-- OB1 在双手启动调用之后，先执行 `DB_AlarmSummaryTest.s_arrAlarms[1] := DB_TwoHandStartTest.s_bSyncFault;`，再调用 `DB_AlarmSummaryTest.fb_AlarmSummary(...)`。
+- 新建 `DB_AlarmSummaryTest`（全局 DB，只放激励与结果；`fb_AlarmSummary` 实例在测试台 `FB_9001_TestBench_DJ2026011` 里作多重实例）：``s_arrAlarms[1..16]` 激励、`s_bReset` 复位激励、`s_bAlarmLamp` 与 `s_bAnyAlarm` 结果。
+- 测试台在双手启动调用之后，先执行 `"DB_AlarmSummaryTest".s_arrAlarms[1] := "DB_TwoHandStartTest".s_bSyncFault;`，再调用 `#fb_AlarmSummary(...)`；OB123 只负责每周期调用一次测试台（背景 DB `DB_TestBench`）。
 - 第 2 至 16 路报警位不由 OB1 写入，保留给 `.scltest` 激励与后续扩展。
 
 ### 6.5 测试用例设计
@@ -202,8 +202,8 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 
 ### 7.4 OB1 集成与数据块映射
 
-- 新建 `DB_BatchCounterTest`，内含 `fb_BatchCounter` 实例、`s_bPhotoSensor` 光电激励、`s_dBatchTarget` 设定数量、`s_bReset` 复位激励、`s_dBatchCount` 与 `s_bBatchComplete` 结果。
-- OB1 在报警汇总调用之后调用 `DB_BatchCounterTest.fb_BatchCounter(...)`，激励与结果均经测试 DB 读写，不新增物理 IO。
+- 新建 `DB_BatchCounterTest`（全局 DB，只放激励与结果；`fb_BatchCounter` 实例在测试台里作多重实例）：``s_bPhotoSensor` 光电激励、`s_dBatchTarget` 设定数量、`s_bReset` 复位激励、`s_dBatchCount` 与 `s_bBatchComplete` 结果。
+- 测试台在报警汇总调用之后调用 `#fb_BatchCounter(...)`，激励与结果均经测试 DB 读写，不新增物理 IO。
 
 ### 7.5 测试用例设计
 

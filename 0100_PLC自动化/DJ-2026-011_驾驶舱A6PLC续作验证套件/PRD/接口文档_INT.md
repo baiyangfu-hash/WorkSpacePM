@@ -49,7 +49,7 @@
 
 | 信号名称 | 符号地址 | 方向 | 信号说明 | 备注 |
 |---------|---------|------|---------|------|
-| s_arrAlarms | DB_AlarmSummaryTest.s_arrAlarms | 输入→FB | 16 路报警输入 | 第 1 路由 OB1 接双手启动同步故障 |
+| s_arrAlarms | DB_AlarmSummaryTest.s_arrAlarms | 输入→FB | 16 路报警输入 | 第 1 路由测试台 FB_9001 接双手启动同步故障 |
 | s_bReset | DB_AlarmSummaryTest.s_bReset | 输入→FB | 报警复位按钮 | 上升沿有效 |
 | s_bAlarmLamp | DB_AlarmSummaryTest.s_bAlarmLamp | FB→输出 | 报警灯 | 报警锁存后保持点亮 |
 | s_bAnyAlarm | DB_AlarmSummaryTest.s_bAnyAlarm | FB→输出 | 任意报警汇总 | 当前任一路报警为 TRUE |
@@ -110,18 +110,20 @@
 
 ### 7.3 FB 实例与调用约定
 
-| 实例名 | 类型 | 所在 DB | 调用位置 | 说明 |
+TIA 的全局 DB 里不能放 FB 实例，三个被测块的实例都放在测试台 `FB_9001_TestBench_DJ2026011` 里（多重实例），全局测试 DB 只放激励与结果。测试台由 OB123 通过背景 DB `DB_TestBench` 调用一次。
+
+| 实例名 | 类型 | 所在位置 | 调用位置 | 说明 |
 |--------|------|---------|---------|------|
-| fb_TwoHandStart | FB_1091_TwoHandStart_DJ2026011 | DB_TwoHandStartTest | OB1 | 双手启动功能块实例 |
-| fb_AlarmSummary | FB_2001_AlarmSummary_DJ2026011 | DB_AlarmSummaryTest | OB1 | 报警汇总功能块实例 |
-| fb_BatchCounter | FB_2002_BatchCounter_DJ2026011 | DB_BatchCounterTest | OB1 | 批量计数功能块实例 |
+| fb_TwoHandStart | FB_1091_TwoHandStart_DJ2026011 | FB_9001 多重实例 | FB_9001 | 双手启动功能块实例 |
+| fb_AlarmSummary | FB_2001_AlarmSummary_DJ2026011 | FB_9001 多重实例 | FB_9001 | 报警汇总功能块实例 |
+| fb_BatchCounter | FB_2002_BatchCounter_DJ2026011 | FB_9001 多重实例 | FB_9001 | 批量计数功能块实例 |
 
 - 报警汇总的 `i_arrAlarms` 为 `ARRAY[1..16] OF BOOL`，下标从 1 开始，调用方不得传入长度不足的数组。
 - 复位按钮传电平信号，功能块内部取上升沿；禁止外部再叠加沿检测。
-- OB1 每个扫描周期先把 `DB_TwoHandStartTest.s_bSyncFault` 写入 `DB_AlarmSummaryTest.s_arrAlarms[1]`，再调用报警汇总。
+- 测试台每个扫描周期先把 `DB_TwoHandStartTest.s_bSyncFault` 写入 `DB_AlarmSummaryTest.s_arrAlarms[1]`，再调用报警汇总。
 - 第 1 路之外的报警位由测试或上位机直接写入 `DB_AlarmSummaryTest.s_arrAlarms[2..16]`。
 - 批量计数的光电信号与复位按钮同传电平信号，功能块内部取上升沿；`i_dBatchTarget` 为 DINT 计数值，小于等于 0 时不计数也不完成。
-- OB1 在报警汇总调用之后调用批量计数，激励与结果均经 `DB_BatchCounterTest` 读写。
+- 测试台在报警汇总调用之后调用批量计数，激励与结果均经 `DB_BatchCounterTest` 读写。
 
 ## 8. 版本兼容性说明
 
