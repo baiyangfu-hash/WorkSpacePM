@@ -53,7 +53,7 @@ j = s.index(NL, i)
 extra = NL.join([
     '[[ "$(cat "$REAL/.auto-pm/reports/m3-settle72/settle_result.txt" 2>/dev/null)" == SETTLE72_DONE* ]] || die "card SETTLE72 has not finished (m3-settle72/settle_result.txt)"',
     'for rr in RUN-SW008-M3-D07P-001 RUN-SW008-M3-REL72-002; do [[ "$(q "select state from run_items where run_id=?" "$rr")" == CANCELLED ]] || die "$rr is not CANCELLED (card SETTLE72)"; done',
-    'for pj in SW-2026-008 SYS-2026-001; do [[ "$("$PY" -B -c \'import sqlite3,sys;c=sqlite3.connect("file:.auto-pm/continuity.db?mode=ro",uri=True);print(c.execute("SELECT count(*) FROM run_items r JOIN work_items w ON w.work_id=r.work_id WHERE w.subject_project_id=? AND r.state NOT IN (\'SUCCEEDED\',\'FAILED\',\'CANCELLED\') AND w.state IN (\'ACCEPTED\',\'CLOSED\',\'CANCELLED\')",(sys.argv[1],)).fetchone()[0])\' "$pj")" == 0 ]] || die "$pj still has a Run under a finished Work (the 7.2 interlock would fail the switch again)"; done',
+    r'''for pj in SW-2026-008 SYS-2026-001; do [[ "$("$PY" -B -c "import sqlite3,sys;c=sqlite3.connect('file:.auto-pm/continuity.db?mode=ro',uri=True);print(c.execute('SELECT count(*) FROM run_items r JOIN work_items w ON w.work_id=r.work_id WHERE w.subject_project_id=? AND r.state NOT IN (?,?,?) AND w.state IN (?,?,?)',(sys.argv[1],'SUCCEEDED','FAILED','CANCELLED','ACCEPTED','CLOSED','CANCELLED')).fetchone()[0])" "$pj")" == 0 ]] || die "$pj still has a Run under a finished Work (the 7.2 interlock would fail the switch again)"; done''',
 ])
 s = s[: j + 1] + extra + NL + s[j + 1:]
 # new post-switch check: the same orient conflict check for SYS-2026-001

@@ -33,3 +33,7 @@
 
 ## 补充（07:30 MST）：演练补完
 第三次演练（`evidence/rehearsal_run3_filtered.out`）在 07:28 MST 之后接着第二次的现场续跑：第 10 个目标 `RUN-SW008-M3-D07P-001` 也走完（目标 Run 与 Work 都 CANCELLED，恢复链 CLOSED，旧口令与恢复口令探测被拒），第 9 步证据：`orphans_after.txt` = `SW-2026-008 = 0 ; SYS-2026-001 = 0`，`orient_after.txt` 两个项目各一行 `orient conflicts: []`，`settle_result.txt` = `SETTLE72_DONE chg_sw=CHG-SCPT-2026-480 chg_sys=CHG-DOCU-2026-054 … targets=10`，脚本退出码 0（`evidence/rehearsal_end_state_after_run3.txt` 是账本副本的终态）。演练用的脚本只在 `CARD_SHA=` 一行与真实脚本不同（`settle72_rehearsal_setup.sh` 的 sed）；真实脚本字节未变，SHA-256 仍为 `b0dd4ea3eac07e3939631f05fb694ab3070010d18d06533a9f2c126a80f34146`。
+
+## 补充（07:50 MST）：切换脚本一行引号修复，结算已完成
+- 结算（SETTLE72）07:32–07:42 MST 在真实账本上跑完：10 条目标 Run 全部 CANCELLED，10 个恢复 Work CLOSED，`orphans_after` 两个项目都是 0，两个项目的 `pm orient` 冲突都是 `[]`，`SETTLE72_DONE chg_sw=CHG-SCPT-2026-480 chg_sys=CHG-DOCU-2026-054 head=67ab4431…`；唯一的 git 写入是控制根 `main` 上的提交 `67ab4431`（只含 Decision 文件，待推 PR 分支合并）。
+- 切换脚本 V1.1 的 `--check-only` 在真实账本上暴露一处引号缺陷：新增的“挂在已结束 Work 下的 Run 为 0”核验里，SQL 的单引号嵌进了 bash 单引号字符串，报 `no such column: SUCCEEDED`（核验本身没放行任何东西，它只会误拒）。已改成 bash 双引号包 python、SQL 里用参数 `?` 传值，**只改了这一行**（`evidence/one_line_sql_quoting_fix.diff`）。卡字节不变（SHA-256 `cfbaaca80f3f394fd317b275c4552f39349624d11f6304ea674123733b15b5ed`），脚本新 SHA-256 为 `73c25c32f94586d77bf887d2d9cf9adc3ab2696308d2f92daa9bb0e782fbefc6`（旧 `534b2f14…`）。修复后的 `--check-only` 在真实账本上通过（含步骤 M2 的 check、两个项目的 0 条核验）。请审计确认这一行改动；审计确认前不运行切换。
