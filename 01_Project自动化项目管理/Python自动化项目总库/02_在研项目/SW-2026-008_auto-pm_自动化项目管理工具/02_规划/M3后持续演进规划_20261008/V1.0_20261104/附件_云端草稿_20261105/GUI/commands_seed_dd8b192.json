@@ -1,0 +1,786 @@
+[
+ {
+  "command": "change create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "change edit",
+  "machine_readable": "none"
+ },
+ {
+  "command": "change list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "change show",
+  "machine_readable": "none"
+ },
+ {
+  "command": "change transition",
+  "machine_readable": "none"
+ },
+ {
+  "command": "change verify",
+  "machine_readable": "none"
+ },
+ {
+  "command": "clean",
+  "machine_readable": "none"
+ },
+ {
+  "command": "constraint check",
+  "machine_readable": "json"
+ },
+ {
+  "command": "constraint guard",
+  "machine_readable": "none"
+ },
+ {
+  "command": "constraint heal",
+  "machine_readable": "none"
+ },
+ {
+  "command": "constraint list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "constraint verify",
+  "machine_readable": "none"
+ },
+ {
+  "command": "context resolve",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity backup",
+  "machine_readable": "json"
+ },
+ {
+  "command": "continuity checkpoint create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity dispatch prepare",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity handoff accept",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity handoff create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity lease extend-hold",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity lease record-holder",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity lease renew",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity lease run-with-renewal",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity list-backups",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity mission create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity mission show",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity mission transition",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity orchestration report-finding",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity orchestration report-repair",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity recovery plan",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity restore-backup",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run fence-legacy-terminal",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run fence-terminal-lease",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run legacy-terminal-evidence",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run reclaim",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run reconcile-terminal-lease",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run revoke-unstarted",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run settle-expired",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run start",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity run transition",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity verify-backup",
+  "machine_readable": "json"
+ },
+ {
+  "command": "continuity work adjudicate",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity work adjudication-evidence",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity work authorize",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity work create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity work relate",
+  "machine_readable": "none"
+ },
+ {
+  "command": "continuity work transition",
+  "machine_readable": "none"
+ },
+ {
+  "command": "decision create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "decision list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "decision show",
+  "machine_readable": "none"
+ },
+ {
+  "command": "delivery archive clean",
+  "machine_readable": "none"
+ },
+ {
+  "command": "delivery archive list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "delivery build",
+  "machine_readable": "none"
+ },
+ {
+  "command": "delivery package",
+  "machine_readable": "none"
+ },
+ {
+  "command": "delivery status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "doc check",
+  "machine_readable": "none"
+ },
+ {
+  "command": "doc inject",
+  "machine_readable": "json"
+ },
+ {
+  "command": "doc refresh",
+  "machine_readable": "json"
+ },
+ {
+  "command": "doc sync",
+  "machine_readable": "none"
+ },
+ {
+  "command": "doctor",
+  "machine_readable": "none"
+ },
+ {
+  "command": "dogfood inspect",
+  "machine_readable": "none"
+ },
+ {
+  "command": "dogfood prepare",
+  "machine_readable": "none"
+ },
+ {
+  "command": "dogfood review",
+  "machine_readable": "none"
+ },
+ {
+  "command": "git-hook commit-msg",
+  "machine_readable": "none"
+ },
+ {
+  "command": "git-hook install",
+  "machine_readable": "none"
+ },
+ {
+  "command": "git-hook pre-commit",
+  "machine_readable": "none"
+ },
+ {
+  "command": "git-hook preflight",
+  "machine_readable": "none"
+ },
+ {
+  "command": "git-hook release-gate",
+  "machine_readable": "none"
+ },
+ {
+  "command": "gui",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff claim",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff close",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff fail",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff failures",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff heartbeat",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff preflight",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff queue",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff requeue",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff result-submit",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff saga compensate",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff saga resume",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff saga status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff show",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff start",
+  "machine_readable": "none"
+ },
+ {
+  "command": "handoff timeout",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card approve",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card by-change",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card dispatch",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card precheck",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card validate",
+  "machine_readable": "none"
+ },
+ {
+  "command": "implementation-card verify",
+  "machine_readable": "none"
+ },
+ {
+  "command": "ledger reconcile",
+  "machine_readable": "none"
+ },
+ {
+  "command": "long-run start",
+  "machine_readable": "none"
+ },
+ {
+  "command": "long-run status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "long-run stop",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc check",
+  "machine_readable": "json"
+ },
+ {
+  "command": "plc docs check",
+  "machine_readable": "json"
+ },
+ {
+  "command": "plc docs confirm",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc docs plan",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc docs sync",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc ingest",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc init",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc promote",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc repair",
+  "machine_readable": "none"
+ },
+ {
+  "command": "plc standardize",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm accept",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm acceptance-scan",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm approve",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm approver-pin init",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm approver-pin status",
+  "machine_readable": "json"
+ },
+ {
+  "command": "pm close",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm confirm-start",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm context",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm drafts",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm execute",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm handoff",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm inbox add",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm inbox confirm",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm inbox list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm inbox reject",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm inbox show",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm missions",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm orient",
+  "machine_readable": "json"
+ },
+ {
+  "command": "pm park",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm pending",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm plan",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm recover",
+  "machine_readable": "json"
+ },
+ {
+  "command": "pm recover-status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm resume",
+  "machine_readable": "json"
+ },
+ {
+  "command": "pm sign-risk",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm state-backup pull",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm state-backup push",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm state-backup status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm switch",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm takeover",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm triage",
+  "machine_readable": "json"
+ },
+ {
+  "command": "pm unpark",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm verify",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm workflow",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm-session archive",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm-session check",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pm-session view",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pr open",
+  "machine_readable": "none"
+ },
+ {
+  "command": "pr ready",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project create",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project delete",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project edit",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project hooks install",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project hooks status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project hooks uninstall",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project import",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project list",
+  "machine_readable": "json"
+ },
+ {
+  "command": "project register",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project retrofit",
+  "machine_readable": "none"
+ },
+ {
+  "command": "project show",
+  "machine_readable": "json"
+ },
+ {
+  "command": "project snapshot",
+  "machine_readable": "json"
+ },
+ {
+  "command": "prototype archive",
+  "machine_readable": "none"
+ },
+ {
+  "command": "prototype bundle",
+  "machine_readable": "none"
+ },
+ {
+  "command": "prototype check",
+  "machine_readable": "none"
+ },
+ {
+  "command": "prototype init",
+  "machine_readable": "none"
+ },
+ {
+  "command": "python check",
+  "machine_readable": "json"
+ },
+ {
+  "command": "python init",
+  "machine_readable": "none"
+ },
+ {
+  "command": "python repair",
+  "machine_readable": "none"
+ },
+ {
+  "command": "role check",
+  "machine_readable": "json"
+ },
+ {
+  "command": "role list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "spec check",
+  "machine_readable": "format"
+ },
+ {
+  "command": "spec frontmatter",
+  "machine_readable": "none"
+ },
+ {
+  "command": "spec index",
+  "machine_readable": "none"
+ },
+ {
+  "command": "spec lint",
+  "machine_readable": "format"
+ },
+ {
+  "command": "spec report",
+  "machine_readable": "format"
+ },
+ {
+  "command": "spec sync",
+  "machine_readable": "none"
+ },
+ {
+  "command": "template list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "template update",
+  "machine_readable": "none"
+ },
+ {
+  "command": "vartable batch-parse",
+  "machine_readable": "format"
+ },
+ {
+  "command": "vartable convert",
+  "machine_readable": "format"
+ },
+ {
+  "command": "vartable detect-encoding",
+  "machine_readable": "format"
+ },
+ {
+  "command": "vartable detect-format",
+  "machine_readable": "format"
+ },
+ {
+  "command": "vartable list-encodings",
+  "machine_readable": "none"
+ },
+ {
+  "command": "vartable list-formats",
+  "machine_readable": "format"
+ },
+ {
+  "command": "vartable parse",
+  "machine_readable": "format"
+ },
+ {
+  "command": "workflow accept",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow approve",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow confirm-start",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow context",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow execute",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow history",
+  "machine_readable": "json"
+ },
+ {
+  "command": "workflow list",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow plan",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow resume",
+  "machine_readable": "json"
+ },
+ {
+  "command": "workflow run",
+  "machine_readable": "none"
+ },
+ {
+  "command": "workflow status",
+  "machine_readable": "none"
+ },
+ {
+  "command": "worktree close",
+  "machine_readable": "none"
+ },
+ {
+  "command": "worktree list",
+  "machine_readable": "json"
+ },
+ {
+  "command": "worktree open",
+  "machine_readable": "none"
+ },
+ {
+  "command": "worktree sweep",
+  "machine_readable": "json"
+ }
+]

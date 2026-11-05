@@ -1,0 +1,1034 @@
+<title>驾驶舱总控屏 v2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: desktop shell (dark rail + light work area + bottom console drawer), the same bones the PySide6 app will have.
+   Color: graphite rail, cool neutral surfaces, one ink-blue accent; red/amber/blue/green only for severity, grey dashed = not checked.
+   Type: Microsoft YaHei UI in the real app (Noto Sans SC here), Consolas in the real app (JetBrains Mono here) for ids, hashes and commands. */
+:root{
+  --bg:#eceff3; --surface:#ffffff; --surface2:#f5f7f9; --line:#dfe3e9; --line2:#c8cfd9;
+  --ink:#15191f; --ink2:#485262; --ink3:#616b7a;
+  --rail:#171c24; --rail-ink:#a9b2bf; --rail-on:#ffffff; --rail-line:#262d38; --rail-hover:#212833; --rail-act:#2a3342;
+  --accent:#1d5c8f; --accent-ink:#ffffff; --accent-soft:#e1edf7;
+  --block:#c6262e; --block-soft:#fbe9ea; --risk:#9a5c08; --risk-soft:#fdf1dc; --hint:#2f6db3; --hint-soft:#e6eef9;
+  --ok:#2c7a46; --ok-soft:#e3f2e8; --na:#5f687a; --na-soft:#eef0f4;
+  --sans:"Microsoft YaHei UI","Noto Sans SC","PingFang SC",system-ui,sans-serif;
+  --mono:"Cascadia Mono","JetBrains Mono",Consolas,Menlo,monospace;
+  --shadow:0 1px 2px rgba(15,25,40,.06),0 8px 24px rgba(15,25,40,.10);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1217; --surface:#171b22; --surface2:#1c212a; --line:#272d37; --line2:#374050;
+  --ink:#e7eaef; --ink2:#a0aab9; --ink3:#8f99a8;
+  --rail:#0a0d11; --rail-ink:#8e98a7; --rail-line:#1a1f27; --rail-hover:#141922; --rail-act:#1e2633;
+  --accent:#5aa3de; --accent-ink:#071420; --accent-soft:#172636;
+  --block:#ff7078; --block-soft:#381d20; --risk:#e8aa52; --risk-soft:#332810; --hint:#7eb0f2; --hint-soft:#182640;
+  --ok:#62c686; --ok-soft:#15301f; --na:#8994a5; --na-soft:#212630; color-scheme:dark;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1217; --surface:#171b22; --surface2:#1c212a; --line:#272d37; --line2:#374050;
+  --ink:#e7eaef; --ink2:#a0aab9; --ink3:#8f99a8;
+  --rail:#0a0d11; --rail-ink:#8e98a7; --rail-line:#1a1f27; --rail-hover:#141922; --rail-act:#1e2633;
+  --accent:#5aa3de; --accent-ink:#071420; --accent-soft:#172636;
+  --block:#ff7078; --block-soft:#381d20; --risk:#e8aa52; --risk-soft:#332810; --hint:#7eb0f2; --hint-soft:#182640;
+  --ok:#62c686; --ok-soft:#15301f; --na:#8994a5; --na-soft:#212630; color-scheme:dark;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:12px;letter-spacing:0}
+.num{font-variant-numeric:tabular-nums}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* shell */
+.app{display:grid;grid-template-columns:212px minmax(0,1fr);height:100%;padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px))}
+.rail{background:var(--rail);color:var(--rail-ink);display:flex;flex-direction:column;padding:14px 10px;gap:2px;overflow:auto;min-height:0}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 14px;color:var(--rail-on);font-weight:700;font-size:15px;letter-spacing:.04em}
+.brand svg{width:22px;height:22px;stroke:var(--rail-on)}
+.grp{font-size:11px;letter-spacing:.14em;color:#8590a0;padding:14px 10px 6px;text-transform:uppercase}
+.nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;background:none;border:0;text-align:left;color:var(--rail-ink);width:100%}
+.nav:hover{background:var(--rail-hover);color:var(--rail-on)}
+.nav[aria-current="page"]{background:var(--rail-act);color:var(--rail-on)}
+.nav .badge{margin-left:auto;min-width:20px;padding:0 6px;height:18px;border-radius:9px;font-size:11px;line-height:18px;text-align:center;background:var(--block);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.nav .badge.soft{background:#394353;color:#d5dbe4}
+.rail .spacer{flex:1}
+.rail .foot{padding:10px;font-size:11px;color:#8590a0;border-top:1px solid var(--rail-line);margin-top:8px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 24px;background:var(--surface);border-bottom:1px solid var(--line)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);color:var(--ink2);font-size:12px;white-space:nowrap}
+.chip b{font-weight:500;color:var(--ink)}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.chip.off .dot{background:var(--na)}
+.chip.warn .dot{background:var(--risk)}
+.top .grow{flex:1}
+a.btn{text-decoration:none}
+.seg{display:inline-flex;align-self:flex-start;border:1px solid var(--line2);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:4px 12px;color:var(--ink2);font-size:12px}
+.seg button+button{border-left:1px solid var(--line2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.demo{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px dashed var(--na);color:var(--na);border-radius:4px;font-size:11px;letter-spacing:.04em}
+.scroll{flex:1;min-height:0;overflow:auto;padding:22px 24px 28px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font-size:21px;margin:0;font-weight:700;letter-spacing:.01em;text-wrap:balance}
+h2{font-size:14px;margin:0;font-weight:700}
+.sub{color:var(--ink2);font-size:12.5px}
+.hd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.hd .sub{flex:1}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.pad{padding:16px 18px}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec>.hd{padding:0 2px}
+.cols{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:20px;align-items:start}
+
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:10px;font-size:11.5px;font-weight:500;white-space:nowrap;background:var(--na-soft);color:var(--na)}
+.pill.block{background:var(--block-soft);color:var(--block)}
+.pill.risk{background:var(--risk-soft);color:var(--risk)}
+.pill.hint{background:var(--hint-soft);color:var(--hint)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.accent{background:var(--accent-soft);color:var(--accent)}
+.pill.na{background:transparent;border:1px dashed var(--na);color:var(--na)}
+.pill svg.i{width:12px;height:12px;stroke-width:2.2}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--line2);background:var(--surface);color:var(--ink);font-size:12.5px;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{border-color:transparent;background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-soft)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* today: headline */
+.lead{display:flex;align-items:center;gap:22px;padding:18px 22px;flex-wrap:wrap}
+.lead .big{font-size:44px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.lead .t{display:flex;flex-direction:column;gap:2px;flex:1;min-width:240px}
+.lead .t b{font-size:16px}
+.mix{display:flex;gap:8px;flex-wrap:wrap}
+
+/* queue */
+.q{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;padding:14px 18px;border-top:1px solid var(--line)}
+.q:first-child{border-top:0}
+.q .l{display:flex;flex-direction:column;gap:4px;min-width:0}
+.q .row1{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.q .ttl{font-size:14.5px;font-weight:700}
+.q .why{color:var(--ink2);font-size:12.5px}
+.q .r{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.q .age{font-size:12px;color:var(--ink2);white-space:nowrap}
+.q .age b{font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+.q .say{grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--surface2);border-radius:6px;padding:6px 8px;color:var(--ink2);font-size:12px}
+.q .say .mono{color:var(--ink);overflow-wrap:anywhere}
+.q .say .btn{margin-left:auto}
+.q .acts{display:flex;gap:6px}
+.more{padding:10px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;color:var(--ink2);font-size:12.5px}
+
+/* integrity */
+.int{display:flex;flex-direction:column}
+.ir{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 16px;border-top:1px solid var(--line)}
+.ir:first-child{border-top:0}
+.ir .k{font-weight:500}
+.ir .h{grid-column:1/-1;font-size:11.5px;color:var(--ink3)}
+.ir .v{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;text-align:right}
+.ir .v.na{font-weight:500;font-size:12.5px;color:var(--na);border:1px dashed var(--na);border-radius:4px;padding:0 8px;line-height:22px}
+.ir .v.bad{color:var(--block)} .ir .v.warn{color:var(--risk)} .ir .v.good{color:var(--ok)}
+.gauge{display:flex;gap:3px;padding:12px 16px 0}
+.gauge i{flex:1;height:5px;border-radius:3px;background:var(--line2)}
+.gauge i.on{background:var(--accent)}
+.gauge i.off{background:transparent;border:1px dashed var(--na)}
+
+/* work + timeline */
+.work{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.wk{padding:14px 16px;display:flex;flex-direction:column;gap:8px;text-align:left;width:100%}
+.wk:hover{border-color:var(--line2);box-shadow:var(--shadow)}
+.dots{display:flex;gap:3px}
+.dots i{flex:1;height:6px;border-radius:2px;background:var(--line2)}
+.dots i.d{background:var(--accent)}
+.dots i.c{background:var(--accent);outline:2px solid var(--accent-soft);outline-offset:1px}
+.dots i.u{background:var(--risk)}
+.dots i.f{background:var(--block)}
+.tl{display:grid;grid-template-columns:104px 150px minmax(0,1fr);gap:0}
+.tl>div{padding:9px 14px;border-top:1px solid var(--line);align-items:center;display:flex}
+.tl>div:nth-child(-n+3){border-top:0}
+.tl .t{color:var(--ink3)}
+
+/* missions board */
+.mis{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:20px;align-items:start}
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}
+.col{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:120px}
+.col>h3{margin:0;font-size:12.5px;display:flex;align-items:center;gap:8px;color:var(--ink2);padding:2px 4px}
+.col>h3 b{margin-left:auto;font-weight:500;font-variant-numeric:tabular-nums}
+.mc{background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:10px 11px;display:flex;flex-direction:column;gap:6px;text-align:left;width:100%}
+.mc:hover{border-color:var(--line2)}
+.mc[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.mc .id{color:var(--ink3)}
+.mc .tt{font-weight:500;line-height:1.4}
+.tags{display:flex;gap:5px;flex-wrap:wrap}
+.empty{border:1px dashed var(--line2);border-radius:7px;padding:14px;color:var(--ink3);font-size:12px;text-align:center}
+.det{position:sticky;top:0;display:flex;flex-direction:column}
+.det .hdr{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.spine{list-style:none;margin:0;padding:12px 18px 6px;display:flex;flex-direction:column}
+.sp{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;position:relative;padding-bottom:12px}
+.sp:not(:last-child)::before{content:"";position:absolute;left:12px;top:24px;bottom:-2px;width:2px;background:var(--line2)}
+.sp.done:not(:last-child)::before{background:var(--accent)}
+.sp .nd{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line2);background:var(--surface);color:var(--ink3);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;position:relative;z-index:1}
+.sp.done .nd{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.sp.cur .nd{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.sp.user .nd{border-color:var(--risk);color:var(--risk);box-shadow:0 0 0 4px var(--risk-soft)}
+.sp.lost .nd{border-color:var(--block);color:var(--block);box-shadow:0 0 0 4px var(--block-soft)}
+.sp.park .nd{border-style:dashed;border-color:var(--na);color:var(--na)}
+.sp .nd svg.i{width:12px;height:12px;stroke-width:2.6}
+.sp .tx{display:flex;flex-direction:column;gap:1px;min-width:0}
+.sp .nm{display:flex;gap:8px;align-items:center;font-weight:500}
+.sp.todo .nm{color:var(--ink3);font-weight:400}
+.sp .ev{font-size:11.5px;color:var(--ink3);overflow-wrap:anywhere}
+.sp .ev.none{color:var(--na)}
+.who{font-size:11px;color:var(--ink3);border:1px solid var(--line);border-radius:4px;padding:0 5px;line-height:17px;font-weight:400}
+.next{margin:4px 14px 16px;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--surface2);border:1px solid var(--line)}
+.next.user{background:var(--risk-soft);border-color:transparent}
+.next.lost{background:var(--block-soft);border-color:transparent}
+.next b{font-size:13.5px}
+.cmd{display:flex;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.cmd .mono{flex:1;overflow-wrap:anywhere;min-width:0}
+.steps-fix{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;color:var(--ink2)}
+
+/* tables */
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th{font-size:11.5px;font-weight:500;color:var(--ink3);text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 14px;border-top:1px solid var(--line);vertical-align:top}
+tr:first-child td{border-top:0}
+.gates{display:flex;gap:4px;flex-wrap:wrap}
+.g{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:4px;font-size:11px;background:var(--na-soft);color:var(--na);white-space:nowrap}
+.g.ok{background:var(--ok-soft);color:var(--ok)} .g.bad{background:var(--block-soft);color:var(--block)} .g.wait{background:var(--risk-soft);color:var(--risk)}
+.g.na{background:transparent;border:1px dashed var(--na)}
+.g svg.i{width:11px;height:11px;stroke-width:2.6}
+.verdict{display:flex;flex-direction:column;gap:5px}
+.reason{font-size:12px;color:var(--ink2)}
+
+/* worktrees */
+.topo{display:flex;flex-direction:column;align-items:center;gap:0;padding:18px 18px 6px}
+.root-box{border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:10px 16px;display:flex;flex-direction:column;gap:2px;align-items:center;max-width:100%}
+.stem{width:2px;height:16px;background:var(--line2)}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink2)}
+.fld input,.fld select{height:30px;border:1px solid var(--line2);border-radius:6px;background:var(--surface);color:var(--ink);padding:0 8px;font:inherit}
+
+/* release */
+.pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0}
+.ps{padding:14px 14px 14px 18px;display:flex;flex-direction:column;gap:4px;position:relative;background:var(--surface2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%,14px 50%);margin-left:-8px}
+.ps:first-child{clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);margin-left:0;border-left:1px solid var(--line)}
+.ps.done{background:var(--ok-soft)} .ps.cur{background:var(--accent-soft)} .ps.user{background:var(--risk-soft)}
+.ps .n{font-size:11px;color:var(--ink3)} .ps b{font-size:13px}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start}
+.kv{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px 14px;margin:0}
+.kv dt{color:var(--ink3)} .kv dd{margin:0;overflow-wrap:anywhere}
+.oral{display:flex;flex-direction:column}
+.oral>div{padding:12px 16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.oral>div:first-child{border-top:0}
+
+/* plc */
+.verd{display:flex;gap:16px;align-items:center;padding:18px 20px;flex-wrap:wrap}
+.verd .badge-lg{width:52px;height:52px;border-radius:12px;display:grid;place-items:center;flex:none}
+.verd .badge-lg svg.i{width:26px;height:26px;stroke-width:2.2}
+.verd.ok .badge-lg{background:var(--ok-soft);color:var(--ok)}
+.verd.bad .badge-lg{background:var(--block-soft);color:var(--block)}
+.verd.na .badge-lg{border:1.5px dashed var(--na);color:var(--na)}
+.verd .t{flex:1;min-width:240px;display:flex;flex-direction:column;gap:2px}
+.verd .t b{font-size:17px}
+.list{display:flex;flex-direction:column}
+.li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;padding:10px 16px;border-top:1px solid var(--line);align-items:start}
+.li:first-child{border-top:0}
+.li .s{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--na-soft);color:var(--na)}
+.li .s.ok{background:var(--ok-soft);color:var(--ok)} .li .s.bad{background:var(--block-soft);color:var(--block)} .li .s.warn{background:var(--risk-soft);color:var(--risk)}
+.li .s svg.i{width:12px;height:12px;stroke-width:2.6}
+.note{font-size:12px;color:var(--ink3)}
+
+/* spine svg */
+.svgbox{overflow-x:auto;padding:6px 8px 12px}
+.svgbox svg{display:block;min-width:960px;width:100%;height:auto}
+.lg{display:flex;gap:14px;flex-wrap:wrap;padding:0 16px 14px;color:var(--ink2);font-size:12px}
+
+/* commands */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filters input{height:30px;border:1px solid var(--line2);border-radius:6px;background:var(--surface);color:var(--ink);padding:0 10px;font:inherit;min-width:220px}
+.fchip{height:26px;padding:0 11px;border-radius:13px;border:1px solid var(--line2);background:var(--surface);font-size:12px;color:var(--ink2)}
+.fchip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+
+/* console drawer + sheet + toast */
+.drawer{border-top:1px solid var(--line);background:var(--surface)}
+.drawer>button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:7px 24px;text-align:left;color:var(--ink2);font-size:12px}
+.drawer .log{max-height:180px;overflow:auto;border-top:1px solid var(--line);padding:6px 24px 10px;display:flex;flex-direction:column;gap:6px}
+.log .e{display:grid;grid-template-columns:96px minmax(0,1fr) 70px;gap:12px;align-items:baseline}
+.log .e .mono{overflow-wrap:anywhere}
+.sheet-bg{position:fixed;inset:0;background:rgba(10,14,20,.5);display:grid;place-items:center;padding:20px;z-index:50}
+.sheet{width:min(560px,100%);background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:22px;display:flex;flex-direction:column;gap:12px;max-height:100%;overflow:auto}
+.sheet h2{font-size:17px}
+.sheet .danger{background:var(--risk-soft);color:var(--risk);border-radius:6px;padding:8px 10px;font-size:12.5px;display:flex;gap:8px;align-items:flex-start}
+.sheet .foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.toast{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:8px 14px;border-radius:8px;font-size:12.5px;z-index:60;box-shadow:var(--shadow)}
+
+@media (max-width:1100px){.mis{grid-template-columns:minmax(0,1fr)}.det{position:static}.cols{grid-template-columns:minmax(0,1fr)}.board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .rail{flex-direction:row;padding:6px 8px;overflow-x:auto;overflow-y:hidden;gap:4px;align-items:center}
+  .brand,.grp,.rail .foot,.rail .spacer{display:none}
+  .nav{width:auto;white-space:nowrap}
+  .top{padding:8px 16px}
+  .scroll{padding:16px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+  .board{grid-template-columns:minmax(0,1fr)}
+  .pipe{grid-template-columns:minmax(0,1fr);gap:6px}
+  .ps,.ps:first-child{clip-path:none;margin-left:0;border:1px solid var(--line);border-radius:6px}
+  .tl{grid-template-columns:minmax(0,1fr)}
+  .tl>div{border-top:0;padding:2px 14px}
+  .drawer>button{padding-inline:16px}.drawer .log{padding-inline:16px}
+  .log .e{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:no-preference){.mc,.btn,.nav,.wk{transition:background-color .12s,border-color .12s,box-shadow .12s}}
+
+.hc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.hc .ht{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hc .ht b{font-size:15px}
+.hc dl{display:grid;grid-template-columns:104px 1fr;gap:6px 14px;margin:0;font-size:13px}
+.hc dt{color:var(--ink2)}
+.hc dd{margin:0}
+.hc .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button.chip.act{font:inherit;cursor:pointer;background:var(--block-soft);color:var(--block);border-color:transparent}
+.chip.bad{background:var(--block-soft);color:var(--block);border-color:transparent}
+.wz .steps{display:flex;gap:6px;flex-wrap:wrap}
+.wz .facts{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:13px;margin:0}
+.wz .facts dt{color:var(--ink2)}
+.wz .facts dd{margin:0}
+.wz input[type=text],.wz input[type=password]{height:36px;border:1px solid var(--line2);border-radius:6px;background:var(--surface);color:var(--ink);padding:0 10px;font:inherit;width:100%}
+.wz .warn{background:var(--risk-soft);color:var(--risk);border-radius:6px;padding:8px 10px;font-size:12.5px;display:flex;gap:8px;align-items:flex-start}
+.wz .chk{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+@media (max-width:640px){.hc dl,.wz .facts{grid-template-columns:1fr}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="6" rx="1"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M18 17V9a3 3 0 0 0-3-3h-3"/><path d="M14 3l-2 3 2 3"/></symbol>
+  <symbol id="i-tree" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 3c3 2 5 5 5 9l-2 4H9l-2-4c0-4 2-7 5-9z"/><circle cx="12" cy="10" r="1.6"/><path d="M9 16l-2 4 3-1M15 16l2 4-3-1"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="5" rx="1"/><rect x="15" y="4" width="6" height="5" rx="1"/><rect x="9" y="15" width="6" height="5" rx="1"/><path d="M9 6.5h6M6 9v3h12V9M12 12v3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-dash" viewBox="0 0 24 24"><path d="M7 12h10"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-cross" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <nav class="rail" id="rail" aria-label="页面"></nav>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <div class="scroll" id="scroll"><div class="wrap" id="view"></div></div>
+    <div class="drawer" id="drawer"></div>
+  </div>
+</div>
+<div id="overlay"></div>
+
+<script>
+"use strict";
+/* ---------- helpers ---------- */
+var $=function(s,r){return (r||document).querySelector(s)};
+var ic=function(n,c){return '<svg class="i'+(c?' '+c:'')+'" aria-hidden="true"><use href="#i-'+n+'"/></svg>'};
+var esc=function(s){return String(s).replace(/[&<>"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]})};
+
+/* ---------- example data (everything here is made up for the prototype) ---------- */
+var STEPS=[
+ {n:1,name:'进门定位',who:'本地',cmd:'pm orient <PID> --json',lane:1},
+ {n:2,name:'入箱',who:'你说，本地记',cmd:'pm inbox add / confirm',lane:0},
+ {n:3,name:'出计划',who:'本地',cmd:'pm plan（七栏）',lane:1},
+ {n:4,name:'批准',who:'你',cmd:'pm approve',lane:0,user:1,tp:'①'},
+ {n:5,name:'开工',who:'本地',cmd:'worktree open → run start',lane:1},
+ {n:6,name:'写与自检',who:'本地',cmd:'plc check · doc check · pytest',lane:1},
+ {n:7,name:'验证',who:'本地',cmd:'pm verify --lease-wallet',lane:1},
+ {n:8,name:'提 PR',who:'本地',cmd:'pr open',lane:1},
+ {n:9,name:'审计与合并',who:'云端',cmd:'audit_pr.py · pr ready',lane:2,tp:'②'},
+ {n:10,name:'验收与收口',who:'你',cmd:'pm accept → pm close',lane:0,user:1,tp:'②'}
+];
+var MIS=[
+ {id:'CARD-SW008-GUI-U01',pid:'SW-2026-008',title:'脊柱图页：流程图页加“一件事怎么走”',state:'ACTIVE',col:0,step:6,owner:'claude:laptop',lease:'租约还剩 41 分钟',
+  ev:['pm orient · 11-05 08:02 · 退出码 0','pm inbox confirm · 11-05 08:10 · 你','pm plan · 七栏齐 · 验收 3 条','pm approve · 11-05 08:21 · 你亲手','worktree open claude · 分支 claude/gui-u01','',
+      '','','',''],
+  next:{kind:'agent',title:'agent 在写：不用你做什么',desc:'写完自检会进到第 7 步。你想看它在跑什么，复制下面这条自己在终端看。',cmd:'python main.py continuity checkpoint --run-id RUN-0042 --list'}},
+ {id:'CARD-DJ009-002',pid:'DJ-2026-009',title:'握手中途断线撤销允许信号',state:'ACCEPTANCE_PENDING',col:1,step:10,owner:'trae:cn',lease:'已释放',tags:['等了 1 天'],wait:'1 天',sev:'hint',
+  ev:['pm orient · 11-03 09:15 · 0','pm inbox confirm · 11-03 09:30 · 你','pm plan · 七栏齐','pm approve · 11-03 09:41 · 你亲手','worktree open trae · 分支 trae/dj009-002','plc check · LSP 已真跑 · 退出码 0',
+      'pm verify · 11-04 16:50 · 0','pr open · #611','audit_pr · PASS · 规则/安全无需签字',''],
+  next:{kind:'user',title:'确认验收',desc:'验收只能由你本人做。记下你已经看过结果；验收后还要收口，才会把文件并回控制根。',cmd:'python main.py pm accept --mission-id MIS-DJ009-0002',btn:'确认验收',how:'accept'}},
+ {id:'CARD-DJ009-003',pid:'DJ-2026-009',title:'安全区 7 点（急停、安全门复位后不自启）',state:'AWAITING_APPROVAL',col:1,step:4,owner:'—',lease:'未开工',tags:['安全区','等了 14 小时'],wait:'14 小时',sev:'hint',
+  ev:['pm orient · 11-04 06:05 · 0','pm inbox confirm · 11-04 06:08 · 你','pm plan · 七栏齐 · 安全回路：是','','','','','','',''],
+  next:{kind:'user',title:'批准范围',desc:'只批准你看过的这一版（哈希对不上命令会拒绝）。批准不会启动任何 agent。',cmd:'python main.py pm approve --request-id REQ-0031 --plan-hash 4be07a91c3d2',btn:'批准范围',how:'approve'}},
+ {id:'CARD-DJ009-001',pid:'DJ-2026-009',title:'Modbus TCP 客户端通讯层',state:'PARKED',col:2,step:6,owner:'claude:cloud',lease:'钥匙已交出',tags:['搁了 9 天'],wait:'9 天',sev:'hint',
+  ev:['pm orient · 10-26 · 0','pm inbox confirm · 你','pm plan · 七栏齐','pm approve · 你亲手','worktree open claude','断点：握手函数写完，缺超时重连的测试'],
+  next:{kind:'user',title:'拿回，或继续搁着',desc:'搁着超过 7 天。拿回只听你本人；拿回后先同步 main 再干活。',cmd:'python main.py pm unpark --mission-id MIS-DJ009-0001 --as claude:laptop --approval-evidence-ref user-confirmation:<你那条消息的时间>',btn:'拿回',how:'unpark'}},
+ {id:'CARD-SW008-PLC-FB2002',pid:'SW-2026-005',title:'FB_2002 不再读 Output，修警告',state:'ACTIVE',col:0,step:6,owner:'claude:laptop',lease:'租约过期 3 小时',tags:['失联'],lost:1,sev:'block',wait:'3 小时',
+  ev:['pm orient · 11-04 13:40 · 0','pm inbox confirm · 你','pm plan · 七栏齐','pm approve · 你亲手','worktree open claude','最近断点 11-04 14:20 · 距今 4 小时'],
+  next:{kind:'lost',title:'执行者失联：先这样处理',desc:'卡开着、租约过期、最近断点也超过 1 小时。别重开一张，先按顺序做：',
+   fix:['在控制根复制下面的命令，看恢复状态（只读）。','状态是“可接管”→ 让另一个 agent 用 handoff 接手；状态不明 → 先别动，把输出发给我。','都不行再看《出事了怎么办》第 3 段。'],cmd:'python main.py pm recover-status --pid SW-2026-005'}}
+];
+var PRS=[
+ {n:611,proj:['DJ-2026-009'],t:'feat(plc): DJ-009 握手撤销允许信号',br:'trae/dj009-002',head:'a1b2c3d4e5f6',gates:['ok','ok','na','ok','ok'],audit:'PASS',need:'',onlineOnly:1},
+ {n:612,proj:['DJ-2026-005'],t:'fix(plc): FB_2002 不读 Output（碰安全区）',br:'claude/fb2002',head:'7f3c9a10b2de',gates:['ok','ok','wait','ok','ok'],audit:'PASS',need:'安全签字 7f3c9a10b2de',needKind:'safety'},
+ {n:613,proj:['仓库公共'],t:'docs(rules): AGENTS.md 指针整理',br:'claude/agents-ptr',head:'9e1d4c77a0b3',gates:['ok','wait','na','ok','ok'],audit:'PASS',need:'规则批准 9e1d4c77a0b3',needKind:'rules'},
+ {n:614,proj:['SW-2026-008'],t:'test(cli): 长门禁加固',br:'claude/gate-harden',head:'5d20e8b611c4',gates:['bad','ok','na','ok','bad'],audit:'—',need:'',red:'sw008-ci 红：test_long_gate'},
+ {n:615,proj:['SW-2026-008','仓库公共'],t:'chore(docs): handover 一页脊柱',br:'claude/spine-page',head:'c04a7e19d5b8',gates:['ok','ok','na','ok','ok'],audit:'UNVERIFIED',need:'',unv:'审计有 UNVERIFIED，要人工补查'}
+];
+var GATE_NAMES=['pr-gate','rules-approval','safety-zone','reviews-tools-ci','ci-aggregate'];
+var GH='https://github.com/baiyangfu-hash/WorkSpacePM';
+var WT=[
+ {n:'claude',kind:'agent',br:'claude/gui-u01',dirty:3,unpushed:0,merged:false,idle:0,card:['CARD-SW008-GUI-U01'],size:'1.2 GB'},
+ {n:'trae',kind:'agent',br:'trae/dj009-002',dirty:0,unpushed:1,merged:false,idle:1,card:['CARD-DJ009-002'],size:'0.9 GB'},
+ {n:'cursor',kind:'agent',br:'—',dirty:0,unpushed:0,merged:true,idle:6,stale:1,card:[],size:'0 B',empty:1},
+ {n:'manual',kind:'other',br:'manual/dj-009',dirty:1,unpushed:0,merged:false,idle:2,card:[],size:'0.4 GB'},
+ {n:'claude-fb',kind:'agent',br:'claude/fb2002',dirty:0,unpushed:2,merged:false,idle:1,card:['CARD-SW008-PLC-FB2002','CARD-SW008-GUI-U01'],size:'1.1 GB',bad:'同一个工位同时挂了两张卡'},
+ {n:'run-plan-REL72-002',kind:'run-plan',br:'run-plan-REL72-002',dirty:0,unpushed:0,merged:true,idle:2,card:[],size:'0.3 GB'}
+];
+var BR=[
+ {b:'trae/dj009-002',where:'本地+远程',ahead:4,behind:0,merged:false,pr:611,wt:'trae',tip:'留着',why:'PR 开着'},
+ {b:'claude/fb2002',where:'本地+远程',ahead:2,behind:3,merged:false,pr:612,wt:'claude-fb',tip:'留着',why:'落后 main 3 个提交，拿回后先同步'},
+ {b:'claude/gui-u01',where:'本地+远程',ahead:5,behind:0,merged:false,pr:0,wt:'claude',tip:'留着',why:'还没开 PR'},
+ {b:'claude/agents-ptr',where:'远程',ahead:1,behind:0,merged:false,pr:613,wt:'',tip:'留着',why:'PR 开着，等规则批准'},
+ {b:'claude/gate-harden',where:'远程',ahead:2,behind:0,merged:false,pr:614,wt:'',tip:'留着',why:'PR 红，作者在修'},
+ {b:'claude/old-m3-notes',where:'本地',ahead:0,behind:7,merged:true,remoteGone:1,pr:0,wt:'',tip:'可清理',why:'已并进 main，远程已删'},
+ {b:'codex/m2-gov-wbs9-attest',where:'远程',ahead:0,behind:41,merged:true,pr:0,wt:'',tip:'保护',why:'你 10-23 定的保留'},
+ {b:'backup/main-20261104',where:'本地+远程',ahead:0,behind:2,merged:true,pr:0,wt:'',tip:'保护',why:'备份分支，不许动'}
+];
+var SWEEP=[
+ {t:'cursor',cat:'工位',rm:1,why:'已并进 main，干净，闲置 6 天'},
+ {t:'run-plan-REL72-002',cat:'run-plan 残留',rm:1,why:'Run 已结束，没有未提交改动'},
+ {t:'claude/old-m3-notes',cat:'远程已删的本地分支',rm:1,why:'已并进 main，远程已删'},
+ {t:'claude-fb',cat:'工位',rm:0,why:'还有 2 个未推送提交；保留'},
+ {t:'manual',cat:'名册外目录',rm:0,why:'有未提交改动；保留'}
+];
+var CMDS=[
+ ['pm orient','主线','进门定位 · 步骤 1',1,'连续性查询 continuity-resume.v2（含 conflicts、next_legal_action）'],
+ ['pm resume','主线','恢复细节',1,'同上'],
+ ['pm sign-risk','主线','签署接受风险 · 要终端交互',2,'要你输入 Run 编号整串、“接受风险”四个字，口令生效时再输口令；带 agent 标记或非终端一律拒。界面向导见“要你出手”；后端分三步：终端窗口过渡（今天）、--status 只读（R-7，第一个实施项）、--explain 加 --submit（改批准规则，实施前须你单独批准）'],
+ ['pm state-backup status','主线','顶栏“账本备份 N 小时前” · 要你出手',0,'只读，读本机标记文件，不联网；只输出一行文字（建议新增 R-8：--json）；生效版本 1.3.3-dd8b192 里已有（协调者报告，冒烟测试退出码 0）'],
+ ['pm state-backup push','主线','账本异地备份 · 要你出手（第 16 种）',0,'agent 端自动模式会把它当数据外传拦下，要你在独立 PowerShell 里运行；可加 --dry-run 演练；不要口令；生效版本 1.3.3-dd8b192 里已有（协调者报告）'],
+ ['pm missions','主线','四栏卡板',2,'默认就是 JSON（pm-missions.v1：在干、等你、搁着、已关四栏；搁着的卡带原因、断点、是否超 7 天）'],
+ ['pm pending','主线','待批准范围卡',2,'默认就是 JSON（界面已经在读 cards 列表）'],
+ ['pm inbox list','主线','收件箱',2,'默认就是 JSON（界面已经在读 items 列表）'],
+ ['pm triage','主线','分诊台（切换前部署的 1.3.3-d563293 里没有；现行 1.3.3-dd8b192 待笔记本重核）',3,'pm-triage.v1，--json 已有'],
+ ['pm approver-pin status','主线','口令是否生效',1,'第一行文字也能判，--json 已有'],
+ ['pm verify','主线','验证 · 步骤 7',2,'默认就是 JSON；成败看退出码，reason 是原因'],
+ ['pm recover-status','主线','主控重启后状态',2,'默认就是 JSON'],
+ ['worktree list','主线','工作树 · 步骤 5',1,'--json；加 --deep 才查未提交、未推送、是否并进 main'],
+ ['pr ready','主线','合并前放行检查 · 步骤 9',0,'退出码 0/1，没有 JSON；工位页和 PR 页都需要'],
+ ['long-run status','主线','门禁进度',0,'文字'],
+ ['ledger reconcile','主线','对账（目标 0/0/0）',0,'文字，退出码判差异'],
+ ['plc check','领域','PLC 检查 · LSP 证据',1,'--json'],
+ ['spec check','领域','规范检查',4,'--format json'],
+ ['doc check','领域','文档静态扫描',0,'文字'],
+ ['change list / show','领域','变更单',0,'文字；工具页现在靠文字解析'],
+ ['decision list / show','领域','决策',0,'文字'],
+ ['handoff（17 条）','历史','v1 交接，已退役',0,'不进界面'],
+ ['pm-session（3 条）','历史','PM_SESSION 已退役',0,'不进界面'],
+ ['workflow（11 条）','历史','pm 的别名',0,'不进界面']
+];
+var EVENTS=[
+ ['11-04 20:02','SW-2026-008','运行 RUN-0042 续租（claude:laptop）'],
+ ['11-04 19:47','SW-2026-008','账本备份已推送到状态仓库'],
+ ['11-04 17:31','DJ-2026-009','验收等待：CARD-DJ009-002 握手中途断线撤销允许信号'],
+ ['11-04 06:12','DJ-2026-009','批准等待：CARD-DJ009-003 安全区 7 点']
+];
+
+/* ---------- state ---------- */
+var S={view:'today',online:true,sel:MIS[1].id,drawer:false,qOpen:false,plc:'ok',cmdCat:'全部',cmdQ:'',spineSel:MIS[0].id,variant:'plc',theme:'',
+  log:[{t:'20:14:55',cmd:'main.py pm orient SW-2026-008 --json',rc:0,ex:1},{t:'20:14:52',cmd:'main.py pm missions --pid DJ-2026-009',rc:0,ex:1}],
+  done:{},closedWs:{},swept:0,hs:{},wz:null,wzStage:3,pinOn:false,marker:false,chk:'',wtTab:'trees',wtAgent:'claude',wtCard:'CARD-SW008-GUI-U02',pjReg:{},pjDirty:false,pjv:{id:'DJ-2026-005',tab:'ov'},pn:{stack:'plc',mode:'standard-project',id:'',name:'新项目名称'}};
+var NAV=[
+ ['日常（跨项目）',[['mine','要你出手','lock'],['today','今天','home'],['missions','任务','board'],['prs','PR 与审计','pr']]],
+ ['受管项目',[['projects','项目管理','folder']]],
+ ['驾驶舱（本机部署与运行）',[['worktrees','工作树与分支','tree'],['release','发版','rocket'],['spine','脊柱图','flow'],['commands','命令与契约','list']]]
+];
+var SCOPE={mine:['跨项目','每件事带“属于谁”：驾驶舱，或某个项目编号'],today:['跨项目','每件事带“属于谁”'],missions:['跨项目','每张卡属于一个项目；驾驶舱母体 SW-2026-008 的卡属于它'],prs:['跨项目','按 PR 改到的文件算属于哪个项目或驾驶舱'],projects:['受管项目','以项目编号为单位'],project:['受管项目','这个项目自己的任务、PR、PLC 证据'],worktrees:['驾驶舱（本机部署与运行）','以本机控制根为单位，不属于哪个项目'],release:['驾驶舱（本机部署与运行）','以本机控制根和发布版为单位'],spine:['驾驶舱（本机部署与运行）','驾驶舱的一件事怎么走'],commands:['驾驶舱（本机部署与运行）','驾驶舱的命令和契约']};
+function route(){var h=(location.hash||'').slice(1);if(/^[a-z]+$/.test(h)&&NAV.some(function(g){return g[1].some(function(i){return i[0]===h})}))S.view=h}
+function go(v){S.view=v;try{history.replaceState(null,'','#'+v)}catch(e){location.hash=v}render();var s=$('#scroll');if(s)s.scrollTop=0}
+
+/* ---------- derived ---------- */
+function mis(id){return MIS.filter(function(m){return m.id===id})[0]}
+function queue(){
+ var q=[];
+ MIS.forEach(function(m){
+  if(S.done[m.id])return;
+  if(m.lost)q.push({sev:'block',m:m,ttl:'执行者失联：'+m.id,why:'卡开着，租约已过期，最近断点也超过 1 小时。',age:3,unit:'小时',basis:'账本 execution_leases.expires_at + checkpoints',act:'看怎么办',say:'失联 '+m.id+' 先观察',go:m.id});
+  else if(m.state==='ACCEPTANCE_PENDING')q.push({sev:'hint',m:m,ttl:'验收结果：'+m.title,why:m.id+' · 只能你本人验收',age:24,unit:'小时',basis:'mission.state = ACCEPTANCE_PENDING',act:'去验收',say:m.id+' 验收',go:m.id,user:1});
+  else if(m.state==='AWAITING_APPROVAL')q.push({sev:'hint',m:m,ttl:'批准范围：'+m.title,why:m.id+' · 含安全区',age:14,unit:'小时',basis:'mission.state = AWAITING_APPROVAL',act:'去批准',say:m.id+' 批准范围',go:m.id,user:1});
+  else if(m.state==='PARKED')q.push({sev:'hint',m:m,ttl:'搁了 9 天：'+m.title,why:m.id+' · 拿回还是作废，由你定',age:216,unit:'小时',basis:'mission.state = PARKED，超过 7 天',act:'去看',say:m.id+' 继续搁 / 拿回',go:m.id,user:1});
+ });
+ PRS.forEach(function(p){
+  if(!S.online)return;
+  if(p.needKind==='safety')q.push({sev:'risk',pr:p,ttl:'安全签字：PR #'+p.n,why:p.t,age:9,unit:'小时',basis:'safety-zone 命中，头 '+p.head,act:'看 PR',say:p.need,go:'prs',user:1,copy:1});
+  if(p.needKind==='rules')q.push({sev:'hint',pr:p,ttl:'规则批准：PR #'+p.n,why:p.t,age:5,unit:'小时',basis:'rules-approval 等你的评论',act:'看 PR',say:p.need,go:'prs',user:1,copy:1});
+ });
+ var o={block:0,risk:1,hint:2};
+ q.sort(function(a,b){return o[a.sev]-o[b.sev]||b.age-a.age});
+ return q;
+}
+function ageText(i){return i.age>=24?Math.floor(i.age/24)+' 天':i.age+' 小时'}
+function sevPill(s){return s==='block'?'<span class="pill block">阻塞</span>':s==='risk'?'<span class="pill risk">风险</span>':'<span class="pill hint">提醒</span>'}
+function pillState(m){
+ if(m.lost)return '<span class="pill block">失联</span>';
+ return {ACTIVE:'<span class="pill accent">在干</span>',AWAITING_APPROVAL:'<span class="pill hint">待批准</span>',ACCEPTANCE_PENDING:'<span class="pill hint">待验收</span>',PARKED:'<span class="pill">搁着</span>'}[m.state]||''}
+function dots(m,big){
+ var h='<div class="dots" role="img" aria-label="第 '+m.step+' 步，共 10 步">';
+ for(var i=1;i<=10;i++){var c=i<m.step?'d':i===m.step?(m.lost?'f':(m.col===1?'u':'c')):'';h+='<i class="'+c+'"></i>'}
+ return h+'</div>';
+}
+
+/* ---------- views ---------- */
+function vToday(){
+ var q=queue(),show=S.qOpen?q:q.slice(0,4);
+ var users=q.filter(function(i){return i.user}).length,oldest=q.reduce(function(a,i){return Math.max(a,i.age)},0);
+ var h='<div class="hd"><h1>今天</h1><span class="sub">周三 11-04 20:15 MST · 账本读于 2 分钟前 · 只显示等你出手的、不替你做决定</span></div>';
+ h+='<section class="card lead"><div class="big">'+q.length+'</div><div class="t"><b>件事要你出手</b><span class="sub">最久等了 '+(oldest>=24?Math.floor(oldest/24)+' 天':oldest+' 小时')+'，其中 '+users+' 件只能你本人做。</span></div><div class="mix">'+
+   ['block','risk','hint'].map(function(s){var n=q.filter(function(i){return i.sev===s}).length;return n?sevPill(s).replace('</span>',' '+n+'</span>'):''}).join('')+'</div></section>';
+ h+='<div class="cols"><section class="sec"><div class="hd"><h2>要你出手</h2><span class="sub">严重的在前，同级等得久的在前；每件附一句可复制的回复</span></div><div class="card">';
+ show.forEach(function(i,ix){
+  h+='<div class="q"><div class="l"><div class="row1">'+sevPill(i.sev)+(i.user?'<span class="pill">'+ic('lock')+' 只听你本人</span>':'')+'</div><div class="ttl">'+esc(i.ttl)+'</div><div class="why">'+esc(i.why)+'</div><div class="note">依据 <span class="mono">'+esc(i.basis)+'</span></div></div>'+
+   '<div class="r"><div class="age">等了 <b>'+ageText(i)+'</b></div><div class="acts"><button class="btn primary sm" data-act="goto" data-v="'+(i.m?'missions':'prs')+'" data-id="'+(i.m?i.go:'')+'">'+esc(i.act)+'</button></div></div>'+
+   '<div class="say"><span>在线程里回一句：</span><span class="mono">'+esc(i.say)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(i.say)+'">'+ic('copy')+' 复制</button></div></div>';
+ });
+ if(!q.length)h+='<div class="pad"><b>今天没有要你出手的事。</b><div class="sub">下面“正在进行”里的卡都在 agent 手上。</div></div>';
+ if(q.length>4)h+='<div class="more"><button class="btn sm" data-act="qmore">'+(S.qOpen?'收起':'展开另外 '+(q.length-4)+' 件')+'</button><span>已按严重程度排好</span></div>';
+ h+='</div><div class="note" style="padding:0 2px">只覆盖三类：账本里等你的卡、变更记录里待批的、PR 上等你签字的。线程里的待办由协调者汇报，这里算不出。</div></section>';
+ // integrity
+ var on=S.online,N=on?5:3;
+ var rows=[
+  ['门禁红的分支',on?['1','bad']:['断网未知','na'],on?'GitHub check-runs；#614 的 sw008-ci 红':'要联网读 GitHub，不拿旧数据冒充'],
+  ['越界改动',['没检查','na'],'pr-gate 的结论还没接进来'],
+  ['说完成但机器没过',['0 张','good'],'只查账本路线：已关的卡收口单是否 COMPLETED；PR 路线算不出'],
+  ['安全区待签',on?['1','warn']:['断网未知','na'],on?'#612 等“安全签字 7f3c9a10b2de”':'要联网读 GitHub'],
+  ['账本对不上',['0 条','good'],'收口单与卡状态、工作项 BLOCKED、过期 Run'],
+  ['执行者失联',['1','bad'],'卡开着 + 租约过期 + 最近断点超 1 小时；只覆盖写账本的执行者']
+ ];
+ h+='<section class="sec"><div class="hd"><h2>AI 有没有越界或谎报</h2><span class="sub num">本次实际执行 '+N+' / 6</span></div><div class="card int"><div class="gauge" aria-hidden="true">';
+ var live=on?[1,0,1,1,1,1]:[0,0,1,0,1,1];
+ live.forEach(function(x,i){h+='<i class="'+(x?'on':'off')+'"></i>'});
+ h+='</div>';
+ rows.forEach(function(r){h+='<div class="ir"><span class="k">'+r[0]+'</span><span class="v '+r[1][1]+'">'+r[1][0]+'</span><span class="h">'+esc(r[2])+'</span></div>'});
+ h+='</div><div class="note" style="padding:0 2px">灰色虚线＝没检查或断网未知，不是 0，更不是绿。</div></section></div>';
+ // working
+ h+='<section class="sec"><div class="hd"><h2>正在进行</h2><span class="sub">只有一张“在干”的钥匙；点卡看它走到脊柱哪一步</span></div><div class="work">';
+ MIS.filter(function(m){return m.state==='ACTIVE'}).forEach(function(m){
+  h+='<button class="card wk" data-act="goto" data-v="missions" data-id="'+m.id+'"><div class="row1" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+pillState(m)+'<span class="mono" style="color:var(--ink3)">'+m.id+'</span></div><b>'+esc(m.title)+'</b>'+dots(m)+
+   '<div class="sub">第 '+m.step+' 步 · '+STEPS[m.step-1].name+' · '+esc(m.owner)+' · '+esc(m.lease)+'</div></button>';
+ });
+ h+='</div></section>';
+ h+='<div class="cols"><section class="sec"><div class="hd"><h2>最近发生了什么</h2><span class="sub">最近 7 天，只用账本和变更记录里真有的时间</span></div><div class="card tl">';
+ EVENTS.forEach(function(e){h+='<div class="t mono">'+e[0]+'</div><div><span class="pill">'+e[1]+'</span></div><div>'+esc(e[2])+'</div>'});
+ h+='</div></section><section class="sec"><div class="hd"><h2>谁在干活</h2></div><div class="empty">预留。Trae 和云端线程不写账本，现在没有数据源，所以不显示任何数字。</div></section></div>';
+ return h;
+}
+
+function spineHtml(m){
+ var h='<ol class="spine">';
+ STEPS.forEach(function(s,i){
+  var n=i+1,cls='todo',node=String(n),ev=m.ev[i]||'';
+  if(S.done[m.id]==='accepted'&&n===10){cls='cur';ev='已验收 · '+S.doneT+' · 你亲手；下一步收口'}
+  if(n<m.step||(S.done[m.id]==='closed')){cls='done';node=ic('check')}
+  else if(n===m.step){
+   if(m.lost){cls='lost';node=ic('x')}
+   else if(m.state==='PARKED'){cls='park';node=ic('pause')}
+   else if(m.col===1&&!S.done[m.id]){cls='user cur';node=ic('lock')}
+   else cls='cur';
+  }
+  if(S.done[m.id]==='accepted'&&n===10)cls='cur';
+  var evh=ev?'<span class="ev">'+esc(ev)+'</span>':(n<=m.step?'<span class="ev none">没记录（读不到，不当作已完成）</span>':'<span class="ev mono">'+esc(s.cmd)+'</span>');
+  if(n===m.step&&!ev&&!m.lost)evh='<span class="ev mono">'+esc(s.cmd)+'</span>';
+  h+='<li class="sp '+cls+'"><span class="nd">'+node+'</span><span class="tx"><span class="nm">'+s.name+'<span class="who">'+s.who+'</span></span>'+evh+'</span></li>';
+ });
+ return h+'</ol>';
+}
+function nextHtml(m){
+ var x=m.next,st=S.done[m.id];
+ if(st==='closed')return '<div class="next"><b>已收口</b><span class="sub">文件已按字节并回控制根，变更单待你提交。接着在终端对账：</span><div class="cmd"><span class="mono">python main.py ledger reconcile '+m.pid+'</span><button class="btn sm" data-act="copy" data-t="python main.py ledger reconcile '+m.pid+'">'+ic('copy')+'</button></div></div>';
+ if(st==='accepted'&&m.id==='CARD-DJ009-002')return '<div class="next"><b>收口：把验收过的文件并回控制根</b><span class="sub">不替你提交 Git。</span><div class="cmd"><span class="mono">python main.py pm close --mission-id MIS-DJ009-0002</span></div><div><button class="btn primary" data-act="sheet" data-how="close" data-id="'+m.id+'">收口</button></div></div>';
+ var cls=x.kind==='user'?'user':x.kind==='lost'?'lost':'';
+ var h='<div class="next '+cls+'"><b>'+esc(x.title)+'</b><span class="'+(x.kind==='lost'?'':'sub')+'">'+esc(x.desc)+'</span>';
+ if(x.fix)h+='<ol class="steps-fix">'+x.fix.map(function(f){return '<li>'+esc(f)+'</li>'}).join('')+'</ol>';
+ h+='<div class="cmd"><span class="mono">'+esc(x.cmd)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(x.cmd)+'">'+ic('copy')+' 复制</button></div>';
+ if(x.btn)h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" data-act="sheet" data-how="'+x.how+'" data-id="'+m.id+'">'+ic('lock')+' '+x.btn+'</button><span class="note">点了先看等价命令，确认才运行</span></div>';
+ return h+'</div>';
+}
+function vMissions(){
+ var sel=mis(S.sel)||MIS[0];
+ var h='<div class="hd"><h1>任务</h1><span class="sub">同一项目同一时刻只有一张“在干”。切换、搁着、拿回只听你本人；没有“合并”“删除”“启动 agent”这类按钮。</span></div><div class="mis"><div class="sec"><div class="board">';
+ var cols=['在干','等你','搁着'];
+ cols.forEach(function(name,ci){
+  var list=MIS.filter(function(m){var c=m.col;if(m.state==='PARKED')c=2;return c===ci&&!S.done[m.id]||(ci===2&&S.done[m.id]==='x')});
+  h+='<div class="col"><h3>'+name+'<b>'+list.length+'</b></h3>';
+  list.forEach(function(m){
+   h+='<button class="mc" data-act="sel" data-id="'+m.id+'" aria-pressed="'+(m.id===S.sel)+'"><span class="id mono">'+m.id+'</span><span class="tt">'+esc(m.title)+'</span>'+dots(m)+'<span class="tags">'+pillState(m)+(m.tags||[]).filter(function(t){return t!=='失联'}).map(function(t){return '<span class="pill'+(t.indexOf('搁了')===0?' risk':'')+'">'+t+'</span>'}).join('')+'</span></button>';
+  });
+  if(!list.length)h+='<div class="empty">'+(ci===1?'今天没有等你的':'没有')+'</div>';
+  h+='</div>';
+ });
+ var closed=12+Object.keys(S.done).filter(function(k){return S.done[k]==='closed'}).length;
+ h+='<div class="col"><h3>已关<b>'+closed+'</b></h3><div class="empty">默认折叠。最近 30 天已关的 '+closed+' 张，没收口的不会藏在这里。</div></div></div></div>';
+ h+='<aside class="card det"><div class="hdr"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+pillState(sel)+'<span class="mono" style="color:var(--ink3)">'+sel.id+'</span></div><h2 style="font-size:16px;line-height:1.4">'+esc(sel.title)+'</h2><div class="sub">'+sel.pid+' · '+esc(sel.owner)+' · '+esc(sel.lease)+'</div></div>'+
+   '<div style="padding:12px 18px 0"><b style="font-size:12.5px">一件事走到哪</b> <span class="note">脊柱 10 步，每步的证据来自账本</span></div>'+spineHtml(sel)+nextHtml(sel)+'</aside></div>';
+ return h;
+}
+
+function gateChip(i,st){
+ var on=S.online;
+ if(!on)return '<span class="g na" title="断网未知">'+GATE_NAMES[i]+' 未知</span>';
+ var m={ok:['ok','check'],bad:['bad','x'],wait:['wait','clock'],na:['na','dash']}[st];
+ return '<span class="g '+m[0]+'">'+ic(m[1])+GATE_NAMES[i]+(st==='na'?' 没跑':'')+'</span>';
+}
+function vPrs(){
+ var h='<div class="hd"><h1>PR 与审计</h1><span class="sub">合并前看这一页：必过项、审计、签字，一处汇总。合并只在 GitHub 上由合并线程做，这里没有合并按钮；要看细节就点“在 GitHub 打开”。</span><a class="btn sm" href="'+GH+'/pulls" target="_blank" rel="noopener">全部 PR '+ic('ext')+'</a><span class="demo">示例数据</span></div>';
+ if(!S.online)h+='<div class="card pad" style="border-style:dashed"><b>断网，GitHub 这部分显示“未知”。</b><div class="sub">不会拿上次的数据冒充现在的状态。右上角把“在线”打开可以看联网时的样子。</div></div>';
+ h+='<div class="card tbl"><table><thead><tr><th>PR</th><th>属于哪个项目</th><th>必过项</th><th>审计</th><th>能不能合</th></tr></thead><tbody>';
+ PRS.forEach(function(p){
+  var v;
+  if(!S.online)v='<span class="pill na">未知</span><span class="reason">没读到 GitHub</span>';
+  else if(p.red)v='<span class="pill block">不能合</span><span class="reason">'+p.red+'</span>';
+  else if(p.unv)v='<span class="pill risk">先别合</span><span class="reason">'+p.unv+'</span>';
+  else if(p.need)v='<span class="pill risk">等你</span><span class="reason">缺：'+p.need+'</span><button class="btn sm" data-act="copy" data-t="'+p.need+'">'+ic('copy')+' 复制这句话</button>';
+  else v='<span class="pill ok">可以合</span><span class="reason">三条件齐：审计 PASS、必过项全绿、无评审未解决</span>';
+  var au=!S.online?'<span class="pill na">未知</span>':p.audit==='PASS'?'<span class="pill ok">PASS</span>':p.audit==='UNVERIFIED'?'<span class="pill risk">UNVERIFIED</span>':'<span class="pill na">没做</span>';
+  h+='<tr><td style="min-width:260px"><div><b>#'+p.n+'</b> '+esc(p.t)+' <a class="btn sm" href="'+GH+'/pull/'+p.n+'" target="_blank" rel="noopener" aria-label="在 GitHub 打开 PR '+p.n+'">在 GitHub 打开 '+ic('ext')+'</a></div><div class="note"><span class="mono">'+p.br+'</span> · 头 <span class="mono">'+p.head+'</span></div></td><td>'+p.proj.map(function(x){return '<span class="pill '+(x==='仓库公共'?'':'hint')+'">'+x+'</span>'}).join(' ')+'<div class="reason">按改到的文件算</div></td><td><div class="gates">'+p.gates.map(function(g,i){return gateChip(i,g)}).join('')+'</div></td><td>'+au+'</td><td><div class="verdict">'+v+'</div></td></tr>';
+ });
+ h+='</tbody></table></div><div class="note" style="padding:0 2px">“属于哪个项目”按 PR 改到的文件路径里的项目编号算（现有采集已经这么算），改到公共文件算“仓库公共”，一个 PR 改了几个项目就列几个。“UNVERIFIED”不当通过，要人工补查。推新提交后头提交号变，之前的规则批准和安全签字作废。</div>';
+ return h;
+}
+
+
+/* ---------- 项目管理（v9）：登记状态按 main 登记表，其余列是示例 ---------- */
+var PJ=[
+ {id:'SYS-2026-001',name:'工作空间治理',stack:'—',phase:'使用中',reg:1,open:0,last:'3 小时前',own:1},
+ {id:'SW-2026-008',name:'auto-pm 自动化项目管理工具',stack:'python',phase:'developing',reg:1,open:2,last:'2 分钟前',own:1,tag:'驾驶舱母体'},
+ {id:'SW-2026-009',name:'英语学习助手',stack:'python',phase:'developing',reg:1,open:0,last:'6 天前'},
+ {id:'SW-2026-010',name:'驾驶舱 A6 Python 验证套件',stack:'python',phase:'developing',reg:1,open:0,last:'8 天前'},
+ {id:'DJ-2026-005',name:'目录名里没有名称',stack:'plc',phase:'developing',reg:1,open:1,last:'1 天前',lsp:'未经 LSP 检查'},
+ {id:'DJ-2026-011',name:'驾驶舱 A6 PLC 续作验证套件',stack:'plc',phase:'developing',reg:1,open:0,last:'1 天前',lsp:'未经 LSP 检查'},
+ {id:'DJ-2026-009',name:'汇川换型改造',stack:'plc',phase:'—',reg:0,open:-1,last:'—'},
+ {id:'DJ-2026-000',name:'只有文件夹',stack:'plc',phase:'—',reg:0,open:-1,last:'—'}
+];
+function pjIsReg(p){return p.reg||S.pjReg[p.id]}
+function pnCmd(dry){var q=S.pn;return 'python main.py project create --stack '+q.stack+(q.id?' --id '+q.id:' --auto-id')+' --name "'+(q.name||'<名称>')+'"'+(q.stack==='plc'?' --mode '+q.mode:'')+(dry?' --dry-run':'')}
+function pjAct(p){
+ var dis=function(t,why){return '<button class="btn sm" disabled>'+t+'</button>'+(why?'<div class="reason">'+why+'</div>':'')};
+ if(!pjIsReg(p))
+  return '<div class="tags"><button class="btn sm" data-act="run" data-t="main.py project register '+p.id+' --dry-run">'+ic('term')+' 预览登记</button><button class="btn sm" data-act="sheet" data-how="pjreg" data-id="'+p.id+'">登记…</button></div><div class="reason">登记后登记表会留下未提交改动，先提交才能开 Run</div>';
+ var del=p.own?dis(ic('lock')+' 删除…','驾驶舱母体和治理项目，界面不放删除'):'<button class="btn sm" data-act="sheet" data-how="pjdel" data-id="'+p.id+'">'+ic('lock')+' 删除…</button>';
+ return '<div class="tags"><button class="btn sm" data-act="pjopen" data-id="'+p.id+'">项目页</button><button class="btn sm" data-act="run" data-t="main.py project retrofit '+p.id+'">补元数据</button><button class="btn sm" data-act="run" data-t="main.py project edit '+p.id+' --phase developing">改阶段</button>'+del+'<button class="btn sm" disabled>归档</button></div><div class="reason">归档：命令还没有，见下面</div>';
+}
+function vProjects(){
+ var h='<div class="hd"><h1>项目管理</h1><span class="sub">列出所有项目、哪些登记了、怎么新建和登记。界面只调 project 组的命令，不改登记表文件，不搬也不删目录。</span><span class="demo">示例数据 · 登记状态按 main 登记表</span></div>';
+ if(S.pjDirty)h+='<div class="card pad" style="border-color:var(--risk)"><b>登记表有未提交改动</b><div class="sub" style="margin-top:6px">刚才登记写了 workspace_registry.json。先在控制根提交它，再开 Run，否则 pm verify 会拒绝。界面不替你提交。</div></div>';
+ h+='<section class="card pad"><b>哪些事命令已经有</b><div class="tags" style="margin-top:8px"><span class="pill ok">已有：新建、登记、补元数据、改阶段、查看</span><span class="pill risk">只听你本人：删除、强制导入</span><span class="pill block">还没有：归档</span></div></section>';
+ var rows=PJ.filter(function(p){return !p.gone});
+ h+='<section class="sec"><div class="hd"><h2>全部项目（'+rows.length+'）</h2><span class="sub">命令：project list --json、project show &lt;编号&gt; --json，开着的卡来自 pm missions --pid</span></div><div class="card tbl"><table><thead><tr><th>项目</th><th>技术栈 · 阶段</th><th>登记</th><th>开着的卡</th><th>最近动静</th><th>操作</th></tr></thead><tbody>';
+ rows.forEach(function(p){
+  var reg=pjIsReg(p);
+  var open=!reg?'<span class="note">没登记，读不了</span>':p.open?'<span class="pill hint">'+p.open+' 张</span>':'<span class="note">没有</span>';
+  var lsp=p.lsp&&reg?'<div class="tags" style="margin-top:4px"><span class="pill risk">'+p.lsp+'</span></div>':'';
+  h+='<tr><td style="min-width:220px"><b class="mono">'+p.id+'</b>'+(p.own?' <span class="pill accent">'+(p.tag||'驾驶舱自己')+'</span>':'')+(p.nw?' <span class="pill hint">刚建</span>':'')+'<div class="note">'+esc(p.name)+'</div>'+lsp+'</td><td><span class="mono">'+p.stack+'</span><div class="note">'+p.phase+'</div></td><td>'+(reg?'<span class="pill ok">'+ic('check')+' 已登记</span>':'<span class="pill block">'+ic('alert')+' 没登记</span><div class="reason">只有文件夹，没登记进驾驶舱</div>')+'</td><td>'+open+'</td><td class="num" style="white-space:nowrap">'+p.last+'</td><td style="min-width:260px">'+pjAct(p)+'</td></tr>';
+ });
+ h+='</tbody></table></div></section>';
+ var q=S.pn;
+ h+='<section class="sec"><div class="hd"><h2>新建项目</h2><span class="sub">project create：从 Copier 模板建骨架。建完不会自动登记，登记是单独一步。</span></div><div class="card pad"><div class="form">'+
+  '<label class="fld">技术栈<select id="pn-stack" data-act="pnf">'+['plc','python'].map(function(a){return '<option'+(a===q.stack?' selected':'')+'>'+a+'</option>'}).join('')+'</select></label>'+
+  (q.stack==='plc'?'<label class="fld">PLC 模式<select id="pn-mode" data-act="pnf">'+['standard-project','shared-library','test-suite'].map(function(a){return '<option'+(a===q.mode?' selected':'')+'>'+a+'</option>'}).join('')+'</select></label>':'')+
+  '<label class="fld">项目编号（留空自动生成）<input id="pn-id" data-act="pnf" value="'+esc(q.id)+'" placeholder="例如 DJ-2026-012"></label>'+
+  '<label class="fld">项目名称<input id="pn-name" data-act="pnf" value="'+esc(q.name)+'"></label></div>'+
+  '<div class="cmd" style="margin-top:12px"><span class="mono">'+esc(pnCmd(false))+'</span><button class="btn sm" data-act="copy" data-t="'+esc(pnCmd(false))+'">'+ic('copy')+' 复制</button></div>'+
+  '<div class="tags" style="margin-top:10px"><button class="btn sm" data-act="run" data-t="'+esc(pnCmd(true).replace('python ',''))+'">'+ic('term')+' 先预览（--dry-run，不创建）</button><button class="btn primary sm" data-act="sheet" data-how="pjnew" data-id="new">创建…</button></div></div></section>';
+ h+='<section class="sec"><div class="hd"><h2>导入外部目录</h2></div><div class="card pad"><div class="sub">把别处的项目目录收进工作空间。<span class="mono">--force</span> 会覆盖同名目录，只听你本人，已启用口令时要输口令，所以界面只给命令，不放运行按钮。</div><div class="cmd" style="margin-top:8px"><span class="mono">python main.py project import &lt;路径&gt; --move</span><button class="btn sm" data-act="copy" data-t="python main.py project import <路径> --move">'+ic('copy')+' 复制</button></div></div></section>';
+ h+='<section class="sec"><div class="hd"><h2>归档：命令还没有，按钮先占位</h2></div><div class="card pad"><div class="sub">9 月 CHG-SCPT-2026-177 做过 <span class="mono">project archive / restore</span>，只在 1.2.4 发布版里；1.3.3 和现在的源码里没有，为什么没带过来没查。11-03 提的 PLC 工程归档（封条、归档拦截、CI）按我手上的记录还是设计稿。</div><div class="sub" style="margin-top:8px">现在唯一能做的是 <span class="mono">project edit --phase archived</span>：只改阶段标记，不搬目录，不封条。我建议先不放这个按钮，标了 archived 但没封条，容易让人以为已经归档。</div></div></section>';
+ h+='<div class="note" style="padding:0 2px">任务页和今天页的示例卡用了 DJ-2026-009、SW-2026-005 的编号，是原型编的，不代表真实账本；真实登记状态以这页为准（main 登记表里 DJ-2026-009 没登记）。DJ-2026-005、DJ-2026-011 在笔记本账本里有没有卡，要界面启动后读 pm missions 才知道。</div>';
+ return h;
+}
+function pjDelSheet(id){
+ return {t:'删除项目 '+id+'：要你出手',noRun:1,what:'界面没有“确认并运行”。删除只听你本人，在你自己的终端运行。账本里还开着的 Mission、Work、Run，或项目目录有没提交的改动，命令会拒绝并列出原因；通过后整个目录先搬进回收区（<span class="mono">.auto-pm/recycle/'+id+'/时间戳/</span>），可原样搬回。已启用批准口令时，命令会要你在终端输口令。',cmd:'python main.py project delete '+id+' --confirm --approval-evidence-ref user-confirmation:<你那条消息的时间>',danger:'这是删除。带 agent 标记的环境命令直接拒绝。命令没有只检查不删的 --dry-run，界面没法先替你试探阻止项；建议下一次发版加，本期不做。'};
+}
+function pjRegSheet(id){
+ return {t:'登记 '+id,what:'把 '+id+' 写进工作区登记表 workspace_registry.json，登记之后 pm orient、批准、驾驶舱才认识它。命令自己写“由用户或主执行在控制根登记，agent 请勿自行登记”。',cmd:'python main.py project register '+id,danger:'登记表是治理文件。登记后会留下未提交改动，先在控制根提交，再开 Run；不提交就开 Run，pm verify 会拒绝。可先点“预览登记”看会写什么。',after:'pjreg'};
+}
+function pjNewSheet(){
+ var q=S.pn;return {t:'创建项目：'+esc(q.name),what:'用 Copier 模板建'+(q.stack==='plc'?' PLC（'+q.mode+'）':' Python')+'项目骨架。create 不碰治理文件；建完要另走“登记”一步。',cmd:pnCmd(false),after:'pjnew'};
+}
+
+function brVisible(b){return !(S.swept&&SWEEP.some(function(x){return x.rm&&x.t===b.b}))}
+function wtVisible(w){return !S.closedWs[w.n]&&!(S.swept&&SWEEP.some(function(x){return x.rm&&x.t===w.n}))}
+function sweepRm(){return S.swept?[]:SWEEP.filter(function(x){return x.rm})}
+function wsAct(w){
+ var dis=function(why){return '<button class="btn sm" disabled>'+ic('lock')+' 收工位</button><div class="reason">'+why+'</div>'};
+ if(w.kind==='run-plan')return '<span class="note">run-plan 残留，在“可清理”页签清</span>';
+ if(w.kind!=='agent')return '<span class="note">名册外目录，你在终端处理</span>';
+ if(w.dirty)return dis('有 '+w.dirty+' 处未提交改动');
+ if(w.unpushed)return dis('还有 '+w.unpushed+' 个未推送提交');
+ return '<button class="btn sm" data-act="sheet" data-how="closews" data-id="'+w.n+'">'+ic('lock')+' 收工位</button>';
+}
+function wsSheet(id){
+ var w=WT.filter(function(x){return x.n===id})[0];
+ return {t:'收工位：'+id,what:'把工位 '+esc(id)+'（分支 '+esc(w.br)+'）从控制根里移除。命令自己会拒绝有未提交改动或没推送提交的工位。只动本地工位，不删远程分支，不动别的 agent 的工位。界面只调用 worktree close，不自己删；命令拒绝时原样显示原因。',cmd:'python main.py worktree close '+id,danger:'这是删除，只能你本人点。这个工位现在：未提交 '+w.dirty+'，未推送 '+w.unpushed+(w.merged?'，已并进 main':'')+'，闲置 '+w.idle+' 天。',after:'closews'};
+}
+function sweepSheet(){
+ var rm=sweepRm();
+ return {t:'清理这 '+rm.length+' 项',what:'worktree sweep --apply 会删下面这几项，只删这几项：<ul style="margin:6px 0 0 18px">'+rm.map(function(x){return '<li><b class="mono">'+esc(x.t)+'</b>（'+esc(x.cat)+'）：'+esc(x.why)+'</li>'}).join('')+'</ul>',cmd:'python main.py worktree sweep --apply',danger:'这是删除，只能你本人点。保留项、受保护分支、远程分支都不动；点之前把上面的清单再看一遍。界面只调用 sweep --apply，不自己删。',after:'swept'};
+}
+function getHow(how,id){return how==='closews'?wsSheet(id):how==='sweepgo'?sweepSheet():how==='pjdel'?pjDelSheet(id):how==='pjreg'?pjRegSheet(id):how==='pjnew'?pjNewSheet():HOW[how]}
+
+function vWorktrees(){
+ var h='<div class="hd"><h1>工作树与分支</h1><span class="sub">worktree list 和 sweep 的结果。一台电脑一个控制根，每个 agent 一个工位，一个工位一张卡。看工位和分支。收工位、清理要你本人点：点之前先弹确认单，列出要删的东西和等价命令，你确认才运行。</span><span class="demo">示例数据</span></div>';
+ h+='<section class="card pad"><b>界面怎么删：只调收工命令</b><div class="sub" style="margin-top:6px">“收工位”只调用 worktree close，“清理”只调用 worktree sweep --apply。界面不拼 rm，不拼 git worktree remove，也不自己判断某个工位能不能删；命令拒绝时，把原因原样显示。</div><div class="tags" style="margin-top:8px"><span class="pill ok">现在：命令现有护栏 + 点前确认单</span><span class="pill risk">加固卡⑤ 未实现 · 周五交本地 Claude</span></div><div class="sub" style="margin-top:8px">卡⑤落地后，命令只认台账登记为 agent 建的、干净、已推送、无联接点的工位，其他一律拒绝；界面不用改。还没核：从界面启动的 close 算不算你本人的终端。</div></section>';
+ h+='<div class="seg" role="group" aria-label="切换">'+[['trees','工作树 '+WT.filter(wtVisible).length],['branches','分支 '+BR.filter(brVisible).length],['sweep','可清理 '+sweepRm().length]].map(function(o){return '<button data-act="wtab" data-v="'+o[0]+'" aria-pressed="'+(S.wtTab===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>';
+ if(S.wtTab==='trees'){
+  h+='<section class="card"><div class="topo"><div class="root-box"><b>控制根 R · main</b><span class="mono" style="color:var(--ink2)">C:\\Users\\fubai\\Documents\\My_Workspace</span><span class="note">账本 .auto-pm/continuity.db 只在这里；驾驶舱命令只在这里跑</span></div><div class="stem"></div></div>';
+  h+='<div class="tbl"><table><thead><tr><th>工位</th><th>分支</th><th>状态</th><th>占用的卡</th><th>闲置</th><th>占用</th><th>检查</th><th>操作</th></tr></thead><tbody>';
+  WT.filter(wtVisible).forEach(function(w){
+   var st=[];if(w.empty)st.push('<span class="pill">空着</span>');else{st.push('<span class="pill'+(w.dirty?' risk':'')+'">未提交 '+w.dirty+'</span>');st.push('<span class="pill'+(w.unpushed?' risk':'')+'">未推送 '+w.unpushed+'</span>')}
+   if(w.merged)st.push('<span class="pill ok">已并进 main</span>');
+   var kind=w.kind==='agent'?'':'<span class="pill hint" style="margin-left:6px">'+(w.kind==='run-plan'?'run-plan':'名册外')+'</span>';
+   var chk=w.bad?'<span class="pill block">'+ic('alert')+' 违规</span><div class="reason">'+w.bad+'</div>':'<span class="pill ok">'+ic('check')+' 正常</span>';
+   var idle=w.stale?'<span class="pill risk">'+w.idle+' 天</span>':'<span class="num">'+w.idle+' 天</span>';
+   h+='<tr><td><b>'+w.n+'</b>'+kind+'<div class="note mono">.auto-pm/worktrees/'+w.n+'</div></td><td class="mono">'+w.br+'</td><td><div class="tags">'+st.join('')+'</div></td><td>'+(w.card.length?w.card.map(function(c){return '<div class="mono">'+c+'</div>'}).join(''):'<span class="note">—</span>')+'</td><td>'+idle+'</td><td class="num">'+w.size+'</td><td>'+chk+'</td><td>'+wsAct(w)+'</td></tr>';
+  });
+  h+='</tbody></table></div></section>';
+  h+='<div class="note" style="padding:0 2px">“未提交、未推送、已并进 main”要加 --deep 才查，整仓库大时要几分钟，所以放在后台跑、结果缓存。最近一次深检 20:10 · 用了 3 分 20 秒 <button class="btn sm" data-act="run" data-t="main.py worktree list --json --deep">'+ic('term')+' 重新深检（只读）</button></div>';
+  var cmd='python main.py worktree open '+S.wtAgent+' '+S.wtCard;
+  h+='<section class="sec"><div class="hd"><h2>开工位</h2><span class="sub">统一用 worktree open：它从最新 origin/main 建工位和分支，认 agent 名册。界面只生成命令，由你或 agent 在控制根里运行。</span></div><div class="card pad"><div class="form"><label class="fld">agent<select id="wta" data-act="wtf">'+['claude','trae','cursor','vscode','codex'].map(function(a){return '<option'+(a===S.wtAgent?' selected':'')+'>'+a+'</option>'}).join('')+'</select></label><label class="fld">卡号<input id="wtc" data-act="wtf" value="'+esc(S.wtCard)+'"></label></div><div class="cmd" style="margin-top:12px"><span class="mono">'+esc(cmd)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(cmd)+'">'+ic('copy')+' 复制</button></div></div></section>';
+  h+='<section class="sec"><div class="hd"><h2>收工位</h2><span class="sub">上面表格每行的“收工位”按钮就是它，只有干净、已推送的工位能点。想在终端自己收，用这条命令。</span></div><div class="card pad"><div class="cmd"><span class="mono">python main.py worktree close claude</span><button class="btn sm" data-act="copy" data-t="python main.py worktree close claude">'+ic('copy')+' 复制</button></div></div></section>';
+ } else if(S.wtTab==='branches'){
+  h+='<div class="card pad" style="border-style:dashed"><b>分支的数据来源</b><div class="sub">本地分支和“已并进 main、远程已删”来自 worktree list 与 sweep（命令已有）。远程分支列表、领先落后 main 要在界面里只读地跑 git（命令树里还没有 branch 命令，将来可加 branch list --json）。对应 PR 来自现有的 GitHub 采集。</div></div>';
+  h+='<div class="card tbl"><table><thead><tr><th>分支</th><th>在哪</th><th>对 main</th><th>对应 PR</th><th>对应工位</th><th>建议</th></tr></thead><tbody>';
+  BR.filter(brVisible).forEach(function(x){
+   var rel=x.merged?'<span class="pill ok">已并进 main</span>':'<span class="pill">领先 '+x.ahead+'</span>'+(x.behind?' <span class="pill risk">落后 '+x.behind+'</span>':'');
+   var pr=x.pr?'<a class="btn sm" href="'+GH+'/pull/'+x.pr+'" target="_blank" rel="noopener">#'+x.pr+' '+ic('ext')+'</a>':'<span class="note">没有</span>';
+   var tip=x.tip==='可清理'?'<span class="pill risk">可清理</span>':x.tip==='保护'?'<span class="pill accent">'+ic('lock')+' 保护</span>':'<span class="pill ok">留着</span>';
+   h+='<tr><td class="mono" style="min-width:210px">'+x.b+(x.remoteGone?'<div class="note">远程已删</div>':'')+'</td><td>'+x.where+'</td><td><div class="tags">'+rel+'</div></td><td>'+pr+'</td><td>'+(x.wt?'<span class="mono">'+x.wt+'</span>':'<span class="note">—</span>')+'</td><td><div class="tags">'+tip+'</div><div class="reason">'+x.why+'</div></td></tr>';
+  });
+  h+='</tbody></table></div><div class="note" style="padding:0 2px">“保护”的分支不会出现在可清理清单里。这里不删远程分支（合并后由 GitHub 自动删）；本地分支随“可清理”一起清。</div>';
+ } else {
+  var rm=sweepRm(),keep=SWEEP.filter(function(x){return !x.rm});
+  h+='<div class="card pad"><b>sweep 默认只列，不删。</b><div class="sub">下面是 worktree sweep（只读列出）的结果：能清的在上面，保留的写了原因。要真的清，点下面的“清理这 N 项”：先弹确认单，列出每一项，你确认才运行。agent 自己跑 --apply 只清自己的工位；run-plan 残留和别人的工位只认你本人。</div></div>';
+  h+=rm.length?'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" data-act="sheet" data-how="sweepgo" data-id="all">'+ic('lock')+' 清理这 '+rm.length+' 项</button><span class="note">点了先看清单和等价命令，确认才运行</span></div>':'<div class="note">没有可清的了（原型模拟：刚才那几项已清掉）。</div>';
+  var row=function(x){return '<div class="li"><span class="s">'+(x.rm?ic('check'):ic('lock'))+'</span><div><b class="mono">'+x.t+'</b> <span class="pill hint">'+x.cat+'</span><div class="sub">'+x.why+'</div></div></div>'};
+  h+='<section class="sec"><div class="hd"><h2>可以清（'+rm.length+'）</h2></div><div class="card list">'+rm.map(row).join('')+'</div></section>';
+  h+='<section class="sec"><div class="hd"><h2>保留（'+keep.length+'）</h2></div><div class="card list">'+keep.map(row).join('')+'</div></section>';
+  var lst=rm.map(function(x){return x.t}).join('、');
+  var c1='python main.py worktree sweep --json',c2='python main.py worktree sweep --apply';
+  h+='<section class="sec"><div class="hd"><h2>想自己在终端清</h2></div><div class="card pad"><div class="sub">1. 清单：复制留底，或发给 agent。</div><div class="cmd" style="margin:8px 0 14px"><span class="mono">'+esc(lst)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(lst)+'">'+ic('copy')+' 复制清单</button></div><div class="sub">2. 命令：想在终端自己清，用这条。</div><div class="cmd" style="margin-top:8px"><span class="mono">'+esc(c2)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(c2)+'">'+ic('copy')+' 复制</button></div></div></section>';
+ }
+ return h;
+}
+
+function vRelease(){
+ var h='<div class="hd"><h1>发版</h1><span class="sub">只读。切换发布、延长保持、删除、改规则只认你亲口，所以这一页没有对应按钮，只告诉你该去哪做。</span><span class="demo">示例数据</span></div>';
+ var P=[['冻结','done','提交 dd8b192f2e0a'],['体检','done','doctor --pre-release'],['重门禁','cur','第 5 / 9 组'],['入库 PR','','发版目录 + 部署清单'],['切换','user','只认你亲口'],['切后核对','','对账 0/0/0 · 备份']];
+ h+='<div class="card pad"><div class="pipe">'+P.map(function(p,i){return '<div class="ps '+p[1]+'"><span class="n">'+(i+1)+'</span><b>'+p[0]+(p[1]==='done'?' '+ic('check'):p[1]==='user'?' '+ic('lock'):'')+'</b><span class="note">'+p[2]+'</span></div>'}).join('')+'</div></div>';
+ h+='<div class="grid2"><section class="card pad sec"><h2>重门禁（long-run）</h2><div class="bar" role="progressbar" aria-valuenow="55" aria-valuemin="0" aria-valuemax="100"><i style="width:55%"></i></div><dl class="kv"><dt>卡</dt><dd class="mono">d0b66a55ec90</dd><dt>开始</dt><dd class="num">11-04 21:00 MST · 已跑 3 小时 10 分</dd><dt>当前组</dt><dd>rest</dd><dt>内存峰值</dt><dd class="num">11.4 GB / 总闸线 14 GB</dd><dt>保持（hold）</dt><dd>还能延长 1 次、最多再 2 小时，<b>只认你本人的原话</b></dd><dt>读取方式</dt><dd class="mono">long-run status（只读；不碰跑着的门禁）</dd></dl></section>'+
+  '<section class="card oral"><div><b>只认你亲口的事</b><span class="note">界面不给按钮，不是疏漏，是设计</span></div>'+
+  [['切换发布','在笔记本终端改指针；agent 只会告诉你命令'],['延长门禁保持','在门禁线程发含卡号、延长、不过不切换三点的原话'],['删除文件、远程分支','你自己在终端执行；工位和本地分支的清理在“工作树与分支”页，你点'],['改规则文字','GitHub 评论“规则批准 <头 12 位>”']].map(function(o){return '<div><span style="display:flex;gap:8px;align-items:center">'+ic('lock')+'<b>'+o[0]+'</b></span><span class="sub">'+o[1]+'</span></div>'}).join('')+'</section></div>';
+ return h;
+}
+
+function vProject(){
+ var p=PJ.filter(function(x){return x.id===S.pjv.id})[0]||PJ[0],reg=pjIsReg(p),tab=S.pjv.tab;
+ var tabs=[['ov','概览'],['tk','任务'],['pr','PR']].concat(p.stack==='plc'?[['plc','PLC 证据']]:[]);
+ if(tab==='plc'&&p.stack!=='plc')tab='ov';
+ var h='<div class="hd"><button class="btn sm" data-act="nav" data-v="projects">← 项目管理</button><h1>'+p.id+'</h1><span class="sub">'+esc(p.name)+(p.tag?' · '+p.tag:'')+'</span><span class="demo">示例数据</span></div>';
+ h+='<div class="seg" role="group" aria-label="项目页签">'+tabs.map(function(o){return '<button data-act="pjtab" data-v="'+o[0]+'" aria-pressed="'+(tab===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>';
+ if(!reg)h+='<div class="card pad" style="border-style:dashed"><b>这个项目没登记进驾驶舱</b><div class="sub">没登记就读不了任务和 PR 证据。到“项目管理”点“预览登记”。</div></div>';
+ if(tab==='ov'){
+  var cmd='python main.py project show '+p.id+' --json';
+  h+='<section class="card pad"><dl class="kv"><dt>技术栈</dt><dd class="mono">'+p.stack+'</dd><dt>阶段</dt><dd>'+p.phase+'</dd><dt>登记</dt><dd>'+(reg?'已登记':'没登记')+'</dd><dt>开着的卡</dt><dd>'+(reg?p.open+' 张':'读不了')+'</dd><dt>最近动静</dt><dd>'+p.last+'</dd>'+(p.lsp&&reg?'<dt>PLC 证据</dt><dd><span class="pill risk">'+p.lsp+'</span> <button class="btn sm" data-act="pjtab" data-v="plc">去看</button></dd>':'')+'</dl><div class="cmd" style="margin-top:12px"><span class="mono">'+cmd+'</span><button class="btn sm" data-act="copy" data-t="'+cmd+'">'+ic('copy')+' 复制</button></div></section>';
+ } else if(tab==='tk'){
+  var ms=MIS.filter(function(m){return m.pid===p.id});
+  h+=ms.length?'<section class="card list">'+ms.map(function(m){return '<div class="li"><span class="s">'+ic('board')+'</span><div><b>'+esc(m.title)+'</b> '+pillState(m)+'<div class="sub mono">'+m.id+'</div></div><button class="btn sm" data-act="goto" data-v="missions" data-id="'+m.id+'">去任务页</button></div>'}).join('')+'</section>':'<div class="card pad"><div class="sub">没有开着的卡（原型示例里只有 DJ-2026-009、SW-2026-005、SW-2026-008 有卡）。</div></div>';
+ } else if(tab==='pr'){
+  var ps=PRS.filter(function(x){return x.proj.indexOf(p.id)>=0});
+  h+=ps.length?'<section class="card list">'+ps.map(function(x){return '<div class="li"><span class="s">'+ic('pr')+'</span><div><b>#'+x.n+'</b> '+esc(x.t)+'<div class="sub mono">'+x.br+' · 头 '+x.head+'</div></div><a class="btn sm" href="'+GH+'/pull/'+x.n+'" target="_blank" rel="noopener">在 GitHub 打开 '+ic('ext')+'</a></div>'}).join('')+'</section>':'<div class="card pad"><div class="sub">没有改到这个项目的开着的 PR。</div></div>';
+ } else h+=vPlc(p.id,true);
+ return h;
+}
+
+function vPlc(pid,embedded){
+ var st=S.plc,V={
+  ok:{c:'ok',ico:'check',t:'LSP 已真跑 · 通过',d:'插件命令行真实诊断过，退出码 0。这份结果可以交给你去 TIA 导入。'},
+  bad:{c:'bad',ico:'x',t:'LSP 已真跑 · 有失败项',d:'有 1 条失败，退出码 1。先别导入。'},
+  miss:{c:'na',ico:'dash',t:'未验证 · 找不到 Siemens 语言服务插件',d:'不是通过。结构规则跑了，LSP 没跑；交付阶段会被拦住。'},
+  none:{c:'na',ico:'dash',t:'未经 LSP 检查',d:'这个提交还没有在笔记本上跑过 plc check。交给你的包必须这样标。'}}[st];
+ var rows={
+  ok:[['ok','SCL 结构完整性','12 个块全部齐全'],['ok','命名与禁用语法（LSP-905）','0 处'],['ok','Siemens 语言服务','check 0 个错误 · 0 个警告'],['ok','文档一致性','plc docs check 一致']],
+  bad:[['ok','SCL 结构完整性','12 个块全部齐全'],['ok','命名与禁用语法（LSP-905）','0 处'],['bad','Siemens 语言服务','FB_2002 第 41 行：读取了 Output 变量（1 个错误）'],['ok','文档一致性','一致']],
+  miss:[['ok','SCL 结构完整性','12 个块全部齐全'],['ok','命名与禁用语法（LSP-905）','0 处'],['warn','Siemens 语言服务','没找到插件，算“未验证”（警告）'],['ok','文档一致性','一致']],
+  none:[['na','全部','还没有这个提交的检查记录']]}[st];
+ var h='<div class="note" style="padding:0 2px 4px">PLC 项目导入 TIA 前的“合格证”：这份 PLC 代码，有没有被真实的 LSP 检查过。TIA 编译由你做，这里不假装编译。</div>';
+ h+='<div class="seg" role="group" aria-label="演示状态">'+[['ok','真跑通过'],['bad','真跑失败'],['miss','插件找不到'],['none','没跑']].map(function(o){return '<button data-act="plc" data-v="'+o[0]+'" aria-pressed="'+(st===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>';
+ h+='<section class="card"><div class="verd '+V.c+'"><div class="badge-lg">'+ic(V.ico)+'</div><div class="t"><b>'+V.t+'</b><span class="sub">'+V.d+'</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="run" data-t="main.py plc check '+pid+'">重新跑 plc check</button><button class="btn" data-act="copy" data-t="（此处是 plc check 的原文输出）"'+(st==='none'?' disabled':'')+'>'+ic('copy')+' 复制原文</button></div></div>';
+ h+='<div class="list" style="border-top:1px solid var(--line)">'+rows.map(function(r){return '<div class="li"><span class="s '+r[0]+'">'+ic(r[0]==='ok'?'check':r[0]==='bad'?'x':r[0]==='warn'?'alert':'dash')+'</span><div><b>'+r[1]+'</b><div class="sub">'+r[2]+'</div></div></div>'}).join('')+'</div></section>';
+ h+='<section class="card pad"><dl class="kv"><dt>项目</dt><dd>'+pid+'</dd><dt>提交</dt><dd class="mono">a1b2c3d4e5f6</dd><dt>命令</dt><dd class="mono">python main.py plc check '+pid+' --json</dd><dt>跑的时间</dt><dd>'+(st==='none'?'—':'11-04 20:12 MST · 笔记本')+'</dd><dt>退出码</dt><dd class="num">'+({ok:'0',bad:'1',miss:'0（有警告）',none:'—'}[st])+'</dd></dl><p class="note" style="margin:12px 0 0">云端的 CI（plc-ci）跳过 LSP 插件层，所以云端 PLC PR 没有这一项证据；这一页读的是笔记本上的结果。</p></section>';
+ return h;
+}
+
+function spineSvg(m){
+ var W=1240,H=330,x0=84,w=96,g=17,laneY=[70,160,250],lane=['你','本地','云端'];
+ var s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="脊柱十步，按谁做分三条泳道">';
+ lane.forEach(function(l,i){s+='<rect x="0" y="'+(laneY[i]-38)+'" width="'+W+'" height="76" fill="'+(i===1?'var(--surface2)':'none')+'" stroke="var(--line)" stroke-dasharray="'+(i===1?'0':'3 4')+'"/><text x="14" y="'+(laneY[i]+4)+'" font-size="13" font-weight="700" fill="var(--ink2)">'+l+'</text>'});
+ var pos=STEPS.map(function(st,i){return {x:x0+i*(w+g),y:laneY[st.lane]}});
+ for(var i=0;i<9;i++){var a=pos[i],b=pos[i+1],xa=a.x+w,xb=b.x,mid=(xa+xb)/2,done=i+1<m.step;
+  s+='<path d="M'+xa+' '+a.y+' C'+mid+' '+a.y+' '+mid+' '+b.y+' '+xb+' '+b.y+'" fill="none" stroke="'+(done?'var(--accent)':'var(--line2)')+'" stroke-width="2"/>'}
+ STEPS.forEach(function(st,i){
+  var p=pos[i],n=i+1,cls=n<m.step?'done':n===m.step?'cur':'todo';
+  var fill=cls==='done'?'var(--accent)':'var(--surface)',stroke=cls==='todo'?'var(--line2)':st.user&&cls==='cur'?'var(--risk)':'var(--accent)',tc=cls==='done'?'var(--accent-ink)':'var(--ink)';
+  s+='<g><rect x="'+p.x+'" y="'+(p.y-24)+'" width="'+w+'" height="48" rx="8" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(cls==='cur'?2.5:1.5)+'"/>'+
+   '<text x="'+(p.x+w/2)+'" y="'+(p.y-4)+'" text-anchor="middle" font-size="13" font-weight="700" fill="'+tc+'">'+st.name+'</text>'+
+   '<text x="'+(p.x+w/2)+'" y="'+(p.y+13)+'" text-anchor="middle" font-size="10.5" fill="'+(cls==='done'?'var(--accent-ink)':'var(--ink3)')+'">第 '+n+' 步</text>';
+  if(st.tp)s+='<g><circle cx="'+(p.x+w-4)+'" cy="'+(p.y-24)+'" r="11" fill="var(--risk)"/><text x="'+(p.x+w-4)+'" y="'+(p.y-19.5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-ink)">'+st.tp+'</text></g>';
+  s+='</g>';
+ });
+ return s+'</svg>';
+}
+var VARIANTS={
+ plc:{t:'PLC 任务',rows:[['判安全区','先看 safety_zone.yml 和源码 // @安全区 标记；PR 必写“安全回路：是/否”'],['写','照 903～907、STD-830～860；接口只用 OPC UA 或 Modbus TCP'],['自检','plc check（LSP 只在笔记本）→ 本系统“PLC 证据”页'],['安全区额外','先仿真，再评论“安全签字 <头 12 位>”，推新提交作废'],['你的那一步','TIA 导入编译由你做，贴回截图或文本']]},
+ spec:{t:'规范改动',rows:[['起草','agent 起草规范正文'],['立项','change create → CHG-SPEC'],['批准','你批准变更单（只听你本人）'],['机器检查','spec check / lint / frontmatter'],['PR','评论“规则批准 <头 12 位>”；不自己合']]},
+ rel:{t:'发版',rows:[['冻结','定冻结点，载荷里只放已合并的代码'],['体检','doctor --pre-release；dogfood'],['重门禁','long-run start；延长保持只认你原话'],['入库','发版目录和部署清单入库的 PR'],['切换','只认你亲口；切后对账 0/0/0、备份']]}
+};
+function vSpine(){
+ var m=mis(S.spineSel)||MIS[0],V=VARIANTS[S.variant];
+ var h='<div class="hd"><h1>脊柱图</h1><span class="sub">一件事从头走到底的十步，和使用规划的第 2 节逐行对应。图的数据在 flow/spine.json，不写死在代码里。</span></div>';
+ h+='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="fld" style="flex-direction:row;align-items:center;gap:8px">看哪张卡<select id="sps" data-act="sps">'+MIS.map(function(x){return '<option value="'+x.id+'"'+(x.id===m.id?' selected':'')+'>'+x.id+' · 第 '+x.step+' 步</option>'}).join('')+'</select></label></div>';
+ h+='<section class="card"><div class="svgbox">'+spineSvg(m)+'</div><div class="lg"><span><b style="color:var(--risk)">①</b> 确认计划：你只在这里点头</span><span><b style="color:var(--risk)">②</b> 规则批准、安全签字、确认验收：你亲口</span><span>③ 切换发布、删除、改规则：不在这张图里，只认你亲口</span></div></section>';
+ h+='<section class="sec"><div class="hd"><h2>三个变体：和脊柱不一样的地方</h2></div><div class="seg" role="group">'+Object.keys(VARIANTS).map(function(k){return '<button data-act="var" data-v="'+k+'" aria-pressed="'+(S.variant===k)+'">'+VARIANTS[k].t+'</button>'}).join('')+'</div><div class="card list">'+V.rows.map(function(r,i){return '<div class="li"><span class="s">'+(i+1)+'</span><div><b>'+r[0]+'</b><div class="sub">'+r[1]+'</div></div></div>'}).join('')+'</div></section>';
+ return h;
+}
+
+function vCommands(){
+ var cats=['全部','主线','领域','历史'],q=S.cmdQ.toLowerCase();
+ var jtxt=['无 --json','有 --json','默认就是 JSON','源码有，部署版没有','--format json'];
+ var h='<div class="hd"><h1>命令与契约</h1><span class="sub">界面的每个页面读哪条命令、能不能直接拿机器可读的输出。<b>下表是我读 main 源码和切换前部署的 1.3.3-d563293 实测的，不是示例；现行版本是 1.3.3-dd8b192（07:49 MST 切换，协调者报告），命令总数待笔记本重核。</b></span></div>';
+ h+='<div class="filters">'+cats.map(function(c){return '<button class="fchip" data-act="cat" data-v="'+c+'" aria-pressed="'+(S.cmdCat===c)+'">'+c+'</button>'}).join('')+'<input id="cq" data-act="cq" placeholder="搜命令，例如 orient" value="'+esc(S.cmdQ)+'" aria-label="搜命令"></div>';
+ h+='<div class="card tbl"><table><thead><tr><th>命令</th><th>类</th><th>界面用在</th><th>机器可读输出</th><th>说明</th></tr></thead><tbody>';
+ CMDS.filter(function(c){return (S.cmdCat==='全部'||c[1]===S.cmdCat)&&(!q||c[0].toLowerCase().indexOf(q)>=0||c[2].indexOf(q)>=0)}).forEach(function(c){
+  var j=c[3],pc=j===0?'block':j===3?'risk':'ok';
+  h+='<tr><td class="mono">'+c[0]+'</td><td><span class="pill'+(c[1]==='历史'?' na':'')+'">'+c[1]+'</span></td><td>'+c[2]+'</td><td><span class="pill '+(c[1]==='历史'?'na':pc)+'">'+(c[1]==='历史'?'不进界面':jtxt[j])+'</span></td><td class="sub">'+c[4]+'</td></tr>';
+ });
+ h+='</tbody></table></div><div class="note" style="padding:0 2px">命令总数 195 条（29 组），其中 31 条历史物；这个分类以后由数据文件驱动，新增命令没分类，测试就红。</div>';
+ return h;
+}
+
+/* ---------- shell render ---------- */
+
+/* ---- 要你出手 ---- */
+var KIND={A:'A 点一下',B:'B 输入确认',C:'C 去别的软件',D:'D 对 agent 说一句话'};
+var HAND=[
+ {id:'sign',k:'B',sev:'block',ttl:'签署接受风险：Run RUN-SW008-M3-REL72-003',who:'门禁线程在等你 · 已等 38 分钟',why:'租约已过期，原持有者进程判不出。agent 不能自己接手，也不能代签。',todo:'你本人确认两次（口令生效时三次）。目标形态在界面里完成；今天（第一步）在弹出的终端窗口里完成。',ver:'账本里出现签字事件；agent 重新回收后放行。',cmd:'python main.py pm sign-risk --run-id RUN-SW008-M3-REL72-003 --claimant claude:m3rel72c'},
+ {id:'safe',k:'C',sev:'risk',ttl:'PR #611 缺“安全签字”',who:'审计线程在等你 · 已等 2 小时',why:'只认你本人的 GitHub 账号对当前头提交的评论；推了新提交就作废。',todo:'先仿真，再在 PR 上发这一句评论。',ver:'重读 GitHub，评论出现且头 12 位对得上才算。',say:'安全签字 0439b123dfec',link:'/pull/611'},
+ {id:'rule',k:'C',sev:'hint',ttl:'PR #612 缺“规则批准”',who:'审计线程在等你 · 已等 5 小时',why:'这个 PR 改了受保护的规则文件，只认你本人的评论。',todo:'看完改动，在 PR 上发这一句评论。',ver:'同上。',say:'规则批准 a50626856157',link:'/pull/612'},
+ {id:'gate',k:'D',sev:'risk',ttl:'下一次发版门禁：三点批准',who:'门禁线程在等你',why:'只认你亲口发的三点原话。卡号和提交号界面帮你填好，句式以门禁线程现行口径为准。',todo:'复制这一句，自己发到门禁线程。没有“替你发送”的按钮。',ver:'重读门禁状态：Run 出现并开始跑。',say:'批准 RUN-SW008-M3-REL72-004（卡 SHA 前 12 位 0123456789ab）：允许延长持有；不过不切换。'},
+ {id:'tia',k:'C',sev:'hint',ttl:'TIA 博图编译：DJ-2026-005 导出文件',who:'PLC 线在等你 · 已等 1 天',why:'agent 不碰 TIA，交付边界是静态检查全绿。',todo:'导入、编译，把结果按下面模板贴回给 agent。',ver:'你贴回的结果。',say:'TIA 编译回传：工程 DJ-2026-005；TIA 版本 V19；结果 通过 / 错误 N 条；报错原文：（粘贴在这里）'},
+ {id:'bk',k:'C',sev:'risk',ttl:'账本异地备份：距上次 31 小时（超过 24 小时）',who:'没有 agent 在等 · 已超期 7 小时',why:'备份把去掉租约口令的账本副本推到你的私有仓库，agent 端自动模式把它当数据外传拦下了；拦截就是不让 agent 自己做。命令本身不要口令。',todo:'在本机独立 PowerShell 的控制根里运行下面这条命令。想先演练，复制“演练命令”，它不推送、不记备份时间。',ver:'重读备份记录：时间刷新、事件数对得上；命令自己会打印远程提交号前 12 位。',say:'python main.py pm state-backup push',lab:'复制命令',say2:'python main.py pm state-backup push --dry-run'},
+ {id:'acc',k:'A',sev:'hint',ttl:'确认验收：数据采集接口 MIS-DJ009-0002',who:'任务在等你 · 已等 1 天',why:'验收只能你本人做。',todo:'去任务页看结果，点“确认验收”，点前弹确认单。',ver:'任务状态变成已验收。',go:'missions'}
+];
+function chkCmd(t){
+ t=(t||'').trim();if(!t)return '';
+ var r=[];
+ var isMain=/^(python(\.exe)?\s+|\.venv\\Scripts\\python\.exe\s+)?(\.\\)?main\.py\s/i.test(t)||/^(\S+\\)?python(\.exe)?\s+main\.py\s/i.test(t);
+ var del=/(rm\s+-|Remove-Item|\bdel\s|rmdir|git\s+push\s+.*--force|git\s+reset\s+--hard|git\s+clean|worktree\s+remove|branch\s+-D)/i.test(t);
+ var pin=/(pm\s+(approve|accept|park|unpark|switch|sign-risk)|inbox\s+(confirm|reject)|extend-hold|approver-pin|change\s+approve)/i.test(t);
+ r.push(isMain?'<span class="pill ok">main.py 驾驶舱命令</span>':'<span class="pill hint">不是 main.py 命令</span>');
+ if(del)r.push('<span class="pill block">删除或改写历史类</span>');
+ if(pin)r.push('<span class="pill risk">要你在终端输入确认或口令</span>');
+ r.push(isMain&&!del?'<span class="pill accent">可以“在终端窗口里运行”（参数按列表传，不经 shell）</span>':'<span class="pill">只复制，界面不运行</span>');
+ return '<div class="tags">'+r.join('')+'</div><div class="note">说明：这是按命令文字做的粗判，真正读写和要不要口令以命令自己为准。</div>';
+}
+function vMine(){
+ var open=handOpen(),done=HAND.length-open.length;
+ var h='<div class="hd"><h1>要你出手</h1><span class="sub">所有必须你本人签字、授权或亲自执行的事。每件写清：谁在等、为什么只能你、怎么做、怎么确认办成了。界面不替你签、不替你发。</span><span class="demo">示例数据</span></div>';
+ h+='<section class="card pad"><b>四种做法</b><div class="tags" style="margin-top:8px">'+Object.keys(KIND).map(function(k){return '<span class="pill hint">'+KIND[k]+'</span>'}).join('')+'</div><div class="sub" style="margin-top:8px">状态四种：待你、已发出（刚办完，等界面重读）、已生效（带证据）、没生效（写原因）。界面不信点击和退出码，只信重读到的账本、GitHub 和发布指针。</div></section>';
+ h+='<div class="note" style="padding:2px">待办 '+open.length+' 件'+(done?'，已办完 '+done+' 件':'')+'。有 agent 停着等你的排前面。</div>';
+ HAND.forEach(function(x){
+  var ok=S.hs[x.id]==='ok',sent=S.hs[x.id]==='sent';
+  var acts='';
+  if(x.k==='B'&&!ok&&!sent)acts+='<button class="btn primary" data-act="wzopen">'+ic('lock')+' 开始签署</button><button class="btn" data-act="copy" data-t="'+esc(x.cmd)+'">'+ic('copy')+' 复制命令，去独立 PowerShell 签</button>';
+  if(x.link)acts+='<a class="btn" href="'+GH+x.link+'" target="_blank" rel="noopener">在 GitHub 打开 '+ic('ext')+'</a>';
+  if(x.say)acts+='<button class="btn" data-act="copy" data-t="'+esc(x.say)+'">'+ic('copy')+' '+(x.lab||'复制整句')+'</button>';
+  if(x.say2)acts+='<button class="btn" data-act="copy" data-t="'+esc(x.say2)+'">'+ic('copy')+' 复制演练命令</button>';
+  if(x.go)acts+='<button class="btn" data-act="goto" data-v="'+x.go+'">去任务页</button>';
+  h+='<section class="card hc"><div class="ht">'+(ok?'<span class="pill ok">已生效</span>':sent?'<span class="pill hint">已发出 · 等 agent 回收</span>':'<span class="pill '+x.sev+'">待你 · '+({block:'阻塞',risk:'风险',hint:'提醒'})[x.sev]+'</span>')+'<span class="pill hint">'+KIND[x.k]+'</span><b>'+x.ttl+'</b></div><div class="sub">'+x.who+'</div><dl><dt>为什么只能你</dt><dd>'+x.why+'</dd><dt>你要做什么</dt><dd>'+x.todo+'</dd><dt>怎么确认办成了</dt><dd>'+x.ver+(ok?' <b>已确认：账本事件 RISK-示例（原型示例，不是真签字）</b>':sent?' <b>已发出：界面读不到签字，等 agent 重新回收放行后才变成已生效（原型示例）</b>':'')+'</dd></dl>'+(x.say?'<div class="cmd"><span class="mono">'+esc(x.say)+'</span></div>':'')+(acts&&!ok&&!sent?'<div class="acts">'+acts+'</div>':'')+'</section>';
+ });
+ h+='<section class="sec"><div class="hd"><h2>签署向导的后端：分三步</h2><span class="sub">向导第一页可以切换，看三种情形各是什么样。</span></div><div class="card list">'+[['ok','check','第一步 · 今天可用','ok','不改批准规则','向导负责说明和先决检查，最后“在终端窗口里运行”同一条命令（弹出真终端，打字在那里）。界面看不到退出码，读不到签字，以 agent 重新回收放行为准。'],['','clock','第二步 · --status 只读（R-7）','accent','第一个实施项','pm sign-risk --status --json：只读，不读口令，不写账本。界面就能显示“已签署，等 agent 回收”和签字号，agent 也能自查。属下一次发版，要专用卡和独立审计。'],['warn','lock','第三步 · --explain 与 --submit','risk','改批准规则，实施前须你单独批准','向导在界面里收齐全部输入，一次提交；所有校验仍在命令里，口令只走标准输入。现在不做。']].map(function(o){return '<div class="li"><span class="s '+o[0]+'">'+ic(o[1])+'</span><div><b>'+o[2]+'</b> <span class="pill '+o[3]+'">'+o[4]+'</span><div class="sub">'+o[5]+'</div></div></div>'}).join('')+'</div></section>';
+ h+='<section class="sec"><div class="hd"><h2>agent 给了你一条命令？</h2><span class="sub">粘进来，界面先告诉你它是什么，再决定要不要在终端窗口里运行。</span></div><div class="card pad"><input id="chk" data-act="chk" value="'+esc(S.chk)+'" placeholder="例如：python main.py pm sign-risk --run-id … --claimant …" style="height:34px;width:100%;border:1px solid var(--line2);border-radius:6px;background:var(--surface);color:var(--ink);padding:0 10px;font:inherit"><div style="margin-top:10px">'+chkCmd(S.chk)+'</div></div></section>';
+ h+='<div class="note" style="padding:2px">窗口没开时，界面提醒不了你；那时只能靠 agent 在聊天里说。</div>';
+ return h;
+}
+var WZ={run:'RUN-SW008-M3-REL72-003',holder:'claude:m3rel72b',claimant:'claude:m3rel72c',phrase:'接受风险'};
+function wzSeq(){if(S.wzStage<3)return ['pre','risk','term','done'];return S.pinOn?['pre','risk','c1','c2','pin','done']:['pre','risk','c1','c2','done']}
+function stageBox(){var t={1:'今天能用的：界面做说明和先决检查，打字在弹出的终端窗口里。界面看不到退出码，也读不到签字。',2:'加上只读的 --status 之后：界面能读到“已签署，等 agent 回收”和签字号；打字仍在终端窗口里。',3:'再加 --explain 和 --submit 之后：全部输入都在这个窗口里完成。这一步改批准规则，实施前须你单独批准，现在不做。'};
+ return '<div class="note" style="margin-top:10px">后端阶段（原型演示，看三种情形）：</div><div class="seg" role="group" aria-label="后端阶段">'+[[1,'第一步 今天'],[2,'第二步 加 --status'],[3,'第三步 加 --submit']].map(function(o){return '<button data-act="wzstage" data-v="'+o[0]+'" aria-pressed="'+(S.wzStage===o[0])+'">'+o[1]+'</button>'}).join('')+'</div><div class="note">'+t[S.wzStage]+'</div>'}
+function wzOpen(){S.wz={i:0,err:''};wzRender()}
+function wzRender(){
+ var w=S.wz,seq=wzSeq(),name=seq[w.i];
+ var T={pre:'签署前检查',risk:'风险说明',term:'在终端窗口里运行',c1:'第 1 次确认',c2:'第 2 次确认',pin:'第 3 次确认：批准口令',done:'结果'};
+ var dots=seq.map(function(s,i){return '<span class="pill '+(i<w.i||name==='done'?'ok':i===w.i?'accent':'')+'">'+(i+1)+' '+T[s].split('：')[0]+'</span>'}).join('');
+ var b='';
+ if(name==='pre'){
+  var ck=function(ok,t){return '<div class="chk">'+(ok?'<span class="pill ok">'+ic('check')+'</span>':'<span class="pill block">'+ic('alert')+'</span>')+'<span>'+t+'</span></div>'};
+  b=ck(!S.marker,'本窗口的环境里没有 agent 标记（CLAUDECODE、CODEX_SANDBOX 等）')+ck(true,'窗口是你亲手打开的，不是离屏或自动化启动')+ck(true,'事实是刚现读的：Run 还没人持有有效租约，原持有者进程仍是“无法判断”')+ck(true,'批准口令状态：'+(S.pinOn?'已生效，会要你输口令':'未设置'))+
+   (S.marker?'<div class="danger">'+ic('alert')+'<span>本窗口是从 agent 终端里启动的，命令会直接拒绝。请关掉，从开始菜单或独立 PowerShell 重新打开。界面不会去清环境变量，也不会代你打字。</span></div>':'')+
+   '<div class="note">下面两个开关只在原型里有，用来看另一种情形。</div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="wzmark" aria-pressed="'+S.marker+'">演示：'+(S.marker?'取消“从 agent 终端启动”':'假装从 agent 终端启动')+'</button><button class="btn sm" data-act="wzpin" aria-pressed="'+S.pinOn+'">演示：'+(S.pinOn?'取消“已设批准口令”':'假装已设批准口令')+'</button></div>'+stageBox();
+ } else if(name==='risk'){
+  b=(S.pinOn?'':'<div class="warn">'+ic('alert')+'<span>未设批准口令：这次签署防不了别的程序冒充你，建议先在终端设口令。设口令界面不做。</span></div>')+
+   '<dl class="facts"><dt>Run</dt><dd class="mono">'+WZ.run+'</dd><dt>当前持有者</dt><dd class="mono">'+WZ.holder+'</dd><dt>租约到期</dt><dd>2026-11-05 02:23:02（本机时间）</dd><dt>原持有者进程</dt><dd>无法判断（没有记录进程）</dd><dt>申请人</dt><dd class="mono">'+WZ.claimant+'</dd></dl>'+
+   '<div>签署后，申请人可以在租约失效后接手；如果原持有者其实还在干活，它之后的写入会全部被拒绝。</div><div class="note">这份签字只对这个 Run、这个申请人、当前持有者和这一版租约有效，续租或换主就作废。</div>';
+ } else if(name==='c1'){
+  b='<div>把 Run 编号整串原样敲进来（不要只输一部分，也不要输申请人名字）。</div><label class="fld">Run 编号<input type="text" id="wzin" autocomplete="off" spellcheck="false"></label>';
+ } else if(name==='c2'){
+  b='<div>输入这四个字：<b>'+WZ.phrase+'</b></div><label class="fld">确认<input type="text" id="wzin" autocomplete="off" spellcheck="false"></label>';
+ } else if(name==='term'){
+  var cmd1='python main.py pm sign-risk --run-id '+WZ.run+' --claimant '+WZ.claimant;
+  b='<div>Run 编号、“接受风险”和口令（如果设了）都要在终端窗口里敲，界面看不到，也不会代你敲。点下面的按钮会弹出一个真的终端窗口，运行这一条命令：</div><div class="cmd"><span class="mono">'+esc(cmd1)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(cmd1)+'">'+ic('copy')+' 复制</button></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="wzrun">'+ic('term')+' 在终端窗口里运行（原型模拟）</button></div>'+(w.ran?'<div class="note">终端窗口已弹出（原型模拟）。去那里敲完，回来点“重新读取账本”。</div>':'<div class="note">先点上面的按钮。</div>');
+ } else if(name==='pin'){
+  b='<div>输入批准口令。口令只在这个窗口的内存里，不进命令行参数、环境变量、文件、日志；提交后立刻清空。</div><label class="fld">批准口令<input type="password" id="wzin" autocomplete="off"></label><div class="note">原型里随便输一个就行，不会保存。</div>';
+ } else {
+  var st=S.wzStage;
+  var say=st===1?'已在终端签署回收风险：Run '+WZ.run+'，申请人 '+WZ.claimant+'。请重新回收。':'已签署回收风险：Run '+WZ.run+'，申请人 '+WZ.claimant+'，签字号 RISK-示例。请重新回收。';
+  b=(st===1?'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="pill hint">已发出 · 等 agent 回收放行</span><b>界面读不到签字</b></div><div class="note">今天没有只读命令能看到签字（--status 要到第二步才有）。界面只能等 agent 重新回收放行，“待你签署”那张卡才会消失。</div>':'<div class="verd ok" style="display:flex;gap:10px;align-items:center"><span class="pill ok">'+ic('check')+(st===2?' 读到：已签署，等 agent 回收（--status，原型模拟）':' 已写入账本（原型模拟）')+'</span><b>签字号 RISK-示例</b></div>')+
+   '<dl class="facts"><dt>绑定</dt><dd>Run '+WZ.run+'、申请人 '+WZ.claimant+'、当前持有者 '+WZ.holder+'、这一版租约</dd><dt>什么时候作废</dt><dd>租约被续租或换主就作废，到时这张卡回到“待你签署”</dd></dl>'+
+   '<div class="note">给等待的 agent：账本里已有签字，它重新回收就会放行。你也可以把这句话贴给它：</div><div class="cmd"><span class="mono">'+esc(say)+'</span><button class="btn sm" data-act="copy" data-t="'+esc(say)+'">'+ic('copy')+' 复制</button></div>';
+ }
+ var foot='<button class="btn" data-act="wzx">'+(name==='done'?'关闭':'取消')+'</button>'+(w.i>0&&name!=='done'?'<button class="btn" data-act="wzback">上一步</button>':'')+(name==='done'?'':'<button class="btn primary" data-act="wznext"'+(name==='pre'&&S.marker?' disabled':'')+'>'+(name==='term'?'重新读取账本':seq[w.i+1]==='done'?'确认签署':'下一步')+'</button>');
+ $('#overlay').innerHTML='<div class="sheet-bg"><div class="sheet wz" role="dialog" aria-modal="true" aria-labelledby="wz-t"><h2 id="wz-t">签署接受风险 · '+T[name]+'</h2><div class="steps">'+dots+'</div>'+b+(w.err?'<div class="danger" role="alert">'+ic('alert')+'<span>'+esc(w.err)+'</span></div>':'')+'<div class="foot">'+foot+'</div></div></div>';
+ var f=$('#wzin');if(f)f.focus();else{var p=$('#overlay .btn.primary');if(p&&!p.disabled)p.focus()}
+}
+function wzNext(){
+ var w=S.wz,name=wzSeq()[w.i],v=($('#wzin')&&$('#wzin').value||'').trim();
+ if(name==='pre'&&S.marker)return;
+ if(name==='c1'&&v!==WZ.run){w.err='Run 编号不一致，未签署。你输入的是“'+v+'”，应当是“'+WZ.run+'”。请重新输入。';wzRender();return}
+ if(name==='c2'&&v!==WZ.phrase){w.err='未输入“'+WZ.phrase+'”，未签署。你输入的是“'+v+'”，应当是这四个字：'+WZ.phrase+'。';wzRender();return}
+ if(name==='pin'&&!v){w.err='没有输入口令，未签署。';wzRender();return}
+ if(name==='term'&&!w.ran){w.err='还没有在终端窗口里运行命令。先点“在终端窗口里运行”，在那里敲完再回来。';wzRender();return}
+ w.err='';w.i++;
+ if(wzSeq()[w.i]==='done'){S.hs.sign=S.wzStage===1?'sent':'ok';addLog(S.wzStage===3?'pm sign-risk --run-id '+WZ.run+' --claimant '+WZ.claimant+'（向导提交，原型模拟）':S.wzStage===2?'pm sign-risk --status --json（只读，原型模拟）':'重新读取账本（原型模拟）',0);render()}
+ wzRender();
+}
+
+var VIEWS={mine:vMine,today:vToday,missions:vMissions,prs:vPrs,projects:vProjects,worktrees:vWorktrees,release:vRelease,project:vProject,spine:vSpine,commands:vCommands};
+function handOpen(){return HAND.filter(function(x){return S.hs[x.id]!=='ok'})}
+function badges(){var q=queue();return {mine:handOpen().length,today:q.length,missions:MIS.filter(function(m){return m.col===1&&!S.done[m.id]}).length,prs:S.online?PRS.filter(function(p){return p.need||p.red||p.unv}).length:0}}
+function renderRail(){
+ var b=badges(),h='<div class="brand">'+ic('cross')+'驾驶舱</div>';
+ NAV.forEach(function(g){h+='<div class="grp">'+g[0]+'</div>';g[1].forEach(function(i){var n=b[i[0]];h+='<button class="nav" data-act="nav" data-v="'+i[0]+'"'+(S.view===i[0]?' aria-current="page"':'')+'>'+ic(i[2])+'<span>'+i[1]+'</span>'+(n?'<span class="badge'+(i[0]==='today'||i[0]==='mine'?'':' soft')+'">'+n+'</span>':'')+'</button>'})});
+ h+='<div class="spacer"></div><div class="foot">原型 v14 · 示例数据<br>不连账本，不跑任何命令</div>';
+ $('#rail').innerHTML=h;
+}
+function renderTop(){
+ $('#top').innerHTML='<span class="chip"><span class="dot"></span><b>控制根</b> 已确认</span><span class="chip"><b class="mono">1.3.3-dd8b192</b> 发布版</span><span class="chip">账本 <b>2 分钟前</b></span>'+
+  '<span class="chip'+(S.online?'':' off')+'"><span class="dot"></span><b>GitHub</b> '+(S.online?'在线':'断网')+'</span>'+(S.marker?'<span class="chip bad" role="alert">'+ic('alert')+' 本窗口是从 agent 终端里启动的，签字类操作会被拒；请关掉，从开始菜单或独立 PowerShell 重新打开</span>':'')+(S.hs.bk==='ok'?'':'<span class="chip warn" title="超过 24 小时变黄；从没做过标红。读 pm state-backup status，只读本机标记文件"><span class="dot"></span>账本备份 <b>31 小时前</b></span>')+(handOpen().length?'<button class="chip act" data-act="nav" data-v="mine">要你出手 <b>'+handOpen().length+'</b></button>':'')+'<span class="grow"></span><span class="demo">原型</span>'+
+  '<div class="seg" role="group" aria-label="网络"><button data-act="net" data-v="1" aria-pressed="'+S.online+'">在线</button><button data-act="net" data-v="0" aria-pressed="'+!S.online+'">离线</button></div>'+
+  '<div class="seg" role="group" aria-label="主题"><button data-act="theme" data-v="" aria-pressed="'+(S.theme==='')+'">跟随系统</button><button data-act="theme" data-v="light" aria-pressed="'+(S.theme==='light')+'">浅</button><button data-act="theme" data-v="dark" aria-pressed="'+(S.theme==='dark')+'">深</button></div>';
+}
+function renderDrawer(){
+ var last=S.log[0];
+ var h='<button data-act="drawer" aria-expanded="'+S.drawer+'">'+ic('term')+'<b>控制台</b><span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(last?esc(last.cmd)+' · 退出码 '+last.rc:'还没有命令')+'</span><span class="note">'+(S.drawer?'收起':'展开')+'</span></button>';
+ if(S.drawer)h+='<div class="log">'+S.log.map(function(e){return '<div class="e"><span class="mono" style="color:var(--ink3)">'+e.t+'</span><span class="mono">'+esc(e.cmd)+'</span><span class="pill '+(e.rc?'block':'ok')+'">退出码 '+e.rc+'</span></div>'}).join('')+'<div class="note">每个按钮的等价命令和退出码都在这里，和命令行完全一致；原型里这些是模拟的。</div></div>';
+ $('#drawer').innerHTML=h;
+}
+function render(){
+ var keep=document.activeElement&&document.activeElement.id;var pos=document.activeElement&&document.activeElement.selectionStart;
+ renderRail();renderTop();$('#view').innerHTML=VIEWS[S.view]();var sc=SCOPE[S.view],hd=$('#view .hd');if(sc&&hd){var sp=document.createElement('span');sp.className='pill '+(sc[0]==='驾驶舱（本机部署与运行）'?'accent':sc[0]==='受管项目'?'hint':'');sp.title=sc[1];sp.textContent='范围：'+sc[0]+' · '+sc[1];hd.insertBefore(sp,hd.children[1]||null)}renderDrawer();
+ if(keep){var el=document.getElementById(keep);if(el){el.focus();try{if(pos!=null)el.setSelectionRange(pos,pos)}catch(e){}}}
+}
+function toast(t){var o=document.createElement('div');o.className='toast';o.textContent=t;o.setAttribute('role','status');document.body.appendChild(o);setTimeout(function(){o.remove()},1600)}
+function nowT(){var d=new Date(Date.now()-7*3600e3),z=function(n){return ('0'+n).slice(-2)};return z(d.getUTCHours())+':'+z(d.getUTCMinutes())+':'+z(d.getUTCSeconds())}
+function addLog(cmd,rc){S.log.unshift({t:nowT(),cmd:cmd,rc:rc,ex:1})}
+function copy(t){
+ var done=function(){toast('已复制')};
+ try{navigator.clipboard.writeText(t).then(done,function(){fallback(t,done)})}catch(e){fallback(t,done)}
+}
+function fallback(t,done){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy');done()}catch(e){toast('请手动选中复制')}a.remove()}
+
+/* confirm sheet: shows the equivalent command before anything runs */
+var HOW={
+ accept:{t:'确认验收',what:'记下你已经看过结果。验收后还要点“收口”，才会把文件并回控制根。',cmd:'python main.py pm accept --mission-id MIS-DJ009-0002',danger:'验收只能由你本人做；点之前确认你已经看过结果。',ev:1,after:'accepted'},
+ close:{t:'收口',what:'把验收过的文件按字节并回控制根，推进任务，把证据写进变更单。不替你提交 Git。',cmd:'python main.py pm close --mission-id MIS-DJ009-0002',after:'closed'},
+ approve:{t:'批准范围',what:'只批准你看过的这一版。批准不会启动任何 agent。',cmd:'python main.py pm approve --request-id REQ-0031 --plan-hash 4be07a91c3d2 --approver baiyang --approval-evidence-ref USER_EVIDENCE',danger:'这张卡含安全区。批准只是“可以开始做”，不等于安全签字。',ev:1,after:'approved'},
+ unpark:{t:'拿回这张卡',what:'先核对工作树没被动过，再发新钥匙（存本机钱包，不显示）。拿回后先同步 main 再干活。',cmd:'python main.py pm unpark --mission-id MIS-DJ009-0001 --as claude:laptop --approval-evidence-ref USER_EVIDENCE',ev:1,after:'unparked'}
+};
+function openSheet(how,id){
+ var o=getHow(how,id),evl=o.ev?'<div><div class="note">凭据（点击那一刻生成；口令生效后改为终端里输入口令）</div><div class="cmd"><span class="mono">user-confirmation:gui-click-20261104T201530-8c1f2a90</span></div></div>':'';
+ $('#overlay').innerHTML='<div class="sheet-bg" data-act="sheetbg"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-t"><h2 id="sh-t">'+o.t+'</h2><div>'+o.what+'</div><div><div class="note">等价命令（和你在终端里敲的完全一样）</div><div class="cmd"><span class="mono">'+esc(o.cmd)+'</span></div></div>'+evl+(o.danger?'<div class="danger">'+ic('alert')+'<span>'+o.danger+'</span></div>':'')+'<div class="foot"><button class="btn" data-act="sheetx">取消</button><button class="btn" data-act="copy" data-t="'+esc(o.cmd)+'">'+ic('copy')+' 复制命令，去终端运行</button>'+(o.noRun?'':'<button class="btn primary" data-act="sheetgo" data-how="'+how+'" data-id="'+id+'">确认并运行</button>')+'</div></div></div>';
+ var b=$('#overlay .btn.primary');if(b)b.focus();
+}
+function closeSheet(){$('#overlay').innerHTML=''}
+
+document.addEventListener('click',function(ev){
+ var t=ev.target.closest('[data-act]');if(!t)return;var a=t.dataset.act;
+ if(a==='sheetbg'){if(ev.target===t)closeSheet();return}
+ if(a==='nav')go(t.dataset.v);
+ else if(a==='goto'){if(t.dataset.id){S.sel=t.dataset.id;S.spineSel=t.dataset.id}go(t.dataset.v)}
+ else if(a==='copy')copy(t.dataset.t);
+ else if(a==='qmore'){S.qOpen=!S.qOpen;render()}
+ else if(a==='sel'){S.sel=t.dataset.id;render()}
+ else if(a==='net'){S.online=t.dataset.v==='1';render()}
+ else if(a==='theme'){S.theme=t.dataset.v;if(S.theme)document.documentElement.setAttribute('data-theme',S.theme);else document.documentElement.removeAttribute('data-theme');render()}
+ else if(a==='drawer'){S.drawer=!S.drawer;render()}
+ else if(a==='plc'){S.plc=t.dataset.v;render()}
+ else if(a==='var'){S.variant=t.dataset.v;render()}
+ else if(a==='wtab'){S.wtTab=t.dataset.v;render()}
+ else if(a==='cat'){S.cmdCat=t.dataset.v;render()}
+ else if(a==='run'){addLog(t.dataset.t,S.plc==='bad'?1:0);S.drawer=true;render();toast('已在控制台记下一条（原型是模拟的）')}
+ else if(a==='sheet')openSheet(t.dataset.how,t.dataset.id);
+ else if(a==='wzopen')wzOpen();
+ else if(a==='wznext')wzNext();
+ else if(a==='wzback'){S.wz.i=Math.max(0,S.wz.i-1);S.wz.err='';wzRender()}
+ else if(a==='wzx')closeSheet();
+ else if(a==='wzmark'){S.marker=!S.marker;render();wzRender()}
+ else if(a==='wzpin'){S.pinOn=!S.pinOn;wzRender()}
+ else if(a==='toast')toast(t.dataset.t);
+ else if(a==='pjopen'){S.pjv={id:t.dataset.id,tab:'ov'};go('project')}
+ else if(a==='pjtab'){S.pjv.tab=t.dataset.v;render()}
+ else if(a==='wzstage'){S.wzStage=+t.dataset.v;S.wz.i=0;S.wz.ran=false;S.wz.err='';wzRender()}
+ else if(a==='wzrun'){S.wz.ran=true;S.wz.err='';addLog('pm sign-risk --run-id '+WZ.run+' --claimant '+WZ.claimant+'（终端窗口里运行，原型模拟）',0);render();wzRender()}
+ else if(a==='sheetx')closeSheet();
+ else if(a==='sheetgo'){
+  var o=getHow(t.dataset.how,t.dataset.id),id=t.dataset.id;addLog(o.cmd.replace('python ','').replace(/USER_EVIDENCE/,'user-confirmation:gui-click-…'),0);
+  if(o.after==='accepted'){S.done[id]='accepted';S.doneT='11-04 20:15 MST'}
+  else if(o.after==='closed')S.done[id]='closed';
+  else if(o.after==='closews')S.closedWs[id]=1;
+  else if(o.after==='swept')S.swept=1;
+  else if(o.after==='pjreg'){S.pjReg[id]=1;S.pjDirty=true}
+  else if(o.after==='pjnew'){var qn=S.pn,nid=qn.id||(qn.stack==='plc'?'DJ-2026-012':'SW-2026-011');PJ.push({id:nid,name:qn.name,stack:qn.stack,phase:'developing',reg:0,open:-1,last:'刚刚',nw:1})}
+  else if(o.after==='approved'){S.done[id]='approved';var m=mis(id);m.step=5;m.col=0;m.state='ACTIVE';m.owner='待领取';m.lease='未开工';m.tags=['已批准 11-04 20:15'];m.ev[3]='pm approve · 11-04 20:15 · 你亲手';delete S.done[id];}
+  else if(o.after==='unparked'){var m2=mis(id);m2.state='ACTIVE';m2.col=0;m2.tags=['刚拿回：先同步 main'];m2.lease='新钥匙已发';m2.next={kind:'agent',title:'拿回后先同步 main 再干活',desc:'在这张卡的工作树里同步 main、跑测试；有冲突就停下来交给你，不自动变基。',cmd:'git fetch origin main && git merge origin/main'}}
+  closeSheet();S.drawer=true;render();toast('已运行，回执在控制台（原型是模拟的）');
+ }
+});
+document.addEventListener('input',function(ev){
+ var t=ev.target;if(!t.dataset)return;
+ if(t.dataset.act==='cq'){S.cmdQ=t.value;render()}
+ else if(t.dataset.act==='chk'){S.chk=t.value;render()}
+ else if(t.dataset.act==='wtf'){S.wtAgent=$('#wta').value;S.wtCard=$('#wtc').value||'<卡号>';render()}
+ else if(t.dataset.act==='sps'){S.spineSel=t.value;render()}
+ else if(t.dataset.act==='pnf'){var g=function(i){var e=document.getElementById(i);return e?e.value:null};S.pn={stack:g('pn-stack')||S.pn.stack,mode:g('pn-mode')||S.pn.mode,id:(g('pn-id')||'').trim(),name:g('pn-name')||''};render()}
+});
+document.addEventListener('change',function(ev){var t=ev.target;if(t.dataset&&t.dataset.act==='sps'){S.spineSel=t.value;render()}});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeSheet()});
+window.addEventListener('hashchange',function(){route();render()});
+route();render();
+</script>

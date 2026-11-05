@@ -1,0 +1,339 @@
+{
+  "schema_version": "cockpit-spine.v1",
+  "note": "脊柱十步的数据文件草稿（云端起草，未进仓库）。进仓库后放 scripts/cockpit_board/flow/spine.json，由‘脊柱图’页和‘任务’页读；同一份内容也写在 docs/handover/ 的脊柱页里，测试逐行核对（见 test_spine_reconcile_draft.py）。步骤文字来自《驾驶舱使用规划（草稿）》第 2 节，完成判据来自 GUI 方案 Doc‘脊柱十步怎么从账本推出来’。规划定稿后以规划为准，这里跟着改。",
+  "handover_page": "docs/handover/（脊柱页的文件名由规划批次①定，U-01 开卡时填）",
+  "lanes": [
+    {
+      "id": "you",
+      "name": "你"
+    },
+    {
+      "id": "local",
+      "name": "本地"
+    },
+    {
+      "id": "cloud",
+      "name": "云端"
+    }
+  ],
+  "display_states": [
+    {
+      "id": "done",
+      "name": "完成",
+      "rule": "有机器读得到的证据"
+    },
+    {
+      "id": "current",
+      "name": "当前",
+      "rule": "卡现在停在这一步"
+    },
+    {
+      "id": "waiting_you",
+      "name": "等你",
+      "rule": "这一步只有用户能做"
+    },
+    {
+      "id": "lost",
+      "name": "失联",
+      "rule": "卡开着、租约过期、最近断点超过 1 小时"
+    },
+    {
+      "id": "parked",
+      "name": "搁着",
+      "rule": "卡已 pm park，钥匙已交出"
+    },
+    {
+      "id": "no_record",
+      "name": "没记录",
+      "rule": "读不到证据；绝不画成完成"
+    },
+    {
+      "id": "todo",
+      "name": "还没到",
+      "rule": "当前步之后的步；不是证据状态"
+    }
+  ],
+  "touchpoints": [
+    {
+      "id": "T1",
+      "name": "确认计划",
+      "at_step": 3,
+      "who": "you"
+    },
+    {
+      "id": "T2",
+      "name": "规则批准 / 安全签字 / 确认验收",
+      "at_steps": [
+        9,
+        10
+      ],
+      "who": "you"
+    },
+    {
+      "id": "T3",
+      "name": "亲口事：切换发布、删除、改规则、代签",
+      "at_steps": [],
+      "who": "you",
+      "note": "界面里没有对应按钮，只显示该去哪里做"
+    }
+  ],
+  "steps": [
+    {
+      "n": 1,
+      "name": "进门定位",
+      "lanes": [
+        "local",
+        "cloud"
+      ],
+      "touch": null,
+      "commands": [
+        "project list",
+        "pm orient",
+        "pm resume"
+      ],
+      "point": "P1",
+      "views": [
+        "today.idbar",
+        "missions.spine"
+      ],
+      "done_when": "卡在账本里（orient 的 mission 非空）",
+      "source": [
+        "pm orient --json"
+      ],
+      "when_unreadable": "none_needed",
+      "unreadable_text": "这一步没有按卡的记录，只显示‘卡已建立’"
+    },
+    {
+      "n": 2,
+      "name": "入箱",
+      "lanes": [
+        "local"
+      ],
+      "touch": null,
+      "commands": [
+        "pm inbox add",
+        "pm inbox confirm"
+      ],
+      "point": "P2",
+      "views": [
+        "missions.spine"
+      ],
+      "done_when": "收件箱条目已确认并关联本卡",
+      "source": [
+        "pm orient --json#intake",
+        "pm inbox list"
+      ],
+      "when_unreadable": "skipped",
+      "unreadable_text": "直接建的卡没有入箱记录，标‘跳过’，不是‘没记录’"
+    },
+    {
+      "n": 3,
+      "name": "出计划",
+      "lanes": [
+        "local"
+      ],
+      "touch": "T1",
+      "commands": [
+        "pm plan"
+      ],
+      "point": "P3",
+      "views": [
+        "missions.spine",
+        "missions.sheet"
+      ],
+      "done_when": "范围卡存在且七栏齐",
+      "source": [
+        "pm pending#cards"
+      ],
+      "when_unreadable": "no_record",
+      "unreadable_text": "没有就写‘没记录’"
+    },
+    {
+      "n": 4,
+      "name": "批准",
+      "lanes": [
+        "local"
+      ],
+      "touch": null,
+      "commands": [
+        "pm approve"
+      ],
+      "point": "P4",
+      "views": [
+        "missions.sheet"
+      ],
+      "done_when": "任务状态已过‘待批准’，记批准人和时间",
+      "source": [
+        "mission.state",
+        "事件时间"
+      ],
+      "when_unreadable": "waiting_you",
+      "unreadable_text": "状态是待批准就是‘等你’"
+    },
+    {
+      "n": 5,
+      "name": "开工",
+      "lanes": [
+        "local",
+        "cloud"
+      ],
+      "touch": null,
+      "commands": [
+        "pm confirm-start",
+        "worktree open",
+        "continuity run start"
+      ],
+      "point": "P5",
+      "views": [
+        "worktrees",
+        "missions.spine"
+      ],
+      "done_when": "有 Run，工位已登记",
+      "source": [
+        "pm orient --json#run",
+        "worktree list"
+      ],
+      "when_unreadable": "none_needed",
+      "unreadable_text": "云端直接开分支，跳过账本"
+    },
+    {
+      "n": 6,
+      "name": "写与自检",
+      "lanes": [
+        "local",
+        "cloud"
+      ],
+      "touch": null,
+      "commands": [
+        "plc check",
+        "spec check",
+        "doc check"
+      ],
+      "point": "P6",
+      "views": [
+        "plc",
+        "missions.spine"
+      ],
+      "done_when": "Run 在 RUNNING 且有断点；自检回执见‘PLC 证据’",
+      "source": [
+        "pm orient --json#checkpoint"
+      ],
+      "when_unreadable": "no_record",
+      "unreadable_text": "自检没记录写‘没记录’；云端没有 LSP 插件，PLC 写‘未经 LSP 检查’"
+    },
+    {
+      "n": 7,
+      "name": "验证",
+      "lanes": [
+        "local"
+      ],
+      "touch": null,
+      "commands": [
+        "pm verify"
+      ],
+      "point": "P7",
+      "views": [
+        "missions.spine"
+      ],
+      "done_when": "pm verify 的质量回执存在",
+      "source": [
+        "收口单的质量回执"
+      ],
+      "when_unreadable": "no_record",
+      "unreadable_text": "没有回执就是‘没记录’"
+    },
+    {
+      "n": 8,
+      "name": "提 PR",
+      "lanes": [
+        "local",
+        "cloud"
+      ],
+      "touch": null,
+      "commands": [
+        "pr open"
+      ],
+      "point": "P8",
+      "views": [
+        "prs",
+        "missions.spine"
+      ],
+      "done_when": "找到分支名含卡号的 PR",
+      "source": [
+        "GitHub 采集（分支命名见 WS-001：前缀 + 卡号）"
+      ],
+      "when_unreadable": "offline_unknown",
+      "unreadable_text": "断网写‘断网未知’，不用旧数据"
+    },
+    {
+      "n": 9,
+      "name": "审计与合并",
+      "lanes": [
+        "cloud"
+      ],
+      "touch": "T2",
+      "commands": [
+        "audit_pr.py",
+        "pr ready"
+      ],
+      "point": "P9",
+      "views": [
+        "prs",
+        "missions.spine"
+      ],
+      "done_when": "PR 已合并且审计 PASS",
+      "source": [
+        "GitHub 采集",
+        "pr ready"
+      ],
+      "when_unreadable": "offline_unknown",
+      "unreadable_text": "断网未知；审计 UNVERIFIED 不算完成"
+    },
+    {
+      "n": 10,
+      "name": "验收与收口",
+      "lanes": [
+        "local"
+      ],
+      "touch": "T2",
+      "commands": [
+        "pm accept",
+        "pm close",
+        "ledger reconcile"
+      ],
+      "point": "P10",
+      "views": [
+        "missions.sheet",
+        "missions.spine"
+      ],
+      "done_when": "任务已关闭",
+      "source": [
+        "mission.state"
+      ],
+      "when_unreadable": "none_needed",
+      "unreadable_text": "待验收、已验收未收口各有当前态"
+    }
+  ],
+  "off_spine": [
+    {
+      "id": "incident",
+      "name": "中途出状况",
+      "commands": [
+        "pm park",
+        "pm switch",
+        "pm unpark",
+        "pm handoff",
+        "pm takeover",
+        "pm recover"
+      ],
+      "views": [
+        "missions.lost",
+        "missions.parked"
+      ],
+      "cases": [
+        "J-02",
+        "J-11"
+      ]
+    }
+  ]
+}
