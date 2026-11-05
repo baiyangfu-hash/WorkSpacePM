@@ -1,0 +1,257 @@
+// ============================================================================
+// batch_counter_test.scltest - FB_2002_BatchCounter_DJ2026011 功能测试
+// ============================================================================
+// 被测对象: FB_0001/FB_2002_BatchCounter_DJ2026011 (实例在 DB_BatchCounterTest)
+// 激励: s_bPhotoSensor 光电信号, s_dBatchTarget 批次设定数量, s_bReset 复位按钮;
+//       结果: s_dBatchCount 已计工件数, s_bBatchComplete 批次完成。
+// 计数语义: 光电每个上升沿计一件; 达到设定数量输出批次完成并保持;
+//           完成后不再累加; 复位上升沿清零并重新计数; 设定数量小于等于 0 时不计数。
+//
+// 测试覆盖 (LSP-905 四标段):
+//   test1 - 基本: 复位后计数为零且批次未完成
+//   test2 - 基本: 每个光电上升沿计一件
+//   test3 - 边界: 光电长亮多个周期只计一件
+//   test4 - 状态转移: 计满设定数量置批次完成
+//   test5 - 状态转移: 完成后继续来件不累加
+//   test6 - 状态转移: 复位清零并重新计数
+//   test7 - 边界: 设定数量为 1 时首件即完成
+// ============================================================================
+
+// ============================================================================
+// test1: 设定数量 5, 复位上升沿 -> 计数清零且批次未完成
+// ============================================================================
+TEST_CASE "test1_reset_clears_counter"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 0;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test2: 3 个光电上升沿 -> 计数为 3 且批次未完成
+// ============================================================================
+TEST_CASE "test2_each_rising_edge_counts_one"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 3;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test3: 光电长亮 10 个周期 -> 只计一件
+// ============================================================================
+TEST_CASE "test3_long_on_signal_counts_once"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 10;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 1;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 1;
+END_TEST_CASE
+
+// ============================================================================
+// test4: 计满 5 件 -> 批次完成置位且计数钳位到设定值
+// ============================================================================
+TEST_CASE "test4_reaching_target_sets_complete"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 4;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 5;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = TRUE;
+END_TEST_CASE
+
+// ============================================================================
+// test5: 批次完成后再来一件 -> 计数保持 5 且完成保持
+// ============================================================================
+TEST_CASE "test5_counts_frozen_after_complete"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 5;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = TRUE;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 5;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = TRUE;
+END_TEST_CASE
+
+// ============================================================================
+// test6: 批次完成后按复位 -> 计数清零, 继续计 2 件 -> 计数为 2 且未完成
+// ============================================================================
+TEST_CASE "test6_reset_clears_and_restarts_counting"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 5;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = TRUE;
+
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 0;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 2;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = FALSE;
+END_TEST_CASE
+
+// ============================================================================
+// test7: 设定数量为 1 -> 首件即置批次完成
+// ============================================================================
+TEST_CASE "test7_target_one_completes_on_first_part"
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    SET DB_BatchCounterTest.s_dBatchTarget := 1;
+    SET DB_BatchCounterTest.s_bReset := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bReset := FALSE;
+    WAIT_CYCLES 2;
+
+    SET DB_BatchCounterTest.s_bPhotoSensor := TRUE;
+    WAIT_CYCLES 2;
+    SET DB_BatchCounterTest.s_bPhotoSensor := FALSE;
+    WAIT_CYCLES 2;
+
+    ASSERT DB_BatchCounterTest.s_dBatchCount = 1;
+    ASSERT DB_BatchCounterTest.s_bBatchComplete = TRUE;
+END_TEST_CASE

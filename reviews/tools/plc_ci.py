@@ -105,28 +105,42 @@ def context(source, line_number):
     return " / ".join(reversed(picked))
 scl = []
 bad_encoding = []
+scl_paths = []
 for root, _, files in os.walk(project):
     for name in sorted(files):
         if name.lower().endswith(".scl"):
             path = os.path.join(root, name)
             rel = os.path.relpath(path, project).replace(os.sep, "/")
-            try:
-                source = open(path, encoding="utf-8").read().splitlines()
-            except UnicodeDecodeError as error:
-                # 只为显示上下文才用替身字符读；坏字节本身单独报告，不能静默吞掉
-                bad_encoding.append({"file": rel, "offset": error.start})
-                source = open(path, encoding="utf-8", errors="replace").read().splitlines()
-            except OSError:
-                source = []
-            for v in SclLinter.lint_file(path).violations:
-                if v.severity == "ERROR":
-                    scl.append({"file": rel, "rule": v.rule_id, "message": v.message, "line": v.line_number,
-                                "code": context(source, v.line_number) or v.code_snippet})
+            scl_paths.append((rel, path))
+# 同一项目里只要有一个 .scl 带 UTF-8 BOM，就说明这个项目的 .scl 要导入 TIA Portal（TIA 把无 BOM 的文件按 ANSI 读，
+# 中文注释会乱码）；这时没有 BOM 的 .scl 就是漏网的，逐个报出来。一个都没带 BOM 的项目（含汇川 InoProShop 项目）不受影响。
+def has_bom(path):
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(3) == b"\xef\xbb\xbf"
+    except OSError:
+        return False
+bom_flags = {rel: has_bom(path) for rel, path in scl_paths}
+missing_bom = sorted(rel for rel, flag in bom_flags.items() if not flag) if any(bom_flags.values()) else []
+for rel, path in scl_paths:
+    try:
+        source = open(path, encoding="utf-8-sig").read().splitlines()
+    except UnicodeDecodeError as error:
+        # 只为显示上下文才用替身字符读；坏字节本身单独报告，不能静默吞掉
+        bad_encoding.append({"file": rel, "offset": error.start})
+        source = open(path, encoding="utf-8-sig", errors="replace").read().splitlines()
+    except OSError:
+        source = []
+    for v in SclLinter.lint_file(path).violations:
+        if v.severity == "ERROR":
+            scl.append({"file": rel, "rule": v.rule_id, "message": v.message, "line": v.line_number,
+                        "code": context(source, v.line_number) or v.code_snippet})
 print(json.dumps({
     "check": result.model_dump(),
     "docs": [asdict(f) for f in analysis.findings],
     "scl": scl,
     "encoding": bad_encoding,
+    "missing_bom": missing_bom,
 }, ensure_ascii=False))
 """
 
@@ -290,6 +304,8 @@ def failure_keys(data: dict) -> Counter:
         keys[f"SCL 规范 · {v['file']} [{v['rule']}] {v['message']}" + (f" | 代码: {code}" if code else "")] += 1
     for e in data.get("encoding", []):
         keys[f"SCL 编码 · {e['file']}：不是合法 UTF-8"] += 1
+    for rel in data.get("missing_bom", []):
+        keys[f"SCL 编码 · {rel}：同项目其它 .scl 带 UTF-8 BOM，这个没有（导入 TIA 时中文注释会乱码）"] += 1
     return keys
 
 
