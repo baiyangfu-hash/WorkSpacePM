@@ -207,7 +207,7 @@
 | D-18 | 自动模式拦固定入口（部署、备份推送） | P2 | 卡 225 D | 已核 | #558 |
 | D-19 | 发版标注缺 `d563293`、`dd8b192`，没有指针比对检查 | P2 | R-03 | 已核 | 发版卡 |
 | D-20 | `pm triage`、`pm state-backup` 部署版是否已有 | P2 | R-05 | ❓未核 | 在控制根核 `--help` |
-| D-21 | `SclLinter` 读文件用 `utf-8`，遇 BOM 误报“没有程序块” | P2 | #539、#552；`scl_linter.py` 第 358 行 | 已核 | 卡 228 |
+| D-21 | `SclLinter` 读文件用 `utf-8`，遇 BOM 误报“没有程序块” | P2 | #539、#552；现行源码 `auto_pm/domain/plc/scl_linter.py` 第 581 行 | 读码（读取编码已核；“误报”现象为转述，改后能否消除未验证） | 卡 228 |
 | D-22 | `project archive/restore` 导入旧路径；009 漏列 | P2 | 第 6 节 | 读码 | 本地复现后立卡 |
 | D-23 | 功能散装，没有从头走到底的一张图 | P2 | 第 11 节第 7 项 | 已核 | 使用规划 G-01、G-02 |
 | D-25 | `CHANGELOG.md` 两个 `[Unreleased]`；PM_SESSION 退役提示 | P3 | R-14 | 已核 | 各开 PR |
@@ -224,4 +224,4 @@
 5. **PLC 实机一致性**（D-24、D-21 和卡 228）：用户同意开工后做。
 6. **其余**（D-19、D-20、D-22、D-28 和 P3 三条）：按触发再排。
 
-**还有两条不算驾驶舱缺陷、但要一并交给本地 Claude 的发现**（在附录 A）：NT-1105-35（`0100_PLC自动化` 下约 44 处在块内读自己的 `VAR_OUTPUT`，其中部分是脚本误报）；`SclLinter` 第 358 行改 `utf-8-sig`（这就是 D-21 的具体改法）。
+**还有两条不算驾驶舱缺陷、但要一并交给本地 Claude 的发现**（在附录 A）：NT-1105-35（`0100_PLC自动化` 下约 44 处在块内读自己的 `VAR_OUTPUT`，其中部分是脚本误报）；`SclLinter` 读取编码的具体改法（D-21）：现行源码 `auto_pm/domain/plc/scl_linter.py` 第 581 行 `path.read_text(encoding="utf-8", errors="replace" if array_only else "strict")`，.scl 走 `strict` 一支，把 `utf-8` 换成 `utf-8-sig` 是候选改法，**改后能否消掉“没有程序块”误报没有验证**。注意：`00_Infrastructure/auto_pm/auto_pm/domain/plc/scl_linter.py` 还有一份旧暂存副本（提交 `0f78338b` “stage auto-pm workspace runtime” 留下），它的第 358 行与现行源码无关，不是改的位置；那份副本还在不在、要不要清理，**未核**。
