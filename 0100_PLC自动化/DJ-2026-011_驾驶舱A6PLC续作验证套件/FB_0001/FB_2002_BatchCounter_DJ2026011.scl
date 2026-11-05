@@ -22,6 +22,7 @@ VAR
     s_bPhotoPulse : BOOL;      // 光电信号单周期脉冲
     s_bResetPulse : BOOL;      // 复位按钮单周期脉冲
     s_bBatchLatch : BOOL;      // 批次完成锁存状态
+    s_dBatchCount : DINT;      // 批次已计工件数 (内部计数, 块末尾赋给输出 o_dBatchCount)
 END_VAR
 
 BEGIN
@@ -38,7 +39,7 @@ BEGIN
     // 复位: 上升沿清零计数与批次完成锁存, 之后重新计数。
     // ------------------------------------------------------------------
     IF s_bResetPulse THEN
-        o_dBatchCount := 0;
+        s_dBatchCount := 0;
         s_bBatchLatch := FALSE;
     END_IF;
 
@@ -47,13 +48,15 @@ BEGIN
     // 达到设定数量时钳位到设定值并锁存批次完成, 之后不再累加。
     // ------------------------------------------------------------------
     IF (NOT s_bBatchLatch) AND (i_dBatchTarget > 0) AND s_bPhotoPulse THEN
-        o_dBatchCount := o_dBatchCount + 1;
-        IF o_dBatchCount >= i_dBatchTarget THEN
-            o_dBatchCount := i_dBatchTarget;
+        s_dBatchCount := s_dBatchCount + 1;
+        IF s_dBatchCount >= i_dBatchTarget THEN
+            s_dBatchCount := i_dBatchTarget;
             s_bBatchLatch := TRUE;
         END_IF;
     END_IF;
 
+    // 输出只在块末尾赋值, 块内不再读取输出参数 (TIA 对读输出参数报警)。
+    o_dBatchCount := s_dBatchCount;
     o_bBatchComplete := s_bBatchLatch;
 
 END_FUNCTION_BLOCK
