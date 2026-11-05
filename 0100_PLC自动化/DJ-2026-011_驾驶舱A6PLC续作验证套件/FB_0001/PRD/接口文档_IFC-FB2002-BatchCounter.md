@@ -36,7 +36,7 @@
 
 ## 4. 逻辑说明
 
-1. `i_bPhotoSensor` 与 `i_bReset` 分别经 `FB_R_TRIG` 取上升沿，得到单周期脉冲 `s_bPhotoPulse` 与 `s_bResetPulse`。
+1. `i_bPhotoSensor` 与 `i_bReset` 分别经 `R_TRIG` 取上升沿，得到单周期脉冲 `s_bPhotoPulse` 与 `s_bResetPulse`。
 2. 复位优先：复位脉冲到来时 `o_dBatchCount` 清零、`s_bBatchLatch` 清零，随后重新计数。
 3. 计数：未完成且 `i_dBatchTarget > 0` 时，每个光电上升沿 `o_dBatchCount` 加 1。
 4. 完成：`o_dBatchCount` 达到 `i_dBatchTarget` 时钳位到设定值并锁存 `s_bBatchLatch`，`o_bBatchComplete` 输出锁存状态，之后不再累加。

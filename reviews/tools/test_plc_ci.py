@@ -61,7 +61,9 @@ def sample(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for project in (D009, D011, SYSLIB):
         path = sample_file(root, project)
         path.parent.mkdir(parents=True)
-        path.write_text(SAMPLE_SCL, encoding="utf-8")
+        # D011 的 .scl 已统一带 UTF-8 BOM（导入 TIA 用）；样件也带，才不会被“漏 BOM”新规则当成老问题。
+        # 样件第一行放注释：驾驶舱的 SclLinter 按 utf-8 读（不是 utf-8-sig），BOM 紧贴代码首行时会误报“没有程序块”（已记入遗留问题）
+        path.write_text(("\ufeff// 样件\n" if project == D011 else "") + SAMPLE_SCL, encoding="utf-8")
     # .scltest 也自己放一份，不依赖项目里现有的测试文件
     (root / D009 / SAMPLE_DIR / "ci_sample_test.scltest").write_text("// 样件\n", encoding="utf-8")
     # 检查代码也放进样件仓库：推到 main 的场景里裁判取自样件自己的提交
@@ -147,6 +149,24 @@ def test_new_scl_and_doc_problem_in_009_fails(pr, capsys) -> None:
     assert f"      - SCL 规范 · {SAMPLE_DIR}/{SAMPLE_NAME}" in out  # 老问题照样列出，不被新问题盖掉
 
 
+def test_scl_without_bom_in_a_bom_project_fails(pr, capsys) -> None:
+    """同项目其它 .scl 都带 BOM（导入 TIA 用）时，新加的无 BOM .scl 必须判新增失败，否则 TIA 里中文注释会乱码。"""
+    head, run = pr
+    (head / D011 / SAMPLE_DIR / "FB_CiNoBom.scl").write_bytes(SAMPLE_OK.replace("FB_CiSample", "FB_CiNoBom").encode("utf-8"))
+    code, out = run(capsys)
+    assert code == 1
+    assert f"新增失败：SCL 编码 · {SAMPLE_DIR}/FB_CiNoBom.scl：同项目其它 .scl 带 UTF-8 BOM" in out
+
+
+def test_project_with_no_bom_at_all_is_not_asked_for_one(pr, capsys) -> None:
+    """一个 .scl 都没带 BOM 的项目（如汇川 InoProShop 的 009）不受影响。"""
+    head, run = pr
+    (head / D009 / "PRD" / "备注.md").write_text("x\n", encoding="utf-8")
+    code, out = run(capsys)
+    assert "SCL 编码" not in out.split(f"{D009}", 1)[1].split("[PASS", 1)[0] if f"{D009}" in out else True
+    assert code == 0
+
+
 def test_one_more_of_an_existing_violation_kind_still_counts_as_new(pr, capsys) -> None:
     head, run = pr
     lib = sample_file(head, SYSLIB)
@@ -164,7 +184,7 @@ def test_one_more_of_an_existing_violation_kind_still_counts_as_new(pr, capsys) 
 
 def test_fixing_a_known_failure_removes_it(pr, capsys) -> None:
     head, run = pr
-    sample_file(head, D011).write_text(SAMPLE_OK, encoding="utf-8")
+    sample_file(head, D011).write_text("\ufeff// 样件\n" + SAMPLE_OK, encoding="utf-8")
     code, out = run(capsys)
     assert code == 0
     assert f"[FAIL] {D011}" not in out and "新增失败" not in out

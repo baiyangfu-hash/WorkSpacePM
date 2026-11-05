@@ -137,12 +137,12 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 | o_bAlarmLamp | VAR_OUTPUT | BOOL | 报警灯输出，报警锁存后保持点亮 |
 | o_bAnyAlarm | VAR_OUTPUT | BOOL | 报警汇总结果，当前任一路报警为 TRUE |
 
-静态变量：`fb_rTrigReset`（FB_R_TRIG，复位沿检测）、`s_bResetPulse`（单周期复位脉冲）、`s_bAlarmLatch`（锁存状态）。临时变量：`temp_iIndex`（遍历索引）。
+静态变量：`fb_rTrigReset`（R_TRIG，复位沿检测）、`s_bResetPulse`（单周期复位脉冲）、`s_bAlarmLatch`（锁存状态）。临时变量：`temp_iIndex`（遍历索引）。
 
 ### 6.3 锁存逻辑
 
 1. 每周期遍历 `i_arrAlarms[1..16]`，任意一路为 TRUE 时 `o_bAnyAlarm` 置 TRUE。
-2. `i_bReset` 经 `FB_R_TRIG` 取上升沿，得到单周期脉冲 `s_bResetPulse`。
+2. `i_bReset` 经 `R_TRIG` 取上升沿，得到单周期脉冲 `s_bResetPulse`。
 3. 报警优先：`o_bAnyAlarm` 为 TRUE 时置位 `s_bAlarmLatch`；仅当 `o_bAnyAlarm` 为 FALSE 且 `s_bResetPulse` 为 TRUE 时清零。
 4. `o_bAlarmLamp` 输出 `s_bAlarmLatch`，因此报警消失后灯仍亮，直到复位；报警仍在时复位被忽略。
 
@@ -190,11 +190,11 @@ OB1 采用"区域化"布局，遵循 LSP-905 规范：
 | o_dBatchCount | VAR_OUTPUT | DINT | 当前批次已计工件数 |
 | o_bBatchComplete | VAR_OUTPUT | BOOL | 批次完成输出，达到设定数量后保持到复位 |
 
-静态变量：`fb_rTrigPhoto`、`fb_rTrigReset`（FB_R_TRIG 沿检测）、`s_bPhotoPulse`、`s_bResetPulse`（单周期脉冲）、`s_bBatchLatch`（批次完成锁存）。无临时变量。
+静态变量：`fb_rTrigPhoto`、`fb_rTrigReset`（R_TRIG 沿检测）、`s_bPhotoPulse`、`s_bResetPulse`（单周期脉冲）、`s_bBatchLatch`（批次完成锁存）。无临时变量。
 
 ### 7.3 计数与完成逻辑
 
-1. `i_bPhotoSensor` 与 `i_bReset` 分别经 `FB_R_TRIG` 取上升沿，得到单周期脉冲；光电长亮只计一件，复位长按不会反复清零。
+1. `i_bPhotoSensor` 与 `i_bReset` 分别经 `R_TRIG` 取上升沿，得到单周期脉冲；光电长亮只计一件，复位长按不会反复清零。
 2. 复位优先：复位脉冲到来时 `o_dBatchCount` 清零、`s_bBatchLatch` 清零，同一周期内到来的光电脉冲从 0 重新计 1 件。
 3. 计数：`s_bBatchLatch` 为 FALSE 且 `i_dBatchTarget > 0` 时，每个光电脉冲 `o_dBatchCount` 加 1。
 4. 完成：`o_dBatchCount` 达到 `i_dBatchTarget` 时钳位到设定值并置位 `s_bBatchLatch`，`o_bBatchComplete` 输出锁存状态；锁存期间继续来件不再累加。

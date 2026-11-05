@@ -31,7 +31,7 @@
 
 - 功能块为单实例调用，实例位于 `DB_TwoHandStartTest.fb_TwoHandStart`。
 - 两个按钮传电平信号（按下=TRUE），功能块内部不做取沿，无需外部做沿检测。
-- 同步窗口 `i_dSyncWindowMs` 为毫秒，由调用方传入常量（默认 500），功能块内部使用 `FB_TON` 计时（SysLib，按真实毫秒计时）。
+- 同步窗口 `i_dSyncWindowMs` 为毫秒，由调用方传入常量（默认 500），功能块内部使用 TIA 原生 IEC 定时器 `TON_TIME`（多重实例 `fb_tSyncWindow`，不依赖 SysLib），`PT` 由 `DINT_TO_TIME(i_dSyncWindowMs)` 转成 TIME，之后读 `.Q`。
 - `o_bStartOutput` 只表示“双手同步按住”这一逻辑条件，不是安全信号；急停、安全门等安全回路由安全继电器与 `FB_1030_SafetyManager` 负责。
 
 ## 4. 逻辑说明

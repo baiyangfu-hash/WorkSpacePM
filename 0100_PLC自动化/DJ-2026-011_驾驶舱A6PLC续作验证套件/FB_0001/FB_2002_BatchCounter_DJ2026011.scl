@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // FB_2002_BatchCounter_DJ2026011: 批量计数功能块
 // 描述: 光电每检测到一个工件计一件, 计数达到设定数量时输出批次完成并保持;
 //       按复位按钮的上升沿清零计数并重新计数;
@@ -17,8 +17,8 @@ VAR_OUTPUT
     o_bBatchComplete : BOOL;  // 批次完成输出, 达到设定数量后保持到复位
 END_VAR
 VAR
-    fb_rTrigPhoto : FB_R_TRIG; // 光电信号上升沿检测
-    fb_rTrigReset : FB_R_TRIG; // 复位按钮上升沿检测
+    fb_rTrigPhoto : R_TRIG;    // 光电信号上升沿检测 (TIA 原生 R_TRIG 多重实例)
+    fb_rTrigReset : R_TRIG;    // 复位按钮上升沿检测 (TIA 原生 R_TRIG 多重实例)
     s_bPhotoPulse : BOOL;      // 光电信号单周期脉冲
     s_bResetPulse : BOOL;      // 复位按钮单周期脉冲
     s_bBatchLatch : BOOL;      // 批次完成锁存状态
@@ -29,8 +29,10 @@ BEGIN
     // 光电与复位上升沿: 各自只在信号跳变瞬间产生一个扫描周期脉冲,
     // 因此光电长亮只计一件, 复位按钮长按不会反复清零。
     // ------------------------------------------------------------------
-    fb_rTrigPhoto(IN := i_bPhotoSensor, Q => s_bPhotoPulse);
-    fb_rTrigReset(IN := i_bReset, Q => s_bResetPulse);
+    #fb_rTrigPhoto(CLK := #i_bPhotoSensor);
+    s_bPhotoPulse := #fb_rTrigPhoto.Q;
+    #fb_rTrigReset(CLK := #i_bReset);
+    s_bResetPulse := #fb_rTrigReset.Q;
 
     // ------------------------------------------------------------------
     // 复位: 上升沿清零计数与批次完成锁存, 之后重新计数。

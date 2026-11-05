@@ -35,7 +35,7 @@
 ## 4. 逻辑说明
 
 1. 每个扫描周期先遍历 `i_arrAlarms[1..16]`，任意一路为 TRUE 时 `o_bAnyAlarm` 置 TRUE。
-2. `i_bReset` 经 `FB_R_TRIG` 取上升沿，得到单周期复位脉冲。
+2. `i_bReset` 经 `R_TRIG` 取上升沿，得到单周期复位脉冲。
 3. 锁存逻辑：`o_bAnyAlarm` 为 TRUE 时置位 `s_bAlarmLatch`；仅当 `o_bAnyAlarm` 为 FALSE 且复位脉冲到来时清零。
 4. `o_bAlarmLamp` 直接输出锁存状态，因此报警消失后灯仍亮，直到按复位；报警仍在时复位不生效。
 

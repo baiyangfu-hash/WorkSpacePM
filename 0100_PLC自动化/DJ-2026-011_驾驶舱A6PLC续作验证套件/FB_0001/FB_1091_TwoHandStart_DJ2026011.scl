@@ -1,9 +1,10 @@
-// ============================================================================
+﻿// ============================================================================
 // FB_1091_TwoHandStart_DJ2026011: 双手启动功能块
 // 描述: 两个启动按钮须在 0.5 秒(默认 500ms, 可调)内先后按下并一直按住才输出启动;
 //       任一松开立即停止; 两个都松开后才允许下一次启动;
 //       同一扫描周期双手同步按下视为满足同步窗口。
-// 遵守规范: Siemens LSP (LSP-903 三段式 / LSP-905 命名与 CASE-ELSE / LSP-906 DINT 定时器)
+// 遵守规范: Siemens LSP (LSP-905 命名与 CASE-ELSE); 定时器用 TIA 原生 TON_TIME 多重实例
+//   (不依赖 SysLib, 可直接导入 TIA Portal V19 编译)
 // ============================================================================
 
 FUNCTION_BLOCK FB_1091_TwoHandStart_DJ2026011
@@ -17,29 +18,22 @@ VAR_OUTPUT
     o_bSyncFault    : BOOL;   // 同步故障: 单手持按超过同步窗口
 END_VAR
 VAR
-    fb_tSyncWindow  : FB_TON; // 同步窗口定时器 (DINT 毫秒三段式)
+    fb_tSyncWindow  : TON_TIME; // 同步窗口定时器 (TIA 原生 IEC 定时器, 多重实例)
     s_iStep         : INT := 0; // 状态机当前步序
     s_bAnyPressed   : BOOL;   // 任一按钮按下
     s_bBothPressed  : BOOL;   // 双手同时按下
 END_VAR
 
 BEGIN
-    // ------------------------------------------------------------------
-    // 定时器三段式 Step 1: 预赋值 (单手持按且处于等待第二只手步序时计时)
-    // ------------------------------------------------------------------
     s_bAnyPressed  := i_bStartLeft OR i_bStartRight;
     s_bBothPressed := i_bStartLeft AND i_bStartRight;
 
-    fb_tSyncWindow.IN := s_bAnyPressed AND NOT s_bBothPressed AND (s_iStep = 10);
-    fb_tSyncWindow.PT := i_dSyncWindowMs;
-
     // ------------------------------------------------------------------
-    // 定时器三段式 Step 2: 全参数调用 (FB 顶部无条件批量调用区)
+    // 同步窗口定时器: 每扫描周期无条件调用一次 (多重实例, 全参数调用)
+    // 单手持按且处于等待第二只手步序时计时; PT 由毫秒值转 TIME
     // ------------------------------------------------------------------
-    fb_tSyncWindow(IN := fb_tSyncWindow.IN,
-                   PT := fb_tSyncWindow.PT,
-                   Q => fb_tSyncWindow.Q,
-                   ET => fb_tSyncWindow.ET);
+    #fb_tSyncWindow(IN := s_bAnyPressed AND NOT s_bBothPressed AND (s_iStep = 10),
+                    PT := DINT_TO_TIME(#i_dSyncWindowMs));
 
     // ------------------------------------------------------------------
     // CASE 状态机 (带 ELSE 防死锁容错分支)
@@ -61,7 +55,7 @@ BEGIN
                 s_iStep := 20;
             ELSIF NOT s_bAnyPressed THEN
                 s_iStep := 0;
-            ELSIF fb_tSyncWindow.Q THEN
+            ELSIF #fb_tSyncWindow.Q THEN
                 o_bSyncFault := TRUE;
                 s_iStep := 30;
             END_IF;
@@ -78,7 +72,6 @@ BEGIN
     END_CASE;
 
     // ------------------------------------------------------------------
-    // 定时器三段式 Step 3: 读输出已在 CASE 中完成 (fb_tSyncWindow.Q)
     // 最终输出: 仅运行态且双手按住, 任一松开当扫描即断开
     // ------------------------------------------------------------------
     o_bStartOutput := (s_iStep = 20) AND s_bBothPressed;
