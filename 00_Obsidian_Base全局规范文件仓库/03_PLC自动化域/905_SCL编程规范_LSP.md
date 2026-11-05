@@ -1,13 +1,17 @@
 ---
 spec_id: LSP-905
 title: "SCL编程规范"
-version: "V1.5.1"
+version: "V1.6.0"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/905_SCL编程规范_LSP.md"
 replaces: [DEV-801, DEV-810]
 tags: ["SCL", "编程", "核心规范", "LSP", "DJ-2026-005实践"]
 changelog:
+  - version: V1.6.0
+    date: 2026-11-05
+    author: Claude
+    changes: 目标平台为 TIA 时定时器、边沿、计数改用 TIA 原生多重实例（§4.3 重写，示例同步）；新增 §4.9 TIA 系统指令白名单（带参数签名）、§4.10 TIA 导入与验收（.scl 用 UTF-8 带 BOM，TIA 编译 0 错误为 PLC 卡验收硬条件）；起因：DJ-2026-011 导入 TIA V19 实测发现 FB_TON 不存在、中文注释乱码；待用户“规则批准”
   - version: V1.5.1
     date: 2026-10-27
     author: Claude
@@ -40,9 +44,9 @@ changelog:
 
 # SCL 编程规范 (Siemens LSP 兼容版)
 
-> 版本：V1.5.1
-> 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付）
-> 更新日期：2026-10-27
+> 版本：V1.6.0
+> 状态：已验证（§4.4 ENUM 为新增语法，待本机插件与目标平台验证，验证前不得用于交付；§4.9、§4.10 为 2026-11-05 新增，待 TIA 实机编译确认）
+> 更新日期：2026-11-05
 > 适用环境：Siemens LSP (VS Code)、TIA Portal、CODESYS、GX Works
 
 ---
@@ -56,7 +60,9 @@ changelog:
 | 变量命名 | 小驼峰命名，英文为主 | ✅ 强制 |
 | 注释格式 | 使用 `//` 或单层 `(* *)` | ✅ 强制 |
 | 标点符号 | 必须使用英文半角标点 | ✅ 强制 |
-| 定时器调用 | 必须包含完整参数(IN/PT/Q/ET)，Q参数不能为空 | ✅ 强制 |
+| 定时器调用 | TIA 项目用原生 `TON_TIME` 等多重实例，全参数调用，PT 为 TIME（毫秒用 `DINT_TO_TIME`），详见 903 | ✅ 强制 |
+| 类型白名单 | 只用 §4.9 列出的 TIA 系统指令或本仓库有定义的块，其余报错 | ✅ 强制 |
+| 交付编码 | 导入 TIA 的 `.scl` 用 UTF-8 带 BOM（§4.10） | ✅ 强制 |
 | VAR_TEMP位置 | 必须在VAR块中定义，不能在程序中间定义 | ✅ 强制 |
 | GOTO/标签 | **Siemens LSP不支持GOTO和标签语法**，必须用IF-ELSE替代 | ❌ 禁止 |
 
@@ -185,7 +191,7 @@ VAR
     s_bInitialized : BOOL;          // 内部静态初始化标志
     s_iCurrentStep : INT;           // 状态机当前步序
     s_arrMesAlarmQueue : ARRAY[1..10] OF INT; // 数组统一使用 arr 类型标识；下界为 1（§3.6）
-    fb_tActionTimer : FB_TON;       // TON 定时器实例
+    fb_tActionTimer : TON_TIME;     // TIA 原生 TON 定时器实例 (多重实例)
 END_VAR
 
 VAR_TEMP
@@ -296,21 +302,30 @@ END_WHILE;
 
 ### 4.3 定时器调用规范
 
+目标平台是 TIA Portal 时，定时器直接用 TIA 原生多重实例（`TON_TIME` / `TOF_TIME` / `TP_TIME` / `TONR_TIME`），不再使用 SysLib 的 `FB_TON` 包装（TIA 里没有）。完整约定见 903（V3.0.0）。
+
 ```scl
-// ✅ 正确 - 完整参数调用, PT 使用 DINT 类型(扫描周期数)
-fb_tActionTimer.IN := FALSE;
-fb_tActionTimer.PT := 500;
-fb_tActionTimer(IN := fb_tActionTimer.IN, PT := fb_tActionTimer.PT,
-                 Q => s_bTimer_Q, ET => q_eElapsed);
+VAR
+    fb_tActionTimer : TON_TIME;   // 多重实例, FB 静态区声明
+END_VAR
 
-// ❌ 错误 - 使用 TIME 字面量(LSP 不支持 TIME 类型)
-fb_tActionTimer(IN := FALSE, PT := T#500ms, Q => s_bTimer_Q, ET => q_eElapsed);
+// ✅ 正确 - FB 顶部无条件调用, 全参数, PT 是 TIME (毫秒值用 DINT_TO_TIME 转换)
+#fb_tActionTimer(IN := s_bStart, PT := DINT_TO_TIME(#i_dActionMs));
+s_bActionDone := #fb_tActionTimer.Q;
+s_dElapsedMs := TIME_TO_DINT(#fb_tActionTimer.ET);
 
-// ❌ 错误 - 缺少 Q 参数
-fb_tActionTimer(IN := FALSE, PT := 500, Q => , ET => q_eElapsed);
+// ❌ 错误 - 自写包装类型, TIA 里不存在
+fb_tActionTimer : FB_TON;
+
+// ❌ 错误 - DINT 直接给 TIME
+#fb_tActionTimer(IN := s_bStart, PT := #i_dActionMs);
+
+// ❌ 错误 - 先单独赋值再隐式调用, 或把输出写回自己的成员
+#fb_tActionTimer.IN := s_bStart;
+#fb_tActionTimer(IN := #fb_tActionTimer.IN, PT := #fb_tActionTimer.PT, Q => #fb_tActionTimer.Q, ET => #fb_tActionTimer.ET);
 ```
 
-> **重要**：定时器调用必须包含所有参数（IN、PT、Q、ET），Q 参数不能省略。PT 参数必须使用 DINT 类型（扫描周期数），禁止使用 TIME 字面量（如 `T#500ms`）。详见 903_定时器使用规范。
+> **重要**：全参数调用，PT 必须是 TIME（毫秒值用 `DINT_TO_TIME(...)`），调用集中在 FB 顶部无条件区。`T#500ms` 字面量目前仍被驾驶舱 `plc check` 拦截（LSP-906-TIMER-TIME-LITERAL），规则放开前统一写 `DINT_TO_TIME(500)`。汇川 InoProShop 等 CODESYS 系平台类型名为 `TON`，由项目方案文档另行写明。
 
 ---
 
@@ -403,12 +418,66 @@ END_CASE;
 
 ---
 
+### 4.9 TIA 系统指令白名单（V1.6.0 新增，目标平台 TIA Portal V19）
+
+> 生成代码和检查都以本表为准：**白名单里的 TIA 系统指令，加上本仓库里有源码定义的块和 UDT，才允许使用；其余类型、指令一律报错。** 新增一项要先更新本表，写明参数签名。
+> 验证状态：下表签名依据西门子 TIA 手册整理，尚未全部在 TIA V19 实机编译确认；DJ-2026-011 用到的 `TON_TIME`、`R_TRIG`、`DINT_TO_TIME` 在用户重新导入编译通过后，把“实机”列改为 ✔。驾驶舱 `SclLinter` 的白名单规则待另立卡实现，在实现前靠评审清单和 TIA 编译把关。
+
+**定时器（多重实例，FB 静态区声明；调用见 903）**
+
+| 类型 | 输入 | 输出 | 实机 |
+|------|------|------|------|
+| `TON_TIME` | `IN` BOOL，`PT` TIME | `Q` BOOL，`ET` TIME | 待确认 |
+| `TOF_TIME` | `IN` BOOL，`PT` TIME | `Q` BOOL，`ET` TIME | 待确认 |
+| `TP_TIME` | `IN` BOOL，`PT` TIME | `Q` BOOL，`ET` TIME | 待确认 |
+| `TONR_TIME` | `IN` BOOL，`R` BOOL，`PT` TIME | `Q` BOOL，`ET` TIME | 待确认 |
+
+**边沿检测（多重实例）**
+
+| 类型 | 输入 | 输出 | 写法 | 实机 |
+|------|------|------|------|------|
+| `R_TRIG` | `CLK` BOOL | `Q` BOOL | `#fb_rTrig(CLK := #i_bSig); s_bPulse := #fb_rTrig.Q;` | 待确认 |
+| `F_TRIG` | `CLK` BOOL | `Q` BOOL | 同上，下降沿 | 待确认 |
+
+注意：引脚名是 `CLK`，不是旧 SysLib `FB_R_TRIG` 的 `IN`。
+
+**计数器（多重实例，按计数值类型选后缀；这里只列 `_INT` 与 `_DINT`，其他后缀要用先加入本表）**
+
+| 类型 | 输入 | 输出 | 实机 |
+|------|------|------|------|
+| `CTU_INT` / `CTU_DINT` | `CU` BOOL，`R` BOOL，`PV` INT / DINT | `Q` BOOL，`CV` INT / DINT | 待确认 |
+| `CTD_INT` / `CTD_DINT` | `CD` BOOL，`LD` BOOL，`PV` INT / DINT | `Q` BOOL，`CV` INT / DINT | 待确认 |
+| `CTUD_INT` / `CTUD_DINT` | `CU` BOOL，`CD` BOOL，`R` BOOL，`LD` BOOL，`PV` INT / DINT | `QU` BOOL，`QD` BOOL，`CV` INT / DINT | 待确认 |
+
+**转换与移位（函数）**
+
+| 指令 | 签名 | 说明 |
+|------|------|------|
+| `DINT_TO_TIME` | `(DINT) → TIME` | 毫秒值转 TIME，给定时器 `PT` 用 |
+| `TIME_TO_DINT` | `(TIME) → DINT` | TIME 转毫秒 |
+| `<类型>_TO_<类型>` | 数值与位串类型之间的标准转换，如 `INT_TO_DINT`、`DINT_TO_INT`、`INT_TO_WORD`、`WORD_TO_BYTE`、`INT_TO_UINT` | 类型不同一律显式转换，不依赖隐式转换 |
+| `SHL` / `SHR` | `(IN, N)`，`N` 必须是**无符号整数（USINT / UINT / UDINT）或非负常量** | 用有符号 INT 当移位数，本机 LSP 报 `SCL_SEM_SHL_UNSUPPORTED`；变量移位数写 `INT_TO_UINT(...)` |
+
+不在表里、仓库里也没有定义的类型，一律不得使用（如 `FB_TON` / `FB_R_TRIG` / `FB_CTU` 这类自写包装，SysLib 里的这些包装块在项目迁移完成前保留，新程序不得引用）。
+
+### 4.10 TIA 导入与验收（V1.6.0 新增）
+
+1. **导入方式**：把 `.scl` 通过“外部源文件 → 从源生成块”导入 TIA Portal。
+2. **编码**：交付给 TIA 的 `.scl`（块、数据块、OB）一律存成 **UTF-8 带 BOM**。TIA 按系统 ANSI 读无 BOM 的 UTF-8，中文注释会变乱码（2026-11-04 实测）。同一项目不得混放带 BOM 和不带 BOM 的 `.scl`；`.scltest` 只给本机 LSP 用，不进 TIA，不要求 BOM。仓库 CI 的 `plc_ci.py` 对此做检查。
+3. **验收三层，缺一不可**：
+   - ① 本机 `main.py plc check <项目号>`（Siemens LSP + 驾驶舱规则）退出码 0；
+   - ② **TIA 实机编译 0 错误**：由用户在虚拟机或本机 TIA 执行，把编译结果截图或文本交回；
+   - ③ 碰安全区的卡，另需 PLCSIM 或实机仿真，并由用户在 PR 评论里写“安全签字 <提交号>”。
+4. **LSP 通过不等于可交付。** 本机 LSP 只查语法和类型，仿真里 TIA 原生定时器是占位桩，不能用 `.scltest` 声称计时已验证；没有第 ② 层结果的 PLC 卡不得报“完成”。
+
+---
+
 ## 5. Siemens LSP 插件兼容规范
 
 | 错误代码 | 错误信息 | 原因 | 解决方法 |
 |----------|----------|------|----------|
 | PS001 | `unexpected token "METHOD"` | 使用了 LSP 不支持的 METHOD 语法 | 删除 METHOD，改为 FB 主体逻辑或独立 FC/FB |
-| PS002 | `missing Q parameter in TON call` | 定时器调用缺少Q参数 | 添加Q参数变量 |
+| PS002 | `missing Q parameter in TON call` | 旧 FB_TON 写法的调用缺少 Q 参数 | 改用 TIA 原生 `TON_TIME`，全参数调用，读 `.Q`（903 V3.0.0） |
 | LX003 | `unexpected token ，` | 使用了中文标点 | 替换为英文标点 |
 | TC100 | `cannot assign INT to TIME` | INT直接赋值给TIME | 使用DINT存储毫秒值 |
 
@@ -482,9 +551,9 @@ plccheck --verbose .
 | 不得与控制结构交叉 | `REGION` 的开头和结尾必须在同一个 `IF / CASE / FOR / WHILE` 结构的同一层里：区段可以整个放在结构里面，也可以整个包住结构，**不能切开结构**（例如 `REGION` 开在 `IF` 里、`END_REGION` 写在 `END_IF` 之后）；`scl_linter` 规则 `LSP-905-REGION-CROSS-BLOCK` 报 ERROR |
 | 名称里的符号 | 名称只写编号、英文名和中文说明；**不得出现英文分号 `;` 和赋值符 `:=`**（siemens-lsp 会把它们当语句解析，后面整段解析错乱，插件测试会挂）；`scl_linter` 规则 `LSP-905-REGION-NAME-CHARS` 报 ERROR。需要分隔时用 `,` 或空格；`=`、`<`、`>` 也建议不用，改写成中文说法（如“等于”“小于等于”） |
 | 位置 | 只放在 `BEGIN ... END_FUNCTION_BLOCK` 的程序体里，按功能分段；声明块（`VAR ... END_VAR`）不分段 |
-| 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.6） |
+| 分段顺序 | 定时器批量调用 → 输入映射 → 手动 → 自动步序 → 报警 → 输出映射（定时器调用必须在 FB 顶部、不被 IF/CASE 包裹，见 LSP-906 规则 1.5） |
 
-较长程序的完整示例（一个夹紧工位，按功能分 6 个区段，定时器用 SysLib 的 `FB_TON`、三段式调用；同时示范数组下标从 1，见 §3.6）：
+较长程序的完整示例（一个夹紧工位，按功能分 6 个区段，定时器用 TIA 原生 `TON_TIME`、顶部无条件调用；同时示范数组下标从 1，见 §3.6）：
 
 ```scl
 FUNCTION_BLOCK FB_1010_ClampStation
@@ -511,7 +580,7 @@ VAR
     s_bPartPresent : BOOL;                      // 工件在位（映射后）
     s_bClampCmd : BOOL;                         // 夹紧命令（手动/自动合成）
     s_bReleaseCmd : BOOL;                       // 松开命令（手动/自动合成）
-    fb_tStepTimer : FB_TON;                     // 步超时定时器（SysLib 的 FB_TON）
+    fb_tStepTimer : TON_TIME;                   // 步超时定时器（TIA 原生多重实例）
     s_bStepTimeout : BOOL;                      // 步超时 Q
     s_dStepElapsed : DINT;                      // 步已用时间 ms
     s_arrAlarm : ARRAY[1..4] OF BOOL;           // 报警位，下标从 1 起
@@ -521,10 +590,9 @@ VAR_TEMP
     t_bAnyAlarm : BOOL;                         // 任一报警
 END_VAR
 BEGIN
-    REGION 00_Timers 定时器批量调用 无条件每周期执行 LSP-906 1.5/1.6
-        fb_tStepTimer.PT := 3000;
-        fb_tStepTimer(IN := fb_tStepTimer.IN, PT := fb_tStepTimer.PT,
-                      Q => fb_tStepTimer.Q, ET => fb_tStepTimer.ET);
+    REGION 00_Timers 定时器调用 无条件每周期执行 LSP-906 1.5
+        // 步超时：10 步和 30 步各 3000 ms 内必须到位
+        #fb_tStepTimer(IN := (s_iStep = 10) OR (s_iStep = 30), PT := DINT_TO_TIME(3000));
     END_REGION
 
     REGION 01_InputMapping 输入映射
@@ -574,10 +642,8 @@ BEGIN
     END_REGION
 
     REGION 04_Alarm 报警
-        // 步超时：10 步和 30 步各 3000 ms 内必须到位
-        fb_tStepTimer.IN := (s_iStep = 10) OR (s_iStep = 30);
-        s_bStepTimeout := fb_tStepTimer.Q;
-        s_dStepElapsed := fb_tStepTimer.ET;
+        s_bStepTimeout := #fb_tStepTimer.Q;
+        s_dStepElapsed := TIME_TO_DINT(#fb_tStepTimer.ET);
         s_arrAlarm[1] := s_bStepTimeout AND (s_iStep = 10);  // 夹紧超时
         s_arrAlarm[2] := s_bStepTimeout AND (s_iStep = 30);  // 松开超时
         s_arrAlarm[3] := s_bClampedOk AND s_bReleasedOk;     // 两个到位同时为真
@@ -605,7 +671,7 @@ BEGIN
 END_FUNCTION_BLOCK
 ```
 
-> 说明：示例需要 SysLib 的 `FB_TON`；已过本仓库 `scl_linter`（0 个问题）；siemens-lsp 插件命令行 `check` 须在装有插件的本机验证，验证前不得当作已验证的交付样板。
+> 说明：示例只用 TIA 原生 `TON_TIME`，不依赖 SysLib；已过本仓库 `scl_linter`（0 个问题，改写后需重跑确认）；siemens-lsp 插件命令行 `check` 须在装有插件的本机验证，验证前不得当作已验证的交付样板。
 
 ---
 
@@ -616,7 +682,10 @@ END_FUNCTION_BLOCK
 | [ ] 未使用 METHOD 语法 | 无 `METHOD/METHODS/END_METHODS/END_METHOD` |
 | [ ] 变量名符合命名规范 | 前缀正确，小驼峰 |
 | [ ] 无中文变量名 | 全部使用英文 |
-| [ ] 定时器调用完整 | IN、PT、Q、ET参数齐全 |
+| [ ] 定时器写法符合 903 | `TON_TIME` 等多重实例，全参数调用，PT 为 TIME，顶部无条件调用 |
+| [ ] 类型与指令在白名单里 | 只用 §4.9 的 TIA 系统指令或本仓库有定义的块 |
+| [ ] 交付的 .scl 是 UTF-8 带 BOM | §4.10 |
+| [ ] TIA 实机编译 0 错误 | 用户执行，结果随卡回传（§4.10） |
 | [ ] 标点符号正确 | 使用英文半角标点 |
 | [ ] 注释格式正确 | 无嵌套注释 |
 | [ ] 折叠区段写法正确 | 用 `REGION 名称 ... END_REGION`，无 `#REGION`，成对出现，且不切开 IF/CASE/FOR/WHILE（§6.3） |
@@ -630,6 +699,7 @@ END_FUNCTION_BLOCK
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
+| V1.6.0 | 2026-11-05 | Claude | 定时器、边沿、计数改用 TIA 原生多重实例（§4.3 重写，示例与检查清单同步）；新增 §4.9 TIA 系统指令白名单（带参数签名，含 SHL/SHR 无符号移位数）、§4.10 TIA 导入与验收（.scl UTF-8 带 BOM；TIA 编译 0 错误为 PLC 卡验收硬条件；LSP 通过不等于可交付）；起因：DJ-2026-011 导入 TIA V19 实测；待用户“规则批准” |
 | V1.5.1 | 2026-10-27 | Claude | §6.3 补一条：REGION 不得与 IF/CASE/FOR/WHILE 交叉（开头和结尾须在同一控制结构的同一层），对应 scl_linter 规则 LSP-905-REGION-CROSS-BLOCK；另补 REGION 名称里不得出现 `;`、`:=`（规则 LSP-905-REGION-NAME-CHARS，起因 #237 合并后 005 插件测试挂 2 条）；协调者 2026-10-27 指示 |
 | V1.5.0 | 2026-10-26 | Claude | 新增 §6.3 折叠区段 REGION ... END_REGION（siemens-lsp 支持，#REGION 不支持；移植按平台适配），附较长示例；用户 2026-10-26 批准（TIA V19 可直接用，移植按平台适配） |
 | V1.4.0 | 2026-10-26 | Claude | 新增 §3.6 下标起点：STRING 字符下标从 1 起（siemens-lsp 要求）、ARRAY 下界为 1（用户裁决，统一风格）；移植时按平台适配；用户 2026-10-26 批准；数组示例改为下界 1 |
