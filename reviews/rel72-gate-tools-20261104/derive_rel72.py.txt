@@ -78,9 +78,9 @@ PROJECTS = [p["project_id"] for p in json.load(open(ROOT / "SYS-2026-001_Workspa
 def ren(t: str) -> str:
     """Pure renames, applied AFTER every user quote has been removed (see the per-file patches)."""
     for a, b in (
+        (OLD_CARD, NEW_CARD), (OLD_REPORT, NEW_REPORT), ("016_M3_发版7.1候选构建与全量门禁_REP.md", "017_M3_发版7.2候选构建与全量门禁_REP.md"),
         ("claude/rel71b-gate-tools-20261103", "claude/rel72-gate-tools-20261104"), ("reviews/rel71b-gate-tools-20261103", "reviews/rel72-gate-tools-20261104"),
         ("m3-rel71b1-base", "m3-rel72-base"), ("m3rel71b", "m3rel72"), ("m3-rel71b", "m3-rel72"), ("M3R71B01", "M3R72A01"), ("rel71b", "rel72"), ("rel71", "rel72"), ("REL71", "REL72"),
-        (OLD_CARD, NEW_CARD), (OLD_REPORT, NEW_REPORT), ("016_M3_发版7.1候选构建与全量门禁_REP.md", "017_M3_发版7.2候选构建与全量门禁_REP.md"),
         ("card 220 V1.1", "card 221 V1.0"), ("Card 220 V1.1", "Card 221 V1.0"), ("卡 220 V1.1", "卡 221 V1.0"), ("card 220", "card 221"), ("CARD-SW008-M3-REL72 V1.1", "CARD-SW008-M3-REL72 V1.0"),
         ("precheck_V1.1.json", "precheck_V1.0.json"), ("发版 7.1", "发版 7.2"), ("release 7.1", "release 7.2"), (OLD_BASE, FROZEN), ("d5632931", S8), ("M3-REL72 V1.1", "M3-REL72 V1.0"),
     ):
@@ -154,7 +154,7 @@ cfg["expected_deltas"], cfg["expected_skips"] = DELTAS, SKIPS
 cfg["docs"] = {NEW_REPORT: {"deleted_sha256": [], "required_tokens": toks}}
 cfg["frozen_commit"], cfg["base"] = FROZEN, FROZEN
 cfg["projects"] = PROJECTS
-cfg["card_id"], cfg["card_version"], cfg["label"], cfg["run_id"] = "CARD-SW008-M3-REL72", "V1.0", "CARD-SW008-M3-REL72 V1.0", "RUN-SW008-M3-REL72-001"
+cfg["card_id"], cfg["card_version"], cfg["label"], cfg["run_id"] = "CARD-SW008-M3-REL72", "V1.0", "CARD-SW008-M3-REL72 V1.0", "RUN-SW008-M3-REL72-002"
 cfg["files"] = {NEW_REPORT: {"sha256": REP_SHA, "bytes": REP_BYTES, "base_sha256": None}}
 put("rel71_config.json", json.dumps(cfg, ensure_ascii=False, indent=2) + NL)
 if not (EV / "baseline_g2").exists():
@@ -210,13 +210,17 @@ bg = ("M3-REL72（发版 7.2 候选）：用 main 上的合并提交 " + S8 + " 
       "（基线为发版 7 的受治理输出 RUN-SW008-M3-REL7-001；差值取自开跑前从 d671611 到冻结提交的逐组收集数和变化测试文件在两棵树上的跑数，只证明没有分组丢收集用例）、静态检查、全库审计如实记录、文档检查、真实钩子、"
       f"全部注册项目对账、控制根定位无冲突。自发版 7（1.3.3-d671611）以来合入 {len(merged)} 个合并提交，产品子树 {len(prod_changed)} 个文件不同。只提交合同报告，门禁全过才提交。不切换发布版本。")
 a1 = sw_line(a1, "BACKGROUND=", 'BACKGROUND="' + bg + '"')
+a1 = sw(a1, "reviewed final V1.1", "reviewed final V1.0")
 a1 = sw(a1, "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"", "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; GO_AT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"")
 a1 = sw(a1, "      GO_TEXT|NIGHT_TEXT)", "      GO_AT) [[ \"$val\" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || die \"approval_refs.env: GO_AT format\"; GO_AT=\"$val\" ;;\n      GO_TEXT|NIGHT_TEXT)")
 a1 = sw(a1, '[[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" ]]', '[[ -n "$GO_SHA" && -n "$GO_REF" && -n "$GO_TEXT" && -n "$GO_AT" ]]')
 a1 = sw(a1, "(PREAUTH_M2_20261008.txt, last block); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF) (the release 7.1 pre-authorization of 2026-11-03, read from approval_refs.env)",
         "(GO_REF, GO_AT and GO_TEXT in approval_refs.env); the card bytes equal that SHA-256 (checked by this script at start); the approval evidence is the user's own go-ahead for this card SHA (GO_REF)")
 a1 = sw(a1, 'q "select state from run_items where run_id=?" RUN-SW008-M3-REL7-002)" == SUCCEEDED', 'q "select state from run_items where run_id=?" RUN-SW008-M3-REL7-002)" == SUCCEEDED')  # the last governed gate Run that closed cleanly is still REL7-002
-put("rel71_1_approve_start.sh", ren(a1))
+a1 = ren(a1)
+CARD_SHA_ARG = sys.argv[5] if len(sys.argv) > 5 else "__CARD_SHA__"
+a1 = sw_line(a1, "CARD_SHA=", "CARD_SHA=" + CARD_SHA_ARG)
+put("rel71_1_approve_start.sh", a1)
 
 a2 = rd("rel71_2_close_commit.sh")
 a2 = sw(a2, "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"", "GO_SHA=\"\"; GO_REF=\"\"; GO_TEXT=\"\"; GO_AT=\"\"; NIGHT_REF=\"\"; NIGHT_TEXT=\"\"")
@@ -237,8 +241,10 @@ put("commit_msg.template.txt", ren(cm))
 # ---------------------------------------------------------------- manifest of the frozen tools (the card section 5.2 table is filled from this)
 man = {NEW_REPORT: REP_SHA}
 for n in sorted(set(WRITTEN)):
+    if n == "rel72_1_approve_start.sh":
+        continue
     man[f"tools/{n}"] = sha((EV / n).read_bytes())
-(EV / "reference_manifest.json").write_text(json.dumps(man, ensure_ascii=False, indent=1) + NL, encoding="utf-8")
+(EV / "reference_manifest.json").write_bytes((json.dumps(man, ensure_ascii=False, indent=1) + NL).encode("utf-8"))  # LF bytes on every platform
 print("frozen", FROZEN, "| merges", len(merged), "| product files", len(prod_changed), "| report sha", REP_SHA, "|", len(man) - 1, "tools")
 leftover = [n for n in sorted(set(WRITTEN)) if re.search(r"cmsg_01Af|2026-11-03T19|发版 7\.1|release 7\.1|rel71|REL71|REL7-00[12]", (EV / n).read_text(encoding="utf-8", errors="replace"))]
 print("files that still mention 7.1 identifiers (review each):", leftover)

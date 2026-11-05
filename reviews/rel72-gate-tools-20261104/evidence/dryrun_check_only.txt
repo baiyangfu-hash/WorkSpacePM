@@ -1,0 +1,36 @@
+== 0. Preconditions
+card section 4 lists the 1 owned paths; section 5.1 SHA table equals the reference manifest
+reference and tool bytes match the manifest: 20
+launcher: release verified via active_release.json: C:\Users\fubai\Documents\My_Workspace\00_Infrastructure\auto_pm\releases\1.3.3-d563293
+2026-11-04 18:20:14,192 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: §3 缺少子章节 §3.0
+2026-11-04 18:20:14,192 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: §3 缺少子章节 §3.1
+2026-11-04 18:20:14,192 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: §3 缺少子章节 §3.2
+2026-11-04 18:20:14,214 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: §3 缺少子章节 §3.3
+2026-11-04 18:20:14,214 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: §3 缺少子章节 §3.4
+2026-11-04 18:20:14,214 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: 缺少 §8 变更审批章节
+2026-11-04 18:20:14,214 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-161]: 项目编号为空
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: §3 缺少子章节 §3.0
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: §3 缺少子章节 §3.1
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: §3 缺少子章节 §3.2
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: §3 缺少子章节 §3.3
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: §3 缺少子章节 §3.4
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: 缺少 §8 变更审批章节
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-162]: 项目编号为空
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: §3 缺少子章节 §3.0
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: §3 缺少子章节 §3.1
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: §3 缺少子章节 §3.2
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: §3 缺少子章节 §3.3
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: §3 缺少子章节 §3.4
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: 缺少 §8 变更审批章节
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-163]: 项目编号为空
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: §3 缺少子章节 §3.0
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: §3 缺少子章节 §3.1
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: §3 缺少子章节 §3.2
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: §3 缺少子章节 §3.3
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: §3 缺少子章节 §3.4
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: 缺少 §4 变更原因章节
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: 缺少 §8 变更审批章节
+2026-11-04 18:20:14,216 [ WARNING] auto_pm.domain.change.parser: 规范校验违规 [CHG-SCPT-2026-164]: 项目编号为空
+  摘要: 台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条
+CHECK_ONLY_OK: the preconditions hold; nothing was written
+exit=0

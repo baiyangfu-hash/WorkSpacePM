@@ -9,8 +9,8 @@ ROOT=/c/Users/fubai/Documents/My_Workspace
 cd "$ROOT"
 PY="$ROOT/.venv/Scripts/python.exe"
 P='01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具'
-CARD="$P/02_规划/220_M3-REL72_发版7.1候选门禁实施卡_V1.1_PM.md"
-CARD_SHA=1c98ae12615d2f970fd7c5bfd0f15c6c6bab5c5c4ee070d33b02c1c22c41409f
+CARD="$P/02_规划/221_M3-REL72_发版7.2候选门禁实施卡_PM.md"
+CARD_SHA=d0b66a55ec9033db8779468804bbc29c3853aea725b7644f98cead7663cfbc25
 BASE=dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642
 BASE_BRANCH=m3-rel72-base
 TODAY="$(date +%Y%m%d)"
@@ -61,7 +61,7 @@ chg_status() { awk -F'|' '/^\|[[:space:]]*变更状态[[:space:]]*\|/{gsub(/^[[:
 
 echo "== 0. Preconditions"
 [[ "$CARD_SHA" != __CARD_SHA__ ]] || die "card SHA not filled in"
-[[ "$(sha256sum < "$CARD" | cut -d' ' -f1)" == "$CARD_SHA" ]] || die "card 221 bytes differ from the reviewed final V1.1"
+[[ "$(sha256sum < "$CARD" | cut -d' ' -f1)" == "$CARD_SHA" ]] || die "card 221 bytes differ from the reviewed final V1.0"
 grep -qE '^> 安全回路: (是|否)$' "$CARD" || die "card 221 has no line '> 安全回路: 是' or '> 安全回路: 否' in its header (TD-SW008-211; pr open needs it)"
 [[ "$(git rev-parse "$BASE^{commit}")" == "$BASE" ]] || die "baseline missing"
 [[ "$(git rev-parse "$BASE_BRANCH")" == "$BASE" ]] || die "the baseline branch is no longer at the baseline"

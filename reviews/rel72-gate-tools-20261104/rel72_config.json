@@ -35,7 +35,7 @@
   "card_id": "CARD-SW008-M3-REL72",
   "card_version": "V1.0",
   "label": "CARD-SW008-M3-REL72 V1.0",
-  "run_id": "RUN-SW008-M3-REL72-001",
+  "run_id": "RUN-SW008-M3-REL72-002",
   "base": "dd8b192f2e0a8ffdc370fd7e2dc4f7a999bb7642",
   "files": {
     "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/05_收尾/017_M3_发版7.2候选构建与全量门禁_REP.md": {
