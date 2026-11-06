@@ -48,6 +48,30 @@
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
       "runtime_root": "00_Infrastructure/auto_pm"
+    },
+    {
+      "project_id": "DJ-2026-009",
+      "project_root": "0100_PLC自动化/DJ-2026-009_汇川换型改造",
+      "development_root": "0100_PLC自动化/DJ-2026-009_汇川换型改造",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
+    },
+    {
+      "project_id": "DJ-2026-000",
+      "project_root": "0100_PLC自动化/DJ-2026-000",
+      "development_root": "0100_PLC自动化/DJ-2026-000",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
+    },
+    {
+      "project_id": "SysLib",
+      "project_root": "0100_PLC自动化/01_SharedLibraries/SysLib",
+      "development_root": "0100_PLC自动化/01_SharedLibraries/SysLib",
+      "control_project_id": "SYS-2026-001",
+      "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+      "runtime_root": "00_Infrastructure/auto_pm"
     }
   ]
 }
