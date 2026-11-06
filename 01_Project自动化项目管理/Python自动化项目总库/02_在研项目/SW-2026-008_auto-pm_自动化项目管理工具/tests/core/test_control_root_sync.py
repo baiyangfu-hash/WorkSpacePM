@@ -9,6 +9,7 @@ The service must also stay read-only and must not fail offline.
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +23,11 @@ from tests.git_support import git_do, git_out
 
 SCOPE = ("proj",)
 IDENTITY = ("user.email=t@example.invalid", "user.name=tester")
+
+
+def _json_items(value: object) -> list[dict[str, Any]]:
+    assert isinstance(value, list)
+    return value
 
 
 def _git(root: Path, *args: str) -> None:
@@ -495,7 +501,8 @@ def test_uncommitted_files_outside_the_scope_are_listed_with_owner_and_age(world
     assert "RUN-9" in text and "没有 Run 认领" in text and "已放了 3 天以上" in text
     assert "不要自己删" in text
     assert report.needs_attention
-    assert [item["path"] for item in report.as_json()["uncommitted"]] == ["other/b.txt", "other/forgotten.txt"]  # type: ignore[union-attr]
+    assert [item.path for item in report.uncommitted] == ["other/b.txt", "other/forgotten.txt"]
+    assert [item["path"] for item in _json_items(report.as_json()["uncommitted"])] == ["other/b.txt", "other/forgotten.txt"]
 
 
 def test_a_failing_owner_lookup_never_hides_the_files(world: World) -> None:
@@ -545,7 +552,9 @@ def test_control_root_status_command_prints_json_for_other_threads(
     _git(world.control, "switch", "-q", "-c", "codex/settle-card")
     (world.control / "other" / "note.txt").write_text("x\n", encoding="utf-8")
 
-    pm_cli.control_root_status.callback.__wrapped__(_ctx(world.control), "", True)  # type: ignore[attr-defined]
+    callback = pm_cli.control_root_status.callback
+    assert callback is not None
+    inspect.unwrap(callback)(_ctx(world.control), "", True)  # the command's own body, without click's context plumbing
 
     data = json.loads(capsys.readouterr().out)
     assert data["on_main"] is False and data["branch"] == "codex/settle-card"
@@ -558,9 +567,9 @@ def test_control_root_status_command_prints_json_for_other_threads(
 def _execution_service(world: World) -> Any:
     from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
 
-    service = object.__new__(ContinuityExecutionService)
-    service._root = world.control  # type: ignore[attr-defined]
-    service._store = SimpleNamespace(  # type: ignore[attr-defined]
+    service: Any = object.__new__(ContinuityExecutionService)
+    service._root = world.control
+    service._store = SimpleNamespace(
         get_work=lambda _id: (_ for _ in ()).throw(RuntimeError("no ledger in this test")),
     )
     return service

@@ -123,6 +123,7 @@ COMMANDS: dict[str, CommandSpec] = {
     ),
     "continuity recovery plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the exit chain of one abnormal state"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
+    "pm control-root-status": CommandSpec(CommandKind.READ_ONLY, (), (), "branch, uncommitted files and their holders of the control root; no fetch, no write"),
     "pm resume": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm recover": CommandSpec(CommandKind.READ_ONLY, (), (), "--apply writes EXECUTOR_LOST (release 7 and later)"),
     "pm triage": CommandSpec(CommandKind.READ_ONLY, (), (), "open cards plus inbox in suggested order; confirms nothing"),
