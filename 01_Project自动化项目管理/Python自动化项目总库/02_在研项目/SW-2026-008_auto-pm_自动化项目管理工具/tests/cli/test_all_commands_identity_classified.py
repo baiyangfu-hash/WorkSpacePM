@@ -64,6 +64,8 @@ UNDECIDED: dict[str, tuple[str, ...]] = {}
 # identity guard; a command that later gets one must leave this list, and one that starts to write must get a guard.
 READ_ONLY: dict[str, tuple[str, ...]] = {
     "context": ("resolve",),  # prints the identity card; it is the check itself
+    # D-39: writes only remote claim branches on GitHub, never the ledger or any project file; it must run in a cloud clone with no runtime identity
+    "claim": ("list", "open", "release"),
     "doctor": ("",),  # environment diagnosis, prints only
     "gui": ("",),  # opens the cockpit window; every write inside goes through the guarded services
     "role": ("check", "list"),  # reads the role pack registry
