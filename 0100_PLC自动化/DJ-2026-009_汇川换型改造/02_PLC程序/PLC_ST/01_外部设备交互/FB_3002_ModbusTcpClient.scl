@@ -49,6 +49,7 @@ VAR
     s_byHi              : BYTE;         // 寄存器高字节 (前一个字符)
     s_byLo              : BYTE;         // 寄存器低字节 (后一个字符)
     s_sIdBuf            : STRING[32];   // 组件 ID 解包缓冲
+    s_wErrorCode        : WORD;         // 通讯层故障诊断字 (内部累加, 块内判断用, 块末尾赋给输出 q_wErrorCode)
 END_VAR
 
 VAR CONSTANT
@@ -85,14 +86,16 @@ BEGIN
     END_IF;
 
     (* 1. 链路状态与错误码 *)
-    q_wErrorCode := ERR_NONE;
+    s_wErrorCode := ERR_NONE;
     IF NOT i_bUpLinkOK THEN
-        q_wErrorCode := q_wErrorCode OR ERR_UP_LINK;
+        s_wErrorCode := s_wErrorCode OR ERR_UP_LINK;
     END_IF;
     IF NOT i_bDownLinkOK THEN
-        q_wErrorCode := q_wErrorCode OR ERR_DOWN_LINK;
+        s_wErrorCode := s_wErrorCode OR ERR_DOWN_LINK;
     END_IF;
-    q_bComOK := (q_wErrorCode = ERR_NONE);
+    // 输出只在此处赋值, 块内不再读取输出参数 (TIA 对读输出参数报警)。
+    q_wErrorCode := s_wErrorCode;
+    q_bComOK := (s_wErrorCode = ERR_NONE);
 
     (* 2. 上游读解包 (链路断开时保持最后值, 由 FB_3001 心跳超时判故障) *)
     IF i_bUpLinkOK THEN
