@@ -15,7 +15,11 @@ import pytest
 from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkState
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    ContinuityStore,
+    ContinuityStoreError,
+    LedgerIntegrityError,
+)
 from tests.core.test_work_registry_service import (
     ADJ_DECISION,
     ADJ_RECOVERY_TOKEN,
@@ -352,7 +356,7 @@ def test_a_damaged_ledger_refuses_the_first_write(tmp_path: Path) -> None:
         sidecar.unlink(missing_ok=True)
 
     fresh = ContinuityStore(tmp_path, db)  # a new process: the check runs once per store object
-    with pytest.raises(ContinuityStoreError, match="完整性检查失败"):
+    with pytest.raises(LedgerIntegrityError, match="完整性检查失败"):
         fresh.create_planning_draft(_draft("REQ-D02-002"))
 
 

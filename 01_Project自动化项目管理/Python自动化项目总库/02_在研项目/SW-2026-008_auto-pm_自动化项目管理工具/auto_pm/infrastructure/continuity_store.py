@@ -95,6 +95,10 @@ class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
 
 
+class LedgerIntegrityError(ContinuityStoreError):
+    """The ledger file itself is damaged (a fact about the file, not a registered guard refusing a command)."""
+
+
 class RunNotFoundError(ContinuityStoreError):
     """The Run id is not in the ledger (a typed form of the old plain message, so callers need not match its text)."""
 
@@ -1184,7 +1188,7 @@ class ContinuityStore:
         except sqlite3.DatabaseError:
             rows = []  # a page SQLite cannot even read is damage too
         if len(rows) != 1 or str(rows[0][0]) != "ok":
-            raise ContinuityStoreError(
+            raise LedgerIntegrityError(
                 "Continuity Store 账本完整性检查失败，拒绝写入；先 `main.py continuity verify-backup` 核对备份，"
                 "不要继续写这本账"
             )
