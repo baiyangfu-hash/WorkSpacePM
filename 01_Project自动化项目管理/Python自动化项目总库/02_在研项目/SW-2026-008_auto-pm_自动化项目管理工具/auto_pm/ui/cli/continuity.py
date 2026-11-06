@@ -876,6 +876,11 @@ def _token_options(function: _Command) -> _Command:
 @click.option("--owner", "owner_id", required=True)
 @_token_options
 @click.option("--idempotency-key", required=True)
+@click.option(
+    "--abandon",
+    is_flag=True,
+    help="放弃一个验证没过的 Run：只能配 --to CANCELLED，且 Run 必须处于 VERIFYING（干到一半的 Run 只能 --to FAILED）",
+)
 @click.pass_context
 def transition_run(
     ctx: click.Context,
@@ -886,16 +891,23 @@ def transition_run(
     lease_token_env: str | None,
     lease_wallet: bool,
     idempotency_key: str,
+    abandon: bool,
 ) -> None:
     """Apply one legal Run state transition under an active lease."""
+    if abandon and new_state != RunState.CANCELLED.value:
+        raise click.UsageError("--abandon 只能配 --to CANCELLED")
     require_runtime_identity(ctx, project_of_run(ctx, run_id))
     lease_token = _lease_token(
         ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
     )
     try:
-        item = _execution_service(ctx).transition_run(
-            run_id, RunState(new_state), owner_id, lease_token, idempotency_key
-        )
+        service = _execution_service(ctx)
+        if abandon:
+            item = service.abandon_verifying_run(run_id, owner_id, lease_token, idempotency_key)
+        else:
+            item = service.transition_run(
+                run_id, RunState(new_state), owner_id, lease_token, idempotency_key
+            )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
