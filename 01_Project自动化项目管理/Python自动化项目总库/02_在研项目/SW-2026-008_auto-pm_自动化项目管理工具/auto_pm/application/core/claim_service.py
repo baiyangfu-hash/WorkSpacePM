@@ -97,6 +97,10 @@ class Claim:
         }
 
 
+def _decode(data: bytes) -> str:
+    return data.decode("utf-8", errors="replace")  # lenient-decode: Git output only labels hints; one bad byte must not hide the other claims
+
+
 def claim_overlap(first: Sequence[str], second: Sequence[str]) -> tuple[str, ...]:
     """Paths of ``first`` that sit inside or contain a path of ``second`` (a directory claim covers its files)."""
 
@@ -149,12 +153,12 @@ class ClaimService:
 
         if fetch:
             self._fetch()
-        refs = self._git(["for-each-ref", "--format=%(refname)%09%(objectname)", _LOCAL_REF]).decode("utf-8", "replace")
+        refs = _decode(self._git(["for-each-ref", "--format=%(refname)%09%(objectname)", _LOCAL_REF]))
         claims: list[Claim] = []
         for line in refs.splitlines():
             ref, _, commit = line.partition("\t")
             card = ref[len(_LOCAL_REF):]
-            body = self._git(["show", "-s", "--format=%B", commit]).decode("utf-8", "replace")
+            body = _decode(self._git(["show", "-s", "--format=%B", commit]))
             claims.append(self._parse(card, commit, body))
         return sorted(claims, key=lambda claim: claim.card)
 
@@ -250,7 +254,7 @@ class ClaimService:
         if result.returncode == 0:
             self._fetch()
             return self._parse(card, commit, message)
-        text = result.stderr.decode("utf-8", "replace")
+        text = _decode(result.stderr)
         if "stale info" in text or "rejected" in text or "already exists" in text:
             return None
         raise ClaimError(f"推占位分支失败，未领到卡：{text.strip() or '未知错误'}。离线时不能领卡（未核实就不当作领到）")
@@ -259,7 +263,7 @@ class ClaimService:
         numbers = [int(card) for card in taken if card.isdigit()]
         self._run(["fetch", self._remote, "main"])  # a stale origin/main would hand out a number main already uses
         listing = self._git(["ls-tree", "-r", "-z", "--name-only", f"refs/remotes/{self._remote}/main"], allow_failure=True)
-        for line in (listing or b"").decode("utf-8", "replace").split("\0"):
+        for line in _decode(listing or b"").split("\0"):
             found = _CARD_FILE.search(line)
             if found:
                 numbers.append(int(found.group(1)))
@@ -290,7 +294,7 @@ class ClaimService:
                 ref = f"{_CLAIM_REF}{card}"
                 result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"])
                 if result.returncode != 0:
-                    raise ClaimError("放下占位没推成功：" + result.stderr.decode("utf-8", "replace").strip())
+                    raise ClaimError("放下占位没推成功：" + _decode(result.stderr).strip())
                 return
         raise ClaimError(f"没有叫 {card} 的占位")
 
@@ -299,7 +303,7 @@ class ClaimService:
     def _fetch(self) -> None:
         result = self._run(["fetch", "--prune", self._remote, f"+{_CLAIM_REF}*:{_LOCAL_REF}*"])
         if result.returncode != 0:
-            raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{result.stderr.decode('utf-8', 'replace').strip()}")
+            raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{_decode(result.stderr).strip()}")
 
     def _run(self, arguments: list[str], *, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
         return run_git_bounded(
@@ -318,5 +322,5 @@ class ClaimService:
         if result.returncode != 0:
             if allow_failure:
                 return b""
-            raise ClaimError("git " + " ".join(arguments[:2]) + " 失败：" + result.stderr.decode("utf-8", "replace").strip())
+            raise ClaimError("git " + " ".join(arguments[:2]) + " 失败：" + _decode(result.stderr).strip())
         return result.stdout
