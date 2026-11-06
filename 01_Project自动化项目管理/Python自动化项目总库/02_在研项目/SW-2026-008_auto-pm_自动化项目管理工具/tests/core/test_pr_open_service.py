@@ -672,3 +672,39 @@ def test_cli_dry_run_end_to_end_with_the_real_judge(
     assert result.exit_code == 0, result.output
     assert "claude/CARD-1" in result.output and CHG in result.output and "没有推送" in result.output
     assert lab.remote_refs() == before
+
+
+# ── D-58: a station opened by another agent is on loan to that agent ─
+
+
+def test_a_borrowed_station_can_hand_in_its_pr_for_the_borrower(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    lab.service().open("vscode", "CARD-1")  # claude borrows the free vscode station
+    station = lab.station("vscode")
+    (station / "work").mkdir()
+    (station / "work" / "done.txt").write_text("x\n", encoding="utf-8")
+    git(station, "add", "work")
+    git(station, "commit", "-q", "-m", f"feat: [{CHG}] do the card")
+
+    assert lab.service().borrower("vscode") == "claude"
+    assert service(lab).plan("vscode", "CARD-1", CARD_PATH, fetch=False).branch == "vscode/CARD-1"
+
+
+def test_a_station_not_opened_by_the_caller_stays_refused(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AUTO_PM_AGENT", "vscode")
+    work(lab, "vscode")  # opened by vscode itself: no loan record
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    with pytest.raises(PrOpenRefusedError, match="不能替 vscode 开 PR"):
+        service(lab).plan("vscode", "CARD-1", CARD_PATH, fetch=False)
+
+
+def test_closing_the_station_clears_the_loan(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    svc = lab.service()
+    svc.open("vscode", "CARD-1")
+    svc.close("vscode", fetch=False)
+    assert svc.borrower("vscode") == ""
