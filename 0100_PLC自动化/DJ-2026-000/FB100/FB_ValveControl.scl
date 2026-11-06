@@ -61,7 +61,7 @@ VAR
     // =========================================================================
     // 第六部分：内部状态变量
     // =========================================================================
-    ValveState  : INT := 0;       // [内部] 阀门当前状态机状态
+    s_iValveState : INT := 0;     // [内部] 阀门当前状态机状态 (块内判断用; 输出 ValveState 在提前返回处和块末尾才赋值)
                                   //   0=关闭中/已关, 1=打开中, 2=已打开, 3=关闭中
 
     OpenCmd_R   : BOOL := FALSE;   // [内部] 开阀命令上升沿检测（上一周期值）
@@ -83,7 +83,7 @@ BEGIN
         // 强制停止所有阀门动作
         #ValveOpen := FALSE;
         #ValveClose := FALSE;
-        #ValveState := 0;
+        #s_iValveState := 0;
     END_IF;
 
     // 故障复位：按下复位按钮且无过流信号时,清除故障锁存
@@ -94,6 +94,7 @@ BEGIN
 
     // 如果存在故障锁存,不执行后续逻辑
     IF #FaultLocked THEN
+        #ValveState := #s_iValveState;   // 提前返回前也要把状态送到输出
         RETURN;
     END_IF;
 
@@ -108,8 +109,8 @@ BEGIN
         // 检测开阀命令的上升沿（当前为 TRUE 且上一周期为 FALSE）
         IF #OpenCmd AND NOT #OpenCmd_R THEN
             // 只有在未完全打开时才执行开阀动作
-            IF #ValveState <> 2 THEN
-                #ValveState := 1;           // 切换到"打开中"状态
+            IF #s_iValveState <> 2 THEN
+                #s_iValveState := 1;           // 切换到"打开中"状态
                 #ValveOpen := TRUE;         // 启动开阀动作
                 #ValveClose := FALSE;       // 停止关阀动作
             END_IF;
@@ -120,8 +121,8 @@ BEGIN
         // -----------------------------------------------------------------------
         IF #CloseCmd THEN
             // 只有在未完全关闭时才执行关阀动作
-            IF #ValveState <> 0 THEN
-                #ValveState := 3;           // 切换到"关闭中"状态
+            IF #s_iValveState <> 0 THEN
+                #s_iValveState := 3;           // 切换到"关闭中"状态
                 #ValveClose := TRUE;        // 启动关阀动作
                 #ValveOpen := FALSE;        // 停止开阀动作
             END_IF;
@@ -131,14 +132,14 @@ BEGIN
         // 限位开关状态更新
         // -----------------------------------------------------------------------
         // 开到位检测：如果开到位限位触发,标记为已打开
-        IF #OpenLimit AND (#ValveState = 1) THEN
-            #ValveState := 2;               // 切换到"已打开"状态
+        IF #OpenLimit AND (#s_iValveState = 1) THEN
+            #s_iValveState := 2;               // 切换到"已打开"状态
             #ValveOpen := FALSE;            // 停止开阀动作（已到位）
         END_IF;
 
         // 关到位检测：如果关到位限位触发,标记为已关闭
-        IF #CloseLimit AND (#ValveState = 3) THEN
-            #ValveState := 0;               // 切换到"已关闭"状态
+        IF #CloseLimit AND (#s_iValveState = 3) THEN
+            #s_iValveState := 0;               // 切换到"已关闭"状态
             #ValveClose := FALSE;           // 停止关阀动作（已到位）
         END_IF;
 
@@ -154,5 +155,8 @@ BEGIN
     // ============================================================================
     #OpenCmd_R := #OpenCmd;
     #CloseCmd_R := #CloseCmd;
+
+    // 输出只在提前返回处和此处赋值, 块内不再读取输出参数 (TIA 对读输出参数报警)。
+    #ValveState := #s_iValveState;
 
 END_FUNCTION_BLOCK
