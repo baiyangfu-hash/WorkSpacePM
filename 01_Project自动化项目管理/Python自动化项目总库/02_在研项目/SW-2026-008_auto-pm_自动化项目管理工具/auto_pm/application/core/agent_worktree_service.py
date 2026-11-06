@@ -19,6 +19,7 @@ import contextlib
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -226,7 +227,7 @@ class AgentWorktreeService:
         try:
             while True:
                 try:
-                    if os.name == "nt":
+                    if sys.platform == "win32":
                         import msvcrt
 
                         os.lseek(handle, 0, os.SEEK_SET)
@@ -246,7 +247,7 @@ class AgentWorktreeService:
             try:
                 yield
             finally:
-                if os.name == "nt":
+                if sys.platform == "win32":
                     import msvcrt
 
                     os.lseek(handle, 0, os.SEEK_SET)
