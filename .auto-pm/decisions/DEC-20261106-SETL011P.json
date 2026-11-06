@@ -1,0 +1,27 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261106-SETL011P",
+  "project_id": "DJ-2026-011",
+  "change_id": "CHG-PLC-2026-005",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-06T20:47:20.478535+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-DJ011-CHG004-FIX-001"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}
