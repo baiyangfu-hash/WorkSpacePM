@@ -14,6 +14,7 @@ from click.core import ParameterSource
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.claim_service import ClaimService, claim_overlap
 from auto_pm.application.core.control_root_sync import ControlRootSyncService
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
@@ -85,6 +86,29 @@ def _control_root_path(ctx: click.Context) -> str:
     return str(app_ctx.control_root)
 
 
+def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, object]]:
+    """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
+
+    Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
+    """
+
+    try:
+        service = ClaimService(root)
+        active = [claim for claim in service.all_claims(fetch=False) if not claim.free]
+    except Exception:  # noqa: BLE001 - a hint must never stop the command it decorates
+        return []
+    result: list[dict[str, object]] = []
+    for claim in active:
+        clash = claim_overlap(scope_paths, claim.paths) if scope_paths else ()
+        result.append({**claim.as_json(), "overlaps_scope": list(clash)})
+        text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
+        if clash:
+            click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
+        else:
+            click.echo(f"ℹ️ [领卡占位] {text}", err=True)
+    return result
+
+
 def _control_root_sync_notice(ctx: click.Context, *, project_id: str = "", scope_paths: tuple[str, ...] = ()) -> None:
     """Tell the user now, in plain words, if the control root does not match ``origin/main`` -- not only at ``run start``.
 
@@ -93,13 +117,16 @@ def _control_root_sync_notice(ctx: click.Context, *, project_id: str = "", scope
     """
 
     try:
-        service = ControlRootSyncService(_control_root_path(ctx))
-        report = service.check(scope_paths or service.project_scope(project_id))
+        root = _control_root_path(ctx)
+        service = ControlRootSyncService(root)
+        scope = scope_paths or service.project_scope(project_id)
+        report = service.check(scope)
     except Exception as error:  # a hint must never stop the command it decorates
         click.echo(f"⚠️ [控制根同步] 未能核对控制根与 origin/main：{error}", err=True)
         return
     for line in report.lines():
         click.echo(f"⚠️ [控制根同步] {line}", err=True)
+    _claims_notice(root, scope)
 
 
 def _require_control_root(ctx: click.Context) -> None:

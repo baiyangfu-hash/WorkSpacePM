@@ -122,3 +122,61 @@ def test_paths_and_owner_are_required(pair: Pair) -> None:
         pair.laptop.open("300", paths=[], goal="x", owner="claude")
     with pytest.raises(ClaimError, match="不能用"):
         pair.laptop.open("../x", paths=["p"], goal="x", owner="claude")
+
+
+# ── step 3: orient reads claims; step 4: pr open needs a claim ──────────────────────────────────────────────────────
+
+
+def test_pr_open_gate_is_off_unless_required(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.claim_service import claim_refusal
+
+    monkeypatch.delenv("AUTO_PM_REQUIRE_CLAIM", raising=False)
+
+    assert claim_refusal(pair.a, "310", "claude") == ""
+
+
+def test_pr_open_gate_refuses_without_a_claim_and_passes_with_one(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.claim_service import claim_refusal
+
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "1")
+    assert "没有有效的领卡占位" in claim_refusal(pair.a, "310", "claude")
+
+    pair.laptop.open("310", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+
+    assert claim_refusal(pair.a, "310", "claude") == ""
+    assert "不是 trae" in claim_refusal(pair.b, "310", "trae"), "别人的卡不能替他开 PR"
+
+
+def test_pr_open_gate_refuses_a_released_claim(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.claim_service import claim_refusal
+
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "1")
+    pair.laptop.open("311", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.laptop.release("311", owner="claude")
+
+    assert "没有有效的领卡占位" in claim_refusal(pair.a, "311", "claude")
+
+
+def test_pr_open_gate_does_not_pretend_when_offline(pair: Pair, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.claim_service import claim_refusal
+
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "1")
+    _git(pair.a, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    assert "未核实" in claim_refusal(pair.a, "312", "claude")
+
+
+def test_orient_notice_lists_other_claims_and_flags_scope_overlap(
+    pair: Pair, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auto_pm.ui.cli.pm import _claims_notice
+
+    pair.laptop.open("320", paths=["p/module"], goal="refactor", owner="claude", machine="laptop")
+    pair.cloud.all_claims()  # a fetch, as any earlier command would have done
+
+    found = _claims_notice(str(pair.b), ("p",))
+
+    err = capsys.readouterr().err
+    assert "[领卡占位]" in err and "laptop" in err and "重叠" in err
+    assert found[0]["card"] == "320" and found[0]["overlaps_scope"] == ["p"]
+    assert _claims_notice(str(pair.b), ("elsewhere",))[0]["overlaps_scope"] == []

@@ -16,6 +16,7 @@ computer that is allowed to (a person decides; never automatic).
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -96,7 +97,7 @@ class Claim:
         }
 
 
-def _overlap(first: Sequence[str], second: Sequence[str]) -> tuple[str, ...]:
+def claim_overlap(first: Sequence[str], second: Sequence[str]) -> tuple[str, ...]:
     """Paths of ``first`` that sit inside or contain a path of ``second`` (a directory claim covers its files)."""
 
     hit: list[str] = []
@@ -104,6 +105,36 @@ def _overlap(first: Sequence[str], second: Sequence[str]) -> tuple[str, ...]:
         if any(authority_path_covered(path, (other,)) or authority_path_covered(other, (path,)) for other in second):
             hit.append(path)
     return tuple(hit)
+
+
+REQUIRE_CLAIM_ENV = "AUTO_PM_REQUIRE_CLAIM"
+
+
+def claim_required() -> bool:
+    """Whether ``pr open`` insists on a claim.  Opt-in (``AUTO_PM_REQUIRE_CLAIM=1``) until the user flips the default."""
+
+    return os.environ.get(REQUIRE_CLAIM_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def claim_refusal(repo_root: str | Path, card: str, owner: str) -> str:
+    """Why ``owner`` may not open a PR for ``card`` (no active claim of theirs); "" when allowed or not required.
+
+    Offline is "not verified", never a pretended pass or a hard stop on the network: the reason says so and refuses, because an
+    unverified claim is exactly the collision this guards against.
+    """
+
+    if not claim_required():
+        return ""
+    try:
+        claims = ClaimService(repo_root).all_claims()
+    except ClaimError as error:
+        return f"领卡占位未核实（{error}）；联网后再开 PR，或请用户决定"
+    mine = next((claim for claim in claims if claim.card == card and not claim.free), None)
+    if mine is None:
+        return f"卡 {card} 没有有效的领卡占位；先 `main.py claim open {card} --paths … --goal …`（占位过期或已放下的也要重领）"
+    if mine.owner != owner:
+        return f"卡 {card} 的占位是 {mine.label()} 领的，不是 {owner}；不能替别人的卡开 PR"
+    return ""
 
 
 class ClaimService:
@@ -164,7 +195,7 @@ class ClaimService:
                 continue
             if card != "auto" and other.card == card:
                 raise ClaimError(f"卡 {card} 已被领走：{other.label()}，{other.claimed_at}；换一个卡号或找他确认")
-            clash = _overlap(paths, other.paths)
+            clash = claim_overlap(paths, other.paths)
             if clash:
                 raise ClaimError(
                     f"要改的路径和别人的占位重叠：{'、'.join(clash[:5])} ↔ {other.label()}。"
