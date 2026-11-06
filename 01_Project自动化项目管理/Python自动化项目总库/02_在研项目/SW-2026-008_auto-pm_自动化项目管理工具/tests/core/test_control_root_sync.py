@@ -550,3 +550,46 @@ def test_control_root_status_command_prints_json_for_other_threads(
     data = json.loads(capsys.readouterr().out)
     assert data["on_main"] is False and data["branch"] == "codex/settle-card"
     assert [item["path"] for item in data["uncommitted"]] == ["other/note.txt"]
+
+
+# ── D-46: another thread's uncommitted file in the same owned scope must not block a Run that will not touch it ────
+
+
+def _execution_service(world: World) -> Any:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+
+    service = object.__new__(ContinuityExecutionService)
+    service._root = world.control  # type: ignore[attr-defined]
+    service._store = SimpleNamespace(  # type: ignore[attr-defined]
+        get_work=lambda _id: (_ for _ in ()).throw(RuntimeError("no ledger in this test")),
+    )
+    return service
+
+
+def _station(world: World) -> Path:
+    station = world.control / ".auto-pm" / "worktrees" / "claude"
+    station.mkdir(parents=True)
+    return station
+
+
+def test_a_foreign_uncommitted_file_in_the_owned_scope_does_not_block_a_run_that_declares_other_files(world: World) -> None:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+
+    (world.control / "proj" / "a.txt").write_text("another thread is editing this\n", encoding="utf-8")
+    head = _out(world.control, "rev-parse", "HEAD")
+    service = _execution_service(world)
+    station = _station(world)
+
+    # The Run owns all of proj/ but declares only proj/mine.txt as its change: the foreign proj/a.txt cannot collide on closure.
+    service._reject_control_root_drift(station, ("proj/mine.txt",), head, "W-1")
+
+    with pytest.raises(ContinuityExecutionError, match="没有 Run 认领") as refused:
+        service._reject_control_root_drift(station, ("proj/a.txt",), head, "W-1")
+    assert "proj/a.txt" in str(refused.value)
+
+
+def test_a_run_that_declares_nothing_has_nothing_to_merge_back_and_is_never_blocked(world: World) -> None:
+    (world.control / "proj" / "a.txt").write_text("another thread is editing this\n", encoding="utf-8")
+    head = _out(world.control, "rev-parse", "HEAD")
+
+    _execution_service(world)._reject_control_root_drift(_station(world), (), head, "W-1")
