@@ -261,3 +261,34 @@ def test_ct10_records_are_closed_and_immutable() -> None:
         item.__setattr__("title", "changed")
     with pytest.raises(ValidationError):
         item.classification.__setattr__("domain", "PLC")
+
+
+# ── D-38: a shared library such as SysLib can use the inbox ──────────
+
+
+def test_a_library_name_is_a_valid_project_id_and_keeps_its_case() -> None:
+    item = _item(project_id="SysLib", item_id="INBOX-SysLib-0001")
+    assert item.project_id == "SysLib"
+    assert item.item_id == "INBOX-SysLib-0001"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["syslib", "Sy", "Sys-Lib", "Sys Lib", "Sys/Lib", "..", "Sys.Lib", "S" + "a" * 40, ""],
+)
+def test_non_library_non_numbered_names_are_still_refused(bad: str) -> None:
+    from auto_pm.contracts.project_id import is_project_id
+
+    assert not is_project_id(bad)
+
+
+@pytest.mark.parametrize("good", ["SW-2026-008", "DJ-2026-011", "SW-TEST-001", "SysLib", "PlcLib2"])
+def test_numbered_and_library_ids_are_accepted(good: str) -> None:
+    from auto_pm.contracts.project_id import is_project_id
+
+    assert is_project_id(good)
+
+
+def test_a_library_item_id_must_match_its_project() -> None:
+    with pytest.raises(ValidationError):
+        _item(project_id="SysLib", item_id="INBOX-OtherLib-0001")
