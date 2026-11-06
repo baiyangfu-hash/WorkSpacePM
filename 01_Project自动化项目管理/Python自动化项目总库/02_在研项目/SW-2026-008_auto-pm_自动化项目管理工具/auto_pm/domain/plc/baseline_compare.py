@@ -111,7 +111,7 @@ def code_context(source: Sequence[str], line_number: int) -> str:
 
 def _context_in_file(path: Path | str, line_number: int, fallback: str = "") -> str:
     try:
-        source = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        source = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()
     except OSError:
         return fallback
     return code_context(source, line_number) or fallback
