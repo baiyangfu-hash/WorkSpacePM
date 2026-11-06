@@ -63,6 +63,10 @@ class LeaseKeepAlive:
 
     def _renew_once(self) -> None:
         lease = self._execution.current_lease(self._run_id)
+        if (datetime.fromisoformat(lease.expires_at) - self._execution.now_utc()).total_seconds() > self._lease_seconds:
+            # D-31: a lease that already runs longer than this wrapper's length is left alone. Renewing would set it to
+            # now + lease_seconds and quietly shorten it (a 30-minute Run lease became 15 minutes during ``pm verify``).
+            return
         self._execution.renew_lease(
             self._run_id,
             self._owner_id,

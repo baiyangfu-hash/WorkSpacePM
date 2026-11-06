@@ -630,3 +630,24 @@ def test_b26_a_baseline_on_main_has_no_such_remark(tmp_path: Path) -> None:
     _, candidate, baseline = plc_workspace(tmp_path)
 
     assert plc_baseline.baseline_anchor_note(candidate, baseline) == ""
+
+
+def test_d36_test_durations_in_plugin_lines_do_not_make_fake_new_or_fixed_failures() -> None:
+    """The same failing test run twice differs only in its timing ("0.624s" vs "0.7s"); that must not show up as new/fixed."""
+
+    from auto_pm.domain.plc.models import CheckResult
+
+    def result() -> CheckResult:
+        made = CheckResult(project_path="/p")
+        made.add("Siemens 语言服务 test", "fail", "测试失败")
+        return made
+
+    first = failure_keys(result(), "/p", {"test": ["[.] --- FAIL: TestMotor (0.624s)", "[.] --- FAIL: TestValve (12ms)"]})
+    second = failure_keys(result(), "/p", {"test": ["[.] --- FAIL: TestMotor (0.7s)", "[.] --- FAIL: TestValve (3ms)"]})
+
+    diff = diff_failures(second, first)
+    assert diff.passed and not diff.new and not diff.fixed
+    assert len(diff.known) == 2
+
+    other = failure_keys(result(), "/p", {"test": ["[.] --- FAIL: TestOther (0.1s)"]})
+    assert not diff_failures(other, first).passed  # a different test is still a new failure

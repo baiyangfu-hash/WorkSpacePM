@@ -33,6 +33,8 @@ from auto_pm.domain.plc.scl_linter import SclLinter
 
 _DIGITS = re.compile(r"\d+")
 _LOCATION = re.compile(r":\d+(?::\d+)?")
+# 测试用例耗时（"(0.624s)"、"12ms"）每次运行都不一样，不是失败的内容；不抹平，重跑就会出现假的“新增／修好”（D-36）
+_DURATION = re.compile(r"\d+(?:\.\d+)?\s*(?:ms|µs|us|s)\b")
 _DIAGNOSTIC = re.compile(r"^(?:\[(?P<scope>[^\]]*)\]\s*)?(?:\./)?(?P<file>[^:\n]+?):(?P<line>\d+)(?::\d+)?:")
 MAX_CODE_TEXT = 300
 CONTEXT_LINES = 2
@@ -201,7 +203,7 @@ def failure_keys(
             lines = (language or {}).get(command, ())
             if lines:
                 for line in lines:
-                    shown = _LOCATION.sub(":#", _plain(line, project_path))
+                    shown = _DURATION.sub("#s", _LOCATION.sub(":#", _plain(line, project_path)))
                     keys[f"Siemens 语言服务 {command} · {shown}{code_suffix(_source_line(project_path, line))}"] += 1
             else:
                 keys[plain_key] += 1

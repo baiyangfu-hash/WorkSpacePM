@@ -168,3 +168,17 @@ def test_the_machine_is_kept_awake_for_the_block_by_the_keepalive_thread(
         assert [kind for kind, _ in events] == ["on"]
     assert [kind for kind, _ in events] == ["on", "off"]
     assert events[0][1] == events[1][1] != threading.get_ident()
+
+
+def test_d31_a_longer_lease_is_never_shortened_by_the_keepalive(tmp_path: Path) -> None:
+    """``pm verify`` wraps the Run's 30-minute lease in a 15-minute keep-alive; the lease must not drop to 15 minutes."""
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=1800)
+    before = service.current_lease("RUN-001")
+    with _keepalive(service, lease_seconds=900):
+        time.sleep(0.2)  # several 0.02 s intervals
+    after = service.current_lease("RUN-001")
+    assert after.expires_at >= before.expires_at
+    assert after.version == before.version  # nothing was written at all
