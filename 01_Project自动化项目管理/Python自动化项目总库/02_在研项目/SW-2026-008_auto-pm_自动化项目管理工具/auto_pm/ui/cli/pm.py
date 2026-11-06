@@ -14,6 +14,7 @@ from click.core import ParameterSource
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.acceptance_runner import refusal_reason
 from auto_pm.application.core.control_root_sync import ControlRootSyncService
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
@@ -160,7 +161,12 @@ def _checklist_options(function: _F) -> _F:
 
 
 def _plan_checklist(
-    original_request: str, safety_circuit: str, checks: tuple[str, ...], rollback: str
+    original_request: str,
+    safety_circuit: str,
+    checks: tuple[str, ...],
+    rollback: str,
+    *,
+    ctx: click.Context | None = None,
 ) -> PlanChecklist:
     try:
         parsed = tuple(parse_acceptance_check(raw) for raw in checks)
@@ -170,6 +176,14 @@ def _plan_checklist(
         # Advice only (the refusals are in ``plan_checklist_problems``): legal commands that are fragile on a Chinese console.
         for hint in command_hints(check.command):
             click.echo(f"⚠️ [验收命令] 第 {number} 条：{hint}", err=True)
+        if ctx is not None and check.command.strip():
+            # D-30: say now what ``pm verify`` would refuse later (the other platform's quoting, an executable that is not
+            # there).  A warning, not a refusal: the plan may be written on a machine other than the one that verifies.
+            control_root = getattr(ctx.find_root().obj, "control_root", None)
+            if control_root is not None:
+                reason = refusal_reason(check.command, cwd=control_root)
+                if reason:
+                    click.echo(f"⚠️ [验收命令] 第 {number} 条：批准后 `pm verify` 会拒绝执行它（{reason}）；已批准的计划改不了，现在就改", err=True)
     safety = safety_circuit.strip()
     return PlanChecklist(
         original_request=original_request,
@@ -537,7 +551,7 @@ def plan_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
-        plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback),
+        plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback, ctx=ctx),
         submitted_by=submitted_by,
         from_draft=from_draft,
         classification=classification,
@@ -1023,7 +1037,7 @@ def approve_pm(
         inbox_id=inbox_id,
         from_draft=False,
     )
-    checklist = _plan_checklist(original_request, safety_circuit, checks, rollback)
+    checklist = _plan_checklist(original_request, safety_circuit, checks, rollback, ctx=ctx)
     preview = _planning_scope_card(
         ctx,
         project_id=project_id,

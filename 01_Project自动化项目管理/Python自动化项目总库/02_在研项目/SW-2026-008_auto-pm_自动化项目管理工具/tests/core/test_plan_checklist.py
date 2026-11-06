@@ -28,7 +28,7 @@ from auto_pm.domain.change.decision_service import DecisionService, DecisionVali
 from auto_pm.ui.cli.__main__ import cli
 from tests.cli.test_pm_facade import _setup_planning
 from tests.core.test_pm_facade_service import _audit_scene, _p10_facade
-from tests.plan_checklist_support import full_checklist
+from tests.plan_checklist_support import full_checklist, passing_command
 from tests.plan_filing_support import LEGACY_EQUIVALENT_FILING
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
@@ -375,3 +375,40 @@ def test_pm_plan_refuses_chinese_text_in_an_inline_script_and_names_the_rewrite(
     assert result.exit_code == 1
     assert "⑤第 1 条验收命令不能照原文执行" in result.output
     assert "中文只允许出现在 main.py 驾驶舱命令参数中" in result.output and "python -B 脚本路径" in result.output
+
+
+def test_d30_pm_plan_warns_now_about_a_check_that_pm_verify_would_refuse(tmp_path: Path) -> None:
+    """A command whose executable is not there passes the plan form but is refused at ``pm verify``; an approved plan cannot be
+    changed, so the warning has to come at plan time."""
+    _setup_planning(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "pm",
+            *_plan_args(
+                "--original-request", "加报警汇总", "--safety-circuit", "否",
+                "--check", "no-such-tool-d30 --flag => 0", "--rollback", ROLLBACK,
+            ),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "第 1 条：批准后 `pm verify` 会拒绝执行它" in result.output
+    assert "找不到命令 no-such-tool-d30" in result.output
+
+
+def test_d30_a_runnable_check_gets_no_refusal_warning(tmp_path: Path) -> None:
+    _setup_planning(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "pm",
+            *_plan_args(
+                "--original-request", "加报警汇总", "--safety-circuit", "否",
+                "--check", f"{passing_command()} => 0", "--rollback", ROLLBACK,
+            ),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "会拒绝执行它" not in result.output
