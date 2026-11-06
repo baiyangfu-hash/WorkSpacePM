@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -87,6 +88,7 @@ from auto_pm.infrastructure.control_root_guard import (
     is_link_like,
     require_control_root,
     require_safe_workspace_path,
+    worktree_head_and_dirty,
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
@@ -127,6 +129,10 @@ _SIDECAR_RETRY_SECONDS = 0.025
 # (HEAD and status) while it owns the lock, which takes seconds on a loaded Windows runner; 5 s was too short
 # and a second writer failed with "database is locked" (TD-SW008-214 follow-up). Waiting longer only delays.
 _WRITE_LOCK_TIMEOUT_SECONDS = 30.0
+# A write transaction that waited or held the write lock longer than this is logged as a WARNING on
+# ``auto_pm.infrastructure.continuity_store`` (logger name), with the calling method.  Every write also leaves
+# its numbers in ``ContinuityStore.last_write_timing``.  Keep lock-held work short: no git subprocess inside.
+WRITE_LOCK_SLOW_SECONDS = 1.0
 # A Run may keep renewing its lease for at most this long after creation; only the user extends it (extend_lease_hold).
 LEASE_HOLD_CAP_SECONDS = 3 * 3_600
 LEASE_HOLD_MAX_EXTENSION_SECONDS = 12 * 3_600
@@ -556,6 +562,7 @@ class ContinuityStore:
             raise ContinuityStoreError(str(error)) from error
         self._read_snapshot: _ReadSnapshot | None = None
         self._read_snapshot_lock = threading.Lock()
+        self.last_write_timing: dict[str, Any] = {}
 
     def _utc_now(self) -> datetime:
         current = self._clock()
@@ -663,6 +670,33 @@ class ContinuityStore:
         ):
             raise ContinuityStoreError("declared_dirty_paths 超出 owned_paths")
         return worktree
+
+    def _confirm_run_snapshot_in_lock(
+        self,
+        worktree: str,
+        git_head: str,
+        owned_paths: tuple[str, ...],
+        observed_dirty_paths: tuple[str, ...],
+    ) -> None:
+        """Lock-held re-check of a Run's worktree: the same two facts as the full snapshot, in two git calls."""
+
+        problem = ""
+        try:
+            head, dirty = worktree_head_and_dirty(worktree, owned_paths)
+        except ControlRootGuardError as error:
+            problem = str(error)
+        else:
+            actual = {
+                self._authority_path_key(path)
+                for path in dirty
+                if any(self._authority_path_covered(path, (owned,)) for owned in owned_paths)
+            }
+            if head != git_head:
+                problem = f"Run git_head 在开工检查与写账本之间变了：Run 记的是 {git_head}，工位现在是 {head}；请重新开工"
+            elif actual != {self._authority_path_key(path) for path in observed_dirty_paths}:
+                problem = "Run observed_dirty_paths 在开工检查与写账本之间变了；请重新开工"
+        if problem:
+            raise ContinuityStoreError(problem)
 
     @classmethod
     def _run_paths(cls, value: object, *, label: str, allow_empty: bool) -> tuple[str, ...]:
@@ -1152,12 +1186,16 @@ class ContinuityStore:
         db_path = self._validated_db_path()
         conn = sqlite3.connect(db_path, timeout=_WRITE_LOCK_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
+        caller = sys._getframe(2).f_code.co_name  # the method that wrote ``with self._transaction()``
+        asked = time.monotonic()
+        acquired: float | None = None
         try:
             self._validated_db_path()
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute(f"PRAGMA busy_timeout={int(_WRITE_LOCK_TIMEOUT_SECONDS * 1000)}")
             conn.execute("BEGIN IMMEDIATE")
+            acquired = time.monotonic()
             self._validated_db_path()
             yield conn
             self._validated_db_path()
@@ -1167,6 +1205,22 @@ class ContinuityStore:
             raise
         finally:
             conn.close()
+            self._record_write_timing(caller, asked, acquired)
+
+    def _record_write_timing(self, caller: str, asked: float, acquired: float | None) -> None:
+        """Remember how long the last write waited for the lock and how long it held it; warn when slow."""
+
+        done = time.monotonic()
+        waited = (acquired if acquired is not None else done) - asked
+        held = (done - acquired) if acquired is not None else 0.0
+        self.last_write_timing = {"caller": caller, "waited_seconds": waited, "held_seconds": held}
+        if waited > WRITE_LOCK_SLOW_SECONDS or held > WRITE_LOCK_SLOW_SECONDS:
+            log.warning(
+                "Continuity Store 写锁偏慢: %s 等锁 %.2fs，持锁 %.2fs（持锁内不应有 git 调用）",
+                caller,
+                waited,
+                held,
+            )
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
@@ -4218,15 +4272,14 @@ class ContinuityStore:
             )
             if replay is not None:
                 return replay
-            final_worktree = self._validated_run_snapshot(
+            # The full snapshot (about twenty git calls) was taken above, before the lock.  Inside the lock only
+            # two cheap git calls confirm nothing moved in between: HEAD, and the dirty files inside owned_paths.
+            self._confirm_run_snapshot_in_lock(
                 stored_values["worktree_path"],
                 stored_values["git_head"],
                 owned_paths,
-                declared_dirty_paths,
                 observed_paths,
             )
-            if str(final_worktree) != stored_values["worktree_path"]:
-                raise ContinuityStoreError("Run worktree canonical identity 发生漂移")
             if stored_values.get("state") != RunState.READY.value:
                 raise ContinuityStoreError("新 Run 初始状态必须是 READY")
             if stored_values.get("version") != 1:

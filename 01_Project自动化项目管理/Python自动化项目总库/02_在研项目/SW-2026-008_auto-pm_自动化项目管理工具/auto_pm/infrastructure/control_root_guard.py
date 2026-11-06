@@ -305,6 +305,37 @@ def governed_worktree_snapshot(
     return final_candidate, head_before, dirty_before
 
 
+def worktree_head_and_dirty(
+    worktree_path: str | Path, scope_paths: Iterable[str]
+) -> tuple[str, tuple[str, ...]]:
+    """Cheap HEAD and dirty-file facts for one worktree, for re-checking inside a ledger write transaction.
+
+    Two git calls instead of the roughly twenty of ``governed_worktree_snapshot``: ``rev-parse HEAD`` and one
+    ``status`` limited to *scope_paths*.  It reports the same files (changed, staged, untracked and not ignored)
+    as the full snapshot restricted to that scope, without the path-identity checks, which the caller already did
+    before taking the lock.
+    """
+
+    candidate = Path(worktree_path)
+    scope = [path for path in scope_paths if path]
+    head = _git_output(candidate, "rev-parse", "--verify", "HEAD")
+    if not scope:
+        return head, ()
+    output = _git_optional_output(
+        candidate,
+        "--literal-pathspecs",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--no-renames",
+        "--untracked-files=all",
+        "--",
+        *scope,
+    )
+    dirty = {entry[3:].replace("\\", "/") for entry in output.split("\0") if len(entry) > 3}
+    return head, tuple(sorted(dirty))
+
+
 def _real_control_directory(root: Path) -> Path:
     """Require the in-workspace ``.git`` entry to be a real directory, never an alias."""
 
