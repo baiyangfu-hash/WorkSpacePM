@@ -257,7 +257,7 @@
 | D-67 | 账本写事务里跑了约 20 个 git 子进程，持写锁过久，别的写入被拖住 | P2 | 协调者 11-07 转述 | 转述（我没复现） | PR #589 在修 |
 | D-68 | Windows CI 的 `tests/cli/test_long_run_cli.py::test_start_runs_the_command_detached_and_status_reports_the_exit_code` 在 GitHub windows-latest 上时红时绿（main 的 sw008-ci run 42295355980、42139047237 和 #584 的 run 42301570407 都红过）：长跑任务 0.5 秒内状态 FAILED、detached=False、exit_code=127（`long_run_core.py` 第 447 行启动命令时抛 OSError）；具体 OSError 文字在该任务的 run.log 里，断言信息没带出来；纯文档 PR 也会因它变红（#591 已让纯规划文档不再触发 sw008-ci）；建议先让测试失败时把 run.log 带进断言信息，再定位 | P2 | 另一线程转述（协调者要求登记，11-07） | 转述（我没复现；根因未核实） | 未立卡；与 D-33（Windows 测试时红时绿）同类，入账时核对是否合并 |
 | D-69 | 本机 `.git/objects/pack` 里有 32 个 `tmp_idx_`／`tmp_rev_` 垃圾文件（疑似中断的打包留下）；清理（`git prune`）需用户同意 | P3 | 本机线程只读取证时发现（协调者 11-07 转述） | 已核：本机线程看到文件，我没复现 | 未立卡；清理要用户同意 |
-| D-70 | 密钥文件名可以直接入库：`gittoken.txt` 带真实 `ghp_` 令牌进过 My_Workspace 与 WorkSpacePM 历史（令牌已吊销），提交钩子没拦；pre-commit 应禁止 `gittoken*`、`*.token`、`.env*` 这类文件名入库（例外显式列出），`.gitignore` 补 `gittoken.txt`，密钥扫描规则补 `API_SECRET_KEY` 写法 | P2 | TD-112、TD-116 全历史扫描（协调者 11-07 转述） | 已核：扫描命中；钩子缺口我没复现 | 未立卡 |
+| D-70 | 密钥文件名可以直接入库：`gittoken.txt` 带真实 `ghp_` 令牌进过 WorkSpacePM 与 My_OKR（原 My_Workspace，均公开）历史（同一令牌，已吊销），提交钩子没拦；pre-commit 应禁止 `gittoken*`、`*.token`、`.env*` 这类文件名入库（例外显式列出），`.gitignore` 补 `gittoken.txt`，密钥扫描规则补 `API_SECRET_KEY` 写法 | P2 | TD-112、TD-116 全历史扫描（协调者 11-07 转述） | 已核：扫描命中；钩子缺口我没复现 | 未立卡 |
 
 **建议修复批次**（只是建议，每一批开工前仍按 `AGENTS.md` 四阶段先出计划、等用户确认；**交接前不改任何代码**）：
 
