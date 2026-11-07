@@ -36,6 +36,21 @@ def test_sw008_ci_is_expected_only_when_its_paths_change() -> None:
     assert "reviews-tools-ci.yml" in agg.expected_workflows(triggers, ["README.md"])
 
 
+def test_sw008_ci_skips_pure_planning_docs_but_not_code() -> None:
+    triggers = agg.load_triggers(WORKFLOWS)
+    docs = [f"{SW008}/02_规划/241_登记卡_PM.md", f"{SW008}/02_规划/V1.0/SHA256SUMS.txt"]
+    assert "sw008-ci.yml" not in agg.expected_workflows(triggers, docs)
+    assert "sw008-ci.yml" in agg.expected_workflows(triggers, [*docs, f"{SW008}/auto_pm/x.py"])
+    assert "sw008-ci.yml" in agg.expected_workflows(triggers, [f"{SW008}/tests/core/test_x.py"])
+
+
+def test_path_selected_follows_github_order_semantics() -> None:
+    assert agg.path_selected("a/b.md", ("a/**", "!a/**/*.md")) is False
+    assert agg.path_selected("a/b.py", ("a/**", "!a/**/*.md")) is True
+    assert agg.path_selected("a/b.md", ("!a/**/*.md", "a/**")) is True  # 排除项写在前面不生效，和 GitHub 一致
+    assert agg.path_selected("z.py", ("a/**", "!a/**/*.md")) is False
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

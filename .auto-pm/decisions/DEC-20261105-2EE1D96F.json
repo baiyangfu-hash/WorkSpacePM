@@ -1,0 +1,58 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261105-2EE1D96F",
+  "project_id": "DJ-2026-011",
+  "change_id": "CHG-PLC-2026-004",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2002_BatchCounter_DJ2026011.scl",
+    "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2001_AlarmSummary_DJ2026011.scl"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-05T18:00:27.581252+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: plc check DJ-2026-011 全部通过(含 SCL 规范、文档一致性、Siemens 语言服务 check 与 test)",
+    "acceptance: 文档与注释静态扫描通过",
+    "risk: 011 含安全回路(FB_1091 双手启动),本卡不改它,但 PR 仍按安全区走,须用户在 PR 上写“安全签字 <头前 12 位>”,我不自己签字",
+    "risk: 两个 FB 只在云端 #539(未合并)里,本卡基于 #539 头 3addcc7a 开分支;#539 之后变动会冲突,合并顺序须在 #539 之后",
+    "risk: 本机 Siemens LSP 从未在云端版上跑过,plc check 的 test 层可能仍有 SHL 失败,届时如实报告,不改 auto_pm/",
+    "risk: 验收命令只能判 plc check 与 doc check;“不再读 Output”由我另用只读脚本逐文件排查并写进 PR,TIA 重新导入编译由用户做,本卡不替代",
+    "non-goal: 不改 auto_pm/、reviews/tools/、tests/、scripts/(SclLinter 误报若复现另开卡走规则批准)",
+    "non-goal: 不改 FB_1091、DB、OB123、FB_9001 和 PRD 文档",
+    "non-goal: 不处理 SysLib 与 005/009/000 里的 FB_TON、FB_R_TRIG",
+    "safety-circuit: 是（安全区：先仿真，再由用户在 PR 上写“安全签字 + 提交号”后才能合并）"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "9f2cd93e47c071c43ac352a35fb3e7b175364712c11bc7be9b1419cc7df61d1c",
+      "approval_evidence_ref": "user-confirmation:2026-11-05T17:55:47Z",
+      "request_id": "DJ011-TIA-OUTPUT-READ-20261105-P2",
+      "execution_grant": {
+        "adapter": "manual",
+        "approved_model": "claude-code",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2002_BatchCounter_DJ2026011.scl",
+          "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001/FB_2001_AlarmSummary_DJ2026011.scl"
+        ],
+        "plan_checklist": {
+          "original_request": "好了，今天你用驾驶舱开pr，修程序，验证一下驾驶舱的功能。（确认开工，2026-11-05 17:55:47Z）",
+          "safety_circuit": "是",
+          "acceptance_checks": [
+            {
+              "command": "main.py plc check DJ-2026-011",
+              "expected_exit_code": 0
+            },
+            {
+              "command": "main.py doc check",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "丢弃 claude/ 分支和对应 PR;#539 不受影响"
+        }
+      }
+    }
+  }
+}
