@@ -494,12 +494,13 @@ class AgentWorktreeService:
         }
 
         def run(*args: str) -> str:
-            step = subprocess.run(  # noqa: S603 - fixed git argv
+            step = run_git_bounded_text(
                 ["git", "-C", str(path), *args],
+                default_timeout=300.0,
+                error_cls=AgentWorktreeError,
+                where=path,
                 env=env,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
                 check=False,
             )
             if step.returncode != 0:
