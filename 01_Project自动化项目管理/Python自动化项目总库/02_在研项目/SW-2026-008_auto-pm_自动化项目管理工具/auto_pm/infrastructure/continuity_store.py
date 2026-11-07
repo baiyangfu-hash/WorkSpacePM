@@ -4566,8 +4566,12 @@ class ContinuityStore:
             WHERE work_id=? AND version=?""",
             (WorkState.BLOCKED.value, event_time, work_id, work.version),
         )
-        if cursor.rowcount != 1:
-            raise ContinuityStoreError("Work 不存在或版本冲突")
+        if cursor.rowcount != 1:  # cannot happen inside this write transaction; kept so a CAS miss refuses instead of passing
+            from auto_pm.infrastructure.guard_refusal import (
+                GuardStoreRefusal,  # lazy: guard_refusal imports this module
+            )
+
+            raise GuardStoreRefusal("G-LEASE-VALID", "Work 在 Run 终态迁移的同一事务里被改动（版本冲突）")
         key = "work-blocked-" + hashlib.sha256(run_key.encode()).hexdigest()[:48]
         self._append_event(
             conn,

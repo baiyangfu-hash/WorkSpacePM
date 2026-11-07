@@ -9,16 +9,21 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+from auto_pm.application.core.continuity_execution_service import (
+    ContinuityExecutionError,
+    ContinuityExecutionService,
+)
+from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkState
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
 from tests.core.test_continuity_execution_service import Clock, _services, _start, _start_evidence
 
 
-def _in_progress(tmp_path: Path):  # noqa: ANN202 - test helper
+def _in_progress(tmp_path: Path) -> tuple[WorkRegistryService, ContinuityExecutionService]:
     work, service = _services(tmp_path, Clock())
     _start(service)
     _start_evidence(service)
@@ -75,7 +80,9 @@ def test_run_event_and_work_block_commit_together(
     store = service._store
     real = store._append_event
 
-    def fail_on_work_event(conn, aggregate_id, event_type, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+    def fail_on_work_event(
+        conn: sqlite3.Connection, aggregate_id: str, event_type: str, *args: Any, **kwargs: Any
+    ) -> None:
         if event_type == "WORK_TRANSITIONED":
             raise ContinuityStoreError("injected")
         return real(conn, aggregate_id, event_type, *args, **kwargs)
