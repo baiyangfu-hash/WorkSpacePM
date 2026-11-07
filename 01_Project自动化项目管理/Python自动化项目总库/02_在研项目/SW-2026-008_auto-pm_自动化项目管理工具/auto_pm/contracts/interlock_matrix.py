@@ -78,6 +78,9 @@ class CommandSpec:
 
 COMMANDS: dict[str, CommandSpec] = {
     "change create": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",)),
+    "worktree release": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "收自己对话的别名工位，先存救援引用"),
+    "worktree heartbeat": CommandSpec(CommandKind.NORMAL, (), (), "只刷新自己工位的心跳记录，不写账本"),
+    "worktree reclaim": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "只列；--apply 才回收，且只由用户终端执行"),
     "change transition": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL")),
     "decision create": CommandSpec(
         CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL", "G-APPROVAL-PIN")
