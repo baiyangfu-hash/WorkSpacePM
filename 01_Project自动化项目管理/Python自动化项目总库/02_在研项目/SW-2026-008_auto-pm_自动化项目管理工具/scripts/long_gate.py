@@ -55,6 +55,12 @@ MIN_REMAINING_S = 600
 # A gate dispatched with the user's approval may hold its Run's lease 13 h in total: the 3 h default plus this one extension.
 # Fixed on purpose: the config cannot ask for more, and only one extension is ever requested per Run.
 HOLD_EXTENSION_S = 10 * 3600
+# Mirror of ``continuity_store.LEASE_HOLD_CAP_SECONDS`` (this script stays standalone; a test pins the two together).
+LEASE_HOLD_CAP_S = 3 * 3600
+# The closing needs this much lease on top of its own estimate, or the gate is refused at launch (D-03, card 225 item 6).
+CLOSE_MARGIN_EXTRA_S = 30 * 60
+# When the gate ends with less hold than this left, the status says CLOSE_WINDOW_LOW.
+CLOSE_WINDOW_LOW_S = 40 * 60
 # `Event.wait(1)` can return a few ms early on a coarse (Windows) timer; a renewal due within this slack counts as due.
 # It only brings a renewal forward, it does not touch the MIN_REMAINING_S floor.
 RENEW_EARLY_SLACK_S = 0.25
@@ -192,6 +198,23 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
             raise GateError("lease: give exactly one of token_file or wallet: true")
         if "token_file" in lease:
             lease["token_file"] = fill(lease["token_file"])
+    # D-03: how long the round is expected to take and how long the closing needs, so a launch that cannot be closed in time is refused.
+    expected = cfg.get("expected_duration_s")
+    if expected is not None and (not isinstance(expected, int) or isinstance(expected, bool) or not 60 <= expected <= 12 * 3600):
+        raise GateError("config.expected_duration_s must be 60..43200 seconds")
+    estimate = cfg.setdefault("closing_estimate_s", 900)
+    if not isinstance(estimate, int) or isinstance(estimate, bool) or not 0 <= estimate <= 4 * 3600:
+        raise GateError("config.closing_estimate_s must be 0..14400 seconds")
+    closing = cfg.get("closing")
+    if closing is not None:
+        argv = closing.get("argv") if isinstance(closing, dict) else None
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            raise GateError("config.closing.argv must be a non-empty list of strings")
+        closing["argv"] = [fill(a) for a in argv]
+        closing["cwd"] = fill(str(closing.get("cwd", cfg["root"] or cfg["out_dir"])))
+        closing.setdefault("timeout_s", 3600)
+        if not isinstance(closing["timeout_s"], int) or not 10 <= closing["timeout_s"] <= 4 * 3600:
+            raise GateError("config.closing.timeout_s must be 10..14400")
     approval = lease.get("dispatch_approval_ref")
     if approval is not None:
         if mode != "auto_pm":
@@ -560,6 +583,37 @@ class Lease:
             raise GateError(f"hold extension exit {r.returncode}: {tail[:300]}")
         self.log(f"hold extension ok +{HOLD_EXTENSION_S}s")
 
+    def hold_end(self, *, planned_extension: bool = False) -> dt.datetime | None:
+        """Latest moment this Run may keep renewing: creation + default cap + every approved extension (read-only).
+
+        With ``planned_extension`` the extension this gate will request before its first renewal counts too, unless the ledger
+        already holds it.  Only ``auto_pm`` leases have a cap; for the other modes this is ``None``.
+        """
+        if self.cfg["mode"] != "auto_pm":
+            return None
+        run_id = self.cfg["run_id"]
+        db = Path(self.root) / ".auto-pm" / "continuity.db"
+        con = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            row = con.execute("select created_at from run_items where run_id=?", (run_id,)).fetchone()
+            if row is None:
+                raise GateError(f"no Run {run_id}")
+            extra, extended = 0, False
+            for (payload,) in con.execute(
+                "select payload_json from events where aggregate_type='run' and aggregate_id=? and event_type='LEASE_HOLD_EXTENDED'",
+                (run_id,),
+            ):
+                extra += int(json.loads(payload).get("extra_seconds", 0))
+                extended = True
+        finally:
+            con.close()
+        created = dt.datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=dt.UTC)
+        if planned_extension and not extended and self.cfg.get("dispatch_approval_ref"):
+            extra += HOLD_EXTENSION_S
+        return created + dt.timedelta(seconds=LEASE_HOLD_CAP_S + extra)
+
     def _current_version(self) -> int:
         db = Path(self.root) / ".auto-pm" / "continuity.db"
         con = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=30)
@@ -604,6 +658,33 @@ class LeaseKeeper(threading.Thread):
         self.reason = reason
         self.log(f"HARD STOP: {reason}")
         self.hard_stop.set()
+
+
+def hold_margin_refusal(cfg: dict[str, Any], log: Any = None) -> str:
+    """Refusal text when the Run's lease hold cannot cover the expected round plus the closing, else "" (D-03).
+
+    Needs ``expected_duration_s``; without it nothing can be judged and a line says so.  For an ``auto_pm`` lease the cap comes
+    from the ledger; a ledger that cannot be read counts as a refusal, never as a pass.
+    """
+    expected = cfg.get("expected_duration_s")
+    lease = cfg["lease"]
+    if lease["mode"] != "auto_pm":
+        return ""
+    if expected is None:
+        (log or _say)("expected_duration_s is not set: the close-window margin was not checked")
+        return ""
+    try:
+        end = Lease(cfg, Log(Path(cfg["out_dir"]) / LOG_FILE)).hold_end(planned_extension=True)
+    except Exception as error:  # noqa: BLE001 - an unreadable cap is a refusal
+        return f"cannot read the Run's lease hold cap ({type(error).__name__}: {error}); the close window was not verified"
+    assert end is not None
+    need = int(expected) + int(cfg["closing_estimate_s"]) + CLOSE_MARGIN_EXTRA_S
+    have = (end - utc_now()).total_seconds()
+    if have < need:
+        return (f"the lease hold ends {iso(end)}, {int(have)} s from now, but the round (expected {expected} s) plus "
+                f"closing (estimated {cfg['closing_estimate_s']} s) plus a {CLOSE_MARGIN_EXTRA_S} s margin needs {need} s. "
+                "Start a shorter round, or have the user extend the hold (dispatch_approval_ref), or close in another Run.")
+    return ""
 
 
 # ── the runner ───────────────────────────────────────────
@@ -655,6 +736,8 @@ class Runner:
                 "renewals": self.lease.renewals,
             },
             "keep_awake": self.awake.state,
+            "warning": self.state.get("warning"),
+            "closing": self.state.get("closing"),
             "updated_at": iso(utc_now()),
         }
         with self._status_lock:
@@ -685,6 +768,8 @@ class Runner:
                     self.log(f"marker {target} not removed ({type(error).__name__})")
         self.log(f"result {result}" + (f": {reason}" if reason else ""))
         if result in {"DONE", "FAILED"}:
+            self._note_close_window()
+            self._run_closing()
             self._hold_for_closing()
         self.stop_all.set()
         self.write_status()
@@ -699,6 +784,48 @@ class Runner:
             self.log(f"scheduled task {self.task_name} deleted" if code == 0
                      else f"scheduled task {self.task_name} not deleted ({code})")
         return EXIT_CODES[result]
+
+    def _note_close_window(self) -> None:
+        """Say CLOSE_WINDOW_LOW in the log and the status when the hold left for the closing is short (D-03)."""
+        try:
+            end = self.lease.hold_end()
+        except Exception as error:  # noqa: BLE001 - the warning is best effort, the verdict stands
+            self.log(f"close window not checked ({type(error).__name__}: {error})")
+            return
+        if end is None:
+            return
+        left = (end - utc_now()).total_seconds()
+        self.state["close_window_s"] = int(left)
+        if left < CLOSE_WINDOW_LOW_S:
+            self.state["warning"] = "CLOSE_WINDOW_LOW"
+            self.log(f"CLOSE_WINDOW_LOW: the lease hold ends in {int(left)} s (< {CLOSE_WINDOW_LOW_S}); close now")
+        self.save()
+
+    def _run_closing(self) -> None:
+        """Run ``closing.argv`` by this process, outside any AI session, while the keeper still renews the lease.
+
+        A failed or timed-out closing never changes the verdict; the scene is kept and the state says what happened.
+        """
+        closing = self.cfg.get("closing")
+        if not closing:
+            return
+        rec: dict[str, Any] = {"started_at": iso(utc_now())}
+        self.state["closing"] = rec
+        self.log(f"closing: {' '.join(closing['argv'])[:200]}")
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        try:
+            r = subprocess.run(closing["argv"], cwd=closing["cwd"], env=env, capture_output=True, check=False,
+                               timeout=int(closing["timeout_s"]), creationflags=0x08000000 if IS_WINDOWS else 0)
+            rec["exit"], rec["status"] = r.returncode, "done" if r.returncode == 0 else "failed"
+            (self.out / "closing.txt").write_bytes(r.stdout + b"\n--- stderr ---\n" + r.stderr)
+        except subprocess.TimeoutExpired:
+            rec["status"] = "timeout"
+        except OSError as error:
+            rec["status"], rec["error"] = "failed", type(error).__name__
+        rec["ended_at"] = iso(utc_now())
+        self.log(f"closing {rec['status']}" + (f" exit={rec['exit']}" if "exit" in rec else "")
+                 + ("" if rec["status"] == "done" else "; scene kept, nothing was rolled back"))
+        self.save()
 
     def _hold_for_closing(self) -> None:
         """Keep the lease renewed (the keeper thread is still running) until the closing step has written its marker."""
@@ -780,6 +907,10 @@ class Runner:
                 self._park_interrupted(s, rec)
         self.save()
 
+        if self.state.get("resumes", 0) == 0 and not self.state["steps"]:
+            margin = hold_margin_refusal(self.cfg, self.log)
+            if margin:
+                return self._refuse(margin)
         try:
             self.lease.extend_hold()
             self.lease.renew()
@@ -1049,6 +1180,10 @@ def cmd_launch(config_path: Path, wait_s: int) -> int:
     refusal = _memory_preflight_refusal()
     if refusal:
         print(refusal)
+        return EXIT_CODES["REFUSED"]
+    margin = hold_margin_refusal(cfg)
+    if margin:
+        print(f"REFUSED: {margin}")
         return EXIT_CODES["REFUSED"]
     before = time.time()
     (_launch_windows if IS_WINDOWS else _launch_posix)(cfg, config_path.resolve())
