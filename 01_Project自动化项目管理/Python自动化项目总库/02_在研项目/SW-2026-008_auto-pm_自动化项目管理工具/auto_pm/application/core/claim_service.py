@@ -36,7 +36,9 @@ _CARD_FILE = re.compile(r"/02_规划/(\d{3})_[^/]+_PM\.md$")
 GIT_TIMEOUT_SECONDS = 120.0
 LEASE_HOURS = 4  # short on purpose: a holder that is still working renews (``claim renew``); one that went silent frees the card by itself
 LEASE_SECONDS_ENV = "AUTO_PM_CLAIM_LEASE_SECONDS"  # a shorter lease for tests and live drills (e.g. 120 = two minutes); never longer than a day
-MAX_LEASE_SECONDS = 24 * 3600
+MAX_LEASE_SECONDS = 4 * 3600  # not silently clamped: a longer value is refused
+AUTO_RENEW_CAP = timedelta(hours=12)  # keep-alive never carries a claim past 12 h from the last explicit open/renew
+AUTO_RENEW_FETCH_SECONDS = 10.0  # the keep-alive may not hold a checkpoint up
 STALE_DAYS = 2
 AUTO_RETRIES = 8
 
@@ -46,7 +48,7 @@ class ClaimError(RuntimeError):
 
 
 def lease_duration() -> timedelta:
-    """How long a claim or a renewal holds: ``LEASE_HOURS``, or ``AUTO_PM_CLAIM_LEASE_SECONDS`` when that is set (1 second to one day)."""
+    """How long a claim or a renewal holds: ``LEASE_HOURS``, or ``AUTO_PM_CLAIM_LEASE_SECONDS`` when that is set (1 second to four hours)."""
 
     raw = os.environ.get(LEASE_SECONDS_ENV, "").strip()
     if not raw:
@@ -87,6 +89,7 @@ class Claim:
     commit: str
     status: str = "active"
     expires_at: str = ""
+    renewed_at: str = ""  # the last *explicit* renewal; the keep-alive never writes it, so it cannot extend its own cap
 
     @property
     def free(self) -> bool:
@@ -179,6 +182,7 @@ class ClaimService:
     def __init__(self, repo_root: str | Path, *, remote: str = "origin", machine: str | None = None) -> None:
         self._root = Path(repo_root).resolve()
         self._remote = remote
+        self.keepalive_warnings: list[str] = []
         self._machine = machine or socket.gethostname()  # who "I" am as a computer: opens write it, release/renew compare it (D-73)
 
     # ── read ──────────────────────────────────────────────────────────
@@ -213,6 +217,7 @@ class ClaimService:
             commit=commit,
             status=str(data.get("status", "active")),
             expires_at=str(data.get("expires_at", "")),
+            renewed_at=str(data.get("renewed_at", "")),
         )
 
     # ── claim ─────────────────────────────────────────────────────────
@@ -362,27 +367,59 @@ class ClaimService:
         payload["renewed_at"] = now.isoformat(timespec="seconds")
         return self._push_on_top(claim, payload, "续租没推成功")
 
-    def renew_held(self, owner: str, *, fetch: bool = True) -> list[Claim]:
-        """Keep alive every live claim ``owner`` holds, as a side effect of work the agent does anyway (D-39 follow-up).
+    def renew_held(self, owner: str, *, paths: Sequence[str]) -> list[Claim]:
+        """Keep alive the live claims ``owner`` holds **that cover ``paths``** (the checkpointing Run's owned paths), as a side effect
+        of work the agent does anyway (D-39 follow-up).
 
-        Best effort and quiet: a claim is only pushed again once less than half of ``LEASE_HOURS`` is left, so a
-        busy agent does not write a commit per command; any Git or network trouble is swallowed -- this must never
-        stop the command it rides on.  Returns the claims that were actually renewed.
+        Scoped on purpose: a checkpoint proves its own Run is alive, not every card the same owner name holds, so an
+        empty ``paths`` renews nothing.  Capped: never past 12 h after the last explicit open or ``claim renew``
+        (``renewed_at``); after that only an explicit renew keeps the claim.  Bounded: the fetch and the push give up
+        after ``AUTO_RENEW_FETCH_SECONDS``.  A claim is only pushed again once less than half of the lease is left.
+        Failures are recorded in ``keepalive_warnings`` and never raised -- this must not stop the command it rides on.
+        Returns the claims that were actually renewed.
         """
 
+        self.keepalive_warnings = []
         renewed: list[Claim] = []
+        if not paths:
+            return renewed
+        failure: Exception | None = None
         try:
-            mine = [claim for claim in self.all_claims(fetch=fetch) if not claim.free and not holder_problem(claim, owner, self._machine)]
-            threshold = datetime.now(UTC) + lease_duration() / 2
-        except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+            self._fetch(timeout=AUTO_RENEW_FETCH_SECONDS)
+        except Exception as error:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+            failure = error
+        try:
+            now = datetime.now(UTC)
+            lease = lease_duration()
+            mine = [
+                claim
+                for claim in self.all_claims(fetch=False)
+                if not claim.free and not holder_problem(claim, owner, self._machine) and claim_overlap(claim.paths, paths)
+            ]
+        except Exception as error:  # noqa: BLE001 - same reason
+            if failure is None:  # the fetch worked but the claims could not be read; with the fetch also down there is nothing known to warn about
+                self.keepalive_warnings.append(f"领卡续租没做（{error}）；占位到期前请手动 `claim renew`")
+            return renewed
+        if failure is not None:
+            # Say so only when there is something this checkpoint would have kept alive: a clone with no origin or no claims stays quiet.
+            if mine:
+                self.keepalive_warnings.append(f"领卡续租没做（读不到远程占位：{failure}）；占位到期前请手动 `claim renew`")
             return renewed
         for claim in mine:
             try:
-                if datetime.fromisoformat(claim.expires_at) > threshold:
+                anchor = max(filter(None, (claim.claimed_at, claim.renewed_at)))
+                ceiling = datetime.fromisoformat(anchor) + AUTO_RENEW_CAP
+                if now >= ceiling:
+                    self.keepalive_warnings.append(f"{claim.label()} 已满 12 小时自动续租上限，需要显式 `claim renew {claim.card}`")
                     continue
-                renewed.append(self.renew(claim.card, owner=owner))
-            except Exception:  # noqa: BLE001 - same reason; the explicit `claim renew` still reports errors
-                continue
+                if datetime.fromisoformat(claim.expires_at) > now + lease / 2:
+                    continue
+                payload = self._payload(claim, "active")
+                payload["expires_at"] = max(claim.expires_at, min(now + lease, ceiling).isoformat(timespec="seconds"))
+                payload["auto_renewed_at"] = now.isoformat(timespec="seconds")
+                renewed.append(self._push_on_top(claim, payload, "自动续租没推成功", timeout=AUTO_RENEW_FETCH_SECONDS))
+            except Exception as error:  # noqa: BLE001 - same reason; the explicit `claim renew` still reports errors
+                self.keepalive_warnings.append(f"{claim.label()} 自动续租没成功（{error}）；请手动 `claim renew {claim.card}`")
         return renewed
 
     def reclaim(self, card: str, *, by: str, reason: str, approval_ref: str) -> Claim:
@@ -426,28 +463,29 @@ class ClaimService:
             "status": status,
             "claimed_at": claim.claimed_at,
             "expires_at": claim.expires_at,
+            **({"renewed_at": claim.renewed_at} if claim.renewed_at else {}),
         }
 
-    def _push_on_top(self, claim: Claim, payload: dict[str, object], failure: str) -> Claim:
+    def _push_on_top(self, claim: Claim, payload: dict[str, object], failure: str, *, timeout: float | None = None) -> Claim:
         commit = self._commit(claim.card, payload, claim.commit)
         ref = f"{_CLAIM_REF}{claim.card}"
-        result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"])
+        result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"], timeout=timeout)
         if result.returncode != 0:
             raise ClaimError(f"{failure}：" + _decode(result.stderr).strip())
-        self._fetch()
+        self._fetch(timeout=timeout)
         return self._parse(claim.card, commit, f"claim {claim.card}\n" + json.dumps(payload, ensure_ascii=False))
 
     # ── git plumbing ──────────────────────────────────────────────────
 
-    def _fetch(self) -> None:
-        result = self._run(["fetch", "--prune", self._remote, f"+{_CLAIM_REF}*:{_LOCAL_REF}*"])
+    def _fetch(self, *, timeout: float | None = None) -> None:
+        result = self._run(["fetch", "--prune", self._remote, f"+{_CLAIM_REF}*:{_LOCAL_REF}*"], timeout=timeout)
         if result.returncode != 0:
             raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{_decode(result.stderr).strip()}")
 
-    def _run(self, arguments: list[str], *, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+    def _run(self, arguments: list[str], *, stdin: bytes | None = None, timeout: float | None = None) -> subprocess.CompletedProcess[bytes]:
         return run_git_bounded(
             ["git", "-C", str(self._root), *arguments],
-            default_timeout=GIT_TIMEOUT_SECONDS,
+            default_timeout=timeout or GIT_TIMEOUT_SECONDS,
             error_cls=ClaimError,
             where=self._root,
             capture_output=True,

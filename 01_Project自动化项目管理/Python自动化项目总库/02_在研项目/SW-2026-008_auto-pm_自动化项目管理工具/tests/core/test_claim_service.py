@@ -285,14 +285,15 @@ def test_control_root_status_json_carries_other_claims_and_stays_pure_json(
     assert "branch" in data and "on_main" in data, "the existing fields are untouched"
 
 
-def _set_expiry(pair: Pair, card: str, expires_at: str) -> None:
-    """Rewrite a claim's ``expires_at`` on the server (a commit on top), to age it without waiting."""
+def _set_expiry(pair: Pair, card: str, expires_at: str, **more: str) -> None:
+    """Rewrite a claim's ``expires_at`` (and any other field in ``more``) on the server (a commit on top), to age it without waiting."""
 
     ref = f"refs/heads/claims/{card}"
     tip = git_out(pair.origin, "rev-parse", ref)
     body = git_out(pair.origin, "show", "-s", "--format=%B", tip).split("\n", 1)[1].strip()
     data = json.loads(body)
     data["expires_at"] = expires_at
+    data.update(more)
     tree = git_out(pair.origin, "rev-parse", f"{tip}^{{tree}}")
     aged = git_out(pair.origin, "-c", "user.name=t", "-c", "user.email=t@x", "commit-tree", tree, "-p", tip, "-m", f"claim {card}\n" + json.dumps(data))
     _git(pair.origin, "update-ref", ref, aged)
@@ -310,7 +311,7 @@ def test_renew_held_only_pushes_when_less_than_half_the_lease_is_left_and_only_f
     fresh_tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/340")
     other_tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/342")
 
-    renewed = pair.laptop.renew_held("claude")
+    renewed = pair.laptop.renew_held("claude", paths=["p/a", "p/b", "p/c"])
 
     assert [claim.card for claim in renewed] == ["341"], "only my claim that was running low"
     assert git_out(pair.origin, "rev-parse", "refs/heads/claims/340") == fresh_tip, "a fresh lease is not pushed again"
@@ -322,10 +323,11 @@ def test_renew_held_only_pushes_when_less_than_half_the_lease_is_left_and_only_f
 def test_renew_held_skips_free_claims_and_never_raises_when_git_cannot_answer(pair: Pair, tmp_path: Path) -> None:
     pair.laptop.open("343", paths=["p/a"], goal="done", owner="claude", machine="laptop")
     pair.laptop.release("343", owner="claude")
-    assert pair.laptop.renew_held("claude") == [], "a released claim is not brought back to life"
+    assert pair.laptop.renew_held("claude", paths=["p/a"]) == [], "a released claim is not brought back to life"
 
     not_a_repo = ClaimService(tmp_path / "nowhere")
-    assert not_a_repo.renew_held("claude") == []
+    assert not_a_repo.renew_held("claude", paths=["p/a"]) == []
+    assert not_a_repo.keepalive_warnings == [], "a clone with nothing to keep alive stays quiet"
 
 
 # ── D-39 / D-73 / D-102 follow-ups ────────────────────────────────────────────────────────────────
@@ -339,7 +341,7 @@ def test_the_lease_can_be_shortened_for_drills_and_a_bad_value_is_refused(pair: 
     left = (datetime.fromisoformat(claim.expires_at) - datetime.now(UTC)).total_seconds()
     assert 60 < left <= 120, left
 
-    for bad in ("0", "-5", "abc", str(24 * 3600 + 1)):
+    for bad in ("0", "-5", "abc", "14401"):
         monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", bad)
         with pytest.raises(ClaimError, match="AUTO_PM_CLAIM_LEASE_SECONDS"):
             pair.laptop.open("361", paths=["p/b"], goal="x", owner="claude")
@@ -414,5 +416,121 @@ def test_renew_held_leaves_the_same_owner_name_on_another_computer_alone(pair: P
     _set_expiry(pair, "366", (datetime.now(UTC) + timedelta(minutes=30)).isoformat(timespec="seconds"))
     tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/366")
 
-    assert pair.cloud.renew_held("claude") == [], "the cloud session is also called claude, but it is not the holder"
+    assert pair.cloud.renew_held("claude", paths=["p/a"]) == [], "the cloud session is also called claude, but it is not the holder"
     assert git_out(pair.origin, "rev-parse", "refs/heads/claims/366") == tip
+
+
+def _iso(delta_minutes: float) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) + timedelta(minutes=delta_minutes)).isoformat(timespec="seconds")
+
+
+def test_the_lease_limit_is_four_hours_and_four_hours_itself_is_fine(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", "14400")
+    assert pair.laptop.open("367", paths=["p/a"], goal="x", owner="claude").owner == "claude"
+    monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", "14401")
+    with pytest.raises(ClaimError, match="1～14400"):
+        pair.laptop.open("368", paths=["p/b"], goal="x", owner="claude")
+
+
+def test_the_keepalive_only_renews_the_claim_that_covers_the_checkpointing_runs_paths(pair: Pair) -> None:
+    pair.laptop.open("370", paths=["p/a"], goal="this run", owner="claude")
+    pair.laptop.open("371", paths=["p/b"], goal="another card of the same name", owner="claude")
+    _set_expiry(pair, "370", _iso(30))
+    _set_expiry(pair, "371", _iso(30))
+    other_tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/371")
+
+    renewed = pair.laptop.renew_held("claude", paths=["p/a/x.py"])
+
+    assert [claim.card for claim in renewed] == ["370"]
+    assert git_out(pair.origin, "rev-parse", "refs/heads/claims/371") == other_tip, "the other card is not this run's"
+    assert pair.laptop.renew_held("claude", paths=[]) == [], "a run with no owned paths keeps nothing alive"
+
+
+def test_the_keepalive_stops_twelve_hours_after_the_last_explicit_open_or_renew(pair: Pair) -> None:
+    pair.laptop.open("372", paths=["p/a"], goal="long job", owner="claude")
+    _set_expiry(pair, "372", _iso(30), claimed_at=_iso(-13 * 60))
+    tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/372")
+
+    assert pair.laptop.renew_held("claude", paths=["p/a"]) == []
+    assert git_out(pair.origin, "rev-parse", "refs/heads/claims/372") == tip, "nothing was pushed"
+    assert any("12 小时" in warning and "claim renew 372" in warning for warning in pair.laptop.keepalive_warnings)
+
+
+def test_an_explicit_renew_restarts_the_twelve_hour_clock_and_the_keepalive_cannot_restart_it_itself(pair: Pair) -> None:
+    from datetime import datetime
+
+    pair.laptop.open("373", paths=["p/a"], goal="long job", owner="claude")
+    _set_expiry(pair, "373", _iso(30), claimed_at=_iso(-13 * 60))
+    explicit = pair.laptop.renew("373", owner="claude")
+    assert explicit.renewed_at
+    an_hour_ago = _iso(-60)
+    _set_expiry(pair, "373", _iso(30), renewed_at=an_hour_ago)
+
+    first = pair.laptop.renew_held("claude", paths=["p/a"])
+
+    assert [claim.card for claim in first] == ["373"], "the explicit renew gave it another 12 hours"
+    assert first[0].renewed_at == an_hour_ago, "the keep-alive never writes renewed_at"
+    assert datetime.fromisoformat(first[0].expires_at) > datetime.fromisoformat(an_hour_ago)
+
+
+def test_the_keepalive_never_pushes_the_expiry_past_the_twelve_hour_ceiling(pair: Pair) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    pair.laptop.open("374", paths=["p/a"], goal="near the cap", owner="claude")
+    claimed = datetime.now(UTC) - timedelta(hours=11, minutes=40)
+    _set_expiry(pair, "374", _iso(10), claimed_at=claimed.isoformat(timespec="seconds"))
+
+    renewed = pair.laptop.renew_held("claude", paths=["p/a"])
+
+    assert [claim.card for claim in renewed] == ["374"]
+    assert datetime.fromisoformat(renewed[0].expires_at) <= claimed + timedelta(hours=12, seconds=1)
+
+
+def test_the_keepalive_fetch_and_push_are_short_and_a_failure_is_a_warning_not_an_error(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    pair.laptop.open("375", paths=["p/a"], goal="x", owner="claude")
+    _set_expiry(pair, "375", _iso(30))
+    seen: list[tuple[str, float | None]] = []
+    real_run = pair.laptop._run
+
+    def watching(arguments: list[str], *, stdin: bytes | None = None, timeout: float | None = None):  # type: ignore[no-untyped-def]
+        seen.append((arguments[0], timeout))
+        return real_run(arguments, stdin=stdin, timeout=timeout)
+
+    monkeypatch.setattr(pair.laptop, "_run", watching)
+    assert [claim.card for claim in pair.laptop.renew_held("claude", paths=["p/a"])] == ["375"]
+    assert seen and all(timeout == 10.0 for verb, timeout in seen if verb in {"fetch", "push"}), seen
+
+    monkeypatch.setattr(pair.laptop, "_fetch", lambda **_: (_ for _ in ()).throw(ClaimError("offline")))
+    assert pair.laptop.renew_held("claude", paths=["p/a"]) == []
+    assert "offline" in pair.laptop.keepalive_warnings[0], "offline with a claim that would have been renewed: one warning"
+    assert pair.laptop.renew_held("claude", paths=["elsewhere"]) == []
+    assert pair.laptop.keepalive_warnings == [], "offline but nothing of this run's: quiet"
+
+
+def test_the_checkpoint_hook_passes_the_runs_owned_paths_and_prints_warnings_on_stderr(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from types import SimpleNamespace
+
+    from auto_pm.ui.cli import continuity as module
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class FakeService:
+        keepalive_warnings = ["领卡续租没做（读不到占位：offline）"]
+
+        def __init__(self, root: object) -> None:
+            pass
+
+        def renew_held(self, owner: str, *, paths: tuple[str, ...]) -> list[object]:
+            calls.append((owner, tuple(paths)))
+            return []
+
+    monkeypatch.setattr(module, "ClaimService", FakeService)
+    monkeypatch.setattr(module, "caller_agent", lambda: "claude")
+    ctx = SimpleNamespace(find_root=lambda: SimpleNamespace(obj=SimpleNamespace(control_root="/root", workspace_root="")))
+
+    module._keep_claims_alive(ctx, ("p/a", "p/b"))  # type: ignore[arg-type]
+
+    assert calls == [("claude", ("p/a", "p/b"))]
+    assert "领卡续租没做" in capsys.readouterr().err

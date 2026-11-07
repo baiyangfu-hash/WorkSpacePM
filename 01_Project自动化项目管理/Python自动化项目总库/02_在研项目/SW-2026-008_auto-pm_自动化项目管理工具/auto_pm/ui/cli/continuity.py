@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -1510,14 +1510,21 @@ def record_holder(
     click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
-def _keep_claims_alive(ctx: click.Context) -> None:
-    """Checkpointing is proof the agent is still working: stretch its card claims (D-39 follow-up).  Quiet and never fatal."""
+def _keep_claims_alive(ctx: click.Context, owned_paths: Sequence[str]) -> None:
+    """Checkpointing is proof the agent is still working on *this Run's* paths: stretch the claims covering them (D-39 follow-up).
+
+    Quiet and never fatal; a keep-alive that could not run says so on stderr (one line) and the checkpoint still succeeds.
+    """
 
     try:
         app_ctx: AppContext = ctx.find_root().obj
         root = app_ctx.control_root or app_ctx.workspace_root
-        if root:
-            ClaimService(root).renew_held(caller_agent().strip("?") or "user")
+        if not root:
+            return
+        service = ClaimService(root)
+        service.renew_held(caller_agent().strip("?") or "user", paths=owned_paths)
+        for warning in service.keepalive_warnings:
+            click.echo(f"⚠️ {warning}", err=True)
     except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
         return
 
@@ -1571,7 +1578,7 @@ def create_checkpoint(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
-    _keep_claims_alive(ctx)
+    _keep_claims_alive(ctx, run.owned_paths)
     _emit(item)
 
 
