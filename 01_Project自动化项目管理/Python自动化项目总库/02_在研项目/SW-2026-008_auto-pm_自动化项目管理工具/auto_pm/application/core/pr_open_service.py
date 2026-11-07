@@ -32,6 +32,7 @@ from auto_pm.application.core.agent_worktree_service import (
     StationRefusedError,
     caller_agent,
 )
+from auto_pm.application.core.claim_service import claim_refusal
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
 from auto_pm.application.core.paths import PG_MONITORING_DIR
 from auto_pm.application.core.pr_body_builder import (
@@ -195,6 +196,9 @@ class PrOpenService:
                 f"工位在分支 {station.branch or '(无)'}，应为 {branch}（前缀 {prefix} + 卡号 {card}）；"
                 "分支名不符，不开 PR"
             )
+        claim_problem = claim_refusal(self._root, card, agent)
+        if claim_problem:
+            raise PrOpenRefusedError(claim_problem)
         if station.dirty_paths:
             shown = "、".join(station.dirty_paths[:3])
             raise PrOpenRefusedError(
