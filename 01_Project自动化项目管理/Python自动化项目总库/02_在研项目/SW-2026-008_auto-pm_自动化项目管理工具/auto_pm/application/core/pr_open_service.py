@@ -207,6 +207,11 @@ class PrOpenService:
                 f"分支名不符，不开 PR{hint}"
             )
         claim_problem = claim_refusal(self._root, card, agent)
+        if claim_problem and agent == caller_alias() and agent != base_agent(agent):
+            # A claim made before D-112 carries the bare name (``claude``); the caller's own alias station may use it.
+            # Only the bare name of the caller's own base, never another conversation's alias.
+            if not claim_refusal(self._root, card, base_agent(agent)):
+                claim_problem = ""
         if claim_problem:
             raise PrOpenRefusedError(claim_problem)
         if station.dirty_paths:

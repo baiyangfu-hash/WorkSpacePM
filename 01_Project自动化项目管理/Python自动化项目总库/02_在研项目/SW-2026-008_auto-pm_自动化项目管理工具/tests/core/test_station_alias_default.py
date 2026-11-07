@@ -117,3 +117,39 @@ def test_pr_open_hint_is_absent_for_a_user_terminal(tmp_path: Path) -> None:
     with pytest.raises(PrOpenRefusedError) as raised:
         PrOpenService(root).plan("claude", "d109", "card.md", fetch=False)
     assert "worktree open" not in str(raised.value)
+
+
+# ── claim identity follows the alias (D-112, found on the 11-07 deployment: claimed as `claude`, PR refused for `claude-a119dc`) ──
+
+
+def test_pr_open_accepts_a_pre_d112_claim_under_the_bare_name_for_the_own_alias_station(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core import pr_open_service
+
+    root = _control_root(tmp_path)
+    alias = _as_claude(monkeypatch)
+    _service(root).open(alias, "c1", fetch=False)
+    seen: list[str] = []
+
+    def fake(_root: object, _card: str, owner: str) -> str:
+        seen.append(owner)
+        return "" if owner == "claude" else f"占位不是 {owner}"
+
+    monkeypatch.setattr(pr_open_service, "claim_refusal", fake)
+    with pytest.raises(PrOpenRefusedError) as raised:
+        PrOpenService(root).plan(alias, "c1", "card.md", fetch=False)
+    assert "占位不是" not in str(raised.value) and seen == [alias, "claude"]
+
+
+def test_pr_open_refuses_when_the_claim_is_another_conversations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core import pr_open_service
+
+    root = _control_root(tmp_path)
+    alias = _as_claude(monkeypatch)
+    _service(root).open(alias, "c1", fetch=False)
+    monkeypatch.setattr(pr_open_service, "claim_refusal", lambda *_a: "占位是别人的")
+    with pytest.raises(PrOpenRefusedError, match="占位是别人的"):
+        PrOpenService(root).plan(alias, "c1", "card.md", fetch=False)
