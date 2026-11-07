@@ -35,12 +35,45 @@ _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 _CARD_FILE = re.compile(r"/02_规划/(\d{3})_[^/]+_PM\.md$")
 GIT_TIMEOUT_SECONDS = 120.0
 LEASE_HOURS = 4  # short on purpose: a holder that is still working renews (``claim renew``); one that went silent frees the card by itself
+LEASE_SECONDS_ENV = "AUTO_PM_CLAIM_LEASE_SECONDS"  # a shorter lease for tests and live drills (e.g. 120 = two minutes); never longer than a day
+MAX_LEASE_SECONDS = 24 * 3600
 STALE_DAYS = 2
 AUTO_RETRIES = 8
 
 
 class ClaimError(RuntimeError):
     """The claim cannot be made or read; the message says why and what to do next."""
+
+
+def lease_duration() -> timedelta:
+    """How long a claim or a renewal holds: ``LEASE_HOURS``, or ``AUTO_PM_CLAIM_LEASE_SECONDS`` when that is set (1 second to one day)."""
+
+    raw = os.environ.get(LEASE_SECONDS_ENV, "").strip()
+    if not raw:
+        return timedelta(hours=LEASE_HOURS)
+    try:
+        seconds = int(raw)
+    except ValueError:
+        seconds = 0
+    if not 1 <= seconds <= MAX_LEASE_SECONDS:
+        raise ClaimError(f"{LEASE_SECONDS_ENV}={raw!r} 不能用：写成 1～{MAX_LEASE_SECONDS} 之间的整数秒")
+    return timedelta(seconds=seconds)
+
+
+def holder_problem(claim: Claim, owner: str, machine: str | None = None) -> str:
+    """Why ``owner`` on ``machine`` is not the holder of ``claim`` ("" when they are).
+
+    The owner name is what tells two agents apart; the machine name tells two computers apart when both run an agent of the
+    same name (D-73).  Old claims that carry no machine (``?``) compare by owner alone, and so do cloud sessions, whose
+    machine names are not unique but whose owner aliases are.
+    """
+
+    here = machine if machine is not None else socket.gethostname()
+    if claim.owner != owner:
+        return f"卡 {claim.card} 是 {claim.owner}@{claim.machine} 领的，不是 {owner}@{here}"
+    if claim.machine not in {"", "?"} and claim.machine != here:
+        return f"卡 {claim.card} 是 {claim.owner} 在另一台机器 {claim.machine} 上领的，这里是 {here}"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -120,7 +153,7 @@ def claim_required() -> bool:
     return os.environ.get(REQUIRE_CLAIM_ENV, "").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def claim_refusal(repo_root: str | Path, card: str, owner: str) -> str:
+def claim_refusal(repo_root: str | Path, card: str, owner: str, machine: str | None = None) -> str:
     """Why ``owner`` may not open a PR for ``card`` (no active claim of theirs); "" when allowed or not required.
 
     Offline is "not verified", never a pretended pass or a hard stop on the network: the reason says so and refuses, because an
@@ -130,21 +163,23 @@ def claim_refusal(repo_root: str | Path, card: str, owner: str) -> str:
     if not claim_required():
         return ""
     try:
-        claims = ClaimService(repo_root).all_claims()
+        claims = ClaimService(repo_root, machine=machine).all_claims()
     except ClaimError as error:
         return f"领卡占位未核实（{error}）；联网后再开 PR，或请用户决定"
     mine = next((claim for claim in claims if claim.card == card and not claim.free), None)
     if mine is None:
         return f"卡 {card} 没有有效的领卡占位；先 `main.py claim open {card} --paths … --goal …`（占位过期或已放下的也要重领）"
-    if mine.owner != owner:
-        return f"卡 {card} 的占位是 {mine.label()} 领的，不是 {owner}；不能替别人的卡开 PR"
+    problem = holder_problem(mine, owner, machine)
+    if problem:
+        return f"{problem}；不能替别人的卡开 PR"
     return ""
 
 
 class ClaimService:
-    def __init__(self, repo_root: str | Path, *, remote: str = "origin") -> None:
+    def __init__(self, repo_root: str | Path, *, remote: str = "origin", machine: str | None = None) -> None:
         self._root = Path(repo_root).resolve()
         self._remote = remote
+        self._machine = machine or socket.gethostname()  # who "I" am as a computer: opens write it, release/renew compare it (D-73)
 
     # ── read ──────────────────────────────────────────────────────────
 
@@ -209,7 +244,7 @@ class ClaimService:
         taken = {claim.card for claim in existing}
         for _ in range(attempts):
             name = self._next_number(taken) if card == "auto" else card
-            claim = self._create(name, paths, goal, owner, machine or socket.gethostname(), previous=self._tip(existing, name))
+            claim = self._create(name, paths, goal, owner, machine or self._machine, previous=self._tip(existing, name))
             if claim is not None:
                 return claim
             taken.add(name)
@@ -217,7 +252,18 @@ class ClaimService:
                 break
             existing = self.all_claims()
             taken |= {item.card for item in existing}
-        raise ClaimError(f"卡 {card} 刚被别人领走（服务器拒绝了同名占位）；`claim list` 看是谁")
+        raise ClaimError(self._lost_race_message(card))
+
+    def _lost_race_message(self, card: str) -> str:
+        """The refusal for a lost same-name race: names the winner when the claim list can be read again, else says to look."""
+
+        try:
+            winner = next((claim for claim in self.all_claims() if claim.card == card and not claim.free), None)
+        except ClaimError:
+            winner = None
+        if winner is None:
+            return f"卡 {card} 刚被别人领走（服务器拒绝了同名占位）；`claim list` 看是谁"
+        return f"卡 {card} 刚被别人领走：{winner.label()}，{winner.claimed_at}；换一个卡号或找他确认"
 
     @staticmethod
     def _tip(existing: Sequence[Claim], card: str) -> str:
@@ -244,7 +290,7 @@ class ClaimService:
             "goal": goal,
             "status": "active",
             "claimed_at": now.isoformat(timespec="seconds"),
-            "expires_at": (now + timedelta(hours=LEASE_HOURS)).isoformat(timespec="seconds"),
+            "expires_at": (now + lease_duration()).isoformat(timespec="seconds"),
         }
         commit = self._commit(card, payload, previous)
         message = f"claim {card}\n" + json.dumps(payload, ensure_ascii=False)
@@ -276,8 +322,9 @@ class ClaimService:
 
         for claim in self.all_claims():
             if claim.card == card:
-                if claim.owner != owner:
-                    raise ClaimError(f"卡 {card} 是 {claim.owner} 领的，不是 {owner}；别人的占位只由用户决定放不放")
+                problem = holder_problem(claim, owner, self._machine)
+                if problem:
+                    raise ClaimError(f"{problem}；别人的占位只由用户决定放不放")
                 if claim.free:
                     return  # already released or expired: nothing to do
                 payload: dict[str, object] = {
@@ -304,13 +351,14 @@ class ClaimService:
         """The holder says "still working": push a commit that moves ``expires_at`` to now + ``LEASE_HOURS`` (never shortens it)."""
 
         claim = self._find(card)
-        if claim.owner != owner:
-            raise ClaimError(f"卡 {card} 是 {claim.owner} 领的，不是 {owner}；只有持有者能续租")
+        problem = holder_problem(claim, owner, self._machine)
+        if problem:
+            raise ClaimError(f"{problem}；只有持有者能续租")
         if claim.free:
             raise ClaimError(f"卡 {card} 的占位已放下、被收回或已到期，不能续租；重新 `claim open {card} --paths … --goal …`")
         now = datetime.now(UTC)
         payload = self._payload(claim, "active")
-        payload["expires_at"] = max(claim.expires_at, (now + timedelta(hours=LEASE_HOURS)).isoformat(timespec="seconds"))
+        payload["expires_at"] = max(claim.expires_at, (now + lease_duration()).isoformat(timespec="seconds"))
         payload["renewed_at"] = now.isoformat(timespec="seconds")
         return self._push_on_top(claim, payload, "续租没推成功")
 
@@ -324,10 +372,10 @@ class ClaimService:
 
         renewed: list[Claim] = []
         try:
-            mine = [claim for claim in self.all_claims(fetch=fetch) if claim.owner == owner and not claim.free]
+            mine = [claim for claim in self.all_claims(fetch=fetch) if not claim.free and not holder_problem(claim, owner, self._machine)]
+            threshold = datetime.now(UTC) + lease_duration() / 2
         except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
             return renewed
-        threshold = datetime.now(UTC) + timedelta(hours=LEASE_HOURS / 2)
         for claim in mine:
             try:
                 if datetime.fromisoformat(claim.expires_at) > threshold:

@@ -31,8 +31,8 @@ class Pair:
         _git(self.a, "commit", "-q", "-m", "seed")
         _git(self.a, "push", "-q", "origin", "HEAD:main")
         _git(base, "clone", "-q", str(self.origin), str(self.b))
-        self.laptop = ClaimService(self.a)
-        self.cloud = ClaimService(self.b)
+        self.laptop = ClaimService(self.a, machine="laptop")
+        self.cloud = ClaimService(self.b, machine="cloud")
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ def test_pr_open_gate_refuses_without_a_claim_and_passes_with_one(pair: Pair, mo
 
     pair.laptop.open("310", paths=["p/a"], goal="x", owner="claude", machine="laptop")
 
-    assert claim_refusal(pair.a, "310", "claude") == ""
+    assert claim_refusal(pair.a, "310", "claude", "laptop") == ""
     assert "不是 trae" in claim_refusal(pair.b, "310", "trae"), "别人的卡不能替他开 PR"
 
 
@@ -326,3 +326,93 @@ def test_renew_held_skips_free_claims_and_never_raises_when_git_cannot_answer(pa
 
     not_a_repo = ClaimService(tmp_path / "nowhere")
     assert not_a_repo.renew_held("claude") == []
+
+
+# ── D-39 / D-73 / D-102 follow-ups ────────────────────────────────────────────────────────────────
+
+
+def test_the_lease_can_be_shortened_for_drills_and_a_bad_value_is_refused(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", "120")
+    claim = pair.laptop.open("360", paths=["p/a"], goal="short lease", owner="claude")
+    left = (datetime.fromisoformat(claim.expires_at) - datetime.now(UTC)).total_seconds()
+    assert 60 < left <= 120, left
+
+    for bad in ("0", "-5", "abc", str(24 * 3600 + 1)):
+        monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", bad)
+        with pytest.raises(ClaimError, match="AUTO_PM_CLAIM_LEASE_SECONDS"):
+            pair.laptop.open("361", paths=["p/b"], goal="x", owner="claude")
+
+
+def test_a_claim_with_a_short_lease_really_expires_and_another_clone_takes_the_card_over(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The drill the live test repeats on GitHub: open, let the lease run out, a second computer takes the same card."""
+
+    monkeypatch.setenv("AUTO_PM_CLAIM_LEASE_SECONDS", "1")
+    pair.laptop.open("362", paths=["p/a"], goal="will expire", owner="claude")
+    import time
+
+    time.sleep(1.5)
+    monkeypatch.delenv("AUTO_PM_CLAIM_LEASE_SECONDS")
+
+    taken = pair.cloud.open("362", paths=["p/a"], goal="took over", owner="trae")
+
+    assert taken.owner == "trae" and not taken.free
+    with pytest.raises(ClaimError, match="不是 claude"):
+        pair.laptop.renew("362", owner="claude")
+
+
+def test_the_loser_of_a_same_name_race_is_told_who_won(pair: Pair) -> None:
+    pair.laptop.open("363", paths=["p/a"], goal="the winner's goal", owner="claude", machine="laptop")
+    original = pair.cloud.all_claims
+    calls = {"count": 0}
+
+    def stale_first(**kwargs: object):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        return [] if calls["count"] == 1 else original(**kwargs)  # type: ignore[arg-type]
+
+    pair.cloud.all_claims = stale_first  # type: ignore[method-assign]
+
+    with pytest.raises(ClaimError, match=r"刚被别人领走：卡 363（claude@laptop：the winner's goal）"):
+        pair.cloud.open("363", paths=["p/b"], goal="second", owner="trae")
+
+
+def test_the_same_owner_name_on_another_computer_is_not_the_holder(pair: Pair) -> None:
+    pair.laptop.open("364", paths=["p/a"], goal="x", owner="claude")
+
+    with pytest.raises(ClaimError, match="在另一台机器 laptop"):
+        pair.cloud.renew("364", owner="claude")
+    with pytest.raises(ClaimError, match="在另一台机器 laptop"):
+        pair.cloud.release("364", owner="claude")
+    assert pair.laptop.renew("364", owner="claude").owner == "claude"
+    pair.laptop.release("364", owner="claude")
+
+
+def test_the_pr_gate_does_not_accept_the_same_owner_name_from_another_computer(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.claim_service import claim_refusal
+
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "1")
+    pair.laptop.open("365", paths=["p/a"], goal="x", owner="claude")
+
+    assert claim_refusal(pair.a, "365", "claude", "laptop") == ""
+    assert "在另一台机器 laptop" in claim_refusal(pair.b, "365", "claude", "cloud")
+
+
+def test_a_claim_without_a_machine_is_compared_by_owner_alone(pair: Pair) -> None:
+    from auto_pm.application.core.claim_service import Claim, holder_problem
+
+    old = Claim(card="9", owner="claude", machine="?", paths=("p",), goal="", claimed_at="2026-11-07T00:00:00+00:00", commit="c")
+
+    assert holder_problem(old, "claude", "anything") == ""
+    assert "不是 trae" in holder_problem(old, "trae", "anything")
+
+
+def test_renew_held_leaves_the_same_owner_name_on_another_computer_alone(pair: Pair) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    pair.laptop.open("366", paths=["p/a"], goal="laptop's", owner="claude")
+    _set_expiry(pair, "366", (datetime.now(UTC) + timedelta(minutes=30)).isoformat(timespec="seconds"))
+    tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/366")
+
+    assert pair.cloud.renew_held("claude") == [], "the cloud session is also called claude, but it is not the holder"
+    assert git_out(pair.origin, "rev-parse", "refs/heads/claims/366") == tip
