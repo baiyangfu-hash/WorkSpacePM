@@ -91,7 +91,7 @@ class World:
         return {pid for pid, count in self.suspended.items() if count > 0}
 
     def gate(self, folder: Path) -> Any:
-        return mg.Gate(
+        gate = mg.Gate(
             folder,
             committed_gib=lambda: self.committed,
             processes=lambda: list(self.procs.values()),
@@ -104,6 +104,8 @@ class World:
             self_pids=[SELF],
             eligible=lambda pid: pid not in self.system_pids,
         )
+        gate.self_pids = {SELF}  # Gate adds the real os.getpid() to its protected set; a real pid equal to a fake pid of the world (26936) hid it from the ladder (D-92)
+        return gate
 
     def tick(self, gate: Any, seconds: float = 5.0, steps: int = 1) -> None:
         for _ in range(steps):
@@ -908,8 +910,8 @@ def test_a_stop_that_cannot_read_the_state_raises_a_loud_alert_instead_of_claimi
 
     mg.run_forever(gate, sleep=stop_now)
 
-    alerts = list(tmp_path.glob("ALERT-*.txt"))
-    assert alerts and "没有解冻任何进程" in alerts[-1].read_text(encoding="utf-8") and "resume-all" in alerts[-1].read_text(encoding="utf-8")
+    texts = [path.read_text(encoding="utf-8") for path in tmp_path.glob("ALERT-*.txt")]  # the names carry only the second, so a run crossing a second writes two files and the glob order says nothing (D-91)
+    assert any("没有解冻任何进程" in text and "resume-all" in text for text in texts)
     assert "已解冻" not in (tmp_path / "gate.log").read_text(encoding="utf-8").split("【锁定】")[-1]
 
 
@@ -943,7 +945,8 @@ def test_a_stop_that_never_gets_the_state_back_retries_three_minutes_then_alerts
     mg.run_forever(gate, sleep=sleep)
 
     assert len(sleeps) == 1 + int(mg.STOP_RETRY_SECONDS / mg.POLL_SECONDS) == 37  # the loop's own sleep + 36 retries = 180 s
-    text = list(tmp_path.glob("ALERT-*.txt"))[-1].read_text(encoding="utf-8")
+    texts = [path.read_text(encoding="utf-8") for path in tmp_path.glob("ALERT-*.txt")]
+    text = next((candidate for candidate in texts if "没有解冻任何进程" in candidate), "")  # not the glob's last file: a run that crosses a second writes two (D-91)
     assert "没有解冻任何进程" in text and "resume-all" in text and "180" in text
     assert all(str(root) in text for root in roots) and roots
     assert w.frozen()  # (and the alert says so, instead of the log claiming "已解冻")
