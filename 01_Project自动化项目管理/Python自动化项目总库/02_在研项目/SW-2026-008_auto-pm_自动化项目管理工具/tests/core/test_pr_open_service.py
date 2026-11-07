@@ -66,6 +66,13 @@ def passing_judge(station: Path, base: str, head: str, body: str) -> tuple[int, 
     return 0, "ok"
 
 
+@pytest.fixture(autouse=True)
+def _claim_gate_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The claim gate is on by default (user, 2026-11-07) and has its own tests in test_claim_service.py; here it would only hide what these tests check."""
+
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "0")
+
+
 @pytest.fixture
 def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Lab:
     for key in list(os.environ):

@@ -127,12 +127,17 @@ def test_paths_and_owner_are_required(pair: Pair) -> None:
 # ── step 3: orient reads claims; step 4: pr open needs a claim ──────────────────────────────────────────────────────
 
 
-def test_pr_open_gate_is_off_unless_required(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pr_open_gate_is_on_by_default_and_off_only_when_asked(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
     from auto_pm.application.core.claim_service import claim_refusal
 
     monkeypatch.delenv("AUTO_PM_REQUIRE_CLAIM", raising=False)
+    assert "没有有效的领卡占位" in claim_refusal(pair.a, "310", "claude"), "default is on (user, 2026-11-07)"
 
-    assert claim_refusal(pair.a, "310", "claude") == ""
+    for off in ("0", "false", "No", "OFF"):
+        monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", off)
+        assert claim_refusal(pair.a, "310", "claude") == "", off
+    monkeypatch.setenv("AUTO_PM_REQUIRE_CLAIM", "banana")
+    assert "没有有效的领卡占位" in claim_refusal(pair.a, "310", "claude"), "an unreadable value does not switch the guard off"
 
 
 def test_pr_open_gate_refuses_without_a_claim_and_passes_with_one(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,3 +185,44 @@ def test_orient_notice_lists_other_claims_and_flags_scope_overlap(
     assert "[领卡占位]" in err and "laptop" in err and "重叠" in err
     assert found[0]["card"] == "320" and found[0]["overlaps_scope"] == ["p"]
     assert _claims_notice(str(pair.b), ("elsewhere",))[0]["overlaps_scope"] == []
+
+
+def test_renew_pushes_the_lease_forward_and_only_the_holder_may(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core import claim_service
+
+    opened = pair.laptop.open("330", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    monkeypatch.setattr(claim_service, "LEASE_HOURS", claim_service.LEASE_HOURS + 3)  # a later "now + lease" must show in expires_at
+
+    renewed = pair.laptop.renew("330", owner="claude")
+
+    assert renewed.expires_at > opened.expires_at and not renewed.free
+    assert next(c for c in pair.laptop.all_claims() if c.card == "330").expires_at == renewed.expires_at, "it is on the server, not only returned"
+    with pytest.raises(ClaimError, match="只有持有者能续租"):
+        pair.cloud.renew("330", owner="trae")
+
+
+def test_a_released_or_expired_claim_cannot_be_renewed(pair: Pair) -> None:
+    pair.laptop.open("331", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.laptop.release("331", owner="claude")
+    with pytest.raises(ClaimError, match="不能续租"):
+        pair.laptop.renew("331", owner="claude")
+
+
+def test_reclaim_needs_the_users_word_and_frees_the_card_without_deleting_it(pair: Pair) -> None:
+    pair.laptop.open("332", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.cloud.all_claims()
+
+    with pytest.raises(ClaimError, match="只听用户的"):
+        pair.cloud.reclaim("332", by="trae", reason="没动静", approval_ref="")
+    with pytest.raises(ClaimError, match="只听用户的"):
+        pair.cloud.reclaim("332", by="trae", reason="没动静", approval_ref="I said so")
+    with pytest.raises(ClaimError, match="必须写明原因"):
+        pair.cloud.reclaim("332", by="trae", reason=" ", approval_ref="user-confirmation:cmsg_0123456789")
+    assert not next(c for c in pair.cloud.all_claims() if c.card == "332").free, "refused calls changed nothing"
+
+    taken = pair.cloud.reclaim("332", by="trae", reason="没动静", approval_ref="user-confirmation:cmsg_0123456789")
+
+    assert taken.status == "reclaimed" and taken.free
+    again = pair.cloud.open("332", paths=["p/a"], goal="接手", owner="trae", machine="cloud")
+    assert again.owner == "trae", "a reclaimed card can be claimed again, on top of the old history"
+    assert pair.cloud.reclaim("332", by="trae", reason="再收", approval_ref="user-confirmation:cmsg_0123456789").status == "reclaimed"
