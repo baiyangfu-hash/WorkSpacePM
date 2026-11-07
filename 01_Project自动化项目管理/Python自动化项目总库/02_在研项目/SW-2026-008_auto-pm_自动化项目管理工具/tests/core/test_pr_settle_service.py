@@ -192,5 +192,10 @@ def test_settle_scan_has_no_apply_option_so_it_can_never_write() -> None:
     """User decision 2026-11-07: no ``--apply`` that runs ``pm close`` by itself.  The command stays read-only; adding a write option must fail here."""
 
     command = pr_group.commands["settle-scan"]
-    options = {name for param in command.params for name in getattr(param, "opts", [])}
+    options = {
+        name
+        for param in command.params
+        for name in getattr(param, "opts", [])
+        if name.startswith("-")
+    }
     assert options == {"--base"}
