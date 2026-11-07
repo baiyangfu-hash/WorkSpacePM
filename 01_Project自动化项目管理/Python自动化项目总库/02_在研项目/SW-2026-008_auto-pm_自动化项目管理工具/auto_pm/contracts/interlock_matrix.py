@@ -125,6 +125,7 @@ COMMANDS: dict[str, CommandSpec] = {
         CommandKind.RECOVERY, ("lease=valid",), ("G-LEASE-VALID",), "an expired lease cannot be renewed (TD-240): the exit is reclaim"
     ),
     "continuity recovery plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the exit chain of one abnormal state"),
+    "pr settle-scan": CommandSpec(CommandKind.READ_ONLY, (), (), "lists merged-but-open Runs and the legal next commands; moves nothing"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm control-root-status": CommandSpec(CommandKind.READ_ONLY, (), (), "branch, uncommitted files and their holders of the control root; no fetch, no write"),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a
