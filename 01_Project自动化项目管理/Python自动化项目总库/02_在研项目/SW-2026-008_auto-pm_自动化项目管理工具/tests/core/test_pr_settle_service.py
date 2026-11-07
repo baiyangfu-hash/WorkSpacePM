@@ -199,3 +199,92 @@ def test_settle_scan_has_no_apply_option_so_it_can_never_write() -> None:
         if name.startswith("-")
     }
     assert options == {"--base"}
+
+
+# ── gaps found by the independent audit of #594 (four mutants survived) ──
+
+
+def test_when_git_cannot_judge_the_run_is_never_reported_as_merged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit git does not know (exit 128, neither 0 nor 1) must not turn into "merged, ready to close"."""
+    service, _ = _scene(tmp_path)
+    _publish(tmp_path, _commit(tmp_path))
+    store = service._store
+    run = store.get_run("RUN-001").model_copy(
+        update={"worktree_path": str(tmp_path / "removed-worktree")}
+    )
+    unknown_head = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setattr(
+        store, "latest_checkpoint", lambda _run_id: SimpleNamespace(git_head=unknown_head)
+    )
+
+    item = PrSettleService(tmp_path, store)._judge(run, None)
+
+    assert item.merged is False
+    assert item.why.startswith("unknown: git could not judge")
+    assert item.next_steps == ()
+
+
+@pytest.mark.parametrize("state", ["ACCEPTED", "ACCEPTANCE_PENDING", "CLOSED", "CANCELLED", None])
+def test_each_mission_state_gets_its_own_first_step(state: str | None) -> None:
+    steps = PrSettleService._next_steps(
+        "RUN-001", "WORK-001", "M-1" if state else None, state, expired=False
+    )
+    first = steps[0]
+    if state == "ACCEPTED":
+        assert first.startswith("main.py pm close --mission-id M-1") and "一步收口" in first
+        assert "等用户验收" not in first
+    elif state == "ACCEPTANCE_PENDING":
+        assert "等用户验收" in first and not first.startswith("main.py pm close")
+        assert "pm accept --mission-id M-1" in first
+    elif state in {"CLOSED", "CANCELLED"}:
+        assert f"已是 {state}" in first and "continuity recovery plan" in first
+        assert "pm close" not in first
+    else:
+        assert "没有绑定 Mission" in first
+    assert "change transition" in steps[-1]
+
+
+@pytest.mark.parametrize(
+    ("expires_at", "expired"),
+    [
+        ("2020-01-01T00:00:00Z", True),
+        ("2020-01-01T00:00:00+00:00", True),
+        ("2020-01-01T00:00:00", True),  # no zone: read as UTC
+        ("2999-01-01T00:00:00Z", False),
+        ("2999-01-01T00:00:00+00:00", False),
+        ("2999-01-01T00:00:00", False),
+    ],
+)
+def test_lease_expiry_is_computed_for_z_offset_and_naive_timestamps(
+    expires_at: str, expired: bool
+) -> None:
+    store = SimpleNamespace(get_lease=lambda _run_id: SimpleNamespace(expires_at=expires_at))
+    assert PrSettleService(Path("."), store)._lease_expired("RUN-001") is expired  # type: ignore[arg-type]
+
+
+def test_a_missing_lease_does_not_count_as_expired() -> None:
+    from auto_pm.infrastructure.continuity_store import ContinuityStoreError
+
+    def _no_lease(_run_id: str) -> Any:
+        raise ContinuityStoreError("no lease")
+
+    store = SimpleNamespace(get_lease=_no_lease)
+    assert PrSettleService(Path("."), store)._lease_expired("RUN-001") is False  # type: ignore[arg-type]
+
+
+def test_a_merged_run_with_an_expired_lease_gets_the_recovery_step_through_the_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _ = _scene(tmp_path)
+    _publish(tmp_path, _commit(tmp_path))
+    store = service._store
+    monkeypatch.setattr(
+        store, "get_lease", lambda _run_id: SimpleNamespace(expires_at="2020-01-01T00:00:00Z")
+    )
+
+    (item,) = PrSettleService(tmp_path, store).scan(PROJECT)
+
+    assert item.merged and item.lease_expired
+    assert any("租约已过期" in step for step in item.next_steps)
