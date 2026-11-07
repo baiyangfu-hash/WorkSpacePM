@@ -52,6 +52,7 @@ from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
 from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
+from auto_pm.ui.cli.claim import claim_group  # noqa: E402
 from auto_pm.ui.cli.clean import clean_cmd  # noqa: E402
 from auto_pm.ui.cli.constraint import constraint_group  # noqa: E402
 from auto_pm.ui.cli.continuity import continuity_group  # noqa: E402
@@ -175,6 +176,7 @@ cli.add_command(doctor_command)
 cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
 cli.add_command(worktree_group)
+cli.add_command(claim_group)
 cli.add_command(long_run_group)
 cli.add_command(pr_group)
 cli.add_command(role_group)

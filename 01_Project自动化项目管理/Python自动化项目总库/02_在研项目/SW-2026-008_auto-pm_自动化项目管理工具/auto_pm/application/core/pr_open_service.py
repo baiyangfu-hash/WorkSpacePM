@@ -30,8 +30,11 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
     StationRefusedError,
+    acts_for,
+    base_agent,
     caller_agent,
 )
+from auto_pm.application.core.claim_service import claim_refusal
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
 from auto_pm.application.core.paths import PG_MONITORING_DIR
 from auto_pm.application.core.pr_body_builder import (
@@ -168,7 +171,7 @@ class PrOpenService:
         sweep: str | None = None,
         fetch: bool = True,
     ) -> PrPlan:
-        prefix = AGENT_ROSTER.get(agent)
+        prefix = AGENT_ROSTER.get(base_agent(agent))
         if prefix is None:
             raise PrOpenRefusedError(
                 f"`{agent}` 不在 agent 名册里（{'、'.join(sorted(AGENT_ROSTER))}）"
@@ -195,6 +198,9 @@ class PrOpenService:
                 f"工位在分支 {station.branch or '(无)'}，应为 {branch}（前缀 {prefix} + 卡号 {card}）；"
                 "分支名不符，不开 PR"
             )
+        claim_problem = claim_refusal(self._root, card, agent)
+        if claim_problem:
+            raise PrOpenRefusedError(claim_problem)
         if station.dirty_paths:
             shown = "、".join(station.dirty_paths[:3])
             raise PrOpenRefusedError(
@@ -293,7 +299,7 @@ class PrOpenService:
             raise PrOpenRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不开 PR；请用户在自己的终端执行"
             )
-        if caller and caller != agent:
+        if not acts_for(caller, agent):
             raise PrOpenRefusedError(f"你是 {caller}，不能替 {agent} 开 PR")
 
     @staticmethod

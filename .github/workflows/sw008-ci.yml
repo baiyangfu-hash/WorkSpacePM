@@ -18,6 +18,9 @@ on:
       - "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/**"
       - "00_Infrastructure/auto_pm/environment/**"
       - ".github/workflows/sw008-ci.yml"
+      # 纯规划文档（卡、交接清单、缺陷总表、SHA256SUMS）不碰代码，不跑 Windows 全量；测试用的是临时仓库，不读这些真文件。
+      # 必须放在包含项之后（后面的 ! 规则才能把前面命中的文件剔掉）。push 到 main 的触发不变：main 上每个提交都要有结论。
+      - "!01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/**"
   workflow_dispatch:
 
 # Read-only token; no secrets are used by any step.
