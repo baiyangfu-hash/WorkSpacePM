@@ -283,3 +283,46 @@ def test_control_root_status_json_carries_other_claims_and_stays_pure_json(
     assert [claim["card"] for claim in data["claims"]] == ["321"]
     assert "[领卡占位]" not in captured.err, "JSON mode must not also print the human hint"
     assert "branch" in data and "on_main" in data, "the existing fields are untouched"
+
+
+def _set_expiry(pair: Pair, card: str, expires_at: str) -> None:
+    """Rewrite a claim's ``expires_at`` on the server (a commit on top), to age it without waiting."""
+
+    ref = f"refs/heads/claims/{card}"
+    tip = git_out(pair.origin, "rev-parse", ref)
+    body = git_out(pair.origin, "show", "-s", "--format=%B", tip).split("\n", 1)[1].strip()
+    data = json.loads(body)
+    data["expires_at"] = expires_at
+    tree = git_out(pair.origin, "rev-parse", f"{tip}^{{tree}}")
+    aged = git_out(pair.origin, "-c", "user.name=t", "-c", "user.email=t@x", "commit-tree", tree, "-p", tip, "-m", f"claim {card}\n" + json.dumps(data))
+    _git(pair.origin, "update-ref", ref, aged)
+
+
+def test_renew_held_only_pushes_when_less_than_half_the_lease_is_left_and_only_for_my_claims(pair: Pair) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    pair.laptop.open("340", paths=["p/a"], goal="fresh", owner="claude", machine="laptop")
+    pair.laptop.open("341", paths=["p/b"], goal="running low", owner="claude", machine="laptop")
+    pair.laptop.open("342", paths=["p/c"], goal="somebody else's", owner="trae", machine="laptop")
+    low = (datetime.now(UTC) + timedelta(minutes=30)).isoformat(timespec="seconds")
+    _set_expiry(pair, "341", low)
+    _set_expiry(pair, "342", low)
+    fresh_tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/340")
+    other_tip = git_out(pair.origin, "rev-parse", "refs/heads/claims/342")
+
+    renewed = pair.laptop.renew_held("claude")
+
+    assert [claim.card for claim in renewed] == ["341"], "only my claim that was running low"
+    assert git_out(pair.origin, "rev-parse", "refs/heads/claims/340") == fresh_tip, "a fresh lease is not pushed again"
+    assert git_out(pair.origin, "rev-parse", "refs/heads/claims/342") == other_tip, "somebody else's claim is never touched"
+    after = next(c for c in pair.laptop.all_claims() if c.card == "341")
+    assert datetime.fromisoformat(after.expires_at) > datetime.now(UTC) + timedelta(hours=3), "back to about a full lease on the server"
+
+
+def test_renew_held_skips_free_claims_and_never_raises_when_git_cannot_answer(pair: Pair, tmp_path: Path) -> None:
+    pair.laptop.open("343", paths=["p/a"], goal="done", owner="claude", machine="laptop")
+    pair.laptop.release("343", owner="claude")
+    assert pair.laptop.renew_held("claude") == [], "a released claim is not brought back to life"
+
+    not_a_repo = ClaimService(tmp_path / "nowhere")
+    assert not_a_repo.renew_held("claude") == []

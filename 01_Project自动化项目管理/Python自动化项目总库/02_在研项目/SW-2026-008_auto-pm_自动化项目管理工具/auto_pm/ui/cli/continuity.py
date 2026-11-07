@@ -19,6 +19,7 @@ from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
+from auto_pm.application.core.claim_service import ClaimService
 from auto_pm.application.core.continuity_execution_service import (
     CONTROL_ROOT_RUN_REFUSAL,
     ContinuityExecutionError,
@@ -1509,6 +1510,18 @@ def record_holder(
     click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
+def _keep_claims_alive(ctx: click.Context) -> None:
+    """Checkpointing is proof the agent is still working: stretch its card claims (D-39 follow-up).  Quiet and never fatal."""
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        root = app_ctx.control_root or app_ctx.workspace_root
+        if root:
+            ClaimService(root).renew_held(caller_agent().strip("?") or "user")
+    except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+        return
+
+
 @continuity_group.group(name="checkpoint")
 def checkpoint_group() -> None:
     """Create immutable Run recovery checkpoints."""
@@ -1558,6 +1571,7 @@ def create_checkpoint(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
+    _keep_claims_alive(ctx)
     _emit(item)
 
 

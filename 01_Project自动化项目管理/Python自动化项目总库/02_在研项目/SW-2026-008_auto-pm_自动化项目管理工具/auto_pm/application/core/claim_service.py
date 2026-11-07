@@ -314,6 +314,29 @@ class ClaimService:
         payload["renewed_at"] = now.isoformat(timespec="seconds")
         return self._push_on_top(claim, payload, "续租没推成功")
 
+    def renew_held(self, owner: str, *, fetch: bool = True) -> list[Claim]:
+        """Keep alive every live claim ``owner`` holds, as a side effect of work the agent does anyway (D-39 follow-up).
+
+        Best effort and quiet: a claim is only pushed again once less than half of ``LEASE_HOURS`` is left, so a
+        busy agent does not write a commit per command; any Git or network trouble is swallowed -- this must never
+        stop the command it rides on.  Returns the claims that were actually renewed.
+        """
+
+        renewed: list[Claim] = []
+        try:
+            mine = [claim for claim in self.all_claims(fetch=fetch) if claim.owner == owner and not claim.free]
+        except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+            return renewed
+        threshold = datetime.now(UTC) + timedelta(hours=LEASE_HOURS / 2)
+        for claim in mine:
+            try:
+                if datetime.fromisoformat(claim.expires_at) > threshold:
+                    continue
+                renewed.append(self.renew(claim.card, owner=owner))
+            except Exception:  # noqa: BLE001 - same reason; the explicit `claim renew` still reports errors
+                continue
+        return renewed
+
     def reclaim(self, card: str, *, by: str, reason: str, approval_ref: str) -> Claim:
         """Take a card back from a holder that went silent (D-39).  Only on the user's word: ``approval_ref`` must be ``user-confirmation:<where>``.
 
