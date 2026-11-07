@@ -41,7 +41,7 @@
 | 6 | PLC 13 条清单的执行顺序（按原编号分 5 组） | PLC 讨论串；卡 A 快照在 `附件_云端草稿_20261105/使用规划与卡A_B/` | 第 8 步已跑，7+10 卡住 | 等用户决定工位与控制根未提交文件，见第 7 节 |
 | 7 | 剩余 PR：#551、#552、#504、#558（#539 已合）；另有 #569（卡 231 项目登记入库卡）、#571（卡 232 的 7.2 遗留记录入库，原 #568 已关闭）、#572（本交接文档） | GitHub | #551、#552、#504、#558 是草稿；#569、#571 不是草稿，读 GitHub 时开着 | 第 8 节写的是原四个，#569／#571 见 V1.1 第 1.1.6、1.1.7 行 |
 | 8 | 交接后再处理的小债 | `02_M3遗留问题_V1.0_PM.md` 加项目记忆 | 未处理 | 见第 9 节 |
-| 9 | 驾驶舱缺口清单（2026-11-05 实测）与缺陷总表（有效 93 条，另有 D-51 标为不做、D-63 作废；P0～P3；11-06 追加 D-32～D-61，11-07 追加 D-62～D-95） | 本文第 11、12 节 | 已收集，没有修；交接前不改任何代码 | 等本地 Claude 按卡逐条修；碰 `auto_pm/*`、`.trae/` 的要走发版卡或用户原话 |
+| 9 | 驾驶舱缺口清单（2026-11-05 实测）与缺陷总表（有效 94 条，另有 D-51 标为不做、D-63 作废；P0～P3；11-06 追加 D-32～D-61，11-07 追加 D-62～D-96） | 本文第 11、12 节 | 已收集，没有修；交接前不改任何代码 | 等本地 Claude 按卡逐条修；碰 `auto_pm/*`、`.trae/` 的要走发版卡或用户原话 |
 
 ## 2. GUI 方案与原型（转述）
 
@@ -184,7 +184,7 @@
 **数字怎么读**：
 - 这是**已经写下来的**，不等于全部。没有一条是我在真账本上复现过的；“已核”只表示我读过出处原文。
 - 优先级按影响分档：**P0**＝当场让驾驶舱不能用、或把 Run 锁死；**P1**＝会让后来的 agent 走错路、损坏事实、或可能被误删；**P2**＝增加人工负担、有绕过办法；**P3**＝清理杂物。
-- 合计：**P0 8 条、P1 21 条、P2 44 条、P3 20 条**（有效 93 条，不含 D-51、D-63；11-07 核对：D-63 作废，追加 D-79 为 P2、D-80 为 P3、D-81 为 P0，复审追加 D-82～D-85 为 P3，D-86 为 P1，D-87 为 P3、D-88 与 D-89 为 P2）（11-05 晚是 3/10/15/3，共 31；11-06 追加 D-39 为 P0，D-32 为 P1，D-33、D-34、D-35 为 P2，D-36、D-37、D-38 因 PLC 线程使用反馈升为 P1，D-40、D-41、D-46 为 P1，D-38、D-57、D-58 经用户 11-06 认定为实施阻断，升为 P0，D-42～D-45、D-47～D-50、D-53～D-56、D-60 为 P2，D-52、D-59、D-61 为 P3，11-07 追加的 D-64、D-65、D-75、D-78 为 P1，D-62、D-63、D-67、D-68、D-70、D-71、D-72、D-73、D-76 为 P2，D-66、D-69、D-74、D-77 为 P3，D-51 不做，优先级是暂定的，用户可改）。
+- 合计：**P0 8 条、P1 21 条、P2 45 条、P3 20 条**（有效 94 条，不含 D-51、D-63；11-07 核对：D-63 作废，追加 D-79 为 P2、D-80 为 P3、D-81 为 P0，复审追加 D-82～D-85 为 P3，D-86 为 P1，D-87 为 P3、D-88 与 D-89 为 P2）（11-05 晚是 3/10/15/3，共 31；11-06 追加 D-39 为 P0，D-32 为 P1，D-33、D-34、D-35 为 P2，D-36、D-37、D-38 因 PLC 线程使用反馈升为 P1，D-40、D-41、D-46 为 P1，D-38、D-57、D-58 经用户 11-06 认定为实施阻断，升为 P0，D-42～D-45、D-47～D-50、D-53～D-56、D-60 为 P2，D-52、D-59、D-61 为 P3，11-07 追加的 D-64、D-65、D-75、D-78 为 P1，D-62、D-63、D-67、D-68、D-70、D-71、D-72、D-73、D-76 为 P2，D-66、D-69、D-74、D-77 为 P3，D-51 不做，优先级是暂定的，用户可改）。
 
 | 编号 | 缺陷 | 优先级 | 来源 | 核实 | 对应 |
 |---|---|---|---|---|---|
@@ -280,9 +280,10 @@
 | D-90 | Windows 未开开发者模式时，`test_agent_worktree_service.py` 两条符号链接测试（:584、:753，原因“this machine cannot create directory symlinks”）被跳过，#598 变异脚本的 2 个变异（工位目录可经符号链接、删除不检查工位目录经链接）在这类机器上抓不到（53/55）。Linux CI 上这两条是否真跑未核实 | P3 | 本机线程报告（命令 `python -B tests/core/agent_worktree_mutants.py`，main 01937919）；协调者转述 `pytest tests/core/test_agent_worktree_service.py -q -rs` 得 89 passed、2 skipped | 未修：变异脚本在测试被跳过时应报“未验证”而不是当作通过；用户可选开 Windows 开发者模式 | 非阻断 |
 | D-91 | `test_memory_gate.py::test_a_stop_that_cannot_read_the_state_raises_a_loud_alert_instead_of_claiming_it_resumed` 偶发红（ubuntu，#589 头 f9789edb：1 failed, 7473 passed）。我读源码：`scripts/memory_gate.py` 第 591 行告警文件名按“秒”命名（`%Y%m%d-%H%M%S`），测试用 `list(tmp_path.glob("ALERT-*.txt"))[-1]` 取最后一个，glob 顺序不保证按时间；同一秒或多条告警时可能取到不含“没有解冻任何进程”的那条。**根因已确认（审计线程据日志）：这次运行跨过秒边界，写了 …045857 和 …045858 两个文件，glob 顺序不保证，`[-1]` 取到了较早的那个** | P2 | https://github.com/baiyangfu-hash/WorkSpacePM/actions/runs/42338482242/job/128300740839 ；测试位于 main 的 `tests/infrastructure/test_memory_gate.py` 第 902 行；审计线程 #589 终审（协调者转述，我未读）https://github.com/baiyangfu-hash/WorkSpacePM/pull/589#issuecomment-6702882428 | 未修：测试改为遍历全部告警文件取含关键字的，或告警名带序号；同类排查：该文件里其他 `glob("ALERT-*.txt")[-1]` 写法 | 与 #589 无关（#589 没改 memory_gate）|
 | D-92 | `test_memory_gate.py::test_ladder_of_the_trae_tree_is_the_shell_then_the_terminal_owner_and_never_the_main_process` 在 windows-latest 上偶发红（#589 旧头 d7af32cc）：`assert [26060] == [26060, 26936]`，即梯子少了 TERMINAL_OWNER(26936)。测试用的是固定 PID 常量（`test_memory_gate.py` 第 117 行 SHELL=26060、TERMINAL_OWNER=26936），审计线程说是“已知问题”（进程树 PID 碰撞）。根因已确认（审计线程）：假 PID 26936 与总闸加进受保护集合的真实 `os.getpid()` 撞上，被当作受保护进程剔除 | P2 | https://github.com/baiyangfu-hash/WorkSpacePM/actions/runs/42337371630/job/128297235456 ；此前没有登记编号（审计线程也没给）| 未修：测试里改成运行时取不会与 `os.getpid()` 碰撞的 PID；审计线程 #589 终审（协调者转述，我未读）https://github.com/baiyangfu-hash/WorkSpacePM/pull/589#issuecomment-6702882428 | 与 D-68 同类（Windows CI 偶发），入账时核对是否合并 |
-| D-93 | #593 审计的小缺口之一：40 分钟阈值（具体含义以审计评论为准，我未读到原文） | P3 | 协调者 11-07 转述（#593 审计），原文评论**未核实** | 按协调者决定不修，记债 | 非阻断 |
-| D-94 | #593 审计的小缺口之二：跳过收口会挂起（具体场景以审计评论为准，未读到原文） | P3 | 协调者 11-07 转述（#593 审计），原文评论**未核实** | 不修，记债 | 非阻断 |
-| D-95 | #589 的锁内不重复 git 归属检查，残余窗口没有测试覆盖 | P3 | 协调者 11-07 转述（#589 终审），原文**未核实** | 不修，记债；补测试待排 | 非阻断 |
+| D-93 | #593 复审新发现 1：`CLOSE_WINDOW_LOW_S`（40 分钟）阈值没有边界测试，改成 20 分钟测试仍全绿 | P3 | https://github.com/baiyangfu-hash/WorkSpacePM/pull/593#issuecomment-6702160252（协调者转述，我未读原文）| 不修，记债；补边界测试待排 | 非阻断 |
+| D-94 | #593 复审新发现 2：跳过 `_run_closing()` 时测试是挂住而不是变红 | P3 | https://github.com/baiyangfu-hash/WorkSpacePM/pull/593#issuecomment-6702160252（协调者转述，我未读原文）| 不修，记债 | 非阻断 |
+| D-95 | #589 锁内不重复 git 归属检查，残余窗口没有测试覆盖 | P3 | #589 描述里自述的残余窗口（协调者转述，我未读原文）| 不修，记债；补测试待排 | 非阻断 |
+| D-96 | 云端容器（Linux，python 3.13）上 4 条测试稳定失败：`tests/core/test_long_regression.py::test_the_printed_command_really_produces_evidence_that_the_next_verify_accepts`（报“收集到 101 个用例，超过 100”）、`tests/e2e/test_release_pycache_drill.py` c01 与 c02、`tests/infrastructure/test_long_run_core.py::test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_the_evidence`。我在 origin/main 干净工作树上单独重跑这 4 条，同样失败（2 passed、4 failed 是我一起跑的结果）。**根因未核实**：怀疑与容器环境有关（权限、进程、用例计数），没有查 | P2 | 我的命令输出：#585 合并头 b99ec0bf 全量 4 failed、7551 passed；干净 main 单独重跑 4 failed | 未修：先查每条根因；与 D-68 同类（环境相关偶发/稳定失败）| 影响云端会话本地全量验证，CI 的 ubuntu 上这 4 条是否绿未核实 |
 
 **建议修复批次**（只是建议，每一批开工前仍按 `AGENTS.md` 四阶段先出计划、等用户确认；**交接前不改任何代码**）：
 
