@@ -43,8 +43,12 @@ class FakeGitHub:
         self.files[number] = files
         self.commit_times[number] = [commit]
 
-    def claim(self, card: str, paths: list[str], *, claimed_at: str = EARLY, status: str = "active") -> None:
-        self.claims[card] = {"paths": paths, "claimed_at": claimed_at, "status": status, "owner": "claude"}
+    def claim(
+        self, card: str, paths: list[str], *, claimed_at: str = EARLY, status: str = "active", expires_at: str = "2099-01-01T00:00:00Z", released_at: str = ""
+    ) -> None:
+        self.claims[card] = {
+            "paths": paths, "claimed_at": claimed_at, "status": status, "owner": "claude", "expires_at": expires_at, "released_at": released_at,
+        }
 
     def __call__(self, path: str) -> object:
         if self.fail:
@@ -88,8 +92,9 @@ def test_overlap_means_equal_or_inside_a_directory() -> None:
 
 
 def test_the_second_pr_on_the_same_file_is_stopped_and_names_the_first(github: FakeGitHub) -> None:
+    github.claim("c2", ["pkg"])
     github.add_pr(10, body("pkg/mod.py", claim="c1"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
-    github.add_pr(11, body("pkg/mod.py", claim="c2"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/mod.py", claim="c2"), ["pkg/mod.py"], created=LATE)
 
     first = run(github, 10)
     second = run(github, 11)
@@ -101,7 +106,7 @@ def test_the_second_pr_on_the_same_file_is_stopped_and_names_the_first(github: F
 
 def test_a_draft_still_holds_its_files(github: FakeGitHub) -> None:
     github.add_pr(10, body("pkg/"), ["pkg/a.py"], created=BEFORE_ENFORCE, draft=True)
-    github.add_pr(11, body("pkg/b.py"), ["pkg/b.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/b.py"), ["pkg/b.py"], created=LATE)
 
     result = run(github, 11)
 
@@ -110,21 +115,23 @@ def test_a_draft_still_holds_its_files(github: FakeGitHub) -> None:
 
 def test_the_actual_changed_files_count_even_when_the_declared_scope_is_narrow(github: FakeGitHub) -> None:
     github.add_pr(10, body("docs/x.md"), ["docs/x.md", "pkg/sneaky.py"], created=BEFORE_ENFORCE)
-    github.add_pr(11, body("pkg/sneaky.py"), ["pkg/sneaky.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/sneaky.py"), ["pkg/sneaky.py"], created=LATE)
 
     assert not run(github, 11).passed
 
 
 def test_disjoint_prs_do_not_collide(github: FakeGitHub) -> None:
+    github.claim("cb", ["b"])
     github.add_pr(10, body("a/x.py"), ["a/x.py"], created=BEFORE_ENFORCE)
-    github.add_pr(11, body("b/y.py"), ["b/y.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("b/y.py", claim="cb"), ["b/y.py"], created=LATE)
 
     assert run(github, 11).passed
 
 
 def test_a_written_waiver_turns_the_error_into_a_named_note(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg"])
     github.add_pr(10, body("pkg/mod.py"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
-    github.add_pr(11, body("pkg/mod.py", waiver="#10 两边改不同函数，先合 10"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/mod.py", claim="c1", waiver="#10 两边改不同函数，先合 10"), ["pkg/mod.py"], created=LATE)
 
     result = run(github, 11)
 
@@ -134,7 +141,7 @@ def test_a_written_waiver_turns_the_error_into_a_named_note(github: FakeGitHub) 
 
 def test_a_waiver_for_another_pr_does_not_cover_this_one(github: FakeGitHub) -> None:
     github.add_pr(10, body("pkg/mod.py"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
-    github.add_pr(11, body("pkg/mod.py", waiver="#99 无关"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/mod.py", waiver="#99 无关"), ["pkg/mod.py"], created=LATE)
 
     assert not run(github, 11).passed
 
@@ -193,3 +200,48 @@ def test_a_github_that_does_not_answer_is_not_a_pass(github: FakeGitHub) -> None
 
     with pytest.raises(ApiError):
         run(github, 11)
+
+
+def test_a_pr_created_before_the_enforcement_date_is_only_told_about_an_overlap(github: FakeGitHub) -> None:
+    github.add_pr(10, body("pkg/mod.py"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/mod.py"), ["pkg/mod.py"], created=BEFORE_ENFORCE)
+
+    result = run(github, 11)
+
+    assert result.passed
+    assert any("#10" in note and "只提示" in note for note in result.notes)
+
+
+def test_a_claim_released_before_the_first_commit_is_refused_but_one_released_after_is_fine(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg"], status="released", released_at="2026-11-07T11:00:00Z")
+    github.add_pr(11, body("pkg/mod.py", claim="c1"), ["pkg/mod.py"], commit=LATE)
+    assert any("之前就已放下" in error for error in run(github, 11).errors)
+
+    github.claim("c2", ["other"], status="released", released_at="2026-11-07T13:00:00Z")
+    github.add_pr(12, body("other/mod.py", claim="c2"), ["other/mod.py"], commit=LATE)
+    assert run(github, 12).passed, "work finished and released afterwards"
+
+
+def test_a_claim_that_had_already_expired_when_the_first_commit_was_made_is_refused(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg"], expires_at="2026-11-07T11:00:00Z")
+    github.add_pr(11, body("pkg/mod.py", claim="c1"), ["pkg/mod.py"], commit=LATE)
+
+    assert any("占位无效时改了代码" in error for error in run(github, 11).errors)
+
+
+def test_a_file_actually_changed_outside_the_claimed_paths_is_refused_even_if_the_scope_text_is_clean(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.add_pr(11, body("pkg/a/x.py", claim="c1"), ["pkg/a/x.py", "elsewhere/sneaky.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("实际改到的 `elsewhere/sneaky.py`" in error for error in errors)
+    assert not any("pkg/a/x.py" in error for error in errors)
+
+
+def test_one_card_cannot_back_two_open_prs(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg"])
+    github.add_pr(10, body("pkg/a.py", claim="c1"), ["pkg/a.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, body("pkg/b.py", claim="c1"), ["pkg/b.py"], created=LATE)
+
+    assert any("卡 c1 已被更早开着的 PR #10 引用" in error for error in run(github, 11).errors)

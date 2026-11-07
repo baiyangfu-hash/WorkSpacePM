@@ -10,8 +10,10 @@ A. **范围重叠**：本 PR 的范围（``可改范围`` 清单，加上它实�
    PR 合并或关闭后，后来的在下一次事件（推送、改描述）重新判定。确需并行的，在描述里写 ``重叠放行: #<编号> <理由>``，
    检查改为在报告里点名，不报红；放行是自报的，由独立审计核对理由。
 B. **先订卡再改代码**：描述里要有一行 ``领卡占位: <卡号>``；远程要有分支 ``claims/<卡号>``，它的占位提交里记的领卡时间
-   不晚于本 PR 最早的提交，占位没有被收回（``reclaimed``），且本 PR 的 ``可改范围`` 每一条都落在占位登记的路径里。
-   只对 ``CLAIM_ENFORCE_FROM`` 之后创建的 PR 强制，之前已开着的 PR 只在报告里提示。
+   不晚于本 PR 最早的提交；占位在那一刻是有效的（没有被收回，没有已放下，租期没有过）；本 PR 的 ``可改范围``
+   每一条和**实际改到的每个文件**都落在占位登记的路径里；同一张卡不能被编号更小的、开着的 PR 同时引用。
+   A、B 都只对 ``CLAIM_ENFORCE_FROM`` 之后创建的 PR 强制，之前已开着的 PR 只在报告里提示（不把存量 PR 一夜打红）。
+   占位的持有者记在占位里，但 GitHub 上所有 agent 用同一个账号开 PR，查不出“是不是自己的卡”，这一项没有判定。
 
 读不到 GitHub 的回答就不放行（失败关闭）：重跑检查即可。令牌只需 ``pull-requests: read``，不写任何东西。
 
@@ -123,7 +125,7 @@ def changed_files(fetch: Fetch, repo: str, number: int) -> list[str]:
     return sorted(str(item["filename"]) for item in paged(fetch, f"/repos/{repo}/pulls/{number}/files") if "filename" in item)
 
 
-def check_overlap(fetch: Fetch, repo: str, number: int, body: str, result: Result) -> None:
+def check_overlap(fetch: Fetch, repo: str, number: int, body: str, result: Result, *, enforced: bool = True) -> None:
     mine = scope_paths(body, changed_files(fetch, repo, number))
     waivers = {int(match.group(1)): match.group(2) for match in WAIVER_LINE.finditer(body)}
     for other in paged(fetch, f"/repos/{repo}/pulls?state=open&base=main"):
@@ -138,6 +140,9 @@ def check_overlap(fetch: Fetch, repo: str, number: int, body: str, result: Resul
         shown = "、".join(f"`{path}`" for path in hits[:8]) + ("…" if len(hits) > 8 else "")
         title = str(other.get("title") or "")
         draft = "（草稿）" if other.get("draft") else ""
+        if not enforced:
+            result.notes.append(f"与更早开着的 #{other_number}{draft}《{title}》范围重叠：{shown}（本 PR 创建于强制起点之前，只提示）")
+            continue
         if other_number in waivers:
             result.notes.append(f"与 #{other_number}{draft} 范围重叠：{shown}；已按描述放行，理由：{waivers[other_number]}（审计要核对）")
             continue
@@ -172,8 +177,12 @@ def earliest_commit_time(fetch: Fetch, repo: str, number: int) -> str:
     return min(stamps) if stamps else ""
 
 
+def referenced_cards(body: str) -> set[str]:
+    return {match.group(1) for match in CLAIM_LINE.finditer(body)}
+
+
 def check_claim(fetch: Fetch, repo: str, number: int, body: str, created_at: str, enforce_from: str, result: Result) -> None:
-    enforced = bool(enforce_from) and created_at >= enforce_from
+    enforced = is_enforced(created_at, enforce_from)
     problems: list[str] = []
     match = CLAIM_LINE.search(body)
     if match is None:
@@ -185,30 +194,57 @@ def check_claim(fetch: Fetch, repo: str, number: int, body: str, created_at: str
         except NotFound:
             problems.append(f"远程没有 `claims/{card}`：先订卡再开 PR（`main.py claim open {card} --paths … --goal …`）")
         else:
-            claimed_at = str(payload.get("claimed_at", ""))
-            if str(payload.get("status", "")) == "reclaimed":
-                problems.append(f"卡 {card} 的占位已被收回（{payload.get('reclaimed_reason', '无原因')}）：重新订卡")
-            first = earliest_commit_time(fetch, repo, number)
-            if not claimed_at:
-                problems.append(f"`claims/{card}` 里读不到领卡时间")
-            elif first and claimed_at > first:
-                problems.append(f"先改代码后订卡：卡 {card} 订于 {claimed_at}，本 PR 最早的提交在 {first}")
-            claimed = [path for item in payload.get("paths", []) if isinstance(item, str) and (path := normalized(item)) is not None]
-            for entry in declared_scope(body):
-                path = normalized(entry)
-                if path is not None and not any(path == c or path.startswith(c + "/") for c in claimed):
-                    problems.append(f"可改范围里的 `{path}` 不在卡 {card} 订的路径里：补订或收窄范围")
+            problems.extend(claim_problems(fetch, repo, number, body, card, payload))
+            for other in paged(fetch, f"/repos/{repo}/pulls?state=open&base=main"):
+                other_number = other.get("number")
+                if isinstance(other_number, int) and other_number < number and card in referenced_cards(str(other.get("body") or "")):
+                    problems.append(f"卡 {card} 已被更早开着的 PR #{other_number} 引用：一张卡一个 PR，另订一张卡")
     if enforced:
         result.errors.extend(problems)
     else:
         result.notes.extend(f"领卡检查（本 PR 创建于 {created_at or '未知'}，早于强制起点 {enforce_from or '未设'}，只提示）：{item}" for item in problems)
 
 
+def claim_problems(fetch: Fetch, repo: str, number: int, body: str, card: str, payload: dict[str, object]) -> list[str]:
+    problems: list[str] = []
+    claimed_at = str(payload.get("claimed_at", ""))
+    first = earliest_commit_time(fetch, repo, number)
+    status = str(payload.get("status", ""))
+    if status == "reclaimed":
+        problems.append(f"卡 {card} 的占位已被收回（{payload.get('reclaimed_reason', '无原因')}）：重新订卡")
+    elif status == "released" and first and str(payload.get("released_at", "")) <= first:
+        problems.append(f"卡 {card} 的占位在本 PR 最早的提交（{first}）之前就已放下：重新订卡")
+    expires_at = str(payload.get("expires_at", ""))
+    if first and expires_at and expires_at < first:
+        problems.append(f"卡 {card} 的占位在 {expires_at} 就到期了，早于本 PR 最早的提交（{first}）：占位无效时改了代码，重新订卡并续租")
+    if not claimed_at:
+        problems.append(f"`claims/{card}` 里读不到领卡时间")
+    elif first and claimed_at > first:
+        problems.append(f"先改代码后订卡：卡 {card} 订于 {claimed_at}，本 PR 最早的提交在 {first}")
+    claimed = [path for item in payload.get("paths", []) if isinstance(item, str) and (path := normalized(item)) is not None]
+
+    def covered(path: str) -> bool:
+        return any(path == c or path.startswith(c + "/") for c in claimed)
+
+    declared = [path for entry in declared_scope(body) if (path := normalized(entry)) is not None]
+    for path in declared:
+        if not covered(path):
+            problems.append(f"可改范围里的 `{path}` 不在卡 {card} 订的路径里：补订或收窄范围")
+    for path in changed_files(fetch, repo, number):
+        if not covered(path) and path not in declared:
+            problems.append(f"实际改到的 `{path}` 不在卡 {card} 订的路径里：补订或收窄范围")
+    return problems
+
+
+def is_enforced(created_at: str, enforce_from: str) -> bool:
+    return bool(enforce_from) and created_at >= enforce_from
+
+
 def check(fetch: Fetch, repo: str, number: int, body: str, enforce_from: str) -> Result:
     result = Result()
     pr = fetch(f"/repos/{repo}/pulls/{number}")
     created_at = str(pr.get("created_at", "")) if isinstance(pr, dict) else ""
-    check_overlap(fetch, repo, number, body, result)
+    check_overlap(fetch, repo, number, body, result, enforced=is_enforced(created_at, enforce_from))
     check_claim(fetch, repo, number, body, created_at, enforce_from, result)
     return result
 
