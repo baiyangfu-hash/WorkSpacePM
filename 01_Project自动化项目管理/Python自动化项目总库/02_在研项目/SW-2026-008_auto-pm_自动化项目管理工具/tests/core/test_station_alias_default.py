@@ -6,7 +6,6 @@ conversation could not open a PR from a different card (#607, #608).
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,11 @@ import pytest
 from auto_pm.application.core.agent_worktree_service import AgentWorktreeService, caller_alias
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
 from auto_pm.ui.cli.worktree import resolve_station_name
-from tests.core.test_agent_worktree_alias import SESSION, _control_root, as_user  # noqa: F401 - fixture import
+from tests.core.test_agent_worktree_alias import (  # noqa: F401 - fixture import
+    SESSION,
+    _control_root,
+    as_user,
+)
 
 OTHER_SESSION = "0a1b2c3d-1111-2222-3333-444455556666"
 
