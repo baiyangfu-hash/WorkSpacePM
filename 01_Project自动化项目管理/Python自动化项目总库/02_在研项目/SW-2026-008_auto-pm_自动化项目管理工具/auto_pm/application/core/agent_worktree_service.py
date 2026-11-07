@@ -403,10 +403,57 @@ class AgentWorktreeService:
         added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), MAIN_REF)
         if added.returncode != 0:
             raise AgentWorktreeError(f"建工位失败：{_detail(added)}")
+        self._record_borrow(agent, branch)
         self._write_holder_note(agent)
         return self._inspect(
             path, registered=True, branch=branch, head=self._out("rev-parse", MAIN_REF)
         )
+
+    # ── borrowing (D-58) ─────────────────────────────────────────────
+
+    def _borrow_file(self, agent: str) -> Path:
+        # A file next to the stations, never inside one: a station stays clean, and `.auto-pm` is ignored by Git.
+        return self._stations_dir / f".borrowed-{agent}.json"
+
+    def _record_borrow(self, agent: str, branch: str) -> None:
+        """A station opened by another registered agent is on loan to that caller; remember who, so it can hand in the PR.
+
+        ``acts_for`` decides what is the caller's own: its base-name station and its own conversation's alias station are
+        not loans.  The borrower is stored as the caller's alias (base name only when no session id exists), so another
+        conversation of the same agent is not the borrower (D-86).
+        """
+
+        caller = caller_agent()
+        if not caller or caller == _UNKNOWN_CALLER or acts_for(caller, agent):
+            self._clear_borrow(agent)
+            return
+        payload = {"by": caller_alias() or caller, "branch": branch}
+        self._borrow_file(agent).write_text(json.dumps(payload), encoding="utf-8")
+
+    def _clear_borrow(self, agent: str) -> None:
+        try:
+            self._borrow_file(agent).unlink(missing_ok=True)
+        except OSError:
+            pass  # a leftover record only matters while the station exists; open/close rewrite or clear it
+
+    def borrower(self, agent: str) -> str:
+        """Who the station of ``agent`` is on loan to ("" when nobody); only a roster name on a readable record counts."""
+
+        try:
+            data = json.loads(self._borrow_file(agent).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        by = data.get("by") if isinstance(data, dict) else None
+        return by if isinstance(by, str) and base_agent(by) else ""
+
+    def lent_to_caller(self, agent: str) -> bool:
+        """Whether the station of ``agent`` is on loan to this very conversation (same alias, or same base name without a session id)."""
+
+        caller = caller_agent()
+        if not caller or caller == _UNKNOWN_CALLER:
+            return False
+        borrower = self.borrower(agent)
+        return bool(borrower) and borrower == (caller_alias() or caller)
 
     # ── 持有者记录、回收（设计稿：动态 agent 名与工位自动回收）──────────────
 
@@ -587,7 +634,40 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f".auto-pm/worktrees 下已有 {count} 个目录，上限 {MAX_STATIONS}（WS-001）；"
                 "先 `worktree list` 看哪些已经做完，再 `worktree close <agent>` 或 `worktree sweep`（默认只列，加 --apply 才删）"
+                + self._occupant_lines()
             )
+
+    def _occupant_lines(self) -> str:
+        """Who fills the floor and who can free each place (D-11): the refusal alone leaves an agent guessing.
+
+        Best effort and read-only: a station that cannot be inspected is listed as such, never a reason to hide the refusal.
+        """
+
+        try:
+            stations = self.stations()
+        except (AgentWorktreeError, OSError):
+            return ""
+        caller = caller_agent()
+        lines: list[str] = []
+        for station in stations:
+            who = self._who_can_free(station, caller)
+            lines.append(f"  - {station.name}：{who}")
+        return "\n现在占着的目录：\n" + "\n".join(lines) if lines else ""
+
+    def _who_can_free(self, station: Station, caller: str) -> str:
+        verdict = self._sweep_station(station, None)
+        if station.kind == "agent":
+            owner = station.name
+            if verdict.remove:
+                answer = f"已做完可收；由 {owner} 执行 `worktree close {owner}`" + (
+                    "（就是你）" if caller == owner else "，或用户 `worktree sweep --apply`"
+                )
+            else:
+                answer = f"{owner} 的工位，暂不能收（{verdict.reason}）"
+            return answer
+        if verdict.remove:
+            return f"已可清（{verdict.reason}），只由用户在自己的终端 `worktree sweep --apply`"
+        return f"名册外的目录，不属于任何 agent，只由用户处理（{verdict.reason}）"
 
     # ── list ─────────────────────────────────────────────────────────
 
@@ -651,7 +731,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不收工位；请用户在自己的终端执行"
             )
-        if not acts_for(caller, agent):
+        if not (acts_for(caller, agent) or self.lent_to_caller(agent)):
             raise StationRefusedError(
                 f"你是 {caller_alias() or caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )
@@ -912,6 +992,7 @@ class AgentWorktreeService:
             leftover = _broken_reason(station.path)
             warning = f"。注意：{leftover}；用 `worktree list` 看现状，人工处理" if leftover else ""
             raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}{warning}")
+        self._clear_borrow(station.path.name)
         deleted = False
         note = "本地分支保留（已推送、还没并进 main）"
         if station.kind == "run-plan":

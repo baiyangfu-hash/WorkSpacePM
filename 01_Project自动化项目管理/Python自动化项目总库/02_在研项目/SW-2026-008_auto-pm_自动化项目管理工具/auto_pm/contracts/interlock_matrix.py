@@ -125,12 +125,16 @@ COMMANDS: dict[str, CommandSpec] = {
         CommandKind.RECOVERY, ("lease=valid",), ("G-LEASE-VALID",), "an expired lease cannot be renewed (TD-240): the exit is reclaim"
     ),
     "continuity recovery plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the exit chain of one abnormal state"),
+    "pr settle-scan": CommandSpec(CommandKind.READ_ONLY, (), (), "lists merged-but-open Runs and the legal next commands; moves nothing"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
+    "pm control-root-status": CommandSpec(CommandKind.READ_ONLY, (), (), "branch, uncommitted files and their holders of the control root; no fetch, no write"),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a
     # cloud clone with no runtime identity, so they carry no guards.
     "claim list": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the remote claim branches"),
     "claim open": CommandSpec(CommandKind.NORMAL, (), (), "pushes claims/<card> to origin; does not touch the ledger"),
     "claim release": CommandSpec(CommandKind.NORMAL, (), (), "pushes a released marker onto the holder's own claim; deletes nothing"),
+    "claim renew": CommandSpec(CommandKind.NORMAL, (), (), "pushes a renewed lease onto the holder's own claim; deletes nothing"),
+    "claim reclaim": CommandSpec(CommandKind.NORMAL, (), (), "pushes a reclaimed marker onto a silent holder's claim, only on the user's word; deletes nothing"),
     "pm resume": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm recover": CommandSpec(CommandKind.READ_ONLY, (), (), "--apply writes EXECUTOR_LOST (release 7 and later)"),
     "pm triage": CommandSpec(CommandKind.READ_ONLY, (), (), "open cards plus inbox in suggested order; confirms nothing"),

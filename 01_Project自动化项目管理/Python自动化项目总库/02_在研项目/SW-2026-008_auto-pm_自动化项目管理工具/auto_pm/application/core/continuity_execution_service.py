@@ -224,7 +224,7 @@ class ContinuityExecutionService:
             raise ContinuityExecutionError(str(error)) from error
 
     def _reject_control_root_drift(
-        self, worktree: Path, owned: tuple[str, ...], git_head: str
+        self, worktree: Path, owned: tuple[str, ...], git_head: str, work_id: str = ""
     ) -> None:
         """An isolated Run must start from what the control root holds, or its closure could never merge back."""
 
@@ -237,10 +237,23 @@ class ContinuityExecutionService:
             raise ContinuityExecutionError(str(error)) from error
         if drift:
             raise ContinuityExecutionError(
-                "控制根里范围内的文件与本 Run 起点不一致（多半是上一单收口并回、还没提交）："
-                + "、".join(drift)
-                + "；请先把它们提交，再从新的提交建隔离工作树，否则收口时无法并回"
+                "控制根里范围内的文件与本 Run 起点不一致（多半是上一单收口并回、还没提交；只比对本 Run 声明要改的文件）："
+                + "、".join(self._label_drift(path, work_id) for path in drift)
+                + "；请先把它们提交，再从新的提交建隔离工作树，否则收口时无法并回。"
+                "括号里是账本上认领该文件的 Run；没有认领的多半是上一单收口遗留或被提交钩子拦下的，问用户后再提交或还原，不要自己删"
             )
+
+    def _label_drift(self, path: str, work_id: str) -> str:
+        """``path`` with the live Run that claims it (D-46: the refusal must say whose file blocks), best effort."""
+
+        try:
+            for work in self._store.list_works(self._store.get_work(work_id).subject_project_id):
+                for run in self._store.list_runs(work.work_id):
+                    if authority_paths_covered((path,), run.owned_paths):
+                        return f"{path}（{run.run_id}／{run.executor_id} 认领）"
+        except Exception:  # noqa: BLE001 - the label is extra; the refusal itself must still be raised
+            pass
+        return f"{path}（没有 Run 认领）"
 
     def start_run(
         self,
@@ -324,7 +337,10 @@ class ContinuityExecutionService:
                     f"Run git_head 与受管 worktree 当前 HEAD 不一致：--git-head 给的是 {git_head}，工位现在是 {actual_head}。"
                     "处理：把 --git-head 改成工位当前的提交号（在工位里运行 git rev-parse HEAD）再开工"
                 )
-            self._reject_control_root_drift(governed_worktree, owned, git_head)
+            # Closure writes back only the files the Run declares dirty (merge_back refuses per file), so only those can be
+            # blocked by what another thread left uncommitted in the control root.  Checking the whole owned scope refused
+            # runs over files they would never touch (D-46, real_run1.log).
+            self._reject_control_root_drift(governed_worktree, declared, git_head, work_id)
             actual_observed = tuple(
                 path for path in actual_dirty if authority_paths_covered((path,), owned)
             )

@@ -4393,6 +4393,56 @@ def test_extend_hold_checks_the_user_evidence_format_in_the_store_too(tmp_path: 
     assert service.lease_hold_status("RUN-001")["hold_end"] == (clock.start + timedelta(hours=3)).isoformat()
 
 
+def test_d46_run_start_checks_the_declared_files_not_the_whole_owned_scope(tmp_path: Path) -> None:
+    """Another thread's uncommitted file inside the owned scope blocks a Run only if the Run declares that file.
+
+    Guards the call site of ``_reject_control_root_drift``: passing the owned scope instead of the declared files
+    (the D-46 bug) refuses this first Run over a file it will never touch.
+    """
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("another thread is editing this\n", encoding="utf-8")
+    linked = tmp_path / ".auto-pm" / "worktrees" / "RUN-D46"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "--detach", str(linked), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(linked), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    owned = ["auto_pm/core/a.py", "tests/test_a.py"]
+
+    with pytest.raises(ContinuityExecutionError, match="没有 Run 认领") as refused:
+        _start(
+            service,
+            run_id="RUN-D46-A",
+            owned_paths=owned,
+            declared_dirty_paths=["tests/test_a.py"],
+            git_head=head,
+            worktree_path=str(linked),
+            idempotency_key="d46-declares-it",
+        )
+    assert "tests/test_a.py" in str(refused.value)
+
+    run = _start(
+        service,
+        run_id="RUN-D46-B",
+        owned_paths=owned,
+        declared_dirty_paths=[],
+        git_head=head,
+        worktree_path=str(linked),
+        idempotency_key="d46-does-not-declare-it",
+    )
+    assert Path(run.worktree_path) == linked.resolve()
+
+
 def _to_state(service: ContinuityExecutionService, state: RunState) -> None:
     service.transition_run("RUN-001", RunState.RUNNING, "agent-a", "lease-secret", "to-running")
     if state is RunState.VERIFYING:

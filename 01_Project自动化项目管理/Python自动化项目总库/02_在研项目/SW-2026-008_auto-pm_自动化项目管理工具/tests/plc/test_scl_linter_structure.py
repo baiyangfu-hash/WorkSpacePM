@@ -64,3 +64,18 @@ def test_st07_the_shipped_template_and_shared_library_sources_have_no_structure_
     assert files, "the template ships static .scl files"
     for path in files:
         assert _rules(path.read_text(encoding="utf-8")) == [], path.name
+
+
+def test_d21_a_utf8_file_with_a_bom_is_read_like_one_without(tmp_path: Path) -> None:
+    """TIA exports and many editors write a BOM; reading it as plain UTF-8 left U+FEFF before the first keyword."""
+    plain = tmp_path / "plain.scl"
+    bom = tmp_path / "bom.scl"
+    plain.write_text(GOOD_FB, encoding="utf-8")
+    bom.write_text(GOOD_FB, encoding="utf-8-sig")
+    assert bom.read_bytes().startswith(b"\xef\xbb\xbf")
+
+    def rules(path: Path) -> list[str]:
+        return [v.rule_id for v in SclLinter.lint_file(path).violations]
+
+    assert rules(bom) == rules(plain)
+    assert "LSP-905-STRUCT" not in "".join(rules(bom))
