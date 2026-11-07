@@ -1443,19 +1443,16 @@ def test_the_full_floor_message_marks_your_own_finished_station_as_yours(
 def test_sweep_apply_removes_stations_while_holding_the_stations_lock(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     """D-74: the removal must not interleave with a concurrent open/release/close, which all take ``stations.lock``."""
 
-    import sys
-
-    if sys.platform == "win32":
-        pytest.skip("the probe uses fcntl")
-    import fcntl
     import os
+
+    fcntl = pytest.importorskip("fcntl", reason="the probe uses fcntl")
 
     floor = build_mixed_floor(lab)
     service = lab.service()
     held: list[bool] = []
     original = service._remove_station
 
-    def probe(station, **kwargs):  # type: ignore[no-untyped-def]
+    def probe(station: Any, **kwargs: Any) -> Any:
         fd = os.open(lab.root / ".auto-pm" / "stations.lock", os.O_RDWR | os.O_CREAT)
         try:
             try:
