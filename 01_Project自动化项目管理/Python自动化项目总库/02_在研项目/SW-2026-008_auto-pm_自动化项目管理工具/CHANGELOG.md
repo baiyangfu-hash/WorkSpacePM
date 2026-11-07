@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `PM_SESSION` 与 `pm-workflow` 已于 2026-09-09/10 退役（用户 2026-10-10 裁决）：PM_SESSION 不再刷新，仅作历史证据；本文件下文提到 PM_SESSION 的条目都是当时的历史记录，不代表现行做法。现行真源见根目录 `AGENTS.md`。
+
 ### Removed
 
 - 删除驾驶舱里的 Modbus 联调工坊（`auto_pm/domain/modbus/`、`ModbusDebuggerView.qml` 及两个配套组件、侧边栏入口、`tests/modbus/`）；用户 2026-10-25 决定不再需要。DJ-2026-009 的 PLC 侧 Modbus TCP（FB_3002）与此无关，不受影响。
@@ -22,7 +26,7 @@
 - **CHG-SCPT-2026-028** 根启动器向 release 进程传递所属工作空间，使 `pm resume` 与 `context resolve` 无需额外 `-w` 也能读取 Workspace Registry。
 - **CHG-SCPT-2026-029** 增加 SPEC 变更领域兼容；Decision Package 按项目编号消歧，跨项目同号且未指定项目时 fail-closed。
 
-## [Unreleased] - 后 1.2.3 批次（CHG-165~186 补录）
+## 后 1.2.3 批次补录（CHG-165~186，待并入下次 release）
 
 > **说明**：本段补录 2026-08-27 起至 2026-09-06 间已执行但未入账的 22 张变更单，
 > 分三个子批次：Cockpit OS 功能扩展（CHG-165~177）、稳定发布链路（NG-WP-11~17）、
