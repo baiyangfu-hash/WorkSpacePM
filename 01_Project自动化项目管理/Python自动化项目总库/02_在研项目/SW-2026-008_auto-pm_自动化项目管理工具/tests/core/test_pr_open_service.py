@@ -815,3 +815,37 @@ def test_closing_the_station_clears_the_loan(lab: Lab, monkeypatch: pytest.Monke
     svc.open("vscode", "CARD-1")
     svc.close("vscode", fetch=False)
     assert svc.borrower("vscode") == ""
+
+
+def _mutants_module():  # type: ignore[no-untyped-def]
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).with_name("pr_open_mutants.py")
+    spec = importlib.util.spec_from_file_location("pr_open_mutants_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    ("returncode", "output", "expected"),
+    [
+        (0, "86 passed", "survived"),
+        (1, "1 failed, 3 passed", "caught"),
+        (1, "ERROR collecting", "invalid"),
+        (2, "interrupted: 1 error", "invalid"),
+        (3, "INTERNALERROR failed", "invalid"),
+        (4, "usage error", "invalid"),
+        (5, "no tests ran", "invalid"),
+        (-9, "failed", "invalid"),
+        (None, "", "invalid"),
+    ],
+)
+def test_mutant_judge_counts_only_a_real_test_failure_as_caught(
+    returncode, output, expected
+) -> None:  # type: ignore[no-untyped-def]
+    """D-85 audit: a pytest crash or timeout must never be read as "the tests caught the mutant"."""
+
+    assert _mutants_module().judge(returncode, output) == expected

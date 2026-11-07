@@ -1,7 +1,7 @@
 """变异反证：把 ``pr open`` 的每一道拒绝条件逐个拿掉，``test_pr_open_service.py`` 都必须变红。
 
 用法（在 SW-2026-008 项目目录）：``python -B tests/core/pr_open_mutants.py``。
-每个变异只改内存里的一份副本写回源文件、跑完立即还原；退出码 0＝全部变异都被测试抓住。
+每个变异只改内存里的一份副本写回源文件、跑完立即还原；退出码 0＝基线全绿且全部变异都被测试抓住；1＝有漏网；2＝锚点失效或基线不绿；3＝有变异的 pytest 运行无效。
 """
 
 from __future__ import annotations
@@ -126,6 +126,53 @@ def _locate(before: str, originals: dict[Path, str]) -> Path | None:
     return holders[0]
 
 
+LABELS = {"caught": "抓住", "survived": "漏网", "invalid": "无效"}
+RUN_TIMEOUT_SECONDS = 600
+
+
+def judge(returncode: int | None, output: str) -> str:
+    """ "caught" only when pytest itself reports failed tests (exit 1); exit 0 is "survived" (all green).
+
+    Exit 2/3/4/5, a signal exit, or a timeout (``None``) means pytest crashed or never judged: "invalid".
+    Exit 1 without a "failed" line in the output is also "invalid" (e.g. collection trouble reported as 1).
+    """
+
+    if returncode == 0:
+        return "survived"
+    if returncode == 1 and "failed" in output:
+        return "caught"
+    return "invalid"
+
+
+def run_tests() -> tuple[int | None, str]:
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "pytest",
+                "-q",
+                "-x",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+                *TESTS,
+            ],
+            cwd=PROJECT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=RUN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, ""
+    return result.returncode, result.stdout + result.stderr
+
+
 def main() -> int:
     originals = {path: path.read_text(encoding="utf-8") for path in SOURCES}
     # D-85: check every anchor before running anything, and list ALL stale ones (not just the first), so a refactor
@@ -139,42 +186,35 @@ def main() -> int:
     signal.signal(
         signal.SIGTERM, lambda *_: sys.exit(3)
     )  # a killed run still restores the sources in finally
+    invalid: list[str] = []
     survivors: list[str] = []
     try:
+        # A red or crashing baseline would make every mutant look "caught".
+        base_verdict = judge(*run_tests())
+        if base_verdict != "survived":
+            print(f"[错误] 未变异的基线不是全绿（判定：{base_verdict}）；不运行任何变异")
+            return 2
         for name, before, after in MUTANTS:
             target = _locate(before, originals)
             assert target is not None  # checked above
             target.write_text(originals[target].replace(before, after), encoding="utf-8")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "-x",
-                    "-p",
-                    "no:cacheprovider",
-                    "-o",
-                    "addopts=",
-                    *TESTS,
-                ],
-                cwd=PROJECT,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            verdict = judge(*run_tests())
             target.write_text(originals[target], encoding="utf-8")
-            caught = result.returncode != 0
-            print(f"[{'抓住' if caught else '漏网'}] {name}")
-            if not caught:
+            print(f"[{LABELS[verdict]}] {name}")
+            if verdict == "survived":
                 survivors.append(name)
+            elif verdict == "invalid":
+                invalid.append(name)
     finally:
         for path, text in originals.items():
             path.write_text(text, encoding="utf-8")
-    print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} 个变异被测试抓住")
+    caught = len(MUTANTS) - len(survivors) - len(invalid)
+    print(f"{caught}/{len(MUTANTS)} 个变异被测试抓住")
+    if invalid:
+        print(
+            f"{len(invalid)} 个变异的 pytest 运行无效（崩溃、超时或被杀，不算抓住）：{'、'.join(invalid)}"
+        )
+        return 3
     return 1 if survivors else 0
 
 
