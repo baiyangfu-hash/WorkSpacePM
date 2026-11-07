@@ -104,6 +104,7 @@ def test_a_rule_file_without_approval_fails() -> None:
     result = rules.judge(["AGENTS.md", "README.md"], [], HEAD)
     assert not result.passed and result.rule_files == ["AGENTS.md"]
     assert f"规则批准 {HEAD[:12]}" in rules.render(result, HEAD)
+    assert "复制这行评论即可批准" in rules.render(result, HEAD)
 
 
 @pytest.mark.parametrize("sha", [HEAD[:12], HEAD, HEAD[:12].upper()])

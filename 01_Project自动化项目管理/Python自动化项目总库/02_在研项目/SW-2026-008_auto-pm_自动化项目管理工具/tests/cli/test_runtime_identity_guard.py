@@ -42,6 +42,7 @@ NOT_WRITE_COMMANDS = frozenset(
         "approver-pin init",
         "approver-pin status",
         "context",
+        "control-root-status",  # D-44/D-13: read-only (branch, uncommitted files and their holders); no fetch, no write
         "drafts",
         "inbox list",
         "inbox show",

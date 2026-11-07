@@ -51,6 +51,7 @@ AGENT_MARKERS = (
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
     "CODEX_THREAD_ID",
+    "AI_AGENT",  # 通用约定：Claude Code 等会设（本机实测 claude-code_2-1-317_agent），别的 agent 工具陆续跟进
 )
 _TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
 

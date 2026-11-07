@@ -1,0 +1,59 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261106-539133D4",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-055",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+    "SYS-2026-001_WorkspaceGovernance/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-06T00:47:26.950627+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: pm orient DJ-2026-009 能认出该项目（不再报项目未登记）",
+    "acceptance: pm orient DJ-2026-000 能认出该项目",
+    "acceptance: pm orient SysLib 能认出该项目",
+    "risk: 登记表和台账是治理文件，PR 需用户评论规则批准 <头12位>，我不自批",
+    "risk: #568 也往 SYS-2026-001 台账追加行（CHG-DOCU-2026-054），两个 PR 改同一台账文件，后合并者需先同步 main，可能冲突",
+    "risk: approve 会新建 CHG-DOCU 变更单并改台账，控制根随即在 SYS-2026-001 范围内变脏，本卡不开 Run，直接按字节复制进工位提交；控制根目前停在另一条讨论串的分支上，approve 要等它回到干净的 main",
+    "non-goal: 不改任何 PLC 项目文件，不替用户提交或回退登记表，不碰 #568 相关文件",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "cffe0b31f5e3d24b35c05ed7739271083d68df07b044a552f9142c4583922578",
+      "approval_evidence_ref": "user-confirmation:2026-11-05T23:11:06Z",
+      "request_id": "REGISTRY-DJ009-DJ000-SYSLIB-20261105-PLAN",
+      "execution_grant": {
+        "adapter": "manual",
+        "approved_model": "claude-code",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "SYS-2026-001_WorkspaceGovernance/workspace_registry.json"
+        ],
+        "plan_checklist": {
+          "original_request": "同意登记 009、000、SysLib",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": ".venv\\Scripts\\python.exe main.py pm orient DJ-2026-009 --json",
+              "expected_exit_code": 0
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe main.py pm orient DJ-2026-000 --json",
+              "expected_exit_code": 0
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe main.py pm orient SysLib --json",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "丢弃 claude/ 分支和对应 PR；控制根登记表改动可由用户决定是否还原（登记可重做）"
+        }
+      }
+    }
+  }
+}

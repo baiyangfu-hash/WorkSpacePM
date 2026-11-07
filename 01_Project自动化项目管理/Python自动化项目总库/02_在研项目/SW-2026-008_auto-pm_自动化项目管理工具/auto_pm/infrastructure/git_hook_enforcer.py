@@ -26,6 +26,8 @@ EXCLUDED_DIR_NAMES = frozenset({"tests", "docs", "scratch", ".auto-pm"})
 EXCLUDED_DIR_PREFIXES = ("00_Obsidian_Base",)
 EXCLUDED_FILE_PREFIXES = ("test_", "PM_SESSION_")
 _CHG_ID_PATTERN = re.compile(r"CHG-[A-Z0-9]+-\d{4}-\d+")
+# 提交说明里的单号不分大小写（D-01：小写 chg- 曾被当成“没绑单号”）；取出后统一转大写再比对。
+_CHG_ID_IN_MESSAGE = re.compile(r"CHG-[A-Z0-9]+-\d{4}-\d+", re.IGNORECASE)
 _PROJECT_ID_ROW_PATTERN = re.compile(
     r"^\|\s*(?:\*\*)?项目编号(?:\*\*)?\s*\|\s*([^|]+?)\s*\|",
     re.MULTILINE,
@@ -511,9 +513,17 @@ def _project_ledger_file(project_root: Path) -> Path | None:
 
 
 def _run_ledger_gate(
-    workspace_root: Path, related_project_ids: tuple[str, ...] | None
+    workspace_root: Path,
+    related_project_ids: tuple[str, ...] | None,
+    *,
+    report_only_mismatch: bool = False,
 ) -> int:
-    """执行台账门禁；related 为 None 时代表全局发布门。"""
+    """执行台账门禁；related 为 None 时代表全局发布门。
+
+    ``report_only_mismatch`` 只用于工位（双根）提交的 pre-commit（D-01 后半）：控制根台账里的历史对账差异只报告，
+    不阻断这次提交——本次绑定的变更单有没有入账，由 commit-msg 硬卡；全局差异由发布门兜底。台账文件缺失、
+    对账本身出错仍然阻断，因为那时根本判断不了。
+    """
     from auto_pm.core.project_service import ProjectService
     from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 
@@ -565,7 +575,9 @@ def _run_ledger_gate(
             f"孤儿 {len(report.orphan_in_ledger)} 条, "
             f"状态差异 {len(report.status_mismatches)} 条"
         )
-        if is_related:
+        if is_related and report_only_mismatch:
+            print(f"⚠️ [auto-pm pre-commit] {message}（工位提交只报告，不阻断；本次绑定的变更单由 commit-msg 校验，全局差异由发布门拦）")
+        elif is_related:
             print(f"❌ [auto-pm ledger gate] {message}")
             has_blocking_error = True
         else:
@@ -885,7 +897,7 @@ def _enforce_ledger_pre_commit(
     roots = _roots_or_reject(workspace_root, control_root, "pre-commit")
     if roots is None:
         return 1
-    _cand_root, gov_root = roots
+    cand_root, gov_root = roots
     staged = list(snapshot.paths)
     if not staged:
         return 0
@@ -903,7 +915,9 @@ def _enforce_ledger_pre_commit(
         related_project_ids = _production_project_ids_from_paths(prod_files, bindings)
         if not related_project_ids:
             return 0
-        if _run_ledger_gate(gov_root, related_project_ids) != 0:
+        if _run_ledger_gate(
+            gov_root, related_project_ids, report_only_mismatch=cand_root.resolve() != gov_root.resolve()
+        ) != 0:
             print(
                 "🚨 [auto-pm pre-commit] 物理阻断：关联项目台账未闭环，"
                 "严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix"
@@ -992,6 +1006,45 @@ def _enforce_staged_change_status(cand_root: Path, gov_root: Path, snapshot: Sta
     return 0
 
 
+def _is_content_neutral_merge(cand_root: Path, snapshot: StagedSnapshot, prod_files: list[str]) -> bool:
+    """正在合并（有 MERGE_HEAD）且暂存的生产代码与对方父提交逐字节相同时为真。
+
+    这类合并没有带进任何新内容：每个文件在对方分支上已有自己的提交与门禁，不必再给合并提交
+    补一个变更单号（D-01：默认的 MERGE_MSG 不含单号，曾被整条拒绝）。冲突手工解决后产生的
+    新内容、被合并删掉但对方还有的文件，都不算中性，仍要求绑定变更单。任何一步读取失败都按
+    “不中性”处理，保持拒绝。
+    """
+
+    def _rev(spec: str) -> str:
+        result = run_git_bounded_text(
+            ["git", "rev-parse", "-q", "--verify", spec],
+            default_timeout=30.0,
+            error_cls=StagedSnapshotError,
+            where=cand_root,
+            cwd=str(cand_root),
+            capture_output=True,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    try:
+        if not _rev("MERGE_HEAD"):
+            return False
+        wanted = set(prod_files)
+        for entry in snapshot.entries:
+            if entry.path not in wanted:
+                continue
+            their_oid = _rev(f"MERGE_HEAD:{entry.path}")
+            if entry.deleted:
+                if their_oid:
+                    return False
+            elif not their_oid or their_oid != entry.object_id:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def enforce_commit_msg(
     workspace_root: Path,
     commit_msg_file: Path,
@@ -1019,8 +1072,8 @@ def enforce_commit_msg(
     staged = list(snapshot.paths)
     prod_files = filter_production_files(staged)
 
-    if not prod_files:
-        # 纯文档/治理/会话提交，豁免变更单号要求；但暂存的变更单状态仍要有流转依据
+    if not prod_files or _is_content_neutral_merge(cand_root, snapshot, prod_files):
+        # 纯文档/治理/会话提交，或没带进新内容的合并提交，豁免变更单号要求；但暂存的变更单状态仍要有流转依据
         return _enforce_staged_change_status(cand_root, gov_root, snapshot)
 
     try:
@@ -1032,7 +1085,9 @@ def enforce_commit_msg(
         msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
 
         # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
-        chg_matches = tuple(dict.fromkeys(_CHG_ID_PATTERN.findall(msg_content)))
+        chg_matches = tuple(
+            dict.fromkeys(item.upper() for item in _CHG_ID_IN_MESSAGE.findall(msg_content))
+        )
     except Exception as exc:
         print(
             "❌ [auto-pm commit-msg] 物理拦截：无法读取或解析提交信息，"

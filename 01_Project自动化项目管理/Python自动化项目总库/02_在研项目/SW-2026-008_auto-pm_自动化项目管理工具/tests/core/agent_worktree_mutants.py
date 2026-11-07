@@ -21,7 +21,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("有没推送的提交也删", "        if station.unpushed:\n", "        if False:\n"),
     ("锁住的工位也删", "        if station.locked:\n", "        if False:\n"),
     ("detached 工位也删", "        if not station.branch:\n", "        if False:\n"),
-    ("可以收别的 agent 的工位", "        if caller and caller != agent and caller != self.borrower(agent):\n", "        if False:\n"),
+    ("可以收别的 agent 的工位", "        if not (acts_for(caller, agent) or caller == self.borrower(agent)):\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收", "        if False:\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收"),
     (
         "认不出调用方时放行（close）",
         "        if caller == _UNKNOWN_CALLER:\n",
@@ -39,10 +39,10 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "agent 会话 sweep 可清别人的",
-        "            if agent is not None and agent != caller:\n",
+        "            if agent is not None and not acts_for(caller, agent):\n",
         "            if False:\n",
     ),
-    ("agent 会话 sweep 不限定到自己", "            agent = caller\n", "            pass\n"),
+    ("agent 会话 sweep 不限定到自己", "            agent = agent or caller\n", "            pass\n"),
     ("agent 会话可清 run-plan", 'if station.kind == "run-plan" and caller_agent():', "if False:"),
     (
         "名册外前缀的孤儿分支也删",
@@ -72,7 +72,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "--agent 限定不生效",
-        'station.kind == "agent" and agent is not None and station.name != agent',
+        'station.kind == "agent" and agent is not None and not _in_sweep_scope(station.name, agent)',
         "False",
     ),
     ("刚开的空工位也清", "        if station.untouched:\n", "        if False:\n"),
@@ -84,7 +84,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("名册外的目录也清", '        if station.kind == "other":\n', "        if False:\n"),
     (
         "分支前缀不符的工位也清",
-        "if not station.branch.startswith(AGENT_ROSTER[station.name]):",
+        "if not station.branch.startswith(self._prefix(station.name)):",
         "if False:",
     ),
     ("Run 没结束也清 run-plan", "if state not in TERMINAL_RUN_STATES:", "if False:"),
@@ -106,7 +106,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "--agent 限定对孤儿分支不生效",
-        "if agent is not None and not branch.startswith(AGENT_ROSTER[agent]):",
+        "if agent is not None and not branch.startswith(self._prefix(agent)):",
         "if False:",
     ),
     ("没并进 main 也删本地分支", "        elif fresh.merged:\n", "        elif True:\n"),

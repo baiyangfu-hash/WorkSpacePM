@@ -1,0 +1,54 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261106-19A735EB",
+  "project_id": "DJ-2026-000",
+  "change_id": "CHG-PLC-2026-006",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "0100_PLC自动化/DJ-2026-000/FB100/FB_ValveControl.scl"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-06T03:07:16.033862+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: plc check DJ-2026-000 相对基线无新增失败（基线已有失败项，与本卡无关）",
+    "acceptance: 文档与注释静态扫描通过",
+    "risk: 基线 plc check 已有失败项，不在本卡范围，验收用 --baseline 只判新增失败",
+    "risk: PR 按安全区写“安全回路: 是”，需用户安全签字，我不自己签",
+    "risk: DJ-2026-000 没有版本变更台账：plan/approve 会生成 CHG，提交前需先让台账入库；SysLib/000 项目台账由驾驶舱按需创建",
+    "non-goal: 不换定时器/计数器类型（等目标平台答复）",
+    "non-goal: 只改列出的文件，不改其它 PLC 项目",
+    "safety-circuit: 是（安全区：先仿真，再由用户在 PR 上写“安全签字 + 提交号”后才能合并）"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "ab246e853da0711a9a71aa0f5086c3b38533ebf2c0a02e814161f4ea225e5ffd",
+      "approval_evidence_ref": "user-confirmation:2026-11-05T22:36:58Z",
+      "request_id": "DJ000-OUTREAD-20261106-PLAN",
+      "execution_grant": {
+        "adapter": "manual",
+        "approved_model": "claude-code",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "0100_PLC自动化/DJ-2026-000/FB100/FB_ValveControl.scl"
+        ],
+        "plan_checklist": {
+          "original_request": "多重实例，计时器不是已经验证可行了么？计数器应该是一样的才对。相关的计时器，计数器全部都用多重实例好了。今天把PLC问题，全部解决",
+          "safety_circuit": "是",
+          "acceptance_checks": [
+            {
+              "command": ".venv\\Scripts\\python.exe main.py plc check DJ-2026-000 --baseline 6680e590",
+              "expected_exit_code": 0
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe main.py doc check",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "丢弃 claude/ 分支和对应 PR；原程序不变"
+        }
+      }
+    }
+  }
+}
