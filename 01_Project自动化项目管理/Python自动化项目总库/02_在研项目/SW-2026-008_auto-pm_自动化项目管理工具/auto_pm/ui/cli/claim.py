@@ -55,7 +55,7 @@ def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str,
 @click.option("--no-fetch", is_flag=True, help="不联网，只看本机已知的占位")
 @click.pass_context
 def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
-    """只读：列出远程所有占位（已放下或租约 7 天到期的视为空闲，不会自动删）。"""
+    """只读：列出远程所有占位（已放下或租约到期（默认 4 小时，持有者 `claim renew` 续）的视为空闲，不会自动删）。"""
     try:
         claims = _service(ctx).all_claims(fetch=not no_fetch)
     except ClaimError as error:
@@ -83,3 +83,33 @@ def release_claim(ctx: click.Context, card: str, owner: str) -> None:
         _fail(error)
         return
     click.echo(f"已放下卡 {card}")
+
+
+@claim_group.command(name="renew")
+@click.argument("card")
+@click.option("--as", "owner", default="", help="谁在续；必须与领卡时一致")
+@click.pass_context
+def renew_claim(ctx: click.Context, card: str, owner: str) -> None:
+    """续租自己的占位：还在干活就续，把到期时间推到现在 + 4 小时；停了不续，到期自动算空闲。"""
+    try:
+        renewed = _service(ctx).renew(card, owner=_owner(owner))
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"已续租 {renewed.label()}，到期 {renewed.expires_at}")
+
+
+@claim_group.command(name="reclaim")
+@click.argument("card")
+@click.option("--reason", required=True, help="为什么收回（对方没动静、状态未知等）")
+@click.option("--approval-evidence-ref", default="", help="用户原话所在的位置，写成 user-confirmation:<消息时间或编号>；收回别人的占位只听用户的")
+@click.option("--as", "by", default="", help="谁在收；缺省取调用方")
+@click.pass_context
+def reclaim_claim(ctx: click.Context, card: str, reason: str, approval_evidence_ref: str, by: str) -> None:
+    """收回别人没动静的占位：推一个“已收回”提交（写明谁、为什么、依据哪句用户的话），不删分支，卡随即空闲。"""
+    try:
+        claim = _service(ctx).reclaim(card, by=_owner(by), reason=reason, approval_ref=approval_evidence_ref)
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"卡 {card} 的占位已收回（现状态：{claim.status}）")

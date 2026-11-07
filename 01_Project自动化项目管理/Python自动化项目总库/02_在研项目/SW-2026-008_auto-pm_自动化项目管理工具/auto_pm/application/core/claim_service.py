@@ -34,8 +34,8 @@ _LOCAL_REF = "refs/remotes/origin/claims/"
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 _CARD_FILE = re.compile(r"/02_规划/(\d{3})_[^/]+_PM\.md$")
 GIT_TIMEOUT_SECONDS = 120.0
-LEASE_DAYS = 7
-STALE_DAYS = LEASE_DAYS
+LEASE_HOURS = 4  # short on purpose: a holder that is still working renews (``claim renew``); one that went silent frees the card by itself
+STALE_DAYS = 2
 AUTO_RETRIES = 8
 
 
@@ -115,9 +115,9 @@ REQUIRE_CLAIM_ENV = "AUTO_PM_REQUIRE_CLAIM"
 
 
 def claim_required() -> bool:
-    """Whether ``pr open`` insists on a claim.  Opt-in (``AUTO_PM_REQUIRE_CLAIM=1``) until the user flips the default."""
+    """Whether ``pr open`` insists on a claim.  On by default (user, 2026-11-07); ``AUTO_PM_REQUIRE_CLAIM=0`` (or false/no/off) turns it off."""
 
-    return os.environ.get(REQUIRE_CLAIM_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get(REQUIRE_CLAIM_ENV, "").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def claim_refusal(repo_root: str | Path, card: str, owner: str) -> str:
@@ -244,7 +244,7 @@ class ClaimService:
             "goal": goal,
             "status": "active",
             "claimed_at": now.isoformat(timespec="seconds"),
-            "expires_at": (now + timedelta(days=LEASE_DAYS)).isoformat(timespec="seconds"),
+            "expires_at": (now + timedelta(hours=LEASE_HOURS)).isoformat(timespec="seconds"),
         }
         commit = self._commit(card, payload, previous)
         message = f"claim {card}\n" + json.dumps(payload, ensure_ascii=False)
@@ -297,6 +297,74 @@ class ClaimService:
                     raise ClaimError("放下占位没推成功：" + _decode(result.stderr).strip())
                 return
         raise ClaimError(f"没有叫 {card} 的占位")
+
+    # ── renew / reclaim ───────────────────────────────────────────────
+
+    def renew(self, card: str, *, owner: str) -> Claim:
+        """The holder says "still working": push a commit that moves ``expires_at`` to now + ``LEASE_HOURS`` (never shortens it)."""
+
+        claim = self._find(card)
+        if claim.owner != owner:
+            raise ClaimError(f"卡 {card} 是 {claim.owner} 领的，不是 {owner}；只有持有者能续租")
+        if claim.free:
+            raise ClaimError(f"卡 {card} 的占位已放下、被收回或已到期，不能续租；重新 `claim open {card} --paths … --goal …`")
+        now = datetime.now(UTC)
+        payload = self._payload(claim, "active")
+        payload["expires_at"] = max(claim.expires_at, (now + timedelta(hours=LEASE_HOURS)).isoformat(timespec="seconds"))
+        payload["renewed_at"] = now.isoformat(timespec="seconds")
+        return self._push_on_top(claim, payload, "续租没推成功")
+
+    def reclaim(self, card: str, *, by: str, reason: str, approval_ref: str) -> Claim:
+        """Take a card back from a holder that went silent (D-39).  Only on the user's word: ``approval_ref`` must be ``user-confirmation:<where>``.
+
+        Nothing is deleted: a commit marked ``reclaimed`` (who, why, when, on whose word) goes on top, so the history stays and the card is free.
+        """
+
+        if not reason.strip():
+            raise ClaimError("收回占位必须写明原因（--reason）")
+        prefix = "user-confirmation:"
+        if not approval_ref.startswith(prefix) or len(approval_ref[len(prefix):].strip()) < 6:
+            raise ClaimError("收回别人的占位只听用户的：--approval-evidence-ref 写成 user-confirmation:<用户那条消息的时间或编号>")
+        claim = self._find(card)
+        if claim.free:
+            return claim  # already released, reclaimed or expired: nothing to do
+        payload = self._payload(claim, "reclaimed")
+        payload.update(
+            {
+                "reclaimed_by": by,
+                "reclaimed_reason": reason.strip(),
+                "reclaimed_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "reclaimed_on": approval_ref,
+            }
+        )
+        return self._push_on_top(claim, payload, "收回占位没推成功")
+
+    def _find(self, card: str) -> Claim:
+        for claim in self.all_claims():
+            if claim.card == card:
+                return claim
+        raise ClaimError(f"没有叫 {card} 的占位")
+
+    @staticmethod
+    def _payload(claim: Claim, status: str) -> dict[str, object]:
+        return {
+            "owner": claim.owner,
+            "machine": claim.machine,
+            "paths": list(claim.paths),
+            "goal": claim.goal,
+            "status": status,
+            "claimed_at": claim.claimed_at,
+            "expires_at": claim.expires_at,
+        }
+
+    def _push_on_top(self, claim: Claim, payload: dict[str, object], failure: str) -> Claim:
+        commit = self._commit(claim.card, payload, claim.commit)
+        ref = f"{_CLAIM_REF}{claim.card}"
+        result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"])
+        if result.returncode != 0:
+            raise ClaimError(f"{failure}：" + _decode(result.stderr).strip())
+        self._fetch()
+        return self._parse(claim.card, commit, f"claim {claim.card}\n" + json.dumps(payload, ensure_ascii=False))
 
     # ── git plumbing ──────────────────────────────────────────────────
 
