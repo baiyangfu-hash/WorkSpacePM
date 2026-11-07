@@ -19,7 +19,7 @@ TESTS = "tests/core/test_pr_open_service.py"
 MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("名册外的 agent 也开", "        if prefix is None:\n", "        if False:\n"),
     ("认不出调用方时放行", "        if caller == UNKNOWN_CALLER:\n", "        if False:\n"),
-    ("可以替别的 agent 开 PR", "        if not acts_for(caller, agent) and caller != self._stations.borrower(agent):\n", "        if False:\n"),
+    ("可以替别的 agent 开 PR", "        if caller and caller != agent:\n", "        if False:\n"),
     (
         "没有工位也往下走",
         '        if station is None or station.kind != "agent":\n',
