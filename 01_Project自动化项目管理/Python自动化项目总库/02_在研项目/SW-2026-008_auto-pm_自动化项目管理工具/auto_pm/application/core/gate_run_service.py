@@ -179,7 +179,9 @@ def pytest_counts(log: Path) -> dict[str, int] | None:
             tail = handle.read()
     except OSError:
         return None
-    text = tail.decode("utf-8", errors="replace")  # lenient-decode: log tail only feeds the summary regex; exit code and log hash are judged apart
+    text = tail.decode(
+        "utf-8", errors="replace"
+    )  # lenient-decode: log tail only feeds the summary regex; exit code and log hash are judged apart
     for line in reversed(text.splitlines()):
         tokens = _TOKEN.findall(line)
         if tokens and _TIMING.search(line):
@@ -302,16 +304,26 @@ class GateSummary:
 
 
 def _git(worktree: Path, *args: str) -> str | None:
+    """Git's stdout, or None when git could not answer (not started, timed out, or a non-zero exit such as a broken index).
+
+    A failed ``git status`` prints nothing; read as text that would be a clean tree, so the exit code is checked.
+    """
+
     try:
         done = subprocess.run(  # noqa: S603
             ["git", "-C", str(worktree), *args], capture_output=True, check=False, timeout=60
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    text = done.stdout.decode("utf-8", errors="replace")  # lenient-decode: git output is a commit id or status text
+    if done.returncode != 0:
+        return None
+    text = done.stdout.decode(
+        "utf-8", errors="replace"
+    )  # lenient-decode: git output is a commit id or status text
     return text.strip()
 
 
+UNREADABLE_IGNORED = "<读不出被忽略的文件：git ls-files 失败>"
 _CODE_SUFFIXES = (".py", ".ini", ".cfg", ".toml", ".json", ".yaml", ".yml", ".qml")
 
 
@@ -346,6 +358,8 @@ def tree_state(worktree: Path, project: Path) -> TreeState:
         for line in (ignored or "").splitlines()
         if line.endswith(_CODE_SUFFIXES) and "__pycache__" not in line
     )
+    if ignored is None:  # git could not list them: that is "unknown", never "none"
+        listed.append(UNREADABLE_IGNORED)
     return TreeState(
         _git(worktree, "rev-parse", "HEAD") or "",
         None if status is None else bool(status),

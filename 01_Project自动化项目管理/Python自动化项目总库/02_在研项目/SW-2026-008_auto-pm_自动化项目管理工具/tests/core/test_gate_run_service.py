@@ -217,8 +217,8 @@ class _Tree:
 
     def __init__(self, dirty: bool = False, untracked: bool = False) -> None:
         self.head = "a" * 40
-        self.status = " M x.py" if dirty else ("?? zz_probe.py" if untracked else "")
-        self.ignored = ""
+        self.status: str | None = " M x.py" if dirty else ("?? zz_probe.py" if untracked else "")
+        self.ignored: str | None = ""
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> Path:
         real = gate._git
@@ -534,3 +534,41 @@ def test_default_runner_kills_a_group_that_overruns_and_reports_124(tmp_path: Pa
     )
     assert code == 124 and "killed after 1 s" in log.read_text(encoding="utf-8")
     assert gate.default_runner([sys.executable, "-c", "print('ok')"], tmp_path, {}, log, 30) == 0
+
+
+def test_a_git_that_fails_is_unknown_not_clean(tmp_path: Path) -> None:
+    """Counterexample (audit 2): a broken index makes ``git status`` exit 128 with empty output; that must not read as a clean tree."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    for key, value in (
+        ("user.email", "t@example.com"),
+        ("user.name", "t"),
+        ("commit.gpgsign", "false"),
+    ):
+        git("config", key, value)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "c0")
+    (tmp_path / "tests" / "conftest.py").write_text("x = 1\n", encoding="utf-8")  # untracked
+    (tmp_path / ".git" / "index").write_bytes(b"not an index")
+    assert gate._git(tmp_path, "status", "--porcelain") is None
+    state = gate.tree_state(tmp_path, tmp_path)
+    assert state.dirty is None and gate.UNREADABLE_IGNORED in state.ignored_code
+
+
+@pytest.mark.parametrize("broken", ["status", "ls-files"])
+def test_a_round_is_not_pass_when_git_cannot_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    tree = _Tree()
+    if broken == "status":
+        tree.status = None
+    else:
+        tree.ignored = None
+    summary = GateRunService(runner=_Recorder()).run(tree.install(monkeypatch), tmp_path)
+    assert summary.verdict == "PARTIAL" and summary.reasons
+    assert GateRunService().judge_dir(tmp_path).verdict == "PARTIAL"
