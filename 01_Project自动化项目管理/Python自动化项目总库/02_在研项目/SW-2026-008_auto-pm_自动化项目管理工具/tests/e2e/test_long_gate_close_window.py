@@ -229,3 +229,72 @@ def test_a_comfortable_hold_is_not_flagged(lab: dict[str, Path]) -> None:
     cfg = _gate(lab, run_age_s=60)
     assert _run(cfg, "run").returncode == 0
     assert _state(lab).get("warning") is None
+
+
+# ── the margin arithmetic, pinned at its edges (audit of #593: three mutants of this sum survived) ──
+
+
+def _margin_cfg(expected: int, closing: int) -> dict[str, Any]:
+    return {
+        "expected_duration_s": expected,
+        "closing_estimate_s": closing,
+        "out_dir": "unused",
+        "lease": {"mode": "auto_pm"},
+    }
+
+
+def _hold_with(
+    monkeypatch: pytest.MonkeyPatch, module: Any, *, have_s: float, cfg: dict[str, Any]
+) -> str:
+    """Run ``hold_margin_refusal`` with a hold that ends exactly ``have_s`` seconds after a frozen "now"."""
+    now = dt.datetime(2026, 11, 7, 12, 0, 0, tzinfo=dt.UTC)
+    monkeypatch.setattr(module, "utc_now", lambda: now)
+    monkeypatch.setattr(
+        module.Lease,
+        "hold_end",
+        lambda self, planned_extension=False: now + dt.timedelta(seconds=have_s),
+    )
+    monkeypatch.setattr(module.Lease, "__init__", lambda self, cfg, log: None)
+    return str(module.hold_margin_refusal(cfg, log=lambda *_: None))
+
+
+def test_the_margin_is_thirty_minutes() -> None:
+    assert _module().CLOSE_MARGIN_EXTRA_S == 30 * 60
+
+
+def test_exactly_enough_hold_passes_and_one_second_less_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    cfg = _margin_cfg(expected=1000, closing=500)
+    need = 1000 + 500 + 30 * 60
+    assert _hold_with(monkeypatch, module, have_s=need, cfg=cfg) == ""
+    refusal = _hold_with(monkeypatch, module, have_s=need - 1, cfg=cfg)
+    assert refusal
+    assert f"needs {need} s" in refusal
+
+
+def test_the_closing_estimate_alone_decides_the_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    have = 1000 + 100 + 30 * 60  # covers closing=100, but not closing=101
+    assert _hold_with(monkeypatch, module, have_s=have, cfg=_margin_cfg(1000, 100)) == ""
+    assert _hold_with(monkeypatch, module, have_s=have, cfg=_margin_cfg(1000, 101)) != ""
+
+
+def test_the_expected_duration_alone_decides_the_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    have = 1000 + 100 + 30 * 60
+    assert _hold_with(monkeypatch, module, have_s=have, cfg=_margin_cfg(1000, 100)) == ""
+    assert _hold_with(monkeypatch, module, have_s=have, cfg=_margin_cfg(1001, 100)) != ""
+
+
+def test_the_thirty_minute_margin_alone_decides_the_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    # expected + closing is covered by a wide margin, but the 30 min margin is not
+    cfg = _margin_cfg(expected=600, closing=300)
+    assert _hold_with(monkeypatch, module, have_s=600 + 300 + 30 * 60 - 1, cfg=cfg) != ""
+    assert (
+        _hold_with(monkeypatch, module, have_s=600 + 300, cfg=cfg) != ""
+    )  # without any margin: refused
