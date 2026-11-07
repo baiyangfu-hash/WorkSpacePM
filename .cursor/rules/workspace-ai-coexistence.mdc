@@ -33,7 +33,8 @@ alwaysApply: true
 
 ## 工位与控制根（真源：`AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”）
 
-- Cursor 里的 AI 只在自己的工位 `R/.auto-pm/worktrees/cursor` 写代码，分支前缀 `cursor/`；`R` 是本机唯一的控制根（停在 `main`，持 `.auto-pm/continuity.db`）
+- Cursor 里的 AI 的基名是 `cursor`，分支前缀 `cursor/`；工位目录名用别名 `cursor-<会话ID前6位>`（名字规则见 `AGENTS.md` WS-001），在 `R/.auto-pm/worktrees/` 下写代码；`R` 是本机唯一的控制根（停在 `main`，持 `.auto-pm/continuity.db`）
+- **身份声明**：Cursor 没有自带身份标记，跑 `main.py` 必须用 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor <命令参数>`（只在这一条命令期间设置 `AUTO_PM_AGENT=cursor`），否则会被当成用户本人；需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用它运行
 - 驾驶舱命令只在控制根执行；不得另克隆仓库、不得把工作树放在 `.auto-pm/worktrees/` 之外（否则成为第二本账或被拒登记 Run）
 - 其他 agent 的工位与前缀、开收工位命令，以 `AGENTS.md` 该节为准
 
