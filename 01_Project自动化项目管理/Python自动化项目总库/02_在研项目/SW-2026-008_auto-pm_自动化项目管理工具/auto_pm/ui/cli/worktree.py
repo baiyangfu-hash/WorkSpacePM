@@ -57,6 +57,25 @@ class _AgentName(click.ParamType):  # type: ignore[type-arg]
 AGENTS = _AgentName()
 
 
+def resolve_station_name(service: AgentWorktreeService, agent: str, *, opening: bool = False) -> str:
+    """D-112: a bare roster name from an agent that has its own conversation alias means *this conversation's* station.
+
+    Every Claude conversation used to pass ``claude`` and land on the one shared ``claude`` station, so whoever opened it first
+    held it for days and nobody else could open a PR from a different card.  With a session id the caller has its own station
+    ``claude-<6 hex>``; ``opening`` always uses it, other commands use it when it exists and otherwise keep the name they were
+    given (an older station opened under the bare name keeps working).  Without a session id (the user's terminal, other AIs)
+    nothing changes.  Only the caller's own alias can come out of here, so one conversation cannot reach another's station.
+    """
+
+    alias = caller_alias()
+    if not alias or agent == alias or agent != base_agent(alias):
+        return agent
+    if opening or (service.stations_dir / alias).exists():
+        console.print(f"[cyan]按本对话别名 {alias} 处理（{agent} 是所有同名对话共用的名字）[/cyan]")
+        return alias
+    return agent
+
+
 def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeService:
     app_ctx: AppContext = ctx.obj
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
@@ -160,6 +179,7 @@ def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
     """为 AGENT 开工位，分支 <前缀><CARD>，从最新 origin/main 起"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
+    agent = resolve_station_name(service, agent, opening=True)
     try:
         station = service.open(agent, card, fetch=not no_fetch)
     except AgentWorktreeError as error:
@@ -238,6 +258,7 @@ def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
     """收 AGENT 的工位：无未提交改动、提交都已推送才删；已并进 main 的再删本地分支"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
+    agent = resolve_station_name(service, agent)
     try:
         result = service.close(agent, fetch=not no_fetch)
     except AgentWorktreeError as error:
