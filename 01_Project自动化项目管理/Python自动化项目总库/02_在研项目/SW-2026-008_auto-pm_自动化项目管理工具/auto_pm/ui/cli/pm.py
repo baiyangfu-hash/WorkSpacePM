@@ -105,7 +105,7 @@ def _live_run_owners(root: str, project_id: str) -> OwnerLookup | None:
         return None
 
 
-def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, object]]:
+def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True) -> list[dict[str, object]]:
     """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
 
     Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
@@ -120,6 +120,8 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, ob
     for claim in active:
         clash = claim_overlap(scope_paths, claim.paths) if scope_paths else ()
         result.append({**claim.as_json(), "overlaps_scope": list(clash)})
+        if not echo:
+            continue
         text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
         if clash:
             click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
@@ -1433,15 +1435,19 @@ def control_root_status(ctx: click.Context, project_id: str, as_json: bool) -> N
     """
     root = _control_root_path(ctx)
     service = ControlRootSyncService(root, owner_of=_live_run_owners(root, project_id))
-    report = service.check(service.project_scope(project_id))
+    scope = service.project_scope(project_id)
+    report = service.check(scope)
     if as_json:
-        click.echo(json.dumps(report.as_json(), ensure_ascii=False, indent=2))
+        # D-39: other parties' active claims (from the last fetch, no network) ride along so other threads and scripts see them too.
+        payload = {**report.as_json(), "claims": _claims_notice(root, scope, echo=False)}
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     lines = report.lines()
     if not lines:
         click.echo("控制根与 origin/main 一致，在 main 上，没有未提交文件。")
     for line in lines:
         click.echo(line)
+    _claims_notice(root, scope)
 
 
 def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
