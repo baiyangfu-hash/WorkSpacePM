@@ -251,28 +251,42 @@ def claim_validity_problems(card: str, payload: dict[str, object], first: str) -
     return problems
 
 
+def _claimed_paths(payload: dict[str, object]) -> list[str]:
+    items = payload.get("paths", [])
+    if not isinstance(items, list):
+        return []
+    return [path for item in items if isinstance(item, str) and (path := normalized(item)) is not None]
+
+
+def _is_covered(path: str, claimed: Sequence[str]) -> bool:
+    return any(path == c or path.startswith(c + "/") for c in claimed)
+
+
 def claim_coverage_problems(fetch: Fetch, repo: str, number: int, body: str, payloads: dict[str, dict[str, object]]) -> list[str]:
-    """可改范围和实际改到的每个文件，必须落在**所有**被引用的卡订的路径的并集里（一个 PR 可以做几张卡）。"""
+    """可改范围和实际改到的文件，必须落在**所有**被引用的卡订的路径的并集里（一个 PR 可以做几张卡）；
+    并且每张被引用的卡都得是“必需”的：去掉它，范围就覆盖不全。否则一张无关的大范围卡就能把并集撑大，替别的路径放行。"""
 
-    claimed = [
-        path
-        for payload in payloads.values()
-        for item in payload.get("paths", [])  # type: ignore[attr-defined]
-        if isinstance(item, str) and (path := normalized(item)) is not None
-    ]
-
-    def covered(path: str) -> bool:
-        return any(path == c or path.startswith(c + "/") for c in claimed)
-
+    by_card = {card: _claimed_paths(payload) for card, payload in payloads.items()}
+    everything = [path for paths in by_card.values() for path in paths]
     names = "、".join(payloads)
     problems: list[str] = []
     declared = [path for entry in declared_scope(body) if (path := normalized(entry)) is not None]
+    changed = changed_files(fetch, repo, number)
     for path in declared:
-        if not covered(path):
+        if not _is_covered(path, everything):
             problems.append(f"可改范围里的 `{path}` 不在卡 {names} 订的路径里：补订或收窄范围")
-    for path in changed_files(fetch, repo, number):
-        if not covered(path) and path not in declared:
+    for path in changed:
+        if not _is_covered(path, everything) and path not in declared:
             problems.append(f"实际改到的 `{path}` 不在卡 {names} 订的路径里：补订或收窄范围")
+    if problems or len(by_card) < 2:
+        return problems
+    needed = sorted({*declared, *changed})
+    remaining = dict(by_card)
+    for card in reversed(list(by_card)):  # 内容相同的两张卡只留前面那张
+        others = [path for other, paths in remaining.items() if other != card for path in paths]
+        if all(_is_covered(path, others) for path in needed):
+            problems.append(f"卡 {card} 是多余的：去掉它，可改范围和实际改到的文件仍被其余的卡全部覆盖；只引用真正用到的卡，别凑数")
+            del remaining[card]
     return problems
 
 

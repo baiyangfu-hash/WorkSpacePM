@@ -305,3 +305,51 @@ def test_cards_may_share_one_line_separated_by_commas(github: FakeGitHub) -> Non
     github.add_pr(11, body("pkg/a/x.py", "pkg/b/y.py", claim="c1, c2"), ["pkg/a/x.py", "pkg/b/y.py"])
 
     assert run(github, 11).passed
+
+
+def test_an_unrelated_broad_card_cannot_ride_along_to_widen_the_union(github: FakeGitHub) -> None:
+    github.claim("narrow", ["pkg/a"])
+    github.claim("broad", ["pkg"])
+    github.add_pr(11, multi_body("pkg/a/x.py", cards=("narrow", "broad")), ["pkg/a/x.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("卡 broad 是多余的" in error for error in errors), errors
+    assert not any("卡 narrow 是多余的" in error for error in errors)
+
+
+def test_a_broad_card_that_is_really_needed_is_fine_when_the_other_one_is_the_redundant_one(github: FakeGitHub) -> None:
+    github.claim("narrow", ["pkg/a"])
+    github.claim("broad", ["pkg"])
+    github.add_pr(11, multi_body("pkg/a/x.py", "pkg/b/y.py", cards=("narrow", "broad")), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("卡 narrow 是多余的" in error for error in errors), errors
+    assert not any("卡 broad 是多余的" in error for error in errors)
+
+
+def test_two_cards_that_each_cover_a_path_the_other_does_not_both_pass(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"])
+    github.add_pr(11, multi_body("pkg/a/x.py", "pkg/b/y.py", cards=("c1", "c2")), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    assert run(github, 11).passed
+
+
+def test_two_identical_cards_keep_only_the_first(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg"])
+    github.claim("c2", ["pkg"])
+    github.add_pr(11, multi_body("pkg/x.py", cards=("c1", "c2")), ["pkg/x.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("卡 c2 是多余的" in error for error in errors)
+    assert not any("卡 c1 是多余的" in error for error in errors)
+
+
+def test_a_single_card_is_never_called_redundant(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg", "other"])
+    github.add_pr(11, body("pkg/x.py", claim="c1"), ["pkg/x.py"])
+
+    assert run(github, 11).passed
