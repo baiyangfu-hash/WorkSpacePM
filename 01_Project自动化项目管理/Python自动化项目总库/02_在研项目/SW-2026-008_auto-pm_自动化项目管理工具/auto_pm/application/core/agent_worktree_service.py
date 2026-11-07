@@ -16,13 +16,16 @@ checks so that nothing unrecoverable is ever removed:
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from auto_pm.infrastructure.control_root_guard import (
@@ -69,6 +72,95 @@ RunStateLookup = Callable[[str], str | None]
 
 
 _UNKNOWN_CALLER = "?"
+
+# 每个对话一个工位名：<名册里的基名>-<会话 ID 前 6 位十六进制>（设计稿：动态 agent 名）。分支前缀沿用基名。
+_ALIAS = re.compile(r"^(claude|codex|cursor|trae|vscode)-[0-9a-f]{6}$")
+
+
+def base_agent(name: str) -> str:
+    """名册里的基名：``claude`` 返回 ``claude``，``claude-b89bc8`` 也返回 ``claude``，其余返回空串。"""
+
+    if name in AGENT_ROSTER:
+        return name
+    match = _ALIAS.match(name)
+    return match.group(1) if match else ""
+
+
+def session_id(environ: Mapping[str, str] | None = None) -> str:
+    """本对话的会话 ID，不绑定哪家 agent：AUTO_PM_SESSION_ID（任何 agent 或包装脚本可设）优先，其次 Claude Code 的 CLAUDE_CODE_SESSION_ID。"""
+
+    env = os.environ if environ is None else environ
+    for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
+        value = env.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def session_alias(environ: Mapping[str, str] | None = None, *, base: str | None = None) -> str:
+    """本对话的别名 ``<基名>-<6位十六进制>``；拿不到会话 ID 或基名不在名册里时返回空串（退回只用基名）。
+
+    基名取 ``base``，否则取现有的 ``AUTO_PM_AGENT`` 标记（``codex:cli`` 取冒号前的 ``codex``），再否则是 ``claude``。会话 ID 本身是十六进制（含带横线的 UUID）就取它的
+    前 6 位，别的任意字符串则取它的 SHA-256 前 6 位，所以包装脚本随便设个名字也行。
+    """
+
+    env = os.environ if environ is None else environ
+    session = session_id(env)
+    marker = env.get("AUTO_PM_AGENT", "").split(":", 1)[0]
+    chosen = (base or marker or "claude").strip().lower()
+    if not session or chosen not in AGENT_ROSTER:
+        return ""
+    compact = session.lower().replace("-", "")
+    if len(compact) >= 6 and all(character in "0123456789abcdef" for character in compact):
+        digits = compact[:6]
+    else:
+        digits = hashlib.sha256(session.encode("utf-8")).hexdigest()[:6]
+    return f"{chosen}-{digits}"
+
+
+def caller_alias() -> str:
+    """调用者所在对话的别名；调用者必须是名册里的 agent（不是用户终端、也不是认不出的 ``?``），并且拿得到会话 ID。"""
+
+    caller = caller_agent()
+    if not caller or caller == _UNKNOWN_CALLER:
+        return ""
+    return session_alias(base=caller)
+
+
+def ensure_session_id(control_root: str | Path) -> None:
+    """agent 调用却没有任何会话 ID 时，按父进程号生成一个并记住（同一个父进程的后续命令拿到同一个），写进 AUTO_PM_SESSION_ID。
+
+    记在 ``.auto-pm/session-ids/<父进程号>.txt``；父进程号被复用的旧记录由回收时清理。用户自己的终端不生成。
+    """
+
+    if not caller_agent() or caller_agent() == _UNKNOWN_CALLER or session_id():
+        return
+    folder = Path(control_root) / ".auto-pm" / "session-ids"
+    path = folder / f"{os.getppid()}.txt"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if path.is_file():
+            known = path.read_text(encoding="utf-8").strip()
+        else:
+            known = hashlib.sha256(f"{os.getppid()}:{time.time_ns()}:{os.getpid()}".encode()).hexdigest()[:32]
+            path.write_text(known, encoding="utf-8")
+    except OSError:
+        return
+    if known:
+        os.environ["AUTO_PM_SESSION_ID"] = known
+
+
+def acts_for(caller: str, station: str) -> bool:
+    """``caller_agent()`` 的结果能不能动 ``station``：用户（空）随意；认不出（?）不行；agent 只能动基名工位或自己对话的别名工位。"""
+
+    if not caller:
+        return True
+    if caller == _UNKNOWN_CALLER:
+        return False
+    if station == caller:
+        return True
+    alias = caller_alias()
+    return bool(alias) and station == alias
 
 
 def caller_agent() -> str:
@@ -153,6 +245,13 @@ class SweepItem:
     category: str  # "station" | "run-plan" | "gone-branch" | "other"
     remove: bool
     reason: str
+
+
+@dataclass(frozen=True)
+class ReleaseResult:
+    path: Path
+    branch: str
+    rescue_ref: str  # 空串：工位是干净的，没有要救的东西
 
 
 @dataclass
@@ -297,9 +396,175 @@ class AgentWorktreeService:
         added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), MAIN_REF)
         if added.returncode != 0:
             raise AgentWorktreeError(f"建工位失败：{_detail(added)}")
+        self._write_holder_note(agent)
         return self._inspect(
             path, registered=True, branch=branch, head=self._out("rev-parse", MAIN_REF)
         )
+
+    # ── 持有者记录、回收（设计稿：动态 agent 名与工位自动回收）──────────────
+
+    @property
+    def _notes_dir(self) -> Path:
+        return self._root / ".auto-pm" / "station-holders"
+
+    def _write_holder_note(self, agent: str) -> None:
+        """记下谁开的这个别名工位（会话 ID、进程号、对话标题），兜底回收靠它判断持有者还在不在。只给别名工位记。"""
+
+        if not _ALIAS.match(agent):
+            return
+        try:
+            self._notes_dir.mkdir(parents=True, exist_ok=True)
+            note = {
+                "agent": agent,
+                "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0) or os.getppid(),
+                "title": os.environ.get("AUTO_PM_SESSION_TITLE", ""),
+                "opened_at": datetime.now(UTC).isoformat(),
+                "heartbeat_at": datetime.now(UTC).isoformat(),
+            }
+            (self._notes_dir / f"{agent}.json").write_text(
+                json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except (OSError, ValueError):
+            pass  # 记不下来只会让兜底回收少一条依据，不能挡住开工位
+
+    def _read_holder_note(self, agent: str) -> dict[str, object]:
+        try:
+            loaded = json.loads((self._notes_dir / f"{agent}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def release(self, agent: str) -> ReleaseResult:
+        """对话结束时回收自己的别名工位：先把工位里的一切（含未提交、未跟踪的文件）存成救援引用，再收目录。
+
+        分支一定保留；救援引用 ``refs/rescue/<别名>/<时间>`` 指向一个包含全部改动的快照提交，不动工位分支本身，
+        ``git checkout <引用> -- .`` 或 ``git diff <分支> <引用>`` 就能找回。
+        """
+
+        with self._stations_lock():
+            return self._release_locked(agent)
+
+    def _release_locked(self, agent: str) -> ReleaseResult:
+        if not _ALIAS.match(agent):
+            raise AgentWorktreeError(f"`{agent}` 不是会话别名（<基名>-<6位十六进制>）；基名工位用 `worktree close`")
+        caller = caller_agent()
+        if not acts_for(caller, agent):
+            raise StationRefusedError(f"你是 {caller_alias() or caller}，不能回收 {agent} 的工位")
+        path = self._stations_dir / agent
+        info = self._worktrees().get(path.resolve()) if path.exists() else None
+        if info is None:
+            raise StationRefusedError(f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状")
+        self._require_inside(path)
+        rescue = self._save_rescue_ref(path, agent)
+        removed = self._git("worktree", "remove", "--force", str(path))
+        if removed.returncode != 0:
+            raise AgentWorktreeError(f"回收失败：{_detail(removed)}；救援引用 {rescue or '(无改动，没建)'} 已保留")
+        self._git("worktree", "prune")
+        with contextlib.suppress(OSError):
+            (self._notes_dir / f"{agent}.json").unlink()
+        return ReleaseResult(path=path, branch=info.branch, rescue_ref=rescue)
+
+    def _save_rescue_ref(self, path: Path, agent: str) -> str:
+        """工位里有任何没进分支的东西（改动、未跟踪文件）就存成救援引用并返回引用名；干净则返回空串。"""
+
+        status = self._git("status", "--porcelain=v1", "--untracked-files=all", cwd=path)
+        if status.returncode != 0:
+            raise AgentWorktreeError(f"回收前读不出工位状态：{_detail(status)}；不回收")
+        if not status.stdout.strip():
+            return ""
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        ref = f"refs/rescue/{agent}/{stamp}"
+        temp_index = self._root / ".auto-pm" / "tmp" / f"rescue-{agent}-{stamp}.index"
+        temp_index.parent.mkdir(parents=True, exist_ok=True)
+        env = {
+            **os.environ,
+            "GIT_INDEX_FILE": str(temp_index),
+            "GIT_AUTHOR_NAME": "auto-pm",
+            "GIT_AUTHOR_EMAIL": "auto-pm@localhost",
+            "GIT_COMMITTER_NAME": "auto-pm",
+            "GIT_COMMITTER_EMAIL": "auto-pm@localhost",
+        }
+
+        def run(*args: str) -> str:
+            step = run_git_bounded_text(
+                ["git", "-C", str(path), *args],
+                default_timeout=300.0,
+                error_cls=AgentWorktreeError,
+                where=path,
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+            if step.returncode != 0:
+                raise AgentWorktreeError(f"存救援快照失败（git {' '.join(args[:2])}）：{_detail(step)}；不回收")
+            return step.stdout.strip()
+
+        try:
+            run("read-tree", "HEAD")
+            run("add", "-A", "--", ".")
+            tree = run("write-tree")
+            commit = run("commit-tree", tree, "-p", "HEAD", "-m", f"rescue {agent} {stamp}")
+            updated = self._git("update-ref", ref, commit)
+            if updated.returncode != 0:
+                raise AgentWorktreeError(f"存救援快照失败（update-ref）：{_detail(updated)}；不回收")
+        finally:
+            with contextlib.suppress(OSError):
+                temp_index.unlink()
+        return ref
+
+    def touch_heartbeat(self, agent: str) -> bool:
+        """刷新别名工位的心跳（并把持有进程号更新成当前这个对话的）。没有这个工位的记录就什么都不做，返回 False。"""
+
+        note = self._read_holder_note(agent)
+        if not note:
+            return False
+        note["heartbeat_at"] = datetime.now(UTC).isoformat()
+        pid = int(os.environ.get("CLAUDE_PID", "0") or 0)
+        if pid > 0:
+            note["pid"] = pid
+        try:
+            (self._notes_dir / f"{agent}.json").write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            return False
+        return True
+
+    def stale_aliases(self, *, max_silence_hours: float | None = None) -> list[tuple[str, str]]:
+        """别名工位里持有对话已经关了的：返回 (别名, 依据)。
+
+        判定要两个条件**同时**成立：记录的持有进程已经不在，并且心跳已超过 ``max_silence_hours`` 没刷新（默认 2 小时，
+        环境变量 ``AUTO_PM_STATION_STALE_HOURS`` 可调）。进程还活着就绝不算陈旧——跑 3 小时门禁、对话里没有消息的时候，
+        心跳再旧也不回收。没有持有者记录的也不算（证明不了）。
+        """
+
+        limit = max_silence_hours if max_silence_hours is not None else _stale_hours()
+        found: list[tuple[str, str]] = []
+        if not self._stations_dir.is_dir():
+            return found
+        for child in sorted(self._stations_dir.iterdir()):
+            if not child.is_dir() or not _ALIAS.match(child.name):
+                continue
+            note = self._read_holder_note(child.name)
+            pid = note.get("pid")
+            if not isinstance(pid, int) or pid <= 0 or _process_alive(pid):
+                continue
+            silent = _hours_since(note.get("heartbeat_at") or note.get("opened_at"))
+            if silent is None or silent < limit:
+                continue
+            found.append((child.name, f"记录的持有进程 {pid} 已不在，且 {silent:.1f} 小时没有心跳（阈值 {limit:g} 小时）"))
+        return found
+
+    def reclaim_stale(self, *, apply: bool = False) -> list[tuple[str, str]]:
+        """列出（加 ``apply`` 则回收）持有者已不在的别名工位；回收走 release，所以一样先存救援引用。"""
+
+        with self._stations_lock():
+            stale = self.stale_aliases()
+            if apply:
+                if caller_agent():
+                    raise StationRefusedError("回收别的对话的陈旧工位只由用户在自己的终端执行")
+                for name, _reason in stale:
+                    self._release_locked(name)
+            return stale
 
     def count(self) -> int:
         """How many directories sit under ``.auto-pm/worktrees`` (registered or not, a missing one still registered counts)."""
@@ -412,9 +677,9 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不收工位；请用户在自己的终端执行"
             )
-        if caller and caller != agent:
+        if not acts_for(caller, agent):
             raise StationRefusedError(
-                f"你是 {caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
+                f"你是 {caller_alias() or caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )
         path = self._stations_dir / agent
         registered = self._worktrees()
@@ -458,9 +723,9 @@ class AgentWorktreeService:
                 "认不出是哪个 agent 在执行，不清理；先不加 --apply 看清单，删除请用户在自己的终端执行"
             )
         if apply and caller:
-            if agent is not None and agent != caller:
-                raise StationRefusedError(f"你是 {caller}，只能清自己的工位，不能 --agent {agent}")
-            agent = caller
+            if agent is not None and not acts_for(caller, agent):
+                raise StationRefusedError(f"你是 {caller_alias() or caller}，只能清自己的工位，不能 --agent {agent}")
+            agent = agent or caller
         warning = (
             self._fetch_prune() if fetch else "没有联网核对（--no-fetch），按本机已知的远程分支判断"
         )
@@ -477,7 +742,7 @@ class AgentWorktreeService:
         for branch in [] if only is not None else self._gone_branches():
             if branch in checked_out:
                 continue  # the station that holds it decides; deleting under a worktree is never right
-            if agent is not None and not branch.startswith(AGENT_ROSTER[agent]):
+            if agent is not None and not branch.startswith(self._prefix(agent)):
                 continue
             item = self._sweep_gone(branch)
             items.append(item)
@@ -527,7 +792,7 @@ class AgentWorktreeService:
             return SweepItem(
                 target, "run-plan", False, "run-plan 不属于任何 agent，只由用户在自己的终端清"
             )
-        if station.kind == "agent" and agent is not None and station.name != agent:
+        if station.kind == "agent" and agent is not None and not _in_sweep_scope(station.name, agent):
             return SweepItem(
                 target, "station", False, f"是 {station.name} 的工位，本次只清 {agent} 的"
             )
@@ -545,7 +810,7 @@ class AgentWorktreeService:
             if state not in TERMINAL_RUN_STATES:
                 return SweepItem(target, "run-plan", False, f"{run_id} 还在 {state}，没结束，保留")
             return SweepItem(target, "run-plan", True, f"{run_id} 已结束（{state}），工作树干净")
-        if not station.branch.startswith(AGENT_ROSTER[station.name]):
+        if not station.branch.startswith(self._prefix(station.name)):
             return SweepItem(
                 target,
                 "station",
@@ -886,11 +1151,13 @@ class AgentWorktreeService:
             ) from error
 
     def _prefix(self, agent: str) -> str:
-        if agent not in AGENT_ROSTER:
+        base = base_agent(agent)
+        if not base:
             raise AgentWorktreeError(
-                f"agent `{agent}` 不在名册里（{'、'.join(AGENT_ROSTER)}）；表外的 AI 先由用户登记名字和前缀"
+                f"agent `{agent}` 不在名册里（{'、'.join(AGENT_ROSTER)}，或 <基名>-<6位十六进制> 的会话别名）；"
+                "表外的 AI 先由用户登记名字和前缀"
             )
-        return AGENT_ROSTER[agent]
+        return AGENT_ROSTER[base]
 
     def _out(self, *args: str, cwd: Path | None = None) -> str:
         result = self._git(*args, cwd=cwd)
@@ -981,8 +1248,82 @@ def _is_tool_cache(entry: str) -> bool:
     )
 
 
+def _stale_hours() -> float:
+    try:
+        value = float(os.environ.get("AUTO_PM_STATION_STALE_HOURS", "2"))
+    except ValueError:
+        return 2.0
+    return value if value > 0 else 2.0
+
+
+def _hours_since(stamp: object) -> float | None:
+    """ISO 时间到现在过了几小时；读不出来返回 None（按“证明不了”处理，不回收）。"""
+
+    if not isinstance(stamp, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return (datetime.now(UTC) - moment).total_seconds() / 3600
+
+
+def touch_session_heartbeat(control_root: str | Path) -> None:
+    """尽力刷新本对话别名工位的心跳；任何问题都吞掉（门禁、租约续期不能被它拖垮）。"""
+
+    try:
+        alias = caller_alias()
+        if alias:
+            AgentWorktreeService(control_root, run_state=lambda run_id: None, measure_size=False).touch_heartbeat(alias)
+    except Exception:  # noqa: BLE001 - 心跳只是兜底回收的依据
+        return
+
+
+def _in_sweep_scope(name: str, agent: str) -> bool:
+    """``sweep --agent X`` 管的工位：X 自己；调用者就是 X 且有本对话别名时，再加上本对话的别名工位（别的对话的不碰）。"""
+
+    if name == agent:
+        return True
+    alias = caller_alias()
+    return bool(alias) and agent == caller_agent() and name == alias
+
+
+def _process_alive(pid: int) -> bool:
+    """进程还在不在；读不出来按“在”处理（宁可不回收）。"""
+
+    return _windows_alive(pid) if os.name == "nt" else _posix_alive(pid)
+
+
+def _windows_alive(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009 - windll 只在 Windows 上有，getattr 让别的平台的类型检查也过
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return bool(kernel32.GetLastError() != 87)  # 87 = 参数错误 = 进程号不存在
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return bool(code.value == 259)  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _posix_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def _kind(name: str) -> str:
-    if name in AGENT_ROSTER:
+    if base_agent(name):
         return "agent"
     if RUN_PLAN_NAME.match(name):
         return "run-plan"
