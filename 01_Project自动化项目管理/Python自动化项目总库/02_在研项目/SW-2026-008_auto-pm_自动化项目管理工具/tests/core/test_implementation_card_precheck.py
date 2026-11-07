@@ -285,6 +285,12 @@ def test_unknown_baseline_state_value_is_rejected(tmp_path: Path) -> None:
     report = _check(tmp_path, card)
 
     assert not report.passed and "基线状态只允许" in _messages(report)
+    assert "没有列出任何路径" in _messages(report)  # D-29: tells the author why `pr open` will say that
+
+
+def test_card_template_lists_the_allowed_baseline_states() -> None:
+    template = Path(__file__).resolve().parents[2] / "auto_pm" / "templates" / "governance" / "implementation_card.md.jinja"
+    assert "存在 / 计划新增 / 运行态" in template.read_text(encoding="utf-8")
 
 
 def test_runtime_paths_are_checked_on_the_control_root_file_system(tmp_path: Path) -> None:
