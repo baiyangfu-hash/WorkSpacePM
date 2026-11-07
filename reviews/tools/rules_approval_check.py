@@ -166,6 +166,15 @@ def judge(files: list[str], comments: list[dict[str, Any]], head_sha: str) -> Re
     return result
 
 
+MAX_SHOWN_PATH = 200
+
+
+def safe_path(path: str) -> str:
+    """路径名由 PR 作者决定（Git 文件名可含换行、反引号、控制字符），写进评论前转义，免得文字被改写或代码块被提前截断（D-79）。"""
+    shown = "".join(c if c.isprintable() and c != "`" else f"\\x{ord(c):02x}" for c in path)
+    return shown if len(shown) <= MAX_SHOWN_PATH else shown[:MAX_SHOWN_PATH] + "…（路径过长，已截断）"
+
+
 def render(result: Result, head_sha: str) -> str:
     lines: list[str] = []
     if not result.rule_files:
@@ -178,7 +187,7 @@ def render(result: Result, head_sha: str) -> str:
         lines.append("这个号只对当前头提交有效，之后再推新提交要重批；PR 里的批准提示评论会随新推送自动更新。")
     if result.rule_files:
         lines.append("规则文件：")
-        lines.extend(f"- `{f}`" for f in result.rule_files)
+        lines.extend(f"- `{safe_path(f)}`" for f in result.rule_files)
     lines.extend(f"注：{note}" for note in result.notes)
     return "\n".join(lines)
 
