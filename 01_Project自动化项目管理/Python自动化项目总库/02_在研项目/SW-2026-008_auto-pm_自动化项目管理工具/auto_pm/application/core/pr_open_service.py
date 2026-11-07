@@ -30,6 +30,8 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
     StationRefusedError,
+    acts_for,
+    base_agent,
     caller_agent,
 )
 from auto_pm.application.core.claim_service import claim_refusal
@@ -169,7 +171,7 @@ class PrOpenService:
         sweep: str | None = None,
         fetch: bool = True,
     ) -> PrPlan:
-        prefix = AGENT_ROSTER.get(agent)
+        prefix = AGENT_ROSTER.get(base_agent(agent))
         if prefix is None:
             raise PrOpenRefusedError(
                 f"`{agent}` 不在 agent 名册里（{'、'.join(sorted(AGENT_ROSTER))}）"
@@ -297,7 +299,7 @@ class PrOpenService:
             raise PrOpenRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不开 PR；请用户在自己的终端执行"
             )
-        if caller and caller != agent:
+        if not acts_for(caller, agent):
             raise PrOpenRefusedError(f"你是 {caller}，不能替 {agent} 开 PR")
 
     @staticmethod
