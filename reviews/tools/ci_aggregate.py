@@ -131,8 +131,20 @@ def load_triggers(workflows_dir: Path) -> list[Trigger]:
     return found
 
 
+def path_selected(path: str, patterns: tuple[str, ...]) -> bool:
+    """GitHub 的 ``paths:`` 语义：按顺序判断，以 ``!`` 开头的是排除项，最后一个命中的规则说了算（排除项必须写在包含项之后）。"""
+    selected = False
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            if selected and path_matches(path, pattern[1:]):
+                selected = False
+        elif path_matches(path, pattern):
+            selected = True
+    return selected
+
+
 def expected_workflows(triggers: list[Trigger], changed: list[str]) -> list[str]:
-    return [t.workflow for t in triggers if t.always or any(path_matches(f, p) for f in changed for p in t.paths)]
+    return [t.workflow for t in triggers if t.always or any(path_selected(f, t.paths) for f in changed)]
 
 
 def judge(expected: list[str], runs: list[dict], *, elapsed: float, grace: float) -> tuple[str, list[str]]:

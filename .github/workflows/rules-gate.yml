@@ -30,8 +30,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      issues: read
-      pull-requests: read
+      # 写权限只用来在 PR 上发/更新一条“批准提示”评论（D-62）；PR 头不检出、不执行，写权限碰不到 PR 的代码
+      issues: write
+      pull-requests: write
     concurrency:
       group: rules-gate-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -61,6 +62,7 @@ jobs:
           gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
 
       - name: Rules approval check
+        id: check
         env:
           # git 全程关掉 Git LFS，PR 的 .gitattributes 不能启动 git-lfs
           GIT_CONFIG_COUNT: "3"
@@ -79,6 +81,23 @@ jobs:
           set -e
           { echo '### 规则文件批准检查'; cat "$RUNNER_TEMP/verdict.txt"; } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
+
+      # D-62：用户不知道要批的提交号。检查红时，在 PR 上放一条可直接复制的提示评论（同一条，随新推送更新，不刷屏）。
+      # 检查通过后若已有这条评论，就把它改成“通过”；发评论失败不影响检查结论。
+      - name: Post or update the approval hint comment
+        if: always() && steps.check.outcome != 'skipped' && steps.check.outcome != 'cancelled'
+        continue-on-error: true
+        run: |
+          marker='<!-- rules-gate-hint -->'
+          [ -s "$RUNNER_TEMP/verdict.txt" ] || exit 0
+          { echo "$marker"; echo "### 规则文件批准检查（头提交 ${HEAD_SHA:0:12}）"; echo; cat "$RUNNER_TEMP/verdict.txt"; } > "$RUNNER_TEMP/hint.md"
+          existing="$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq '.[] | select(.user.type == "Bot" and (.body | startswith("<!-- rules-gate-hint -->"))) | .id' | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@"$RUNNER_TEMP/hint.md" > /dev/null
+          elif [ "${{ steps.check.outcome }}" = "failure" ]; then
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$RUNNER_TEMP/hint.md" > /dev/null
+          fi
 
   rerun:
     # 只响应用户本人在打开着的 PR 上的评论；别人的评论不触发（判定本身仍由上面的任务做）

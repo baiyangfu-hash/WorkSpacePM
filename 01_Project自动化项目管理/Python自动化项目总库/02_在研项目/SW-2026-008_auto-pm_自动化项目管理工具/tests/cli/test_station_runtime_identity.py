@@ -16,7 +16,7 @@ from auto_pm.ui.cli.pr import pr_group
 from auto_pm.ui.cli.runtime_identity_guard import COCKPIT_PROJECT_ID
 from auto_pm.ui.cli.worktree import worktree_group
 
-WORKTREE_WRITES = {"open", "close"}  # sweep writes only with --apply
+WORKTREE_WRITES = {"open", "close", "release"}  # sweep and reclaim write only with --apply
 WORKTREE_READS = {"list"}
 PR_WRITES = {"open"}  # open writes unless --dry-run
 PR_READS = {"ready", "settle-scan"}
@@ -25,7 +25,7 @@ PR_READS = {"ready", "settle-scan"}
 def test_every_worktree_and_pr_command_is_classified() -> None:
     """A new command fails here until someone decides whether it needs the identity guard."""
 
-    assert set(worktree_group.commands) == WORKTREE_WRITES | WORKTREE_READS | {"sweep"}
+    assert set(worktree_group.commands) == WORKTREE_WRITES | WORKTREE_READS | {"sweep", "reclaim", "heartbeat"}
     assert set(pr_group.commands) == PR_WRITES | PR_READS
 
 

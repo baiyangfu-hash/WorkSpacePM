@@ -163,3 +163,28 @@ def test_the_baseline_check_never_treats_two_unreadable_values_as_equal(
 
     monkeypatch.setattr(service, "_git", fake_git)
     assert service._equals_baseline("proj/a.scl", current, "HEAD0") is expected
+
+
+def test_d40_a_commit_made_in_the_worktree_is_not_counted_as_control_root_drift(tmp_path: Path) -> None:
+    """D-40：工位里提交过再重开 Run，新 git_head 是工位上的提交；控制根没动，就不该报漂移。"""
+
+    control, worktree, _head = _repository(tmp_path)
+    (worktree / TARGET).write_bytes(b"committed in the worktree\n")
+    _git(worktree, "config", "user.email", "drill@example.invalid")
+    _git(worktree, "config", "user.name", "drill")
+    _git(worktree, "commit", "-qam", "work")
+    new_head = _git(worktree, "rev-parse", "HEAD")
+
+    assert CandidateMergeBackService(control).control_root_drift(("proj/src",), new_head) == ()
+
+
+def test_d40_real_uncommitted_control_root_edits_are_still_drift_after_a_worktree_commit(tmp_path: Path) -> None:
+    control, worktree, _head = _repository(tmp_path)
+    _git(worktree, "config", "user.email", "drill@example.invalid")
+    _git(worktree, "config", "user.name", "drill")
+    (worktree / OTHER).write_bytes(b"committed in the worktree\n")
+    _git(worktree, "commit", "-qam", "work")
+    new_head = _git(worktree, "rev-parse", "HEAD")
+    (control / TARGET).write_bytes(b"merged back, not committed\n")
+
+    assert CandidateMergeBackService(control).control_root_drift(("proj/src",), new_head) == (TARGET,)

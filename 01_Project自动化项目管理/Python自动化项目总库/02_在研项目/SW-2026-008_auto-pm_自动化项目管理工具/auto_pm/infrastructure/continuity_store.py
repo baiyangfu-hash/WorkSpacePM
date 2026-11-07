@@ -4318,6 +4318,7 @@ class ContinuityStore:
         lease_token: str,
         expected_epoch: int | None = None,
         failure: ExecutionFailure | None = None,
+        abandon: bool = False,
     ) -> RunItem:
         del now
         idempotency_key = self._validated_idempotency_key(idempotency_key)
@@ -4392,7 +4393,11 @@ class ContinuityStore:
             current = self._get_run(conn, run_id)
             if current.version != expected_version:
                 raise ContinuityStoreError("Run 不存在或版本冲突")
-            if destination not in _STORE_RUN_TRANSITIONS[current.state]:
+            # D-41：持有者放弃“验证中”的 Run 是唯一在普通迁移图之外多开的一条边，只能由 abandon 入口走
+            abandoning = (
+                abandon and current.state is RunState.VERIFYING and destination is RunState.CANCELLED
+            )
+            if not abandoning and destination not in _STORE_RUN_TRANSITIONS[current.state]:
                 raise ContinuityStoreError(f"非法 Run 状态迁移: {current.state} -> {destination}")
             if destination is RunState.SUCCEEDED:
                 self._refuse_while_closure_prepared(conn, "run_id", run_id, "Run")

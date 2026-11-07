@@ -335,17 +335,46 @@ def test_identity_is_proven_even_when_candidate_index_is_empty(
     assert "同仓身份校验失败" in capsys.readouterr().out
 
 
-def test_scenario_3_control_root_ledger_inconsistent_blocks_submission(
+def test_scenario_3_unrelated_history_in_the_control_root_ledger_does_not_block_a_station_commit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """必测场景 3: control-root 当前台账不一致：门禁阻断。"""
+    """必测场景 3（D-01 后半）：控制根台账里无关的历史差异只报告，不阻断工位提交；本次绑定的单已入账就放行。"""
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, control_ledger_clean=True)
+    ledger = ctrl / "01_Project/SW-2026-008/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8") + "| CHG-SCPT-2026-999 | closed |\n", encoding="utf-8"
+    )  # 台账里多出一条没有变更单文件的历史孤儿行
+
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+    out = capsys.readouterr().out
+    assert "只报告，不阻断" in out
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+def test_scenario_3b_a_bound_change_missing_from_the_control_root_ledger_is_still_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """必测场景 3b：本次绑定的变更单没入控制根台账，commit-msg 仍硬拒（pre-commit 只报告）。"""
     cand, ctrl, msg = _make_dual_root_fixture(
         tmp_path,
-        control_ledger_clean=False,  # 控制根台账缺失变更单
+        control_ledger_clean=False,  # 控制根台账缺失绑定的变更单
     )
-    assert enforce_pre_commit(cand, control_root=ctrl) == 1
-    out = capsys.readouterr().out
-    assert "台账未闭环" in out or "台账检查异常" in out or "阻断" in out
+
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "控制根项目台账未包含关联变更单" in capsys.readouterr().out
+
+
+def test_scenario_3c_the_single_root_gate_still_blocks_on_ledger_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """单根（在控制根里直接提交）不变：台账对账不一致照旧阻断。"""
+    _cand, ctrl, _msg = _make_dual_root_fixture(
+        tmp_path, control_ledger_clean=False, control_has_staged_code=True, candidate_has_staged_code=False
+    )
+
+    assert enforce_pre_commit(ctrl) == 1
+    assert "台账未闭环" in capsys.readouterr().out
 
 
 def test_scenario_4_different_common_dir_blocks_submission(

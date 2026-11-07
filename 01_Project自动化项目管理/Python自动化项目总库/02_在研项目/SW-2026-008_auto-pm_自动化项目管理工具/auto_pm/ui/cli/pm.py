@@ -14,7 +14,12 @@ from click.core import ParameterSource
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.control_root_sync import ControlRootSyncService
+from auto_pm.application.core.claim_service import ClaimService, claim_overlap
+from auto_pm.application.core.control_root_sync import (
+    ControlRootSyncService,
+    OwnerLookup,
+    live_run_owner_lookup,
+)
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.pm_resume_service import PmResumeError, PmResumeService
@@ -85,6 +90,43 @@ def _control_root_path(ctx: click.Context) -> str:
     return str(app_ctx.control_root)
 
 
+def _live_run_owners(root: str, project_id: str) -> OwnerLookup | None:
+    """Who holds an uncommitted control-root file, from the ledger's live Runs; None when there is no ledger or project to ask.
+
+    Read-only: it never creates ``continuity.db`` (a fresh clone has none until the first ``_ensure_continuity_store``).
+    """
+
+    if not project_id or not (Path(root) / ".auto-pm" / "continuity.db").is_file():
+        return None
+    try:
+        return live_run_owner_lookup(ContinuityStore(root), project_id)
+    except Exception:  # noqa: BLE001 - a hint must never stop the command it decorates
+        return None
+
+
+def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, object]]:
+    """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
+
+    Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
+    """
+
+    try:
+        service = ClaimService(root)
+        active = [claim for claim in service.all_claims(fetch=False) if not claim.free]
+    except Exception:  # noqa: BLE001 - a hint must never stop the command it decorates
+        return []
+    result: list[dict[str, object]] = []
+    for claim in active:
+        clash = claim_overlap(scope_paths, claim.paths) if scope_paths else ()
+        result.append({**claim.as_json(), "overlaps_scope": list(clash)})
+        text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
+        if clash:
+            click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
+        else:
+            click.echo(f"ℹ️ [领卡占位] {text}", err=True)
+    return result
+
+
 def _control_root_sync_notice(ctx: click.Context, *, project_id: str = "", scope_paths: tuple[str, ...] = ()) -> None:
     """Tell the user now, in plain words, if the control root does not match ``origin/main`` -- not only at ``run start``.
 
@@ -93,13 +135,17 @@ def _control_root_sync_notice(ctx: click.Context, *, project_id: str = "", scope
     """
 
     try:
-        service = ControlRootSyncService(_control_root_path(ctx))
-        report = service.check(scope_paths or service.project_scope(project_id))
+        root = _control_root_path(ctx)
+        owners = _live_run_owners(root, project_id)
+        service = ControlRootSyncService(root, owner_of=owners) if owners else ControlRootSyncService(root)
+        scope = scope_paths or service.project_scope(project_id)
+        report = service.check(scope)
     except Exception as error:  # a hint must never stop the command it decorates
         click.echo(f"⚠️ [控制根同步] 未能核对控制根与 origin/main：{error}", err=True)
         return
     for line in report.lines():
         click.echo(f"⚠️ [控制根同步] {line}", err=True)
+    _claims_notice(root, scope)
 
 
 def _require_control_root(ctx: click.Context) -> None:
@@ -1360,6 +1406,28 @@ def orient_pm(
     _emit_query(payload, as_json)
     _memory_gate_line(ctx, as_json)
     _state_backup_line(ctx, as_json)
+
+
+@pm_group.command(name="control-root-status")
+@click.argument("project_id", required=False, default="")
+@click.option("--json", "as_json", is_flag=True, help="以 JSON 输出（stdout 只有 JSON）")
+@click.pass_context
+def control_root_status(ctx: click.Context, project_id: str, as_json: bool) -> None:
+    """只读：控制根在哪个分支、有哪些未提交文件及属主、与 origin/main 差多少（D-44、D-13）。
+
+    不 fetch、不写任何东西；给别的线程和脚本读的机器信号：`on_main` 为 false 说明控制根被切到了别的分支。
+    """
+    root = _control_root_path(ctx)
+    service = ControlRootSyncService(root, owner_of=_live_run_owners(root, project_id))
+    report = service.check(service.project_scope(project_id))
+    if as_json:
+        click.echo(json.dumps(report.as_json(), ensure_ascii=False, indent=2))
+        return
+    lines = report.lines()
+    if not lines:
+        click.echo("控制根与 origin/main 一致，在 main 上，没有未提交文件。")
+    for line in lines:
+        click.echo(line)
 
 
 def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:

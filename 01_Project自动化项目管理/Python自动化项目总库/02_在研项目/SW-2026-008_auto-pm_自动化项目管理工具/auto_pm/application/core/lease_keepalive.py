@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime
 from types import TracebackType
 
+from auto_pm.application.core.agent_worktree_service import touch_session_heartbeat
 from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
@@ -90,6 +91,8 @@ class LeaseKeepAlive:
         while not self._stop.wait(wait):
             try:
                 self._renew_once()
+                # 长任务（门禁一跑几小时、对话里没有消息）期间顺手刷新本对话工位的心跳，别被当成已关闭
+                touch_session_heartbeat(getattr(self._execution, "_root", "."))
                 wait = self._interval
             except ContinuityExecutionError as error:
                 # One failed attempt (a busy ledger, a lost race on the lease version) must not end the keep-alive: retry

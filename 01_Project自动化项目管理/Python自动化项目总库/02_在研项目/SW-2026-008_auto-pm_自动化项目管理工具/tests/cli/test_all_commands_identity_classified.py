@@ -69,6 +69,13 @@ READ_ONLY: dict[str, tuple[str, ...]] = {
     "role": ("check", "list"),  # reads the role pack registry
 }
 
+# Commands that DO write, but only to GitHub (not the ledger, not any project file), and that must run in a cloud clone that has no
+# runtime identity (D-39: ``claim`` pushes ``claims/<card>`` branches).  Not read-only: the write is real and stays listed here, by
+# name, so a new subcommand of such a group does not slip in unclassified.  Their own test pins that nothing else is touched.
+REMOTE_ONLY_NO_LEDGER: dict[str, tuple[str, ...]] = {
+    "claim": ("list", "open", "release"),
+}
+
 GUARD_CALL = re.compile(r"\b(?:require_runtime_identity\w*|warn_runtime_identity)\b")
 
 
@@ -100,11 +107,16 @@ def _read_only() -> set[str]:
     return {f"{group} {sub}".strip() for group, subs in READ_ONLY.items() for sub in subs}
 
 
+def _remote_only() -> set[str]:
+    return {f"{group} {sub}".strip() for group, subs in REMOTE_ONLY_NO_LEDGER.items() for sub in subs}
+
+
 def _unknown() -> list[str]:
     return sorted(
         name
         for name, command in _outside_classified_groups().items()
         if not _guarded(command) and name not in _undecided() and name not in _read_only()
+        and name not in _remote_only()
     )
 
 
@@ -138,7 +150,11 @@ def test_the_undecided_list_only_names_commands_that_exist_and_are_still_unguard
     """The list is a ratchet: a command that got its guard (or was removed) must leave it."""
 
     present = _outside_classified_groups()
-    for label, names in (("UNDECIDED", _undecided()), ("READ_ONLY", _read_only())):
+    for label, names in (
+        ("UNDECIDED", _undecided()),
+        ("READ_ONLY", _read_only()),
+        ("REMOTE_ONLY_NO_LEDGER", _remote_only()),
+    ):
         gone = sorted(name for name in names if name not in present)
         assert not gone, f"{label} 里有已不存在的命令（请删掉）：" + "、".join(gone)
         now_guarded = sorted(name for name in names if _guarded(present[name]))
@@ -148,7 +164,8 @@ def test_the_undecided_list_only_names_commands_that_exist_and_are_still_unguard
 
 
 def test_a_classified_group_is_not_also_in_the_undecided_list() -> None:
-    assert not CLASSIFIED_GROUPS & (set(UNDECIDED) | set(READ_ONLY))
+    assert not CLASSIFIED_GROUPS & (set(UNDECIDED) | set(READ_ONLY) | set(REMOTE_ONLY_NO_LEDGER))
+    assert not set(READ_ONLY) & set(REMOTE_ONLY_NO_LEDGER), "claim 会写远程，不能归到 READ_ONLY"
 
 
 def test_every_top_level_group_is_either_classified_or_covered_here() -> None:
