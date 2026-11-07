@@ -194,7 +194,13 @@ def _process_start_marker(pid: int) -> str:
             # field 22 (starttime); the command name in field 2 may contain spaces, so count from the last ")".
             return stat.read_text(encoding="utf-8", errors="replace").rsplit(")", 1)[1].split()[19]  # lenient-decode: /proc 文本
         done = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",  # lenient-decode: ps 的时间文本只作指纹比较
+            timeout=5,
+            check=False,
         )
         return done.stdout.strip()
     except (OSError, IndexError, ValueError, subprocess.SubprocessError):
