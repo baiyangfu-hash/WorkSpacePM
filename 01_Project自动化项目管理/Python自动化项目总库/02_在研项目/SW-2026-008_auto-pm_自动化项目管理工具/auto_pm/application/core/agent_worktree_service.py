@@ -416,13 +416,18 @@ class AgentWorktreeService:
         return self._stations_dir / f".borrowed-{agent}.json"
 
     def _record_borrow(self, agent: str, branch: str) -> None:
-        """A station opened by another registered agent is on loan to that caller; remember who, so it can hand in the PR."""
+        """A station opened by another registered agent is on loan to that caller; remember who, so it can hand in the PR.
+
+        ``acts_for`` decides what is the caller's own: its base-name station and its own conversation's alias station are
+        not loans.  The borrower is stored as the caller's alias (base name only when no session id exists), so another
+        conversation of the same agent is not the borrower (D-86).
+        """
 
         caller = caller_agent()
-        if not caller or caller == _UNKNOWN_CALLER or caller == agent:
+        if not caller or caller == _UNKNOWN_CALLER or acts_for(caller, agent):
             self._clear_borrow(agent)
             return
-        payload = {"by": caller, "branch": branch}
+        payload = {"by": caller_alias() or caller, "branch": branch}
         self._borrow_file(agent).write_text(json.dumps(payload), encoding="utf-8")
 
     def _clear_borrow(self, agent: str) -> None:
@@ -439,7 +444,16 @@ class AgentWorktreeService:
         except (OSError, ValueError):
             return ""
         by = data.get("by") if isinstance(data, dict) else None
-        return by if isinstance(by, str) and by in AGENT_ROSTER else ""
+        return by if isinstance(by, str) and base_agent(by) else ""
+
+    def lent_to_caller(self, agent: str) -> bool:
+        """Whether the station of ``agent`` is on loan to this very conversation (same alias, or same base name without a session id)."""
+
+        caller = caller_agent()
+        if not caller or caller == _UNKNOWN_CALLER:
+            return False
+        borrower = self.borrower(agent)
+        return bool(borrower) and borrower == (caller_alias() or caller)
 
     # ── 持有者记录、回收（设计稿：动态 agent 名与工位自动回收）──────────────
 
@@ -717,7 +731,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不收工位；请用户在自己的终端执行"
             )
-        if not (acts_for(caller, agent) or caller == self.borrower(agent)):
+        if not (acts_for(caller, agent) or self.lent_to_caller(agent)):
             raise StationRefusedError(
                 f"你是 {caller_alias() or caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )

@@ -21,7 +21,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("有没推送的提交也删", "        if station.unpushed:\n", "        if False:\n"),
     ("锁住的工位也删", "        if station.locked:\n", "        if False:\n"),
     ("detached 工位也删", "        if not station.branch:\n", "        if False:\n"),
-    ("可以收别的 agent 的工位", "        if not (acts_for(caller, agent) or caller == self.borrower(agent)):\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收", "        if False:\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收"),
+    ("可以收别的 agent 的工位", "        if not (acts_for(caller, agent) or self.lent_to_caller(agent)):\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收", "        if False:\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收"),
     (
         "认不出调用方时放行（close）",
         "        if caller == _UNKNOWN_CALLER:\n",

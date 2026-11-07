@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from auto_pm.application.core.agent_worktree_service import AgentWorktreeError
+from auto_pm.application.core.agent_worktree_service import AgentWorktreeError, StationRefusedError
 from auto_pm.application.core.pr_open_service import (
     PrOpenRefusedError,
     PrOpenService,
@@ -681,6 +681,8 @@ def test_a_borrowed_station_can_hand_in_its_pr_for_the_borrower(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):  # no session id: the loan is recorded under the base name
+        monkeypatch.delenv(key, raising=False)
     lab.service().open("vscode", "CARD-1")  # claude borrows the free vscode station
     station = lab.station("vscode")
     (station / "work").mkdir()
@@ -700,6 +702,61 @@ def test_a_station_not_opened_by_the_caller_stays_refused(
     monkeypatch.setenv("AUTO_PM_AGENT", "claude")
     with pytest.raises(PrOpenRefusedError, match="不能替 vscode 开 PR"):
         service(lab).plan("vscode", "CARD-1", CARD_PATH, fetch=False)
+
+
+# ── D-86: a borrow is per conversation -- another conversation of the same agent is not the borrower ─
+
+SESSION_A = "aaaaaa111111aaaa"  # alias claude-aaaaaa
+SESSION_B = "bbbbbb222222bbbb"  # alias claude-bbbbbb
+
+
+def _as_conversation(monkeypatch: pytest.MonkeyPatch, session: str) -> None:
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", session)
+
+
+def test_a_conversation_opening_its_own_alias_station_is_not_a_loan(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _as_conversation(monkeypatch, SESSION_A)
+    svc = lab.service()
+    svc.open("claude-aaaaaa", "CARD-A", fetch=False)
+    assert svc.borrower("claude-aaaaaa") == ""
+    assert not svc.lent_to_caller("claude-aaaaaa")
+
+
+def test_another_conversation_of_the_same_agent_cannot_close_or_hand_in_the_alias_station(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The audit's reproduction of #585 (comment 6702318141): conversation B closed conversation A's station.
+    _as_conversation(monkeypatch, SESSION_A)
+    lab.service().open("claude-aaaaaa", "CARD-A", fetch=False)
+    _as_conversation(monkeypatch, SESSION_B)
+    with pytest.raises(StationRefusedError, match="不能收 claude-aaaaaa"):
+        lab.service().close("claude-aaaaaa", fetch=False)
+    with pytest.raises(PrOpenRefusedError, match="不能替 claude-aaaaaa 开 PR"):
+        service(lab).plan("claude-aaaaaa", "CARD-A", CARD_PATH, fetch=False)
+
+
+def test_a_loan_belongs_to_the_borrowing_conversation_not_to_its_agent(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _as_conversation(monkeypatch, SESSION_A)
+    svc = lab.service()
+    svc.open("vscode", "CARD-1", fetch=False)  # conversation A borrows the free vscode station
+    assert svc.borrower("vscode") == "claude-aaaaaa"
+    assert svc.lent_to_caller("vscode")
+
+    _as_conversation(monkeypatch, SESSION_B)  # the same agent, another conversation
+    assert not svc.lent_to_caller("vscode")
+    with pytest.raises(StationRefusedError, match="不能收 vscode"):
+        svc.close("vscode", fetch=False)
+    with pytest.raises(PrOpenRefusedError, match="不能替 vscode 开 PR"):
+        service(lab).plan("vscode", "CARD-1", CARD_PATH, fetch=False)
+
+    _as_conversation(monkeypatch, SESSION_A)  # the borrower itself still may
+    svc.close("vscode", fetch=False)
+    assert svc.borrower("vscode") == ""
 
 
 def test_closing_the_station_clears_the_loan(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
