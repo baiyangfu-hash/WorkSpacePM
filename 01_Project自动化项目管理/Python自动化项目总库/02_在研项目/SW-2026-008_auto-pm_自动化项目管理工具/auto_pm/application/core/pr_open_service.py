@@ -299,8 +299,10 @@ class PrOpenService:
             raise PrOpenRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不开 PR；请用户在自己的终端执行"
             )
-        if not acts_for(caller, agent):
-            raise PrOpenRefusedError(f"你是 {caller}，不能替 {agent} 开 PR")
+        if not acts_for(caller, agent) and not self._stations.lent_to_caller(agent):
+            raise PrOpenRefusedError(
+                f"你是 {caller}，不能替 {agent} 开 PR；要用别人的空闲工位，先自己 `worktree open {agent} <卡号>` 借用"
+            )
 
     @staticmethod
     def _normalize_card_path(task_card: str) -> str:

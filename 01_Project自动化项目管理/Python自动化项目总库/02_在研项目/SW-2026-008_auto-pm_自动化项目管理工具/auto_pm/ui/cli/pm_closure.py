@@ -136,6 +136,11 @@ def verify_pm(
         payload["reason"] = reason
     if keepalive.error:
         payload["lease_keepalive_warning"] = keepalive.error
+    try:
+        # D-31: say when the Run's lease now ends, so nobody works on past a deadline they were never shown.
+        payload["lease_expires_at"] = store.get_lease(run_id).expires_at
+    except ContinuityStoreError:
+        pass  # the verdict is what counts; a lease that cannot be read here is reported by the next command
     _echo(payload)
     if not outcome.verified:
         ctx.exit(1)

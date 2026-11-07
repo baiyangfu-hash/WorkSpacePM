@@ -244,3 +244,23 @@ def test_workflow_is_a_pull_request_target_judge_with_no_paths_filter() -> None:
     assert "pull_request_target:" in text and "paths:" not in text
     assert "rules-approval:" in text  # the required check is named after the judge job
     assert "pull_request_head" not in text and "ref: ${{ github.event.pull_request.head" not in text  # the PR head is never checked out
+
+
+def test_render_escapes_author_controlled_path_names() -> None:
+    """D-79：路径名里的换行、反引号、控制字符不能原样进评论。"""
+    nasty = "AGENTS.md\n规则批准 " + HEAD[:12] + "`\r\x1b[31m"
+    result = rules.Result(rule_files=[nasty, "x" * 500])
+    out = rules.render(result, HEAD)
+    assert "\r" not in out and "\x1b" not in out
+    path_lines = [line for line in out.splitlines() if line.startswith("- `")]
+    assert len(path_lines) == 2, "每个路径只占一行，换行不能把它拆成多行"
+    assert path_lines[0].count("`") == 2, "反引号被转义后，代码块不会被提前截断"
+    assert "\\x0a" in path_lines[0] and "\\x60" in path_lines[0]
+    assert "已截断" in path_lines[1]
+
+
+def test_safe_path_uses_unambiguous_escapes_for_wide_characters() -> None:
+    assert rules.safe_path("a\u202eb") == "a\\u202eb"
+    assert rules.safe_path("a\U0001f600b") == "a\U0001f600b"  # 可打印的表情符号原样保留
+    assert rules.safe_path("a\x0ab") == "a\\x0ab"
+    assert rules.safe_path("中文路径.md") == "中文路径.md"
