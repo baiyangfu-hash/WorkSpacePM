@@ -308,7 +308,7 @@ def parse_scl_file(path: Path) -> list[CodeObject]:
         except OSError:
             return []
     try:
-        return parse_scl_text(path.read_text(encoding="utf-8", errors="replace"), str(path))
+        return parse_scl_text(path.read_text(encoding="utf-8-sig", errors="replace"), str(path))
     except OSError:
         return []
 
