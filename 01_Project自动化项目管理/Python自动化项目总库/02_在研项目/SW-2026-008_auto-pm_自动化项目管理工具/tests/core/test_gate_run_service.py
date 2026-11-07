@@ -521,3 +521,16 @@ def test_judge_with_a_worktree_notices_a_hidden_ignored_code_file(
     tree.ignored = "tests/conftest.py\n"
     result = GateRunService().judge_dir(tmp_path, worktree=repo)
     assert result.verdict == "PARTIAL" and any("不一致" in reason for reason in result.reasons)
+
+
+def test_default_runner_kills_a_group_that_overruns_and_reports_124(tmp_path: Path) -> None:
+    """Counterexample: a hung group must not hang the gate; the exit is 124 and the log says it was killed."""
+
+    import sys
+
+    log = tmp_path / "g.txt"
+    code = gate.default_runner(
+        [sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, {}, log, 1
+    )
+    assert code == 124 and "killed after 1 s" in log.read_text(encoding="utf-8")
+    assert gate.default_runner([sys.executable, "-c", "print('ok')"], tmp_path, {}, log, 30) == 0

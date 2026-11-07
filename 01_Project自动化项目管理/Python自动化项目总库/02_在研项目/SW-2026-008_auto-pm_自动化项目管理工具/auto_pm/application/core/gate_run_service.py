@@ -179,9 +179,8 @@ def pytest_counts(log: Path) -> dict[str, int] | None:
             tail = handle.read()
     except OSError:
         return None
-    for line in reversed(
-        tail.decode("utf-8", errors="replace").splitlines()
-    ):  # lenient-decode: a log tail may start mid-character
+    text = tail.decode("utf-8", errors="replace")  # lenient-decode: log tail only feeds the summary regex; exit code and log hash are judged apart
+    for line in reversed(text.splitlines()):
         tokens = _TOKEN.findall(line)
         if tokens and _TIMING.search(line):
             counts: dict[str, int] = {}
@@ -253,19 +252,18 @@ def default_runner(
     """Run one group with its output in ``log``; 124 on timeout (what ``timeout`` returns)."""
 
     with log.open("wb") as handle:
-        child = subprocess.Popen(  # noqa: S603 - argv is built from the group table
-            list(argv),
-            cwd=cwd,
-            env=dict(env),
-            stdin=subprocess.DEVNULL,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-        )
         try:
-            return child.wait(timeout=timeout)
+            return subprocess.run(  # noqa: S603 - argv is built from the group table
+                list(argv),
+                cwd=cwd,
+                env=dict(env),
+                stdin=subprocess.DEVNULL,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+                check=False,
+            ).returncode
         except subprocess.TimeoutExpired:
-            child.kill()
-            child.wait()
             handle.write(f"\n[gate run] killed after {timeout} s\n".encode())
             return 124
 
@@ -310,9 +308,8 @@ def _git(worktree: Path, *args: str) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return (
-        done.stdout.decode("utf-8", errors="replace").strip() if done.returncode == 0 else None
-    )  # lenient-decode: git output
+    text = done.stdout.decode("utf-8", errors="replace")  # lenient-decode: git output is a commit id or status text
+    return text.strip()
 
 
 _CODE_SUFFIXES = (".py", ".ini", ".cfg", ".toml", ".json", ".yaml", ".yml", ".qml")
