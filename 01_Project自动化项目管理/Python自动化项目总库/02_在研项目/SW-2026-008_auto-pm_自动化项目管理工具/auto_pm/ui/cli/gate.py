@@ -16,7 +16,13 @@ from pathlib import Path
 
 import click
 
-from auto_pm.application.core.gate_run_service import GateRunError, GateRunService, GateSummary
+from auto_pm.application.core.gate_run_service import (
+    SUMMARY_FILE,
+    GateRunError,
+    GateRunService,
+    GateSummary,
+    sha256_file,
+)
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
@@ -33,6 +39,8 @@ def _report(summary: GateSummary) -> None:
     for name, result in summary.results.items():
         line = f"{result.verdict:<5} {name:<20} exit={result.exit}"
         click.echo(line + (f"  {result.why}" if result.why else ""))
+    for reason in summary.reasons:
+        click.echo(f"  不是 PASS 的原因：{reason}")
     click.echo(
         f"总判定 {summary.verdict}（组齐全 {summary.complete}，工作树干净 {summary.git_dirty is False}，提交 {summary.commit[:12]}）"
     )
@@ -97,16 +105,32 @@ def run_command(
         click.echo(f"无法开始: {error}", err=True)
         raise SystemExit(2) from error
     _report(summary)
+    click.echo(
+        f"记录 SHA-256 {sha256_file(out_dir / SUMMARY_FILE)}（存进检查点，之后 gate judge --expect-sha256 核对）"
+    )
     raise SystemExit(0 if summary.verdict == "PASS" else 1)
 
 
 @gate_group.command(name="judge")
 @click.argument("out_dir", type=CallerPath(file_okay=False, exists=True, path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
-def judge_command(out_dir: Path, as_json: bool) -> None:
+@click.option(
+    "--expect-sha256",
+    default="",
+    help="gate run 结束时打印的 gate_summary.json 的 SHA-256；不一致就不是 PASS",
+)
+@click.option(
+    "--worktree",
+    default=None,
+    type=CallerPath(file_okay=False, exists=True, path_type=Path),
+    help="再核对这个工作树现在是否仍是被判的那个提交且干净",
+)
+def judge_command(out_dir: Path, as_json: bool, expect_sha256: str, worktree: Path | None) -> None:
     """只读：按日志重新判一遍 OUT_DIR 里的那一轮（不重新生成任何文件）。"""
     try:
-        summary = GateRunService().judge_dir(out_dir)
+        summary = GateRunService().judge_dir(
+            out_dir, expect_sha256=expect_sha256, worktree=worktree
+        )
     except GateRunError as error:
         click.echo(f"无法判卷: {error}", err=True)
         raise SystemExit(2) from error

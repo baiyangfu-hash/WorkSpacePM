@@ -8,7 +8,8 @@ and judged on its own summary line (D-107).
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -96,10 +97,45 @@ def test_failed_in_the_summary_line_fails_even_with_exit_zero(tmp_path: Path) ->
     )
 
 
-def test_undeclared_deselect_fails_and_declared_deselect_passes(tmp_path: Path) -> None:
-    log = _log(tmp_path, "10 passed, 1 deselected in 1.00s\n")
+def test_deselect_count_must_equal_the_manifest_exactly(tmp_path: Path) -> None:
+    undeclared = _group()
+    declared = _group(deselect=("a::b",), deselected=1)
+    one = _log(tmp_path, "10 passed, 1 deselected in 1.00s\n")
+    assert gate.judge_group(undeclared, 0, one)[0] == "FAIL"
+    assert gate.judge_group(declared, 0, one)[0] == "PASS"
+    many = _log(tmp_path, "1 passed, 5000 deselected in 1.00s\n")
+    assert gate.judge_group(declared, 0, many)[0] == "FAIL"  # audit 1.3
+    none = _log(tmp_path, "10 passed in 1.00s\n")
+    assert gate.judge_group(declared, 0, none)[0] == "FAIL"  # the node matched nothing
+
+
+def test_a_group_with_a_deselect_must_say_how_many() -> None:
+    with pytest.raises(ValueError, match="deselect"):
+        GateGroup("g", ("tests/x",), deselect=("a::b",))
+
+
+@pytest.mark.parametrize("group", [g for g in GROUPS if g.min_cases > 1], ids=lambda g: g.name)
+def test_every_group_needs_its_case_floor(tmp_path: Path, group: GateGroup) -> None:
+    log = _log(tmp_path, f"1 passed{', 1 deselected' if group.deselected else ''} in 0.01s\n")
+    verdict, why = gate.judge_group(group, 0, log)
+    assert (
+        verdict == "FAIL" and "下限" in why
+    )  # audit 1.4: one passing test must not pass the 3000-case core group
+    enough = _log(
+        tmp_path,
+        f"{group.min_cases} passed{', 1 deselected' if group.deselected else ''} in 1.00s\n",
+    )
+    assert gate.judge_group(group, 0, enough)[0] == "PASS"
+
+
+def test_xfail_xpass_and_skipped_do_not_count_as_having_run(tmp_path: Path) -> None:
+    assert gate.judge_group(_group(), 0, _log(tmp_path, "7 xfailed in 0.10s\n"))[0] == "FAIL"
+    assert gate.judge_group(_group(), 0, _log(tmp_path, "3 xpassed in 0.10s\n"))[0] == "FAIL"
+
+
+def test_too_many_skipped_fails(tmp_path: Path) -> None:
+    log = _log(tmp_path, f"100 passed, {gate.MAX_SKIPPED + 1} skipped in 1.00s\n")
     assert gate.judge_group(_group(), 0, log)[0] == "FAIL"
-    assert gate.judge_group(_group(deselect=("a::b",)), 0, log)[0] == "PASS"
 
 
 def test_plain_pass(tmp_path: Path) -> None:
@@ -145,11 +181,20 @@ def test_manifest_sha256_changes_when_a_group_is_removed() -> None:
 # ── running ─────────────────────────────────────────────
 
 
+def _line(group: GateGroup) -> str:
+    return f"{group.min_cases + 5} passed, 2 skipped{f', {group.deselected} deselected' if group.deselected else ''} in 4.20s\n"
+
+
 class _Recorder:
     """Stands in for pytest: writes a log per group and remembers the environment it was given."""
 
-    def __init__(self, outcomes: Mapping[str, tuple[int, str]] | None = None) -> None:
+    def __init__(
+        self,
+        outcomes: Mapping[str, tuple[int, str]] | None = None,
+        on_group: Callable[[str], None] | None = None,
+    ) -> None:
         self.outcomes = dict(outcomes or {})
+        self.on_group = on_group
         self.envs: list[Mapping[str, str]] = []
         self.cwds: list[Path] = []
 
@@ -157,28 +202,44 @@ class _Recorder:
         self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int
     ) -> int:
         name = log.stem
-        code, text = self.outcomes.get(name, (0, _PASS_LINE))
-        if name == "qml":
-            text = "10 passed, 1 deselected in 1.00s\n" if code == 0 else text
+        group = next(g for g in GROUPS if g.name == name)
+        code, text = self.outcomes.get(name, (0, _line(group)))
         log.write_text(text, encoding="utf-8")
         self.envs.append(env)
         self.cwds.append(cwd)
+        if self.on_group is not None:
+            self.on_group(name)
         return code
 
 
+class _Tree:
+    """A scriptable stand-in for the git calls of ``tree_state``."""
+
+    def __init__(self, dirty: bool = False, untracked: bool = False) -> None:
+        self.head = "a" * 40
+        self.status = " M x.py" if dirty else ("?? zz_probe.py" if untracked else "")
+        self.ignored = ""
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> Path:
+        real = gate._git
+
+        def fake(worktree: Path, *args: str) -> str | None:
+            if args[:1] == ("status",):
+                assert "--untracked-files=all" in args  # audit 1.1: untracked files must count
+                return self.status
+            if args[:1] == ("ls-files",):
+                return self.ignored
+            if args[:1] == ("rev-parse",) and "HEAD" in args:
+                return self.head
+            return real(worktree, *args)
+
+        monkeypatch.setattr(gate, "_git", fake)
+        top = Path(gate.__file__).resolve()
+        return next(p for p in top.parents if (p / ".git").exists())
+
+
 def _clean_repo(monkeypatch: pytest.MonkeyPatch, dirty: bool = False) -> Path:
-    real = gate._git
-
-    def fake(worktree: Path, *args: str) -> str | None:
-        if args[:1] == ("status",):
-            return " M x.py" if dirty else ""
-        if args[:1] == ("rev-parse",) and "HEAD" in args:
-            return "a" * 40
-        return real(worktree, *args)
-
-    monkeypatch.setattr(gate, "_git", fake)
-    top = Path(gate.__file__).resolve()
-    return next(p for p in top.parents if (p / ".git").exists())
+    return _Tree(dirty=dirty).install(monkeypatch)
 
 
 def test_full_run_passes_and_every_child_gets_the_clean_environment(
@@ -261,3 +322,202 @@ def test_judge_dir_does_not_write_anything(tmp_path: Path, monkeypatch: pytest.M
 def test_a_summary_with_only_skipped_tests_is_a_failure(tmp_path: Path) -> None:
     verdict, why = gate.judge_group(_group(), 0, _log(tmp_path, "5 skipped in 0.10s\n"))
     assert verdict == "FAIL" and "没跑" in why
+
+
+# ── audit 1 of #612: five ways to be passed by mistake, each with its counter-example ──
+
+
+def test_an_untracked_file_makes_the_tree_dirty_and_the_gate_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _Tree(untracked=True).install(monkeypatch)
+    summary = GateRunService(runner=_Recorder()).run(repo, tmp_path)
+    assert summary.git_dirty is True and summary.verdict == "PARTIAL"
+    assert any("不干净" in reason for reason in summary.reasons)
+
+
+def test_ignored_code_files_make_the_gate_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = _Tree()
+    tree.ignored = "tests/conftest_hidden.py\n"
+    summary = GateRunService(runner=_Recorder()).run(tree.install(monkeypatch), tmp_path)
+    assert summary.verdict == "PARTIAL" and summary.ignored_code == ["tests/conftest_hidden.py"]
+
+
+def test_tree_state_in_a_real_repository(tmp_path: Path) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    for key, value in (
+        ("user.email", "t@example.com"),
+        ("user.name", "t"),
+        ("commit.gpgsign", "false"),
+    ):
+        git("config", key, value)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "auto_pm").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("hidden_*.py\n__pycache__/\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "c0")
+    assert gate.tree_state(tmp_path, tmp_path).dirty is False
+    (tmp_path / "tests" / "conftest.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )  # untracked, not ignored
+    assert gate.tree_state(tmp_path, tmp_path).dirty is True
+    (tmp_path / "tests" / "conftest.py").unlink()
+    (tmp_path / "tests" / "hidden_plugin.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )  # ignored code under tests/
+    (tmp_path / "tests" / "__pycache__").mkdir()
+    (tmp_path / "tests" / "__pycache__" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    state = gate.tree_state(tmp_path, tmp_path)
+    assert state.dirty is False and state.ignored_code == ("tests/hidden_plugin.py",)
+
+
+def test_a_tree_that_changes_during_the_round_is_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = _Tree()
+    repo = tree.install(monkeypatch)
+
+    def someone_commits(name: str) -> None:
+        if name == "application":
+            tree.head = "b" * 40  # another process commits in the worktree while the round runs
+
+    summary = GateRunService(runner=_Recorder(on_group=someone_commits)).run(repo, tmp_path)
+    assert summary.commit == "a" * 40 and summary.commit_end == "b" * 40
+    assert summary.verdict == "PARTIAL" and any("变了" in reason for reason in summary.reasons)
+
+
+def test_a_file_touched_during_the_round_is_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = _Tree()
+    repo = tree.install(monkeypatch)
+
+    def someone_edits(name: str) -> None:
+        if name == "plc":
+            tree.status = " M auto_pm/x.py"
+
+    summary = GateRunService(runner=_Recorder(on_group=someone_edits)).run(repo, tmp_path)
+    assert (
+        summary.git_dirty is False
+        and summary.git_dirty_end is True
+        and summary.verdict == "PARTIAL"
+    )
+
+
+def _passed_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+    repo = _clean_repo(monkeypatch)
+    GateRunService(runner=_Recorder()).run(repo, tmp_path)
+    assert GateRunService().judge_dir(tmp_path).verdict == "PASS"
+    return repo, gate.sha256_file(tmp_path / "gate_summary.json") or ""
+
+
+def test_judge_rejects_a_log_forged_into_a_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _passed_round(tmp_path, monkeypatch)
+    (tmp_path / "plc.txt").write_text(
+        "999 passed in 1.00s\n", encoding="utf-8"
+    )  # audit 1.2: a *pass* line, not a failure line
+    judged = GateRunService().judge_dir(tmp_path)
+    assert judged.verdict == "FAIL" and "SHA-256" in judged.results["plc"].why
+
+
+def test_judge_rejects_an_exit_file_that_disagrees_with_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _passed_round(tmp_path, monkeypatch)
+    (tmp_path / "plc.exit").write_text("1\n", encoding="utf-8")
+    judged = GateRunService().judge_dir(tmp_path)
+    assert judged.verdict == "FAIL" and ".exit" in judged.results["plc"].why
+
+
+def test_judge_rejects_an_edited_exit_code_in_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _passed_round(tmp_path, monkeypatch)
+    (tmp_path / "plc.exit").write_text("5\n", encoding="utf-8")
+    (tmp_path / "plc.txt").write_text("no tests ran in 0.01s\n", encoding="utf-8")
+    record = json.loads((tmp_path / "gate_summary.json").read_text(encoding="utf-8"))
+    record["results"]["plc"]["exit"] = 0  # the forger fixes the record's exit but not the disk
+    (tmp_path / "gate_summary.json").write_text(json.dumps(record), encoding="utf-8")
+    assert GateRunService().judge_dir(tmp_path).verdict == "FAIL"
+
+
+def test_judge_rejects_a_missing_log_or_exit_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _passed_round(tmp_path, monkeypatch)
+    (tmp_path / "core.txt").unlink()
+    (tmp_path / "cli.exit").unlink()
+    judged = GateRunService().judge_dir(tmp_path)
+    assert (
+        judged.results["core"].verdict == "FAIL"
+        and judged.results["cli"].verdict == "FAIL"
+        and judged.verdict == "FAIL"
+    )
+
+
+def test_judge_with_the_pinned_summary_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, digest = _passed_round(tmp_path, monkeypatch)
+    assert GateRunService().judge_dir(tmp_path, expect_sha256=digest).verdict == "PASS"
+    wrong = GateRunService().judge_dir(tmp_path, expect_sha256="0" * 64)
+    assert wrong.verdict == "PARTIAL" and any("SHA-256" in reason for reason in wrong.reasons)
+
+
+def test_judge_with_a_worktree_notices_a_moved_or_dirty_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = _Tree()
+    repo = tree.install(monkeypatch)
+    GateRunService(runner=_Recorder()).run(repo, tmp_path)
+    assert GateRunService().judge_dir(tmp_path, worktree=repo).verdict == "PASS"
+    tree.head = "c" * 40
+    assert GateRunService().judge_dir(tmp_path, worktree=repo).verdict == "PARTIAL"
+    tree.head = "a" * 40
+    tree.status = "?? new.py"
+    assert GateRunService().judge_dir(tmp_path, worktree=repo).verdict == "PARTIAL"
+
+
+def test_a_record_without_the_end_of_round_facts_is_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _passed_round(tmp_path, monkeypatch)
+    record = json.loads((tmp_path / "gate_summary.json").read_text(encoding="utf-8"))
+    del record["commit_end"], record["git_dirty_end"]  # an older or hand-made record
+    (tmp_path / "gate_summary.json").write_text(json.dumps(record), encoding="utf-8")
+    assert GateRunService().judge_dir(tmp_path).verdict == "PARTIAL"
+
+
+@pytest.mark.parametrize("field", ["git_dirty", "git_dirty_end"])
+@pytest.mark.parametrize("value", [True, None])
+def test_either_dirty_flag_alone_being_bad_is_not_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+) -> None:
+    """Counterexample: edit one of the two dirty flags in the record; each must be checked on its own."""
+
+    _passed_round(tmp_path, monkeypatch)
+    record = json.loads((tmp_path / "gate_summary.json").read_text(encoding="utf-8"))
+    record[field] = value
+    (tmp_path / "gate_summary.json").write_text(json.dumps(record), encoding="utf-8")
+    assert GateRunService().judge_dir(tmp_path).verdict == "PARTIAL"
+
+
+def test_judge_with_a_worktree_notices_a_hidden_ignored_code_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counterexample: the tree is clean and on the same commit, but an ignored conftest appeared after the round."""
+
+    tree = _Tree()
+    repo = tree.install(monkeypatch)
+    GateRunService(runner=_Recorder()).run(repo, tmp_path)
+    tree.ignored = "tests/conftest.py\n"
+    result = GateRunService().judge_dir(tmp_path, worktree=repo)
+    assert result.verdict == "PARTIAL" and any("不一致" in reason for reason in result.reasons)
