@@ -280,7 +280,7 @@ def test_s19_the_workflow_takes_the_judge_from_the_base_and_never_runs_the_pr_he
     yaml = pytest.importorskip("yaml")
     flow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     assert list(flow[True]) == ["pull_request_target"]  # the base's copy of this workflow runs, not the PR's
-    assert flow["permissions"] == {"contents": "read"}
+    assert flow["permissions"] == {"contents": "read", "pull-requests": "read"}  # read-only; pull-requests lets the overlap check list the open PRs (D-101)
     steps = flow["jobs"]["gate"]["steps"]
     checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
     # the base branch now, never the event's base.sha, which can predate the checker itself (PR #67, 2026-10-23)
@@ -504,3 +504,14 @@ def test_a_hung_git_call_exits_2_instead_of_hanging(monkeypatch, repo, capsys) -
         gate.git(repo, "status")
     assert gate.main(["--base", "main", "--head", "pr", "--repo", str(repo)]) == 2
     assert "超过" in capsys.readouterr().err
+
+
+def test_s20_the_overlap_step_runs_the_judge_from_the_base_with_only_the_body_in_its_environment() -> None:
+    yaml = pytest.importorskip("yaml")
+    flow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    step = next(s for s in flow["jobs"]["gate"]["steps"] if "pr_overlap_check.py" in s.get("run", ""))
+    assert '"$GITHUB_WORKSPACE/reviews/tools/pr_overlap_check.py" --ci' in step["run"] and "python -I " in step["run"]
+    assert "pr-head" not in step["run"] and "RUNNER_TEMP" not in step["run"], "the PR head is never an input of the overlap judge"
+    assert step["if"] == "${{ !cancelled() }}", "it runs even when the scope check failed, so both findings show"
+    assert set(step["env"]) == {"GITHUB_TOKEN", "PR_BODY", "CLAIM_ENFORCE_FROM"}
+    assert step["env"]["PR_BODY"] == "${{ github.event.pull_request.body }}"
