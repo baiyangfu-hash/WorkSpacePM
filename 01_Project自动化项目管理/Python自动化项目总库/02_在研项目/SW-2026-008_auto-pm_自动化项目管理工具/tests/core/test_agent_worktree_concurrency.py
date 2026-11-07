@@ -67,10 +67,10 @@ def test_three_conversations_opening_the_same_agent_station_leave_one_intact_sta
     station = root / ".auto-pm" / "worktrees" / "claude"
     assert (station / ".git").exists(), "赢家的工位目录被输家清掉了"
     listing = subprocess.run(
-        ["git", "-C", str(root), "worktree", "list", "--porcelain"], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), "worktree", "list", "--porcelain"], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout
     assert "prunable" not in listing
     branches = subprocess.run(
-        ["git", "-C", str(root), "branch", "--list", "claude/*"], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), "branch", "--list", "claude/*"], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout.split()
     assert len([item for item in branches if item.startswith("claude/")]) == 1, "输家留下了孤儿分支"
