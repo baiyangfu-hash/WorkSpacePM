@@ -1,0 +1,117 @@
+"""Gate CLI (D-107a): the official multi-group regression gate.
+
+``gate plan``   show the commands of the groups (read-only);
+``gate run``    run the groups from a clean test environment, judge each one, write ``gate_summary.json``;
+``gate judge``  recompute the verdict from the logs of an earlier run (read-only).
+
+Exit codes: 0 PASS; 1 the gate ran and did not pass (a failed group, a missing group, a dirty worktree); 2 it could not start.
+Run it detached with ``main.py long-run start --name <n> --cwd <control root> --worktree <W> -- python -B main.py gate run ...``.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from pathlib import Path
+
+import click
+
+from auto_pm.application.core.gate_run_service import GateRunError, GateRunService, GateSummary
+from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
+
+
+def _only(value: str) -> tuple[str, ...]:
+    return tuple(name.strip() for name in value.split(",") if name.strip())
+
+
+def _fail(error: GateRunError) -> click.ClickException:
+    return click.ClickException(str(error))
+
+
+def _report(summary: GateSummary) -> None:
+    for name, result in summary.results.items():
+        line = f"{result.verdict:<5} {name:<20} exit={result.exit}"
+        click.echo(line + (f"  {result.why}" if result.why else ""))
+    click.echo(
+        f"总判定 {summary.verdict}（组齐全 {summary.complete}，工作树干净 {summary.git_dirty is False}，提交 {summary.commit[:12]}）"
+    )
+
+
+@click.group(name="gate")
+def gate_group() -> None:
+    """官方多组回归门禁：干净的测试环境、逐组判卷、汇总证据。"""
+
+
+@gate_group.command(name="plan")
+@click.option(
+    "--worktree",
+    required=True,
+    type=CallerPath(file_okay=False, exists=True, path_type=Path),
+    help="要判的工作树",
+)
+@click.option("--jobs", default=8, show_default=True, help="并行组的 xdist 进程数")
+@click.option("--only", default="", help="只列这些组（逗号分隔）")
+def plan_command(worktree: Path, jobs: int, only: str) -> None:
+    """只读：列出每组的命令和工作目录。"""
+    try:
+        click.echo(
+            json.dumps(
+                GateRunService().plan(worktree.resolve(), jobs=jobs, only=_only(only)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except GateRunError as error:
+        raise _fail(error) from error
+
+
+@gate_group.command(name="run")
+@click.option(
+    "--worktree",
+    required=True,
+    type=CallerPath(file_okay=False, exists=True, path_type=Path),
+    help="要判的工作树（必须已提交）",
+)
+@click.option(
+    "--out",
+    "out_dir",
+    required=True,
+    type=CallerPath(file_okay=False, path_type=Path),
+    help="输出目录（日志与 gate_summary.json）",
+)
+@click.option("--jobs", default=8, show_default=True, help="并行组的 xdist 进程数")
+@click.option("--only", default="", help="只跑这些组（逗号分隔）；少于全部组时总判定最多是 PARTIAL")
+@click.option("--timeout-minutes", default=180, show_default=True, help="每组的超时")
+@click.pass_context
+def run_command(
+    ctx: click.Context, worktree: Path, out_dir: Path, jobs: int, only: str, timeout_minutes: int
+) -> None:
+    """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
+    require_runtime_identity_for_workspace(ctx)
+    try:
+        summary = GateRunService().run(
+            worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60
+        )
+    except GateRunError as error:
+        click.echo(f"无法开始: {error}", err=True)
+        raise SystemExit(2) from error
+    _report(summary)
+    raise SystemExit(0 if summary.verdict == "PASS" else 1)
+
+
+@gate_group.command(name="judge")
+@click.argument("out_dir", type=CallerPath(file_okay=False, exists=True, path_type=Path))
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
+def judge_command(out_dir: Path, as_json: bool) -> None:
+    """只读：按日志重新判一遍 OUT_DIR 里的那一轮（不重新生成任何文件）。"""
+    try:
+        summary = GateRunService().judge_dir(out_dir)
+    except GateRunError as error:
+        click.echo(f"无法判卷: {error}", err=True)
+        raise SystemExit(2) from error
+    if as_json:
+        click.echo(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
+    else:
+        _report(summary)
+    raise SystemExit(0 if summary.verdict == "PASS" else 1)
