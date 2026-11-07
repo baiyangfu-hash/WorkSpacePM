@@ -98,6 +98,10 @@ class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
 
 
+class LedgerIntegrityError(ContinuityStoreError):
+    """The ledger file itself is damaged (a fact about the file, not a registered guard refusing a command)."""
+
+
 class RunNotFoundError(ContinuityStoreError):
     """The Run id is not in the ledger (a typed form of the old plain message, so callers need not match its text)."""
 
@@ -563,6 +567,7 @@ class ContinuityStore:
             raise ContinuityStoreError(str(error)) from error
         self._read_snapshot: _ReadSnapshot | None = None
         self._read_snapshot_lock = threading.Lock()
+        self._write_integrity_checked = False
         self.last_write_timing: dict[str, Any] = {}
 
     def _utc_now(self) -> datetime:
@@ -1198,6 +1203,7 @@ class ContinuityStore:
             conn.execute(f"PRAGMA busy_timeout={int(_WRITE_LOCK_TIMEOUT_SECONDS * 1000)}")
             conn.execute("BEGIN IMMEDIATE")
             acquired = time.monotonic()
+            self._require_intact_before_first_write(conn)
             self._validated_db_path()
             yield conn
             self._validated_db_path()
@@ -1223,6 +1229,26 @@ class ContinuityStore:
                 waited,
                 held,
             )
+
+    def _require_intact_before_first_write(self, conn: sqlite3.Connection) -> None:
+        """D-02: a damaged ledger is refused at the first write of this process, not found at the next start.
+
+        ``quick_check`` runs once per store object (the write path of one command), inside the write lock, so no
+        other writer can change the file between the check and the write.
+        """
+
+        if self._write_integrity_checked:
+            return
+        try:
+            rows = conn.execute("PRAGMA quick_check").fetchall()
+        except sqlite3.DatabaseError:
+            rows = []  # a page SQLite cannot even read is damage too
+        if len(rows) != 1 or str(rows[0][0]) != "ok":
+            raise LedgerIntegrityError(
+                "Continuity Store 账本完整性检查失败，拒绝写入；先 `main.py continuity verify-backup` 核对备份，"
+                "不要继续写这本账"
+            )
+        self._write_integrity_checked = True
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:

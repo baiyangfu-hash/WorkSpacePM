@@ -258,3 +258,28 @@ def test_reclaim_refuses_a_reference_that_is_only_the_prefix_and_records_who_why
     record = git_out(pair.b, "show", "-s", "--format=%B", taken.commit)
     for expected in ("reclaimed_by", "trae", "没动静", "user-confirmation:cmsg_0123456789", "reclaimed_at"):
         assert expected in record, expected
+
+def test_control_root_status_json_carries_other_claims_and_stays_pure_json(
+    pair: Pair, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D-39 follow-up: other threads and scripts read the claims from ``pm control-root-status --json`` (stdout is only JSON)."""
+
+    import inspect
+    from types import SimpleNamespace
+
+    from auto_pm.ui.cli import pm as pm_cli
+
+    pair.laptop.open("321", paths=["p/module"], goal="refactor", owner="claude", machine="laptop")
+    pair.cloud.all_claims()  # a fetch, as any earlier command would have done
+    root = SimpleNamespace(obj=SimpleNamespace(control_root=pair.b, workspace_root=str(pair.b)))
+    ctx = SimpleNamespace(find_root=lambda: root)
+
+    callback = pm_cli.control_root_status.callback
+    assert callback is not None
+    inspect.unwrap(callback)(ctx, "", True)
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert [claim["card"] for claim in data["claims"]] == ["321"]
+    assert "[领卡占位]" not in captured.err, "JSON mode must not also print the human hint"
+    assert "branch" in data and "on_main" in data, "the existing fields are untouched"
