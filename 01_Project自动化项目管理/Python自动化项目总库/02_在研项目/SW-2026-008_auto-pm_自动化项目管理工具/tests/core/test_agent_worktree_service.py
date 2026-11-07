@@ -1396,3 +1396,45 @@ def test_the_sweep_listing_of_a_roster_station_without_ignored_files_has_no_such
     reason = _reasons(lab.service().sweep())[str(done)]
 
     assert "已并进 main" in reason and "会随目录一起删" not in reason
+
+
+# ── D-11: a full floor says who fills it and who can free each place ───────────────────────────────────────────────
+
+
+def test_the_full_floor_names_every_occupant_and_who_can_free_it(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SysLib thread 11-06: 8/8 filled by directories outside the roster, the refusal left the agent guessing."""
+
+    for key in AGENT_MARKER_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae")
+    _leftover_dirs(lab, MAX_STATIONS - 1)
+    finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    git(lab.root, "fetch", "-q", "origin")
+
+    with pytest.raises(StationRefusedError) as refused:
+        lab.service().open("trae", "CARD-2")
+
+    text = str(refused.value)
+    assert "现在占着的目录" in text
+    assert "claude：已做完可收；由 claude 执行 `worktree close claude`" in text, "别的 agent 做完的工位：点名谁来收"
+    for index in range(MAX_STATIONS - 1):
+        assert f"m3-left-{index}：名册外的目录，不属于任何 agent，只由用户处理" in text
+    assert not lab.station("trae").exists(), "拒绝时不能留下半个工位"
+
+
+def test_the_full_floor_message_marks_your_own_finished_station_as_yours(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for key in AGENT_MARKER_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    _leftover_dirs(lab, MAX_STATIONS - 1)
+    finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    git(lab.root, "fetch", "-q", "origin")
+
+    with pytest.raises(StationRefusedError, match=r"worktree close claude`（就是你）"):
+        lab.service().open("trae", "CARD-2")

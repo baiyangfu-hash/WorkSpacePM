@@ -587,7 +587,40 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f".auto-pm/worktrees 下已有 {count} 个目录，上限 {MAX_STATIONS}（WS-001）；"
                 "先 `worktree list` 看哪些已经做完，再 `worktree close <agent>` 或 `worktree sweep`（默认只列，加 --apply 才删）"
+                + self._occupant_lines()
             )
+
+    def _occupant_lines(self) -> str:
+        """Who fills the floor and who can free each place (D-11): the refusal alone leaves an agent guessing.
+
+        Best effort and read-only: a station that cannot be inspected is listed as such, never a reason to hide the refusal.
+        """
+
+        try:
+            stations = self.stations()
+        except (AgentWorktreeError, OSError):
+            return ""
+        caller = caller_agent()
+        lines: list[str] = []
+        for station in stations:
+            who = self._who_can_free(station, caller)
+            lines.append(f"  - {station.name}：{who}")
+        return "\n现在占着的目录：\n" + "\n".join(lines) if lines else ""
+
+    def _who_can_free(self, station: Station, caller: str) -> str:
+        verdict = self._sweep_station(station, None)
+        if station.kind == "agent":
+            owner = station.name
+            if verdict.remove:
+                answer = f"已做完可收；由 {owner} 执行 `worktree close {owner}`" + (
+                    "（就是你）" if caller == owner else "，或用户 `worktree sweep --apply`"
+                )
+            else:
+                answer = f"{owner} 的工位，暂不能收（{verdict.reason}）"
+            return answer
+        if verdict.remove:
+            return f"已可清（{verdict.reason}），只由用户在自己的终端 `worktree sweep --apply`"
+        return f"名册外的目录，不属于任何 agent，只由用户处理（{verdict.reason}）"
 
     # ── list ─────────────────────────────────────────────────────────
 
