@@ -645,6 +645,7 @@ _RISK_LEVEL_CHOICES = ["none", "low", "medium", "high"]
 @click.option("--risk-level", type=click.Choice(_RISK_LEVEL_CHOICES), default=None, help="§6.1 风险等级")
 @click.option("--mitigation", default=None, help="§6.1 缓解措施")
 @click.option("--propagation-chain", default=None, help="§6.3 变更传播链")
+@click.option("--file", "files", multiple=True, help="§5 涉及文件/交付物（仓库相对路径，可重复）；批准范围读这一栏")
 @click.option("--pid", default=None, help="项目编号（跨项目单号冲突时必填，TD-A04 修复）")
 @click.pass_context
 def cmd_edit(
@@ -658,6 +659,7 @@ def cmd_edit(
     risk_level: str | None,
     mitigation: str | None,
     propagation_chain: str | None,
+    files: tuple[str, ...],
     pid: str | None,
 ) -> None:
     """编辑变更单字段（支持 §4 基本字段 + §6 影响分析字符串字段）
@@ -687,6 +689,8 @@ def cmd_edit(
         updates["mitigation"] = mitigation
     if propagation_chain is not None:
         updates["propagation_chain"] = propagation_chain
+    if files:
+        updates["files"] = list(files)
 
     if not updates:
         console.print("[yellow]未指定要更新的字段，请使用 --background/--necessity 等选项[/yellow]")

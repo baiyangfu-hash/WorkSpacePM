@@ -121,6 +121,8 @@ class ChangeService:
         "propagation_chain",
         "constraint_impacts",
         "domain_impacts",
+        # §5 涉及文件/交付物（D-97）
+        "files",
     }
 
     # update_change_request 禁止修改的字段（受保护）

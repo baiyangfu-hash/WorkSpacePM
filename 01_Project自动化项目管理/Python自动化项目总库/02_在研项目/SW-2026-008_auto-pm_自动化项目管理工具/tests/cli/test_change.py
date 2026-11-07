@@ -527,3 +527,31 @@ def test_change_edit_no_fields_specified(cli_runner: CliRunner, tmp_path: Path) 
     )
     assert result.exit_code == 1
     assert "未指定要更新的字段" in result.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_fills_the_section_5_file_cells(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-97: `change edit --file` writes the §5 涉及文件/交付物 cells that the approved scope is read from."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+
+    result = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a/b.py", "--file", "tests/test_b.py"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    written = next(tmp_path.rglob(f"{change_number}.md")).read_text(encoding="utf-8")
+    assert written.count("| 涉及文件/交付物 | a/b.py<br>tests/test_b.py |") == 2
+
+
+@pytest.mark.cli
+def test_change_edit_file_rejects_a_path_that_would_break_the_table(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a|b.py"])
+
+    assert result.exit_code == 1
+    assert "非法字符" in result.output

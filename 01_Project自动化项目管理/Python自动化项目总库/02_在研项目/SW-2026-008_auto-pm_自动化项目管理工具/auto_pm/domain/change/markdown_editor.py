@@ -184,6 +184,9 @@ class ChangeMarkdownEditor:
             return self._update_table_field(
                 content, "紧急程度", self.render_urgency_value(value)
             )
+        # §5 涉及文件/交付物（D-97）：变更前、变更后两张表同写一份清单，审批读的就是这一栏
+        if field == "files":
+            return self.update_files(content, value)
         # §6 影响分析字段（M3-1 新增）
         if field == "risk_level":
             return self.update_risk_level(content, value)
@@ -196,6 +199,26 @@ class ChangeMarkdownEditor:
         if field == "domain_impacts":
             return self.update_domain_impacts(content, value)
         return content
+
+    def update_files(self, content: str, files: list[str] | tuple[str, ...] | str) -> str:
+        """把 §5 里每一行 ``| 涉及文件/交付物 | … |`` 的值换成给定清单（路径之间用 ``<br>``）。
+
+        清单为空或含 ``|`` / 换行的路径一律拒绝：这一栏是批准范围的来源，写错会让范围悄悄变宽或变空。
+        """
+
+        items = [files] if isinstance(files, str) else list(files)
+        cleaned = [str(item).strip() for item in items if str(item).strip()]
+        if not cleaned:
+            raise ValueError("涉及文件清单不能为空")
+        for item in cleaned:
+            if "|" in item or "\n" in item or "\r" in item or "<br>" in item.lower():
+                raise ValueError(f"涉及文件路径含非法字符（| 换行 <br>）：{item!r}")
+        pattern = re.compile(r"(\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*)[^|\n]*?(\s*\|)")
+        if not pattern.search(content):
+            log.warning("更新涉及文件: 未找到 '涉及文件/交付物' 行，跳过")
+            return content
+        joined = "<br>".join(cleaned)
+        return pattern.sub(lambda m: m.group(1) + joined + m.group(2), content)
 
     def _update_text_block(self, content: str, label: str, value: str) -> str:
         """更新 §4 中的文本块（**变更背景**：xxx）
