@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.ledger_isolation import INHERITED_COCKPIT_ENV, install_tripwire, real_ledger_paths
 from tests.quality_tools_gate import missing_quality_modules, skip_reason
 
 # 测试环境禁用审计日志文件写入：默认路径 ~/.auto-pm/audit/ 在 Trae Sandbox 等
@@ -114,6 +115,32 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_cockpit_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test never inherits the cockpit's workspace / control-root variables from the process that started pytest (D-108).
+
+    ``long-run --worktree`` exports them for acceptance commands; a pytest run under it would otherwise let the e2e drills'
+    child processes treat the real control root as the fixture's root.  A test that needs one sets it with ``monkeypatch.setenv``.
+    """
+
+    for name in INHERITED_COCKPIT_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_ledger_is_off_limits() -> Generator[None, None, None]:
+    """Opening a ``ContinuityStore`` on the real ledger from inside the test run raises, instead of writing to it (D-110)."""
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    paths = real_ledger_paths(os.environ, Path(__file__).resolve().parent)
+    remove = install_tripwire(ContinuityStore, paths)
+    try:
+        yield
+    finally:
+        remove()
 
 
 @pytest.fixture(autouse=True)
