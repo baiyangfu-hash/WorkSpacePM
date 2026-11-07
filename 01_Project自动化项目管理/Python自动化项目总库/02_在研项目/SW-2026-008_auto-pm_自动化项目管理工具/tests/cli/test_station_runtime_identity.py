@@ -19,7 +19,7 @@ from auto_pm.ui.cli.worktree import worktree_group
 WORKTREE_WRITES = {"open", "close"}  # sweep writes only with --apply
 WORKTREE_READS = {"list"}
 PR_WRITES = {"open"}  # open writes unless --dry-run
-PR_READS = {"ready"}
+PR_READS = {"ready", "settle-scan"}
 
 
 def test_every_worktree_and_pr_command_is_classified() -> None:

@@ -17,6 +17,8 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, AgentWorktreeError
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
 from auto_pm.application.core.pr_ready_service import PrReadyService, render
+from auto_pm.application.core.pr_settle_service import PrSettleError, PrSettleService
+from auto_pm.application.core.pr_settle_service import render as render_settle
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
@@ -130,4 +132,26 @@ def ready_cmd(ctx: click.Context, number: int, repo: str | None, reports_dirs: t
     for line in render(report):
         console.print(line, markup=False, highlight=False)
     if not report.ready:
+        raise SystemExit(1)
+
+
+@pr_group.command("settle-scan")
+@click.argument("project_id")
+@click.option("--base", default="origin/main", show_default=True, help="认作“已并入”的基线分支（读最近一次 fetch，不联网）")
+@click.pass_context
+def settle_scan_cmd(ctx: click.Context, project_id: str, base: str) -> None:
+    """合并后的收口清单（只读）：列出工作已并入主线、Run/Mission/变更单还开着的卡和各自合法的下一条命令；不转任何状态
+
+    退出码：0 没有等收口的；1 有（说明里写了下一步）；2 无法判断（没有账本、没有基线分支）。
+    """
+    app_ctx: AppContext = ctx.obj
+    root = Path(app_ctx.control_root or app_ctx.workspace_root or os.getcwd())
+    try:
+        items = PrSettleService(root, base_ref=base).scan(project_id)
+    except PrSettleError as error:
+        console.print(f"[bold red]错误[/bold red] {error}", markup=True, highlight=False)
+        raise SystemExit(2) from error
+    for line in render_settle(items):
+        console.print(line, markup=False, highlight=False)
+    if any(item.merged for item in items):
         raise SystemExit(1)

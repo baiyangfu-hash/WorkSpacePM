@@ -122,6 +122,7 @@ COMMANDS: dict[str, CommandSpec] = {
         CommandKind.RECOVERY, ("lease=valid",), ("G-LEASE-VALID",), "an expired lease cannot be renewed (TD-240): the exit is reclaim"
     ),
     "continuity recovery plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the exit chain of one abnormal state"),
+    "pr settle-scan": CommandSpec(CommandKind.READ_ONLY, (), (), "lists merged-but-open Runs and the legal next commands; moves nothing"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm resume": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm recover": CommandSpec(CommandKind.READ_ONLY, (), (), "--apply writes EXECUTOR_LOST (release 7 and later)"),
