@@ -89,6 +89,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_control_root,
     require_safe_workspace_path,
     worktree_head_and_dirty,
+    worktree_path_identity_problem,
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
@@ -680,21 +681,22 @@ class ContinuityStore:
     ) -> None:
         """Lock-held re-check of a Run's worktree: the same two facts as the full snapshot, in two git calls."""
 
-        problem = ""
-        try:
-            head, dirty = worktree_head_and_dirty(worktree, owned_paths)
-        except ControlRootGuardError as error:
-            problem = str(error)
-        else:
-            actual = {
-                self._authority_path_key(path)
-                for path in dirty
-                if any(self._authority_path_covered(path, (owned,)) for owned in owned_paths)
-            }
-            if head != git_head:
-                problem = f"Run git_head 在开工检查与写账本之间变了：Run 记的是 {git_head}，工位现在是 {head}；请重新开工"
-            elif actual != {self._authority_path_key(path) for path in observed_dirty_paths}:
-                problem = "Run observed_dirty_paths 在开工检查与写账本之间变了；请重新开工"
+        problem = worktree_path_identity_problem(worktree)
+        if not problem:
+            try:
+                head, dirty = worktree_head_and_dirty(worktree, owned_paths)
+            except ControlRootGuardError as error:
+                problem = str(error)
+            else:
+                actual = {
+                    self._authority_path_key(path)
+                    for path in dirty
+                    if any(self._authority_path_covered(path, (owned,)) for owned in owned_paths)
+                }
+                if head != git_head:
+                    problem = f"Run git_head 在开工检查与写账本之间变了：Run 记的是 {git_head}，工位现在是 {head}；请重新开工"
+                elif actual != {self._authority_path_key(path) for path in observed_dirty_paths}:
+                    problem = "Run observed_dirty_paths 在开工检查与写账本之间变了；请重新开工"
         if problem:
             raise ContinuityStoreError(problem)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,7 +14,7 @@ import pytest
 
 from auto_pm.infrastructure import continuity_store as store_module
 from auto_pm.infrastructure import control_root_guard
-from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.control_root_guard import worktree_head_and_dirty
 from tests.core.test_continuity_execution_service import Clock, _services, _start
 
@@ -176,3 +177,60 @@ def test_worktree_head_and_dirty_reports_changed_staged_and_untracked_inside_sco
     assert dirty == ("a dir/new.txt", "a dir/tracked.txt")
     assert worktree_head_and_dirty(tmp_path, ())[1] == ()
     assert worktree_head_and_dirty(tmp_path, ("other.txt",))[1] == ("other.txt",)
+
+
+# ── audit of #589: the two halves of the slow-lock warning, and the worktree identity re-check inside the lock ──
+
+
+@pytest.mark.parametrize(
+    ("asked", "acquired", "done", "warns"),
+    [
+        (0.0, 2.0, 2.1, True),  # only the wait was slow
+        (0.0, 0.1, 3.0, True),  # only the hold was slow
+        (0.0, 0.1, 0.2, False),  # neither
+    ],
+)
+def test_slow_lock_warning_fires_on_a_slow_wait_or_a_slow_hold_alone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    asked: float,
+    acquired: float,
+    done: float,
+    warns: bool,
+) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    store = ContinuityStore(tmp_path)
+    monkeypatch.setattr(time, "monotonic", lambda: done)
+
+    with caplog.at_level(logging.WARNING, logger=store_module.__name__):
+        store._record_write_timing("probe", asked, acquired)
+
+    assert any("写锁偏慢" in record.getMessage() for record in caplog.records) is warns
+
+
+def test_a_worktree_path_that_became_a_link_is_refused_inside_the_lock(tmp_path: Path) -> None:
+    """The canonical-identity re-check of the old in-lock snapshot is kept, git-free, inside the lock."""
+    _, service = _services(tmp_path, Clock())
+    store = service._store
+    real = tmp_path / "real-station"
+    subprocess.run(["git", "init", str(real)], check=True, capture_output=True)
+    link = tmp_path / "linked-station"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError:  # pragma: no cover - no symlink right on this platform
+        pytest.skip("symlinks unavailable")
+
+    with pytest.raises(ContinuityStoreError, match="canonical identity"):
+        store._confirm_run_snapshot_in_lock(str(link), "0" * 40, (), ())
+    # the same directory under its canonical name gets past the identity check (and fails later, on the HEAD)
+    with pytest.raises(ContinuityStoreError, match="git_head|HEAD|rev-parse|Git"):
+        store._confirm_run_snapshot_in_lock(str(real.resolve()), "0" * 40, (), ())
+
+
+def test_the_identity_recheck_costs_no_git_process(tmp_path: Path) -> None:
+    from auto_pm.infrastructure.control_root_guard import worktree_path_identity_problem
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    assert worktree_path_identity_problem(tmp_path.resolve()) == ""
+    assert worktree_path_identity_problem(tmp_path / "gone") != ""

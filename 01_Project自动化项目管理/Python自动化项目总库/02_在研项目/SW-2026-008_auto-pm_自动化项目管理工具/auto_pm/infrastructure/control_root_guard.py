@@ -336,6 +336,28 @@ def worktree_head_and_dirty(
     return head, tuple(sorted(dirty))
 
 
+def worktree_path_identity_problem(stored_path: str | Path) -> str:
+    """Cheap, git-free re-check that a Run's worktree path is still the canonical path stored at Run start ("" = fine).
+
+    The full snapshot resolved the path to its canonical form before the ledger lock was taken.  If, between that and the
+    lock, the directory was swapped for a symlink/junction (or its ``.git`` marker was), the path resolves somewhere else.
+    This costs a few filesystem calls and no git process, so it is safe to run while the lock is held.
+    """
+
+    stored = Path(stored_path)
+    try:
+        resolved = stored.resolve(strict=True)
+    except OSError:
+        return "Run worktree 不存在或无法规范化"
+    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
+        os.path.normpath(str(stored))
+    ):
+        return "Run worktree canonical identity 发生漂移"
+    if is_link_like(stored / ".git"):
+        return "Run worktree .git 标记不得是 symlink/junction/reparse point"
+    return ""
+
+
 def _real_control_directory(root: Path) -> Path:
     """Require the in-workspace ``.git`` entry to be a real directory, never an alias."""
 
