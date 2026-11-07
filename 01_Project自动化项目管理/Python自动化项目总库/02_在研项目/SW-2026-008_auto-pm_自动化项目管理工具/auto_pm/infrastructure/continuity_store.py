@@ -4537,7 +4537,46 @@ class ContinuityStore:
                 event_time,
                 aggregate_type="run",
             )
+            if destination in {RunState.FAILED, RunState.CANCELLED}:
+                self._block_work_without_live_run(conn, current.work_id, idempotency_key, event_time)
             return self._get_run(conn, run_id)
+
+    def _block_work_without_live_run(
+        self, conn: sqlite3.Connection, work_id: str, run_key: str, event_time: str
+    ) -> None:
+        """D-109 layer 3: a Run that ends FAILED/CANCELLED must not leave its Work IN_PROGRESS with nobody working on it.
+
+        Same transaction as the Run's own transition, so there is no moment where the Run is terminal and the Work is not.
+        BLOCKED is an existing legal state (``IN_PROGRESS -> BLOCKED``) that a person clears by retrying (READY) or by
+        cancelling; nothing is deleted.  A Work in any other state, or one that still has a live Run, is left alone.
+        """
+
+        work = self._get_work(conn, work_id)
+        if work.state is not WorkState.IN_PROGRESS:
+            return
+        live = conn.execute(
+            """SELECT run_id FROM run_items WHERE work_id=?
+            AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED') LIMIT 1""",
+            (work_id,),
+        ).fetchone()
+        if live is not None:
+            return
+        cursor = conn.execute(
+            """UPDATE work_items SET state=?, version=version+1, updated_at=?
+            WHERE work_id=? AND version=?""",
+            (WorkState.BLOCKED.value, event_time, work_id, work.version),
+        )
+        if cursor.rowcount != 1:
+            raise ContinuityStoreError("Work 不存在或版本冲突")
+        key = "work-blocked-" + hashlib.sha256(run_key.encode()).hexdigest()[:48]
+        self._append_event(
+            conn,
+            work_id,
+            "WORK_TRANSITIONED",
+            {"state": WorkState.BLOCKED.value, "authorization_ref": work.authorization_ref},
+            key,
+            event_time,
+        )
 
     @classmethod
     def _release_lease_in_transaction(
