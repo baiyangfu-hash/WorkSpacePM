@@ -19,6 +19,8 @@ from tests.core.test_agent_worktree_alias import (  # noqa: F401 - fixture impor
     as_user,
 )
 
+pytestmark = pytest.mark.usefixtures("as_user")
+
 OTHER_SESSION = "0a1b2c3d-1111-2222-3333-444455556666"
 
 
@@ -35,7 +37,6 @@ def _service(root: Path) -> AgentWorktreeService:
 def test_opening_with_the_bare_name_goes_to_the_callers_own_alias_even_when_the_bare_station_is_taken(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    as_user: None,  # noqa: F811
 ) -> None:
     root = _control_root(tmp_path)
     service = _service(root)
@@ -54,8 +55,8 @@ def test_opening_with_the_bare_name_goes_to_the_callers_own_alias_even_when_the_
 
 
 def test_two_conversations_get_two_stations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None
-) -> None:  # noqa: F811
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     service = _service(_control_root(tmp_path))
     first = (
         resolve_station_name(service, "claude", opening=True)
@@ -72,7 +73,6 @@ def test_two_conversations_get_two_stations(
 def test_non_opening_commands_use_the_alias_station_only_when_it_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    as_user: None,  # noqa: F811
 ) -> None:
     service = _service(_control_root(tmp_path))
     alias = _as_claude(monkeypatch)
@@ -86,7 +86,6 @@ def test_non_opening_commands_use_the_alias_station_only_when_it_exists(
 def test_nothing_changes_without_a_session_for_other_bases_or_for_an_explicit_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    as_user: None,  # noqa: F811
 ) -> None:
     service = _service(_control_root(tmp_path))
     assert (
@@ -103,7 +102,6 @@ def test_nothing_changes_without_a_session_for_other_bases_or_for_an_explicit_al
 def test_pr_open_on_a_taken_bare_station_points_to_the_callers_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    as_user: None,  # noqa: F811
 ) -> None:
     root = _control_root(tmp_path)
     _service(root).open("claude", "DEFECT-REG-241", fetch=False)
@@ -113,7 +111,7 @@ def test_pr_open_on_a_taken_bare_station_points_to_the_callers_alias(
     assert alias in str(raised.value) and "worktree open" in str(raised.value)
 
 
-def test_pr_open_hint_is_absent_for_a_user_terminal(tmp_path: Path, as_user: None) -> None:  # noqa: F811
+def test_pr_open_hint_is_absent_for_a_user_terminal(tmp_path: Path) -> None:
     root = _control_root(tmp_path)
     _service(root).open("claude", "DEFECT-REG-241", fetch=False)
     with pytest.raises(PrOpenRefusedError) as raised:
