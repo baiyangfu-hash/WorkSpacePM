@@ -513,9 +513,17 @@ def _project_ledger_file(project_root: Path) -> Path | None:
 
 
 def _run_ledger_gate(
-    workspace_root: Path, related_project_ids: tuple[str, ...] | None
+    workspace_root: Path,
+    related_project_ids: tuple[str, ...] | None,
+    *,
+    report_only_mismatch: bool = False,
 ) -> int:
-    """执行台账门禁；related 为 None 时代表全局发布门。"""
+    """执行台账门禁；related 为 None 时代表全局发布门。
+
+    ``report_only_mismatch`` 只用于工位（双根）提交的 pre-commit（D-01 后半）：控制根台账里的历史对账差异只报告，
+    不阻断这次提交——本次绑定的变更单有没有入账，由 commit-msg 硬卡；全局差异由发布门兜底。台账文件缺失、
+    对账本身出错仍然阻断，因为那时根本判断不了。
+    """
     from auto_pm.core.project_service import ProjectService
     from auto_pm.domain.change.ledger_reconciler import LedgerReconciler
 
@@ -567,7 +575,9 @@ def _run_ledger_gate(
             f"孤儿 {len(report.orphan_in_ledger)} 条, "
             f"状态差异 {len(report.status_mismatches)} 条"
         )
-        if is_related:
+        if is_related and report_only_mismatch:
+            print(f"⚠️ [auto-pm pre-commit] {message}（工位提交只报告，不阻断；本次绑定的变更单由 commit-msg 校验，全局差异由发布门拦）")
+        elif is_related:
             print(f"❌ [auto-pm ledger gate] {message}")
             has_blocking_error = True
         else:
@@ -887,7 +897,7 @@ def _enforce_ledger_pre_commit(
     roots = _roots_or_reject(workspace_root, control_root, "pre-commit")
     if roots is None:
         return 1
-    _cand_root, gov_root = roots
+    cand_root, gov_root = roots
     staged = list(snapshot.paths)
     if not staged:
         return 0
@@ -905,7 +915,9 @@ def _enforce_ledger_pre_commit(
         related_project_ids = _production_project_ids_from_paths(prod_files, bindings)
         if not related_project_ids:
             return 0
-        if _run_ledger_gate(gov_root, related_project_ids) != 0:
+        if _run_ledger_gate(
+            gov_root, related_project_ids, report_only_mismatch=cand_root.resolve() != gov_root.resolve()
+        ) != 0:
             print(
                 "🚨 [auto-pm pre-commit] 物理阻断：关联项目台账未闭环，"
                 "严禁直接 Commit！请先运行 auto-pm ledger reconcile <PID> --fix"
