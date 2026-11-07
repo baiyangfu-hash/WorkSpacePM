@@ -257,3 +257,10 @@ def test_render_escapes_author_controlled_path_names() -> None:
     assert path_lines[0].count("`") == 2, "反引号被转义后，代码块不会被提前截断"
     assert "\\x0a" in path_lines[0] and "\\x60" in path_lines[0]
     assert "已截断" in path_lines[1]
+
+
+def test_safe_path_uses_unambiguous_escapes_for_wide_characters() -> None:
+    assert rules.safe_path("a\u202eb") == "a\\u202eb"
+    assert rules.safe_path("a\U0001f600b") == "a\U0001f600b"  # 可打印的表情符号原样保留
+    assert rules.safe_path("a\x0ab") == "a\\x0ab"
+    assert rules.safe_path("中文路径.md") == "中文路径.md"

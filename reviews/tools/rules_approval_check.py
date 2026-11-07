@@ -169,9 +169,17 @@ def judge(files: list[str], comments: list[dict[str, Any]], head_sha: str) -> Re
 MAX_SHOWN_PATH = 200
 
 
+def _escape_char(char: str) -> str:
+    """码点不超过 0xFF 写成 \\xNN，更大的写成 \\uNNNN（或 \\UNNNNNNNN），避免 \\x202e 被读成 \\x20 加 2e。"""
+    code = ord(char)
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
+
+
 def safe_path(path: str) -> str:
     """路径名由 PR 作者决定（Git 文件名可含换行、反引号、控制字符），写进评论前转义，免得文字被改写或代码块被提前截断（D-79）。"""
-    shown = "".join(c if c.isprintable() and c != "`" else f"\\x{ord(c):02x}" for c in path)
+    shown = "".join(c if c.isprintable() and c != "`" else _escape_char(c) for c in path)
     return shown if len(shown) <= MAX_SHOWN_PATH else shown[:MAX_SHOWN_PATH] + "…（路径过长，已截断）"
 
 
