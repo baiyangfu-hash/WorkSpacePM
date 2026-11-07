@@ -174,7 +174,8 @@ def render(result: Result, head_sha: str) -> str:
         lines.append(f"通过：改了 {len(result.rule_files)} 个规则文件，有用户本人的批准：{result.approval}")
     else:
         lines.append(f"不通过：这个 PR 改了 {len(result.rule_files)} 个规则文件，但 PR 评论里没有用户本人对当前头提交的批准。")
-        lines.append(f"用户请在本 PR 页面评论一行：`{APPROVE_WORD} {head_sha[:MIN_SIGN_LEN]}`（评论后检查会自动重跑；之后再推新提交，要重批）。")
+        lines.append(f"复制这行评论即可批准（在本 PR 页面底部评论框粘贴，点 Comment；检查会自动重跑）：`{APPROVE_WORD} {head_sha[:MIN_SIGN_LEN]}`")
+        lines.append("这个号只对当前头提交有效，之后再推新提交要重批；PR 里的批准提示评论会随新推送自动更新。")
     if result.rule_files:
         lines.append("规则文件：")
         lines.extend(f"- `{f}`" for f in result.rule_files)

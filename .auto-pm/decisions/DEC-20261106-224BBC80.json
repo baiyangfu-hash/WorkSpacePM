@@ -1,0 +1,61 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261106-224BBC80",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-481",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/scl_linter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/scheme_doc.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scl_linter.py",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scheme_doc.py"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-06T02:44:39.055970+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: test_scl_linter.py 全部通过（含新增的“首行即代码的带 BOM 文件 0 违规”用例和“坏编码仍报错”反例）",
+    "acceptance: test_scheme_doc.py 全部通过（含新增的“实例在 FB 静态区时与 INT 表一致”用例和“表里写了但代码没有仍报”反例）",
+    "risk: auto_pm/ 与 tests/ 是受保护路径，PR 需用户评论规则批准 <头12位>，我不自批",
+    "risk: 检查器改动要发版后才在运行的驾驶舱里生效；今天不发版，plc check DJ-2026-011 那条 INT 实例表警告在发版前仍会出现",
+    "risk: scheme_doc 的修法对 CODESYS/InoProShop 项目 FB 静态区写法是否同样成立未核实；两个测试文件之外的 plc 测试是否受影响要在 PR 里补跑相邻测试",
+    "risk: SW-2026-008 控制根里有 5 个发版 7.2 遗留的未提交文件，run start 前要先由另一条讨论串入库",
+    "non-goal: 不改任何 PLC 项目文件（DJ-2026-011 等）与 SysLib",
+    "non-goal: 不同步 00_Infrastructure/auto_pm/ 下的部署副本，也不发版",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "84b9972b12a5cb2c4866454f48e503e9bf87eee11c93f4ec017c5c7bd7241fe8",
+      "approval_evidence_ref": "user-confirmation:2026-11-05T22:36:58Z",
+      "request_id": "PLC-CHECKER-FIX-20261105-PLAN",
+      "execution_grant": {
+        "adapter": "manual",
+        "approved_model": "claude-code",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/scl_linter.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/domain/plc/scheme_doc.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scl_linter.py",
+          "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scheme_doc.py"
+        ],
+        "plan_checklist": {
+          "original_request": "多重实例，计时器不是已经验证可行了么？计数器应该是一样的才对。相关的计时器，计数器全部都用多重实例好了。今天把PLC问题，全部解决",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": ".venv\\Scripts\\python.exe -m pytest {worktree}/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scl_linter.py -q",
+              "expected_exit_code": 0
+            },
+            {
+              "command": ".venv\\Scripts\\python.exe -m pytest {worktree}/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/tests/plc/test_scheme_doc.py -q",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "丢弃 claude/ 分支和对应 PR；检查器源码未发版，运行中的驾驶舱不受影响"
+        }
+      }
+    }
+  }
+}
