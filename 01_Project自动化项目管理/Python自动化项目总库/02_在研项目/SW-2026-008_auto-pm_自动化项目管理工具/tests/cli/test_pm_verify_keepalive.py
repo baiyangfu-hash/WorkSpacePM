@@ -27,7 +27,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, events: list[str], *, keepalive_error
             return [SimpleNamespace(run_id="RUN-1")]
 
         def get_lease(self, _run_id: str) -> SimpleNamespace:
-            return SimpleNamespace(owner_id="agent-a")
+            return SimpleNamespace(owner_id="agent-a", expires_at="2026-11-06T23:00:00+00:00")
 
     class _Facade:
         def __init__(self, *_a: object, **_k: object) -> None: ...
@@ -68,6 +68,7 @@ def test_verify_runs_inside_a_non_strict_keepalive_for_the_runs_holder(monkeypat
     assert result.exit_code == 0, result.output
     assert events == ["init:RUN-1:agent-a:strict=False", "enter", "verify", "exit"]
     assert "lease_keepalive_warning" not in json.loads(result.output)
+    assert json.loads(result.output)["lease_expires_at"] == "2026-11-06T23:00:00+00:00"  # D-31: the new deadline is shown
 
 
 def test_a_lost_renewal_is_reported_in_the_verify_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
