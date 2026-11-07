@@ -169,6 +169,7 @@ def caller_agent() -> str:
     Uses the same markers as the lease handover (``AGENT_MARKERS``): ``AUTO_PM_AGENT`` (``trae:cn`` style, the part
     before the colon), ``CLAUDECODE``/``CLAUDE_CODE_ENTRYPOINT`` for Claude Code and ``CODEX_*`` for Codex.  An agent
     marker that names nobody on the roster, or markers that disagree, give "?" so the caller is refused, never let through.
+    ``AI_AGENT`` (D-75) counts as a marker: ``claude-code_…`` is ``claude``, an unrecognised value is "?".
     """
 
     found: set[str] = set()
@@ -179,6 +180,12 @@ def caller_agent() -> str:
         found.add("claude")
     if any(key.upper().startswith("CODEX_") and value for key, value in os.environ.items()):
         found.add("codex")
+    generic = os.environ.get("AI_AGENT", "").strip().lower()
+    if generic:
+        # AI_AGENT is the generic convention (Claude Code sets e.g. ``claude-code_2-1-317_agent``).  A value that starts with a
+        # roster name is that agent; any other non-empty value is an agent we cannot name, so it is refused ("?"), not let through.
+        named = [name for name in sorted(AGENT_ROSTER) if re.match(rf"{re.escape(name)}(?![a-z0-9])", generic)]
+        found.add(named[0] if named else _UNKNOWN_CALLER)
     if not found:
         return ""
     if len(found) > 1 or not found <= set(AGENT_ROSTER):
