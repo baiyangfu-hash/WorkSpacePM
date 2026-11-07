@@ -246,3 +246,12 @@ def test_a_failing_state_backup_reader_never_stops_orient(tmp_path: Path, monkey
     result = _run(tmp_path, "orient", PROJECT)
 
     assert result.exit_code == 0 and "未能读取备份记录" in result.output
+
+
+@pytest.mark.parametrize("command", ["orient", "resume"])
+def test_d60_the_read_only_locators_do_not_write_the_ai_context_file(tmp_path: Path, command: str) -> None:
+    """D-60 said ``pm orient`` rewrote ``.auto-pm/ai_context.json``; in the source it does not, and this keeps it so."""
+    _workspace(tmp_path)
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", command, PROJECT, "--json"])
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / ".auto-pm" / "ai_context.json").exists()
