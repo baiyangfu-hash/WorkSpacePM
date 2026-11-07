@@ -15,11 +15,13 @@ checks so that nothing unrecoverable is ever removed:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
+import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -44,6 +46,7 @@ RESERVED_CARD_PREFIXES = ("control-root", "run-plan")
 RUN_PLAN_NAME = re.compile(r"^run-plan-[0-9a-f]{16}$")
 TERMINAL_RUN_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
 MAIN_REF = "refs/remotes/origin/main"
+_STATIONS_LOCK_SECONDS = 60.0  # 等别的对话开/收工位的最长时间
 # WS-001 / problem pool item 33 rule 4: at most this many directories under ``.auto-pm/worktrees`` at one time.
 # Counted by directory, not by roster: the unregistered shells and ``m3-*`` leftovers are exactly what piles up.
 MAX_STATIONS = 8
@@ -209,7 +212,59 @@ class AgentWorktreeService:
 
     # ── open ─────────────────────────────────────────────────────────
 
+    @contextlib.contextmanager
+    def _stations_lock(self) -> Iterator[None]:
+        """开/收工位的互斥锁（D-44 的并发测试查出：同一 agent 的两个对话同时开工位，输家会把赢家的工位目录清掉）。
+
+        锁文件在 ``.auto-pm/stations.lock``，不放在 ``worktrees`` 下（那里的目录个数要计入上限）。用操作系统的文件锁，
+        持有进程崩溃或被杀时由系统自动释放；等不到就报错而不是死等。
+        """
+
+        lock_path = self._root / ".auto-pm" / "stations.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + _STATIONS_LOCK_SECONDS
+        handle = os.open(lock_path, os.O_RDWR | os.O_CREAT)
+        try:
+            while True:
+                try:
+                    if sys.platform == "win32":
+                        import msvcrt
+
+                        os.lseek(handle, 0, os.SEEK_SET)
+                        msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as error:
+                    if time.monotonic() >= deadline:
+                        raise AgentWorktreeError(
+                            f"别的对话正在开/收工位，等了 {int(_STATIONS_LOCK_SECONDS)} 秒还没轮到；"
+                            "稍后再试，或确认那个对话是不是卡住了"
+                        ) from error
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                if sys.platform == "win32":
+                    import msvcrt
+
+                    os.lseek(handle, 0, os.SEEK_SET)
+                    with contextlib.suppress(OSError):
+                        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            os.close(handle)
+
     def open(self, agent: str, card: str, *, fetch: bool = True) -> Station:
+        with self._stations_lock():
+            return self._open_locked(agent, card, fetch=fetch)
+
+    def _open_locked(self, agent: str, card: str, *, fetch: bool = True) -> Station:
         prefix = self._prefix(agent)
         if not _CARD.match(card) or card.lower().startswith(RESERVED_CARD_PREFIXES):
             raise AgentWorktreeError(
@@ -347,6 +402,10 @@ class AgentWorktreeService:
     # ── close ────────────────────────────────────────────────────────
 
     def close(self, agent: str, *, fetch: bool = True) -> CloseResult:
+        with self._stations_lock():
+            return self._close_locked(agent, fetch=fetch)
+
+    def _close_locked(self, agent: str, *, fetch: bool = True) -> CloseResult:
         prefix = self._prefix(agent)
         caller = caller_agent()
         if caller == _UNKNOWN_CALLER:

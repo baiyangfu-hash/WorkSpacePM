@@ -904,6 +904,44 @@ class ContinuityExecutionService:
         except ContinuityStoreError as error:
             raise ContinuityExecutionError(str(error)) from error
 
+    def abandon_verifying_run(
+        self,
+        run_id: str,
+        owner_id: str,
+        lease_token: str,
+        idempotency_key: str,
+        *,
+        expected_epoch: int | None = None,
+    ) -> RunItem:
+        """D-41：持有者放弃一个验证没过的 Run（VERIFYING -> CANCELLED），释放租约。
+
+        只对 VERIFYING 开放，且必须持有该 Run 的有效租约；RUNNING 仍只能记失败，普通迁移图
+        （``transition_run``）保持不变，不会因此多出取消边。
+        """
+
+        try:
+            run = self._store.get_run(run_id)
+            lease = self._store.get_lease(run_id)
+            self._require_active_lease(lease, owner_id, lease_token, self._utc_now())
+            if run.state is not RunState.VERIFYING:
+                raise ContinuityExecutionError(
+                    f"只有验证中（VERIFYING）的 Run 才能放弃，当前是 {run.state.value}；"
+                    "干到一半的 Run 只能记为失败"
+                )
+            return self._store.transition_run(
+                run_id,
+                run.version,
+                RunState.CANCELLED.value,
+                idempotency_key,
+                self._utc_now().isoformat(),
+                owner_id=owner_id,
+                lease_token=lease_token,
+                expected_epoch=expected_epoch,
+                abandon=True,
+            )
+        except ContinuityStoreError as error:
+            raise ContinuityExecutionError(str(error)) from error
+
     def record_start_evidence(
         self,
         *,

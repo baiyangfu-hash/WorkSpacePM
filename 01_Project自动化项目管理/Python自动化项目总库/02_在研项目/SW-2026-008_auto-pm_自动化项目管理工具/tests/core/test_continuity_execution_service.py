@@ -4441,3 +4441,50 @@ def test_d46_run_start_checks_the_declared_files_not_the_whole_owned_scope(tmp_p
         idempotency_key="d46-does-not-declare-it",
     )
     assert Path(run.worktree_path) == linked.resolve()
+
+
+def _to_state(service: ContinuityExecutionService, state: RunState) -> None:
+    service.transition_run("RUN-001", RunState.RUNNING, "agent-a", "lease-secret", "to-running")
+    if state is RunState.VERIFYING:
+        service.transition_run(
+            "RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-verifying"
+        )
+
+
+def test_holder_can_abandon_a_verifying_run_and_the_lease_is_released(tmp_path: Path) -> None:
+    """D-41：验证没过的 Run 有干净的放弃出口（VERIFYING -> CANCELLED），不必记成失败。"""
+
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.VERIFYING)
+
+    cancelled = service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-1")
+
+    assert cancelled.state is RunState.CANCELLED
+    assert service._store.get_lease("RUN-001").lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError):
+        service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-2")
+
+
+def test_abandon_is_refused_for_a_running_run_and_for_a_wrong_token(tmp_path: Path) -> None:
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.RUNNING)
+
+    with pytest.raises(ContinuityExecutionError, match="只有验证中"):
+        service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-running")
+    service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-ver")
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        service.abandon_verifying_run("RUN-001", "agent-a", "wrong-secret", "abandon-bad")
+    assert service._store.get_run("RUN-001").state is RunState.VERIFYING
+
+
+def test_normal_transition_graph_still_refuses_cancel_from_verifying(tmp_path: Path) -> None:
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.VERIFYING)
+
+    with pytest.raises(ContinuityExecutionError, match="非法 Run 状态迁移"):
+        service.transition_run(
+            "RUN-001", RunState.CANCELLED, "agent-a", "lease-secret", "normal-cancel"
+        )

@@ -67,9 +67,28 @@ class CandidateMergeBackService:
         if not owned_paths:
             return ()
         pathspecs = ["--", *owned_paths]
-        changed = self._git_z(["diff", "--name-only", "-z", "--no-renames", git_head, *pathspecs])
+        # D-40：Run 的工位上提交过之后重开 Run，git_head 是工位分支上的新提交，控制根还没有它；
+        # 拿它当基线会把“工位里已提交的改动”全算成控制根的漂移，形成死循环。
+        # 基线取 git_head 与控制根 HEAD 的共同祖先：git_head 是控制根 HEAD 的祖先时就是它自己（行为不变），
+        # 工位在其上提交过时则是控制根 HEAD，只有控制根里真正未提交的改动才算漂移。
+        baseline = self._merge_base(git_head) or git_head
+        changed = self._git_z(["diff", "--name-only", "-z", "--no-renames", baseline, *pathspecs])
         untracked = self._git_z(["ls-files", "--others", "--exclude-standard", "-z", *pathspecs])
         return tuple(sorted(set(changed) | set(untracked)))
+
+    def _merge_base(self, git_head: str) -> str:
+        """``git_head`` 与控制根 HEAD 的共同祖先；算不出来（两边无关、对象缺失）返回空串，调用方退回 ``git_head``。"""
+
+        result = run_git_bounded(
+            ["git", "-C", str(self._control_root), "merge-base", git_head, "HEAD"],
+            default_timeout=60.0,
+            error_cls=CandidateMergeBackError,
+            where=self._control_root,
+            capture_output=True,
+            check=False,
+            env=clean_git_environment(),
+        )
+        return result.stdout.decode("utf-8", errors="replace").strip() if result.returncode == 0 else ""  # lenient-decode: git 输出的 40 位哈希，读不出就退回 git_head
 
     def _git_z(self, arguments: list[str]) -> tuple[str, ...]:
         result = run_git_bounded(
