@@ -42,7 +42,10 @@ from pr_scope_check import declared_scope, normalized
 
 API = "https://api.github.com"
 TIMEOUT_SECONDS = 30
-CLAIM_LINE = re.compile(r"^\s*领卡占位\s*[:：]\s*`?([A-Za-z0-9][A-Za-z0-9._-]{0,62})`?\s*$", re.MULTILINE)
+# 一行 ``领卡占位: <卡号>``；一个 PR 做了几张卡就写几行，或在一行里用逗号、顿号、空格隔开（D-113）。
+CLAIM_LINE = re.compile(r"^\s*领卡占位\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+CARD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
+CARD_SEPARATORS = re.compile(r"[,，、;；\s]+")
 WAIVER_LINE = re.compile(r"^\s*重叠放行\s*[:：]\s*#(\d+)\s+(\S.*?)\s*$", re.MULTILINE)
 CLAIM_REF_PREFIX = "claims/"
 
@@ -177,38 +180,62 @@ def earliest_commit_time(fetch: Fetch, repo: str, number: int) -> str:
     return min(stamps) if stamps else ""
 
 
+def claim_tokens(body: str) -> list[str]:
+    """描述里 ``领卡占位`` 行写的全部卡号（按出现顺序、去重）；不是合法卡号的写法原样保留，由调用方报错。"""
+
+    seen: dict[str, None] = {}
+    for match in CLAIM_LINE.finditer(body):
+        for token in CARD_SEPARATORS.split(match.group(1).replace("`", "")):
+            if token:
+                seen.setdefault(token)
+    return list(seen)
+
+
 def referenced_cards(body: str) -> set[str]:
-    return {match.group(1) for match in CLAIM_LINE.finditer(body)}
+    return {token for token in claim_tokens(body) if CARD_NAME.fullmatch(token)}
 
 
 def check_claim(fetch: Fetch, repo: str, number: int, body: str, created_at: str, enforce_from: str, result: Result) -> None:
     enforced = is_enforced(created_at, enforce_from)
     problems: list[str] = []
-    match = CLAIM_LINE.search(body)
-    if match is None:
+    tokens = claim_tokens(body)
+    if not tokens:
         problems.append("描述里没有 `领卡占位: <卡号>` 一行：开工先 `main.py claim list` 看占位表，再 `main.py claim open <卡号> --paths … --goal …` 订卡，订上才改代码")
     else:
-        card = match.group(1)
-        try:
-            payload = claim_payload(fetch, repo, card)
-        except NotFound:
-            problems.append(f"远程没有 `claims/{card}`：先订卡再开 PR（`main.py claim open {card} --paths … --goal …`）")
-        else:
-            problems.extend(claim_problems(fetch, repo, number, body, card, payload))
-            for other in paged(fetch, f"/repos/{repo}/pulls?state=open&base=main"):
-                other_number = other.get("number")
-                if isinstance(other_number, int) and other_number < number and card in referenced_cards(str(other.get("body") or "")):
+        payloads: dict[str, dict[str, object]] = {}
+        for card in tokens:
+            if not CARD_NAME.fullmatch(card):
+                problems.append(f"`领卡占位` 里的 `{card}` 不是合法卡号（字母数字开头，可含 . _ -）；多张卡写多行，或用逗号隔开")
+                continue
+            try:
+                payloads[card] = claim_payload(fetch, repo, card)
+            except NotFound:
+                problems.append(f"远程没有 `claims/{card}`：先订卡再开 PR（`main.py claim open {card} --paths … --goal …`）")
+        first = earliest_commit_time(fetch, repo, number) if payloads else ""
+        for card, payload in payloads.items():
+            problems.extend(claim_validity_problems(card, payload, first))
+        others = [
+            (other_number, referenced_cards(str(other.get("body") or "")))
+            for other in paged(fetch, f"/repos/{repo}/pulls?state=open&base=main")
+            if isinstance(other_number := other.get("number"), int) and other_number < number
+        ]
+        for card in payloads:
+            for other_number, cards in others:
+                if card in cards:
                     problems.append(f"卡 {card} 已被更早开着的 PR #{other_number} 引用：一张卡一个 PR，另订一张卡")
+        if payloads:
+            problems.extend(claim_coverage_problems(fetch, repo, number, body, payloads))
     if enforced:
         result.errors.extend(problems)
     else:
         result.notes.extend(f"领卡检查（本 PR 创建于 {created_at or '未知'}，早于强制起点 {enforce_from or '未设'}，只提示）：{item}" for item in problems)
 
 
-def claim_problems(fetch: Fetch, repo: str, number: int, body: str, card: str, payload: dict[str, object]) -> list[str]:
+def claim_validity_problems(card: str, payload: dict[str, object], first: str) -> list[str]:
+    """一张卡自己的占位是否有效：没被收回、没在首个提交前放下、首个提交时没过期、订卡不晚于首个提交。"""
+
     problems: list[str] = []
     claimed_at = str(payload.get("claimed_at", ""))
-    first = earliest_commit_time(fetch, repo, number)
     status = str(payload.get("status", ""))
     if status == "reclaimed":
         problems.append(f"卡 {card} 的占位已被收回（{payload.get('reclaimed_reason', '无原因')}）：重新订卡")
@@ -221,18 +248,31 @@ def claim_problems(fetch: Fetch, repo: str, number: int, body: str, card: str, p
         problems.append(f"`claims/{card}` 里读不到领卡时间")
     elif first and claimed_at > first:
         problems.append(f"先改代码后订卡：卡 {card} 订于 {claimed_at}，本 PR 最早的提交在 {first}")
-    claimed = [path for item in payload.get("paths", []) if isinstance(item, str) and (path := normalized(item)) is not None]
+    return problems
+
+
+def claim_coverage_problems(fetch: Fetch, repo: str, number: int, body: str, payloads: dict[str, dict[str, object]]) -> list[str]:
+    """可改范围和实际改到的每个文件，必须落在**所有**被引用的卡订的路径的并集里（一个 PR 可以做几张卡）。"""
+
+    claimed = [
+        path
+        for payload in payloads.values()
+        for item in payload.get("paths", [])  # type: ignore[attr-defined]
+        if isinstance(item, str) and (path := normalized(item)) is not None
+    ]
 
     def covered(path: str) -> bool:
         return any(path == c or path.startswith(c + "/") for c in claimed)
 
+    names = "、".join(payloads)
+    problems: list[str] = []
     declared = [path for entry in declared_scope(body) if (path := normalized(entry)) is not None]
     for path in declared:
         if not covered(path):
-            problems.append(f"可改范围里的 `{path}` 不在卡 {card} 订的路径里：补订或收窄范围")
+            problems.append(f"可改范围里的 `{path}` 不在卡 {names} 订的路径里：补订或收窄范围")
     for path in changed_files(fetch, repo, number):
         if not covered(path) and path not in declared:
-            problems.append(f"实际改到的 `{path}` 不在卡 {card} 订的路径里：补订或收窄范围")
+            problems.append(f"实际改到的 `{path}` 不在卡 {names} 订的路径里：补订或收窄范围")
     return problems
 
 

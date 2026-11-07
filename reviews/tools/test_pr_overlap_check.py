@@ -245,3 +245,63 @@ def test_one_card_cannot_back_two_open_prs(github: FakeGitHub) -> None:
     github.add_pr(11, body("pkg/b.py", claim="c1"), ["pkg/b.py"], created=LATE)
 
     assert any("卡 c1 已被更早开着的 PR #10 引用" in error for error in run(github, 11).errors)
+
+
+def multi_body(*scope: str, cards: tuple[str, ...]) -> str:
+    return body(*scope, claim=cards[0]) + "".join(f"\n领卡占位: {card}" for card in cards[1:])
+
+
+def test_a_pr_that_names_two_cards_is_covered_by_both_cards_paths(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"])
+    github.add_pr(11, multi_body("pkg/a/x.py", "pkg/b/y.py", cards=("c1", "c2")), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    result = run(github, 11)
+
+    assert result.passed, result.errors
+
+
+def test_a_path_covered_by_none_of_the_named_cards_is_still_refused(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"])
+    github.add_pr(11, multi_body("pkg/a/x.py", "elsewhere/z.py", cards=("c1", "c2")), ["pkg/a/x.py", "elsewhere/z.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("elsewhere/z.py" in error and "c1" in error and "c2" in error for error in errors)
+    assert not any("pkg/a/x.py" in error for error in errors)
+
+
+def test_every_named_card_is_checked_on_its_own(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"], status="reclaimed")
+    github.add_pr(11, multi_body("pkg/a/x.py", "pkg/b/y.py", cards=("c1", "c2")), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("卡 c2 的占位已被收回" in error for error in errors)
+    assert not any("卡 c1 的占位已被收回" in error for error in errors)
+
+
+def test_a_missing_card_among_several_is_named(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.add_pr(11, multi_body("pkg/a/x.py", cards=("c1", "ghost")), ["pkg/a/x.py"])
+
+    assert any("远程没有 `claims/ghost`" in error for error in run(github, 11).errors)
+
+
+def test_each_named_card_cannot_back_an_earlier_open_pr(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"])
+    github.add_pr(10, body("pkg/b/old.py", claim="c2"), ["pkg/b/old.py"], created=BEFORE_ENFORCE)
+    github.add_pr(11, multi_body("pkg/a/x.py", "pkg/b/y.py", cards=("c1", "c2")), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    assert any("卡 c2 已被更早开着的 PR #10 引用" in error for error in run(github, 11).errors)
+
+
+def test_cards_may_share_one_line_separated_by_commas(github: FakeGitHub) -> None:
+    github.claim("c1", ["pkg/a"])
+    github.claim("c2", ["pkg/b"])
+    github.add_pr(11, body("pkg/a/x.py", "pkg/b/y.py", claim="c1, c2"), ["pkg/a/x.py", "pkg/b/y.py"])
+
+    assert run(github, 11).passed
