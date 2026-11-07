@@ -76,6 +76,22 @@ def resolve_station_name(service: AgentWorktreeService, agent: str, *, opening: 
     return agent
 
 
+def shared_station_refusal(agent: str) -> str:
+    """D-112: ``close claude`` with no station of the caller's own would close the one station every same-named conversation shares.
+
+    Returns the refusal text when the caller has a conversation alias and ``agent`` is the bare shared name, else "".  The caller who
+    really means the shared station says so with ``--shared``.
+    """
+
+    alias = caller_alias()
+    if alias and agent == base_agent(alias) and agent != alias:
+        return (
+            f"{agent} 是所有同名对话共用的工位，不是本对话（{alias}）的；收它会动到别的对话的工作。"
+            f"确定要收这个共用工位，加 --shared"
+        )
+    return ""
+
+
 def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeService:
     app_ctx: AppContext = ctx.obj
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
@@ -253,12 +269,16 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
 @worktree_group.command("close")
 @click.argument("agent", type=AGENTS)
 @click.option("--no-fetch", is_flag=True, help="断网时按本机已知的远程分支判断")
+@click.option("--shared", is_flag=True, help="确认要收同名对话共用的工位（裸名，如 claude）")
 @click.pass_context
-def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
+def close_cmd(ctx: click.Context, agent: str, no_fetch: bool, shared: bool) -> None:
     """收 AGENT 的工位：无未提交改动、提交都已推送才删；已并进 main 的再删本地分支"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     agent = resolve_station_name(service, agent)
+    refusal = "" if shared else shared_station_refusal(agent)
+    if refusal:
+        _fail(AgentWorktreeError(refusal))
     try:
         result = service.close(agent, fetch=not no_fetch)
     except AgentWorktreeError as error:
