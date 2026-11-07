@@ -186,3 +186,11 @@ def test_cli_exit_codes_say_waiting_nothing_waiting_and_cannot_judge(tmp_path: P
     result = _invoke(tmp_path, PROJECT)
     assert result.exit_code == 1 and "RUN-001" in result.output
     service._store.close_read_snapshot()
+
+
+def test_settle_scan_has_no_apply_option_so_it_can_never_write() -> None:
+    """User decision 2026-11-07: no ``--apply`` that runs ``pm close`` by itself.  The command stays read-only; adding a write option must fail here."""
+
+    command = pr_group.commands["settle-scan"]
+    options = {name for param in command.params for name in getattr(param, "opts", [])}
+    assert options == {"--base"}
