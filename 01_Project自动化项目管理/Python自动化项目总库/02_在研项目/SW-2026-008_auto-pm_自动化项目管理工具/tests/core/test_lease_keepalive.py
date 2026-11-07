@@ -182,3 +182,25 @@ def test_d31_a_longer_lease_is_never_shortened_by_the_keepalive(tmp_path: Path) 
     after = service.current_lease("RUN-001")
     assert after.expires_at >= before.expires_at
     assert after.version == before.version  # nothing was written at all
+
+
+def test_a_lease_stamp_without_a_time_zone_is_renewed_as_before_not_a_crash() -> None:
+    # Audit of #585 (comment 6702498372): a naive ``expires_at`` made the D-31 comparison raise TypeError.
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    renewals: list[int] = []
+
+    class Execution:
+        def current_lease(self, run_id: str) -> SimpleNamespace:
+            return SimpleNamespace(expires_at="2026-11-07T05:00:00", version=3)  # no zone
+
+        def now_utc(self) -> datetime:
+            return datetime(2026, 11, 7, 4, 0, tzinfo=UTC)
+
+        def renew_lease(self, *args: object, **kwargs: object) -> None:
+            renewals.append(1)
+
+    keepalive = _keepalive(Execution())
+    keepalive._renew_once()
+    assert renewals == [1]
