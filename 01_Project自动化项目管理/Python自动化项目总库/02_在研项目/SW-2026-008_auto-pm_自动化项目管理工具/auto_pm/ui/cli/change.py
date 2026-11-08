@@ -18,6 +18,7 @@ Commands:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import click
@@ -38,6 +39,7 @@ from auto_pm.change.constants import (
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
 from auto_pm.ui.cli.approval_pin import refuse_agent_approval, require_approval_pin
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity,
     require_runtime_identity_for_change,
@@ -635,6 +637,27 @@ def cmd_transition(
 _RISK_LEVEL_CHOICES = ["none", "low", "medium", "high"]
 
 
+def _read_files_from(ctx: click.Context, source: Path) -> list[str]:
+    """D-140: read the §5 file list from a UTF-8 text file (one path per line; blank lines and ``#`` lines are skipped).
+
+    A path list in a file never crosses the shell's command line, so a long list of Chinese paths cannot be cut in
+    the middle of a character there (D-133). ``utf-8-sig`` also accepts the BOM that Windows PowerShell writes (D-136).
+    """
+
+    try:
+        text = source.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as error:
+        console.print(f"[red]错误: --files-from 文件不是有效的 UTF-8：{ascii(str(source))}（{error.reason}）[/red]")
+        ctx.exit(2)
+        raise  # unreachable: ctx.exit raises; keeps the type checker honest
+    lines = [line.strip() for line in text.splitlines()]
+    paths = [line for line in lines if line and not line.startswith("#")]
+    if not paths:
+        console.print(f"[red]错误: --files-from 文件里没有任何路径：{source}[/red]")
+        ctx.exit(2)
+    return paths
+
+
 @change_group.command(name="edit")
 @click.argument("change_number")
 @click.option("--background", default=None, help="§4 变更背景")
@@ -646,6 +669,13 @@ _RISK_LEVEL_CHOICES = ["none", "low", "medium", "high"]
 @click.option("--mitigation", default=None, help="§6.1 缓解措施")
 @click.option("--propagation-chain", default=None, help="§6.3 变更传播链")
 @click.option("--file", "files", multiple=True, help="§5 涉及文件/交付物（仓库相对路径，可重复）；批准范围读这一栏")
+@click.option(
+    "--files-from",
+    "files_from",
+    type=CallerPath(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="从文本文件读 §5 涉及文件清单（UTF-8，一行一条，空行和 # 开头的行忽略）；可与 --file 合用，绕开命令行传中文路径（D-140）",
+)
 @click.option(
     "--after-approval",
     "after_approval",
@@ -666,6 +696,7 @@ def cmd_edit(
     mitigation: str | None,
     propagation_chain: str | None,
     files: tuple[str, ...],
+    files_from: Path | None,
     after_approval: bool,
     pid: str | None,
 ) -> None:
@@ -696,8 +727,10 @@ def cmd_edit(
         updates["mitigation"] = mitigation
     if propagation_chain is not None:
         updates["propagation_chain"] = propagation_chain
+    if files_from is not None:
+        files = (*files, *_read_files_from(ctx, files_from))
     if files:
-        updates["files"] = list(files)
+        updates["files"] = list(dict.fromkeys(files))
 
     if not updates:
         console.print("[yellow]未指定要更新的字段，请使用 --background/--necessity 等选项[/yellow]")

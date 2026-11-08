@@ -19,6 +19,26 @@ def test_sound_arguments_pass_including_chinese_and_astral_characters() -> None:
     assert broken_argument_message([]) is None
 
 
+def test_a_lone_high_surrogate_without_its_low_half_is_refused_too() -> None:
+    """D-139: the cut can also leave the first half of a pair behind (``\\ud800``-``\\udbff``), not only the second half."""
+
+    for lone_high in ("\ud83d", "\ud800", "\udbff"):
+        message = broken_argument_message(["change", "edit", "CHG-1", "--file", f"路径{lone_high}.py"])
+
+        assert message is not None, ascii(lone_high)
+        assert "第 5 个命令行参数" in message
+        assert ascii(lone_high)[1:-1] in message
+
+    # a complete pair is one sound astral character, not a lone surrogate
+    assert broken_argument_message(["--file", "\ud83d\ude00".encode("utf-16", "surrogatepass").decode("utf-16")]) is None
+
+
+def test_the_refusal_exit_code_is_two() -> None:
+    """D-139: scripts and the PowerShell wrappers branch on this number, so a change to it must fail a test."""
+
+    assert ARGV_EXIT_CODE == 2
+
+
 def test_the_message_names_the_argument_and_its_place_among_the_repeated_option() -> None:
     args = ["change", "edit", "CHG-1", "--file", "a.py", "--file", "b.py", "--file", BROKEN, "--file", "d.py"]
 
@@ -51,6 +71,7 @@ def test_change_edit_with_a_broken_file_argument_is_refused_before_anything_is_w
         cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "ok.py", "--file", BROKEN]
     )
 
+    assert result.exit_code == 2  # the literal, not the constant: the number itself is the contract (D-139)
     assert result.exit_code == ARGV_EXIT_CODE
     assert "第 2 个 --file 的值" in result.output
     assert "codec" not in result.output  # not the old failure from deep inside the write
