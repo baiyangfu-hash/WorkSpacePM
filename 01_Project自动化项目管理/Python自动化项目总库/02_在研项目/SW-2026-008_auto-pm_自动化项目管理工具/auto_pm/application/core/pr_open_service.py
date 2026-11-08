@@ -119,7 +119,7 @@ def default_gh(args: Sequence[str], stdin: str | None) -> subprocess.CompletedPr
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: gh output is shown to the user and its JSON is parsed after; a damaged byte shows up as a parse error there
             check=False,
             stdin=None if stdin is not None else subprocess.DEVNULL,
             timeout=_GH_TIMEOUT_SECONDS,
@@ -464,7 +464,7 @@ class PrOpenService:
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
-                text = raw.decode("utf-8", errors="replace")
+                text = raw.decode("utf-8", errors="replace")  # lenient-decode: only after a strict decode failed; the note below tells the reader to check
                 notes.append(f"变更单 {number} 不是 UTF-8 编码，按容错方式读，关联 TD 可能不全，请核对")
             found.extend(TD_ID.findall(text))
         return tuple(dict.fromkeys(found)), notes
@@ -505,7 +505,7 @@ class PrOpenService:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                errors="replace",
+                errors="replace",  # lenient-decode: the guard script's output is only quoted back to the user
                 check=False,
                 env=env,
                 stdin=subprocess.DEVNULL,
