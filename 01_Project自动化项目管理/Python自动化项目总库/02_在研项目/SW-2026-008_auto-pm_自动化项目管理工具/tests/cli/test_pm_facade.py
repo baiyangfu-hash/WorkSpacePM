@@ -452,3 +452,14 @@ def test_pm_plan_dry_run_is_for_new_requests_only(cli_runner: CliRunner, tmp_pat
 
     assert result.exit_code != 0
     assert "--dry-run" in result.output
+
+
+def test_pm_plan_dry_run_does_not_create_a_missing_ledger(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _setup_planning(tmp_path)
+    for db in (tmp_path / ".auto-pm").glob("continuity.db*"):
+        db.unlink()
+
+    dry = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args(), "--dry-run"])
+
+    assert dry.exit_code == 0, dry.output
+    assert not list((tmp_path / ".auto-pm").glob("continuity.db*"))
