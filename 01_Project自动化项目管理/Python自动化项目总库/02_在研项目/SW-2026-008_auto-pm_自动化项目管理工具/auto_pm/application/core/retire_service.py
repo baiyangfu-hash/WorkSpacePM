@@ -64,7 +64,10 @@ class RetireResult:
     work_id: str
     outcome: str  # "retired" | "skipped"
     detail: str = ""
+    # planned: every Mission under the Work that this retire meant to cancel
     mission_ids: tuple[str, ...] = ()
+    # D-149: the subset confirmed CANCELLED by this apply (a half-done retire lists fewer than planned)
+    cancelled_mission_ids: tuple[str, ...] = ()
 
 
 @dataclass
@@ -157,6 +160,7 @@ class RetireService:
 
     def _retire_one(self, item: RetireItem, missions: MissionService, works: WorkRegistryService) -> RetireResult:
         key_tail = f"{item.work_id}-{item.residue.last_run_id}"
+        cancelled: list[str] = []
         try:
             for mission_id in item.mission_ids:
                 mission = ContinuityStore(self._root).get_mission(mission_id)
@@ -167,10 +171,11 @@ class RetireService:
                     root_work_id=None,  # CANCELLED takes no root Work (it is already bound)
                     idempotency_key=f"retire-mission-{mission_id}-{key_tail}",
                 )
+                cancelled.append(mission_id)
             works.transition(item.work_id, WorkState.CANCELLED, f"retire-work-{key_tail}")
         except (MissionServiceError, WorkRegistryError, ContinuityStoreError) as error:
-            return RetireResult(item.work_id, "skipped", f"没有收口：{error}", item.mission_ids)
-        return RetireResult(item.work_id, "retired", "已取消", item.mission_ids)
+            return RetireResult(item.work_id, "skipped", f"没有收口：{error}", item.mission_ids, tuple(cancelled))
+        return RetireResult(item.work_id, "retired", "已取消", item.mission_ids, tuple(cancelled))
 
     def _write_trace(self, project_id: str, evidence: str, results: list[RetireResult]) -> Path:
         """Write the trace; never overwrite an earlier one (D-134: two applies in the same second used to share a file)."""
@@ -184,7 +189,13 @@ class RetireService:
             "at": self._now().astimezone(UTC).isoformat(),
             "approval_evidence_ref": evidence,
             "results": [
-                {"work_id": r.work_id, "mission_ids": list(r.mission_ids), "outcome": r.outcome, "detail": r.detail}
+                {
+                    "work_id": r.work_id,
+                    "mission_ids": list(r.mission_ids),
+                    "cancelled_mission_ids": list(r.cancelled_mission_ids),
+                    "outcome": r.outcome,
+                    "detail": r.detail,
+                }
                 for r in results
             ],
         }
