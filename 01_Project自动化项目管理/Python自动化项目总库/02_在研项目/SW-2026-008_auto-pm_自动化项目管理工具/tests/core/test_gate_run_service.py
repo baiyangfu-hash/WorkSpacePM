@@ -228,7 +228,8 @@ class _Tree:
                 assert "--untracked-files=all" in args  # audit 1.1: untracked files must count
                 return self.status
             if args[:1] == ("ls-files",):
-                return self.ignored
+                assert "-z" in args  # D-126: NUL-separated, raw names
+                return None if self.ignored is None else self.ignored.replace("\n", "\0")
             if args[:1] == ("rev-parse",) and "HEAD" in args:
                 return self.head
             return real(worktree, *args)
@@ -375,6 +376,26 @@ def test_tree_state_in_a_real_repository(tmp_path: Path) -> None:
     (tmp_path / "tests" / "__pycache__" / "x.py").write_text("x = 1\n", encoding="utf-8")
     state = gate.tree_state(tmp_path, tmp_path)
     assert state.dirty is False and state.ignored_code == ("tests/hidden_plugin.py",)
+
+
+def test_tree_state_lists_an_ignored_code_file_with_a_non_ascii_name(tmp_path: Path) -> None:
+    """D-126: git quotes such a name ("\\350\\...") unless asked for -z, and the quoted text no longer ends in ``.py``."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    for key, value in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git("config", key, value)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "auto_pm").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("*隐藏*.py\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "c0")
+    (tmp_path / "tests" / "隐藏插件.py").write_text("x = 1\n", encoding="utf-8")
+    state = gate.tree_state(tmp_path, tmp_path)
+    assert state.ignored_code == ("tests/隐藏插件.py",)
 
 
 def test_a_tree_that_changes_during_the_round_is_not_pass(
