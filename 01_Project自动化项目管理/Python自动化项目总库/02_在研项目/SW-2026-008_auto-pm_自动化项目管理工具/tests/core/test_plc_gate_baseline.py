@@ -221,7 +221,7 @@ class PanickingTestLsp(FakeSiemensLsp):
         if self.only is not None and not self.only(root):
             return super().test(root)
         self.calls.append(("test", root))
-        note = "插件测试进程 panic 退出（panic: STUB_BUILTIN: B_TON [recovered, repanicked]）：没跑完的用例没有结果，这次测试不算数"
+        note = "插件测试进程 panic 退出（panic: STUB BUILTIN: B_TON [recovered, repanicked]）：没跑完的用例没有结果，这次测试不算数"
         return LanguageServiceResult(
             "test", True, -1, 1, (note,), note, diagnostics=(note, "--- FAIL: TestUserCase001 (0.00s)"), panicked=True
         )

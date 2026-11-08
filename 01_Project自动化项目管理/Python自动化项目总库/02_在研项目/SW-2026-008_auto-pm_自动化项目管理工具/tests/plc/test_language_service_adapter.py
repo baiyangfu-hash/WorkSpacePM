@@ -120,27 +120,58 @@ def test_ls11_terminal_colour_codes_do_not_hide_an_error(tmp_path: Path, text: s
 
 
 # D-137 / D-37: the plugin's Go test process dies on the native TON stub.  Whichever case reaches TON first fails, then the process
-# panics and exits, so which cases got a verdict changes from run to run.  The text below follows the panic block of the archived
-# plugin failure (.trae/specs/_archive/analyze-siemens-plugin-test-failure) with the TON stub name from the local runs; the three raw
-# local outputs themselves were not available in the cloud (未核实 against them).
-PANIC_RUN_A = (
-    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
-    "=== RUN   TestUserCase001_Test1\n"
-    "--- FAIL: TestUserCase001_Test1 (0.00s)\n"
-    "    panic: STUB_BUILTIN: B_TON [recovered, repanicked]\n"
-    "\n"
-    "goroutine 6 [running]:\n"
-    "testing.tRunner.func1.2({0x7ff6, 0xc000})\n"
-    "FAIL\tplc-autogen/runtime\t0.412s\n"
+# panics and exits, so which cases got a verdict changes from run to run.  These are the panic sections of three real local runs of
+# `siemens-lsp test` on DJ-2026-005 (2026-11-08, d137_test_1/2/3.txt); user name anonymised, the builtins hash and a few `...` path
+# prefixes were shortened by hand.  RUN 2 and RUN 3 repeat RUN 1's stack with their own goroutine number, addresses and failed cases.
+_HEAD = (
+    "gogen: 34 unresolved variable references (13 unique symbols)\n"
+    "gogen: 34 unresolved expression fallbacks\n"
+    "siemens-lsp test: running 61/61 cases from 3 file(s)\n"
 )
-PANIC_RUN_B = (
-    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
-    "=== RUN   TestUserCase007_Timer\n"
-    "panic: STUB_BUILTIN: B_TON [recovered]\n"
-    "\tpanic: STUB_BUILTIN: B_TON\n"
-    "\n"
-    "goroutine 18 [running]:\n"
-    "FAIL\tplc-autogen/runtime\t0.388s\n"
+
+
+def _panic_block(goroutine: int, ptrs: tuple[str, str], ton_args: str, home_args: str, took: str, kept: str) -> str:
+    return (
+        "panic: STUB BUILTIN: B_TON [recovered, repanicked]\n\n"
+        f"goroutine {goroutine} [running]:\n"
+        f"testing.tRunner.func1.2({{{ptrs[0]}, {ptrs[1]}}})\n"
+        "\tC:/Program Files/Go/src/testing/testing.go:1974 +0x239\n"
+        "testing.tRunner.func1()\n"
+        "\tC:/Program Files/Go/src/testing/testing.go:1977 +0x349\n"
+        f"panic({{{ptrs[0]}?, {ptrs[1]}?}})\n"
+        "\tC:/Program Files/Go/src/runtime/panic.go:860 +0x13a\n"
+        "siemens.local/builtins.trapBuiltinStub(...)\n"
+        "\tC:/Users/USER/AppData/Local/siemens-lsp/builtins/1707b6fb/stub_support.go:7\n"
+        "siemens.local/builtins.Unimplemented(...)\n"
+        "\tC:/Users/USER/AppData/Local/siemens-lsp/builtins/1707b6fb/stub_support.go:12\n"
+        f"plc-autogen/runtime.FB_FB_TON({ton_args})\n"
+        "\t.../01_SharedLibraries/SysLib/timer/FB_TON.scl:38 +0x37\n"
+        f"plc-autogen/runtime.FB_FB_1005_HomePrepare_BufferFraming({home_args})\n"
+        "\t.../DJ-2026-005/02_PLC程序/PLC_ST/06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl:98 +0xcb\n"
+        "created by testing.(*T).Run in goroutine 1\n"
+        "\tC:/Program Files/Go/src/testing/testing.go:2101 +0x4a9\n"
+        f"FAIL\tplc-autogen/runtime\t{took}\n"
+        "FAIL\n"
+        f"siemens-lsp test: kept generated output in C:\\Users\\USER\\AppData\\Local\\Temp\\siemens-lsp-test-{kept}\n"
+    )
+
+
+PANIC_RUN_1 = (
+    _HEAD
+    + "--- FAIL: TestUserCase061_TALM07Lamps (0.00s)\n"
+    + _panic_block(78, ("0x7ff6a6185760", "0x7ff6a6203050"), "0x0?, 0x0?", "0x2d4132f07808, 0x2d4132f085b8", "1.056s", "3328374442")
+)
+PANIC_RUN_2 = (
+    _HEAD
+    + "--- FAIL: TestUserCase032_TMODE02ManualForcesOutOfAuto (0.00s)\n"
+    + "--- FAIL: TestUserCase010_TPP20Mode4NeedsFourGrips (0.00s)\n"
+    + "--- FAIL: TestUserCase024_TEXT0106LocalSafetyToFrame (0.00s)\n"
+    + _panic_block(50, ("0x7ff6bffd5760", "0x7ff6c0053050"), "0x37d4d97f0008?, 0x1800?", "0x37d4d97f0008, 0x37d4d97f0db8", "0.841s", "211307799")
+)
+PANIC_RUN_3 = (
+    _HEAD
+    + "--- FAIL: TestUserCase001_TCONVMapLayer1 (0.00s)\n"
+    + _panic_block(6, ("0x7ff6e2d65760", "0x7ff6e2de3050"), "0x1?, 0x7ff6e2a91067?", "0x23efca6cb808, 0x23efca6cc5b8", "0.717s", "3504294873")
 )
 ORDINARY_FAIL = (
     "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
@@ -150,7 +181,7 @@ ORDINARY_FAIL = (
 )
 
 
-@pytest.mark.parametrize("output", [PANIC_RUN_A, PANIC_RUN_B])
+@pytest.mark.parametrize("output", [PANIC_RUN_1, PANIC_RUN_2, PANIC_RUN_3])
 def test_d137_a_plugin_test_run_that_panicked_is_incomplete_and_says_why(tmp_path: Path, output: str) -> None:
     service = sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout=output))
 
@@ -160,7 +191,7 @@ def test_d137_a_plugin_test_run_that_panicked_is_incomplete_and_says_why(tmp_pat
     assert result.exit_code == -1, "the recorder treats -1 as 'did not finish'"
     assert result.passed is False and result.error_count >= 1
     assert "panic" in result.messages[0] and "不算数" in result.messages[0]
-    assert "STUB_BUILTIN: B_TON" in result.messages[0]
+    assert "STUB BUILTIN: B_TON" in result.messages[0]
 
 
 def test_d137_an_ordinary_failing_test_run_is_not_a_panic(tmp_path: Path) -> None:
@@ -174,3 +205,13 @@ def test_d137_a_panic_in_check_output_is_not_treated_as_a_test_panic(tmp_path: P
     result = sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout="./a.scl:3:5: ERROR: bad\npanic: x\n")).check(tmp_path)
 
     assert result.panicked is False
+
+
+def test_d137_the_failed_cases_differ_between_panicked_runs_but_none_of_them_yields_a_verdict(tmp_path: Path) -> None:
+    """The three real runs list different failed cases; each is refused the same way, so no fixed/new lines can be built from them."""
+
+    results = [sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout=text)).test(tmp_path) for text in (PANIC_RUN_1, PANIC_RUN_2, PANIC_RUN_3)]
+
+    failed = [{line for line in r.diagnostics if "--- FAIL: TestUserCase" in line} for r in results]
+    assert len({frozenset(f) for f in failed}) == 3
+    assert all(r.panicked and r.exit_code == -1 and not r.passed for r in results)
