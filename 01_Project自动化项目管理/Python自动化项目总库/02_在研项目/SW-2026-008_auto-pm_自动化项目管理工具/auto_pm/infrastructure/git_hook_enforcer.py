@@ -1082,7 +1082,7 @@ def enforce_commit_msg(
             return 1
 
         # 提交说明的编码归用户的编辑器/终端管：这里只认其中的 ASCII 变更单号，严格解码会把合法的 GBK 说明整条拒掉。
-        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
+        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: only the ASCII change id is read; a strict decode would reject a valid GBK message
 
         # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
         chg_matches = tuple(

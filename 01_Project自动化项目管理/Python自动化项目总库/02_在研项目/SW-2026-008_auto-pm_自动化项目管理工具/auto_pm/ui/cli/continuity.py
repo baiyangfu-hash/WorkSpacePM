@@ -260,16 +260,28 @@ def _git(root: Path, *args: str) -> bytes:
         env=clean_git_environment(),
     )
     if result.returncode != 0:
-        message = result.stderr.decode("utf-8", errors="replace").strip()
+        message = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own error text, shown to the user and never parsed
         raise click.ClickException(f"Git 事实采集失败: {message or 'unknown error'}")
-    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own diagnostic text, shown to the user and never parsed
     if diagnostic:
         raise click.ClickException(f"Git 事实采集包含诊断: {diagnostic}")
     return result.stdout
 
 
+def _strict(raw: bytes, encoding: str, what: str) -> str:
+    """Decode git output that feeds an authority decision; bytes that do not decode stop the command instead of turning into ``?``."""
+
+    try:
+        return raw.decode(encoding)
+    except UnicodeDecodeError as error:
+        raise GuardClickRefusal(
+            "G-DECISION-GIT-BINDING",
+            f"Git 事实采集无法按 {encoding} 解码（{what}）：{error}；路径含非法字节，请先改名再继续",
+        ) from error
+
+
 def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
-    head = _git(root, "rev-parse", "HEAD").decode("ascii", errors="replace").strip()
+    head = _strict(_git(root, "rev-parse", "HEAD"), "ascii", "git rev-parse HEAD").strip()
     dirty: set[str] = set()
     commands = (
         ("diff", "--name-only", "-z"),
@@ -277,7 +289,7 @@ def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
         ("ls-files", "--others", "--exclude-standard", "-z"),
     )
     for command in commands:
-        output = _git(root, *command).decode("utf-8", errors="replace")
+        output = _strict(_git(root, *command), "utf-8", f"git {' '.join(command)}")
         dirty.update(path.replace("\\", "/") for path in output.split("\0") if path)
     return head, tuple(sorted(dirty))
 
