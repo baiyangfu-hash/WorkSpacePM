@@ -341,7 +341,7 @@ def _parse_path_tables(
                 continue
             if state not in BASELINE_STATES:
                 findings.append(
-                    PrecheckFinding("path_table", relative, f"基线状态只允许 存在/计划新增/运行态，实际为: {state or '空'}")
+                    PrecheckFinding("path_table", relative, f"基线状态只允许 存在/计划新增/运行态，实际为: {state or '空'}（这一行不会计入可改范围；整张表都无效时 `pr open` 只会报“没有列出任何路径”）")
                 )
                 continue
             resolved = _normalized(relative) if state == BASELINE_RUNTIME else _join(path_root or ".", relative)

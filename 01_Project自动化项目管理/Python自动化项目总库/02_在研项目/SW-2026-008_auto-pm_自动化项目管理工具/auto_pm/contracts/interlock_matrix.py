@@ -134,7 +134,12 @@ COMMANDS: dict[str, CommandSpec] = {
     "claim open": CommandSpec(CommandKind.NORMAL, (), (), "pushes claims/<card> to origin; does not touch the ledger"),
     "claim release": CommandSpec(CommandKind.NORMAL, (), (), "pushes a released marker onto the holder's own claim; deletes nothing"),
     "claim renew": CommandSpec(CommandKind.NORMAL, (), (), "pushes a renewed lease onto the holder's own claim; deletes nothing"),
+    "claim add-paths": CommandSpec(CommandKind.NORMAL, (), (), "pushes the widened path list onto the holder's own claim; claimed_at and the lease stay; deletes nothing"),
     "claim reclaim": CommandSpec(CommandKind.NORMAL, (), (), "pushes a reclaimed marker onto a silent holder's claim, only on the user's word; deletes nothing"),
+    "gate plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the official gate groups; runs nothing"),
+    "gate precheck": CommandSpec(CommandKind.READ_ONLY, (), (), "pre-push self check: ruff, mypy and the related tests; writes only its own temp logs, never the ledger or the worktree"),
+    "gate judge": CommandSpec(CommandKind.READ_ONLY, (), (), "re-judges a finished round from its logs; writes nothing"),
+    "gate run": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "runs pytest groups and writes the round's logs under --out; touches no ledger"),
     "pm resume": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm recover": CommandSpec(CommandKind.READ_ONLY, (), (), "--apply writes EXECUTOR_LOST (release 7 and later)"),
     "pm triage": CommandSpec(CommandKind.READ_ONLY, (), (), "open cards plus inbox in suggested order; confirms nothing"),
@@ -146,6 +151,7 @@ COMMANDS: dict[str, CommandSpec] = {
     # The guards of the two commands below are not inventoried yet (their checks sit in services, not in the command body):
     # P1 fills them in; until then the deadlock check cannot see them, which the contract test lists as unmodelled.
     "pm close": CommandSpec(CommandKind.NORMAL, (), (), "guards not inventoried yet (P1)"),
+    "pm retire": CommandSpec(CommandKind.NORMAL, ("identity=clean", "operator=user", "workspace=control_root"), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL", "G-MUTATION-ROOT"), "dry run by default; --apply cancels an old leftover Mission and Work through their own services, on the user's word"),
     "pm unpark": CommandSpec(CommandKind.NORMAL, ("operator=user",), (), "guards not inventoried yet (P1)"),
     "ledger reconcile": CommandSpec(CommandKind.NORMAL, ("workspace=control_root",), ("G-MUTATION-ROOT",)),
     "pm approver-pin init": CommandSpec(CommandKind.NORMAL, ("operator=user",), ("G-AGENT-APPROVAL",), "does not read the ledger"),

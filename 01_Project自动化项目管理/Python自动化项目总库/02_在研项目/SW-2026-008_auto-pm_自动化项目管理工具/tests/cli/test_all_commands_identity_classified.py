@@ -65,6 +65,7 @@ UNDECIDED: dict[str, tuple[str, ...]] = {}
 READ_ONLY: dict[str, tuple[str, ...]] = {
     "context": ("resolve",),  # prints the identity card; it is the check itself
     "doctor": ("",),  # environment diagnosis, prints only
+    "gate": ("judge", "plan", "precheck"),  # D-107a: ``plan`` prints commands, ``judge`` re-reads logs; ``precheck`` (pre-push self check) writes only temp logs; ``run`` writes its own folder and is guarded
     "gui": ("",),  # opens the cockpit window; every write inside goes through the guarded services
     "role": ("check", "list"),  # reads the role pack registry
 }
@@ -73,7 +74,7 @@ READ_ONLY: dict[str, tuple[str, ...]] = {
 # runtime identity (D-39: ``claim`` pushes ``claims/<card>`` branches).  Not read-only: the write is real and stays listed here, by
 # name, so a new subcommand of such a group does not slip in unclassified.  Their own test pins that nothing else is touched.
 REMOTE_ONLY_NO_LEDGER: dict[str, tuple[str, ...]] = {
-    "claim": ("list", "open", "release", "renew", "reclaim"),
+    "claim": ("list", "open", "release", "renew", "reclaim", "add-paths"),
 }
 
 GUARD_CALL = re.compile(r"\b(?:require_runtime_identity\w*|warn_runtime_identity)\b")

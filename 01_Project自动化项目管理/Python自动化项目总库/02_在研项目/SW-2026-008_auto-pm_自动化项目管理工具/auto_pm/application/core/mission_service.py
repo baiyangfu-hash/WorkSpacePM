@@ -358,7 +358,9 @@ class MissionService:
             self._assert_authority_is_current(
                 current.authority,
                 instant,
-                allow_safe_block=new_state is MissionState.BLOCKED,
+                # An expired authority may still end a card (BLOCKED = safe stop, CANCELLED = D-109 ``pm retire``): both only
+                # make the ledger safer.  Every other move (resume, activate, accept ...) still needs a live authority.
+                allow_safe_block=new_state in {MissionState.BLOCKED, MissionState.CANCELLED},
             )
             resolved_root_work_id = self._resolve_root_work(current, new_state, root_work_id)
             return self._store.transition_mission(

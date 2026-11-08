@@ -16,12 +16,20 @@ name: rules-gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, edited]
+    # 不含 edited（D-124）：判定只读 diff 和评论，不读 PR 正文；改正文也触发会取消还在排队的判定、让它回到队尾
+    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created, edited, deleted]
 
 permissions:
   contents: read
+
+# D-124：并发组放在工作流级（与 pr-gate、safety-gate 一致），并带上事件名：
+# - 判定运行（pull_request_target）：同一个 PR 的新推送取消旧运行；
+# - 评论运行（issue_comment）：只和同一 PR 的评论运行排队，不取消、也不被判定运行取消。
+concurrency:
+  group: rules-gate-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
   rules-approval:
@@ -33,9 +41,6 @@ jobs:
       # 写权限只用来在 PR 上发/更新一条“批准提示”评论（D-62）；PR 头不检出、不执行，写权限碰不到 PR 的代码
       issues: write
       pull-requests: write
-    concurrency:
-      group: rules-gate-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -100,21 +105,21 @@ jobs:
           fi
 
   rerun:
-    # 只响应用户本人在打开着的 PR 上的评论；别人的评论不触发（判定本身仍由上面的任务做）
+    # 只响应用户本人在打开着的 PR 上、与“规则批准”有关的评论（D-124）。所有 agent 都用用户同一个账号发评论，光看用户 id 挡不住 agent 的评论；
+    # 每条无关评论都会把已经成功的 rules-approval 重跑回排队。批准行只认“规则批准”这个词（rules_approval_check.APPROVE_WORD）；
+    # 评论被改（把批准行改没了）时，新正文不含这个词，所以也看 changes.body.from（改之前的正文）；评论被删时事件里带的是被删的正文。
     if: >-
       github.event_name == 'issue_comment'
       && github.event.issue.pull_request
       && github.event.issue.state == 'open'
       && github.event.comment.user.id == 246858089
+      && (contains(github.event.comment.body, '规则批准') || contains(github.event.changes.body.from, '规则批准'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
       actions: write
       pull-requests: read
-    concurrency:
-      group: rules-gate-rerun-${{ github.event.issue.number }}
-      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}

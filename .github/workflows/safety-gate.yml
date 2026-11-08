@@ -27,8 +27,10 @@ permissions:
   issues: read
   statuses: write
 
+# D-124：所有 agent 都用用户同一个账号发评论。一条与签字无关的评论如果和判定运行共用并发组，就会（即使它的任务被跳过）取消正在跑的安全判定。
+# 所以与“安全签字”无关的评论运行单独成组（组名带本次运行号，谁也不取消）；PR 事件和含“安全签字”的评论仍共用一个组，保持原来的串行与取消。
 concurrency:
-  group: safety-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: safety-gate-${{ (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '安全签字') && !contains(github.event.changes.body.from, '安全签字')) && format('noise-{0}', github.run_id) || (github.event.pull_request.number || github.event.issue.number) }}
   cancel-in-progress: true
 
 jobs:
@@ -36,7 +38,8 @@ jobs:
     # A fresh event on a PR that is already merged or closed (e.g. its description edited afterwards) has nothing left to judge: skip the job (grey), not green.
     if: >-
       (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
-      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.issue.state == 'open')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.issue.state == 'open'
+          && (contains(github.event.comment.body, '安全签字') || contains(github.event.changes.body.from, '安全签字')))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:

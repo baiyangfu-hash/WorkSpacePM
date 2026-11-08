@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -17,8 +17,9 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent
+from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent, caller_alias
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
+from auto_pm.application.core.claim_service import ClaimService
 from auto_pm.application.core.continuity_execution_service import (
     CONTROL_ROOT_RUN_REFUSAL,
     ContinuityExecutionError,
@@ -1509,6 +1510,25 @@ def record_holder(
     click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
+def _keep_claims_alive(ctx: click.Context, owned_paths: Sequence[str]) -> None:
+    """Checkpointing is proof the agent is still working on *this Run's* paths: stretch the claims covering them (D-39 follow-up).
+
+    Quiet and never fatal; a keep-alive that could not run says so on stderr (one line) and the checkpoint still succeeds.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        root = app_ctx.control_root or app_ctx.workspace_root
+        if not root:
+            return
+        service = ClaimService(root)
+        service.renew_held(caller_alias() or caller_agent().strip("?") or "user", paths=owned_paths)
+        for warning in service.keepalive_warnings:
+            click.echo(f"⚠️ {warning}", err=True)
+    except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+        return
+
+
 @continuity_group.group(name="checkpoint")
 def checkpoint_group() -> None:
     """Create immutable Run recovery checkpoints."""
@@ -1558,6 +1578,7 @@ def create_checkpoint(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
+    _keep_claims_alive(ctx, run.owned_paths)
     _emit(item)
 
 
