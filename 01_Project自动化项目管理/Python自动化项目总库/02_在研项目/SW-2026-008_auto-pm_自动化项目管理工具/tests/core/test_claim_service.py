@@ -421,6 +421,35 @@ def test_renew_held_leaves_the_same_owner_name_on_another_computer_alone(pair: P
     assert git_out(pair.origin, "rev-parse", "refs/heads/claims/366") == tip
 
 
+def test_renew_held_says_so_when_the_same_name_holds_the_card_on_another_computer(pair: Pair) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    pair.laptop.open("367", paths=["p/a"], goal="laptop's", owner="claude")
+    _set_expiry(pair, "367", (datetime.now(UTC) + timedelta(minutes=30)).isoformat(timespec="seconds"))
+
+    assert pair.cloud.renew_held("claude", paths=["p/a"]) == []
+
+    assert len(pair.cloud.keepalive_warnings) == 1
+    assert "另一台机器" in pair.cloud.keepalive_warnings[0] and "367" in pair.cloud.keepalive_warnings[0]
+
+
+def test_renew_held_stays_quiet_about_other_owners_and_unrelated_paths(pair: Pair) -> None:
+    pair.laptop.open("368", paths=["p/a"], goal="laptop's", owner="trae")
+    pair.laptop.open("369", paths=["q/z"], goal="laptop's", owner="claude")
+
+    pair.cloud.renew_held("claude", paths=["p/a"])
+
+    assert pair.cloud.keepalive_warnings == [], "another agent's card is its business; a card on other paths is not this Run's"
+
+
+def test_renew_held_does_not_warn_for_its_own_claim(pair: Pair) -> None:
+    pair.laptop.open("370", paths=["p/a"], goal="mine", owner="claude")
+
+    pair.laptop.renew_held("claude", paths=["p/a"])
+
+    assert pair.laptop.keepalive_warnings == []
+
+
 def _iso(delta_minutes: float) -> str:
     from datetime import UTC, datetime, timedelta
 

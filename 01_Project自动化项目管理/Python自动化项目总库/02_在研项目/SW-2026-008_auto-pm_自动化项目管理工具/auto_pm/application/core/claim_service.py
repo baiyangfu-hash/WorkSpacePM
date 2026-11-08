@@ -446,11 +446,10 @@ class ClaimService:
         try:
             now = datetime.now(UTC)
             lease = lease_duration()
-            mine = [
-                claim
-                for claim in self.all_claims(fetch=False)
-                if not claim.free and not holder_problem(claim, owner, self._machine) and claim_overlap(claim.paths, paths)
-            ]
+            live = [claim for claim in self.all_claims(fetch=False) if not claim.free and claim_overlap(claim.paths, paths)]
+            mine = [claim for claim in live if not holder_problem(claim, owner, self._machine)]
+            # D-143: the same name on another computer is deliberately left alone, but say so, or the lease just runs out silently
+            elsewhere = [claim for claim in live if claim.owner == owner and holder_problem(claim, owner, self._machine)]
         except Exception as error:  # noqa: BLE001 - same reason
             if failure is None:  # the fetch worked but the claims could not be read; with the fetch also down there is nothing known to warn about
                 self.keepalive_warnings.append(f"领卡续租没做（{error}）；占位到期前请手动 `claim renew`")
@@ -460,6 +459,10 @@ class ClaimService:
             if mine:
                 self.keepalive_warnings.append(f"领卡续租没做（读不到远程占位：{failure}）；占位到期前请手动 `claim renew`")
             return renewed
+        for claim in elsewhere:
+            self.keepalive_warnings.append(
+                f"领卡续租没做：{claim.label()} 是同一个名字在另一台机器 {claim.machine} 上领的，这里是 {self._machine}；请回领卡的那台机器续租，或确认这不是同一个对话"
+            )
         for claim in mine:
             try:
                 anchor = max(filter(None, (claim.claimed_at, claim.renewed_at)))
