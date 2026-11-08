@@ -368,9 +368,44 @@ def tree_state(worktree: Path, project: Path) -> TreeState:
     )
 
 
-def project_dir_in(worktree: Path, module_file: Path | None = None) -> Path:
-    """The project folder (where ``tests/`` is) inside ``worktree``, found from where this code itself lives."""
+_DEPLOYED_RUNTIME = ("00_Infrastructure", "auto_pm")  # the deployed copy: releases, launcher and a mirror of tests/
 
+
+def _project_candidates(worktree: Path) -> list[Path]:
+    """Folders in ``worktree`` that look like this project: a tracked pyproject.toml beside main.py, auto_pm/ and tests/."""
+
+    listed = _git(worktree, "ls-files", "-z", "--", "pyproject.toml", "*/pyproject.toml")
+    if not listed:
+        return []
+    found: list[Path] = []
+    for name in listed.split("\0"):
+        if not name:
+            continue
+        folder = (worktree / name).parent
+        if (
+            (folder / "main.py").is_file()
+            and (folder / "auto_pm" / "__init__.py").is_file()
+            and (folder / "tests").is_dir()
+        ):
+            found.append(folder)
+    return found
+
+
+def project_dir_in(worktree: Path, module_file: Path | None = None) -> Path:
+    """The project folder (where ``tests/`` is) inside ``worktree``.
+
+    It is found from the worktree itself, not from where this code runs (D-151): a deployed release lives under
+    ``00_Infrastructure/auto_pm/releases/<id>/``, whose nearest ``pyproject.toml`` is the infrastructure copy, and the gate
+    would judge that folder's few hundred tests instead of the project's. Only when the worktree has no single match is
+    the folder this code lives in used, and never when that is inside the deployed runtime folder.
+    """
+
+    found = _project_candidates(worktree)
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        listed = "、".join(str(path.relative_to(worktree)) for path in found)
+        raise GateRunError(f"工作树里有多个像项目目录的地方，无法确定门禁该跑哪个: {listed}")
     here = (module_file or Path(__file__)).resolve()
     top = _git(here.parent, "rev-parse", "--show-toplevel")
     if top is None:
@@ -378,7 +413,13 @@ def project_dir_in(worktree: Path, module_file: Path | None = None) -> Path:
     project = next((p for p in here.parents if (p / "pyproject.toml").is_file()), None)
     if project is None:
         raise GateRunError("找不到含 pyproject.toml 的项目目录")
-    return worktree / project.relative_to(Path(top).resolve())
+    relative = project.relative_to(Path(top).resolve())
+    if relative.parts[: len(_DEPLOYED_RUNTIME)] == _DEPLOYED_RUNTIME:
+        raise GateRunError(
+            "工作树里找不到项目目录（含 pyproject.toml、main.py、auto_pm/、tests/），"
+            "而这份代码来自已部署的发布版，不能用它的位置代替"
+        )
+    return worktree / relative
 
 
 class GateRunService:
