@@ -461,6 +461,34 @@ CREATE TABLE IF NOT EXISTS planning_scope_cards (
 """
 _DDL += _PLANNING_SCOPE_CARDS_DDL
 
+# TD-SW008 073: the inbox tables used to be created lazily by ``IntakeStore`` on first use.  They now live in the base DDL like
+# ``planning_scope_cards`` above: every ``initialize`` runs it, all statements are ``IF NOT EXISTS``, so an existing ledger gains
+# the tables without a schema-version bump (an older release still opens it; a rollback stays possible) and keeps its rows.
+INTAKE_ITEMS_DDL = """
+CREATE TABLE IF NOT EXISTS intake_items (
+    item_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    seq INTEGER NOT NULL CHECK (seq >= 1),
+    title_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ticket_hash TEXT NOT NULL,
+    item_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (project_id, seq)
+)
+"""
+INTAKE_BINDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS planning_draft_intake_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    classification_json TEXT NOT NULL,
+    item_id TEXT UNIQUE REFERENCES intake_items(item_id),
+    created_at TEXT NOT NULL
+)
+"""
+_DDL += INTAKE_ITEMS_DDL + ";\n" + INTAKE_BINDINGS_DDL + ";\n"
+
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
