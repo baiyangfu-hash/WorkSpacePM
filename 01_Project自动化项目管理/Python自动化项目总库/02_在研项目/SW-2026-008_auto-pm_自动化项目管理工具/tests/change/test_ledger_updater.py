@@ -140,12 +140,7 @@ class TestInsertRowToIndexTable:
     def test_insert_after_separator(self) -> None:
         """在分隔行后插入新行"""
         updater = LedgerUpdater()
-        content = (
-            "# 台帐\n\n"
-            "## 变更单索引\n\n"
-            "| 序号 | 变更编号 |\n"
-            "|------|----------|\n"
-        )
+        content = "# 台帐\n\n## 变更单索引\n\n| 序号 | 变更编号 |\n|------|----------|\n"
         new_row = "| 001 | CHG-001 | 测试 |\n"
         result = updater._insert_row_to_index_table(content, new_row)
         assert "CHG-001" in result
@@ -327,9 +322,7 @@ class TestLedgerUpdaterRemove:
         assert "CHG-SCPT-2026-001" not in content
         assert "CHG-SCPT-2026-002" in content
 
-    def test_remove_ignores_change_number_in_other_row_description(
-        self, tmp_path: Path
-    ) -> None:
+    def test_remove_ignores_change_number_in_other_row_description(self, tmp_path: Path) -> None:
         """remove 不得删除描述列仅引用目标编号的非目标行。"""
         ledger = tmp_path / "ledger.md"
         ledger.write_text(
@@ -503,3 +496,46 @@ class TestLedgerUpdaterChg085:
                 assert cells[7] == "", f"完成日期列应为空，实际: {cells[7]}"
                 assert cells[8] == "🔄实施中", f"状态列应为 🔄实施中，实际: {cells[8]}"
                 break
+
+
+class TestGeneratedLinksResolve:
+    """TD-SW008-226：台账在 02_变更记录/ 下、变更单在上一级 01_变更单/，生成的链接必须从台账位置能点开。"""
+
+    INDEX = (
+        "# 版本变更台账\n\n"
+        "## 变更单索引\n\n"
+        "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
+        "|------|----------|------|--------|----------|----------|----------|------|\n"
+    )
+
+    @staticmethod
+    def _layout(tmp_path: Path, change_number: str) -> Path:
+        root = tmp_path / "04_监控" / "01_变更管理"
+        domain = change_number.split("-")[1]
+        order = root / "01_变更单" / f"CHG-{domain}" / f"{change_number}.md"
+        order.parent.mkdir(parents=True)
+        order.write_text("变更单\n", encoding="utf-8")
+        ledger = root / "02_变更记录" / "01_版本变更台账.md"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text(TestGeneratedLinksResolve.INDEX, encoding="utf-8")
+        return ledger
+
+    @staticmethod
+    def _link_target(ledger: Path, change_number: str) -> Path:
+        import re
+
+        match = re.search(rf"\[→ {change_number}\]\(([^)]+)\)", ledger.read_text(encoding="utf-8"))
+        assert match is not None, "台账里没有这条变更单的链接"
+        return (ledger.parent / match.group(1)).resolve()
+
+    def test_update_writes_a_link_that_opens_the_change_order(self, tmp_path: Path) -> None:
+        ledger = self._layout(tmp_path, "CHG-SAFE-2026-001")
+        LedgerUpdater().update(str(ledger), "CHG-SAFE-2026-001", "新增一条")
+        assert self._link_target(ledger, "CHG-SAFE-2026-001").is_file()
+
+    def test_self_healing_row_writes_a_link_that_opens_the_change_order(
+        self, tmp_path: Path
+    ) -> None:
+        ledger = self._layout(tmp_path, "CHG-SAFE-2026-002")
+        LedgerUpdater().update_status(str(ledger), "CHG-SAFE-2026-002", "✅已关闭")
+        assert self._link_target(ledger, "CHG-SAFE-2026-002").is_file()
