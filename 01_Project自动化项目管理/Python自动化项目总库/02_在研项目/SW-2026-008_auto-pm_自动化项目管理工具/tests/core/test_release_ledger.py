@@ -36,7 +36,8 @@ class FakeLedger:
         if head == ("change", "create"):
             self.created += 1
             self.change_state = "draft"
-            return f"已创建 CHG-SCPT-2026-9{self.created:02d}"
+            self.change = f"CHG-SCPT-2026-9{self.created:02d}"
+            return f"已创建 {self.change}"
         if head == ("change", "transition"):
             self.change_state = args[args.index("--to") + 1]
         elif head == ("decision", "create"):
@@ -54,6 +55,9 @@ class FakeLedger:
         elif args[:3] == ("continuity", "checkpoint", "create"):
             self.checkpoints.add(args[args.index("--checkpoint-id") + 1])
         return ""
+
+    def find_change(self, release_id: str) -> str:
+        return self.change
 
     def change_status(self, change_id: str) -> str:
         return self.change_state
@@ -93,7 +97,7 @@ def _close(plan: rl.DeployPlan, port: FakeLedger, change_id: str) -> rl.Books:
 
 
 def test_without_a_user_confirmation_reference_nothing_is_planned() -> None:
-    for bad in ("", "approved", "user-confirmation:", "user-confirmation:abc", "agent-says-yes"):
+    for bad in ("", "approved", "user-confirmation:", "user-confirmation:abc", "agent-says-yes", "cmsg_test_001_long_enough", "confirmation:cmsg_test_001"):
         with pytest.raises(rl.LedgerError, match="用户确认引用"):
             _plan(Path("/x"), bad)
 
@@ -192,5 +196,68 @@ def test_the_receipt_lists_every_identifier_and_the_rollback_command(tmp_path: P
 
     receipt = json.loads(path.read_text(encoding="utf-8"))
     assert receipt["release"] == plan.release_id and receipt["previous"] == plan.old_release
+    assert receipt["run"] == f"{plan.run_id} SUCCEEDED" and receipt["work"] == f"{plan.work_id} CLOSED"
     assert receipt["change"] == "CHG-SCPT-2026-901 completed" and receipt["confirmation"] == CONFIRM
     assert receipt["rollback_command"].endswith("/b") and "database rollback" in receipt["not_authorized"]
+
+
+def test_a_resume_after_utc_midnight_reuses_the_first_decision_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import datetime as dt
+
+    class _Day1(dt.datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> _Day1:
+            return cls(2026, 11, 8, 23, 59, tzinfo=dt.UTC)
+
+    class _Day2(_Day1):
+        @classmethod
+        def now(cls, tz: object = None) -> _Day2:
+            return cls(2026, 11, 9, 0, 1, tzinfo=dt.UTC)
+
+    port = FakeLedger(crash_at=8)  # killed after the Decision was made (or just before it), before the Run exists
+    monkeypatch.setattr(rl, "datetime", _Day1)
+    first = _plan(tmp_path)
+    with pytest.raises(RuntimeError, match="killed"):
+        _open(first, port)
+    port.crash_at = None
+    monkeypatch.setattr(rl, "datetime", _Day2)
+
+    second = _plan(tmp_path)
+    _open(second, port)
+
+    assert second.decision_id == first.decision_id and "20261108" in second.decision_id
+    assert port.decisions == {first.decision_id}, "one Decision, not one per calendar day"
+
+
+def test_a_kill_between_change_create_and_the_state_file_does_not_create_a_second_change_order(tmp_path: Path) -> None:
+    port, plan = FakeLedger(), _plan(tmp_path)
+    _open(plan, port)
+    plan.state_file.unlink()  # the process died after "change create" and before state.json was written
+    port.change_state = "draft"
+    port.decisions.clear()
+    port.work = None
+    port.run = None
+
+    books = _open(_plan(tmp_path), port)
+
+    assert port.created == 1 and books.change_id == port.change
+    assert any(step.startswith("change adopt") for step in books.steps)
+
+
+def test_close_books_stops_with_an_error_when_the_work_state_does_not_advance(tmp_path: Path) -> None:
+    port, plan = FakeLedger(), _plan(tmp_path)
+    books = _open(plan, port)
+    original = port.cli
+
+    def stuck(*args: str) -> str:
+        if args[:3] == ("continuity", "work", "transition"):
+            port.commands.append(list(args))
+            return ""  # accepted, yet the state never moves
+        return original(*args)
+
+    port.cli = stuck  # type: ignore[method-assign]
+
+    with pytest.raises(rl.LedgerError, match="Work"):
+        _close(plan, port, books.change_id)
+
+    assert len([c for c in port.commands if c[:3] == ["continuity", "work", "transition"]]) <= len(rl.WORK_CLOSE) + 1

@@ -31,6 +31,9 @@ class LedgerError(RuntimeError):
 
 class LedgerPort(Protocol):
     def cli(self, *args: str) -> str: ...
+    def find_change(self, release_id: str) -> str:
+        """Id of the change order whose references carry ``RELEASE=<release_id>``, or ``""`` when there is none."""
+        ...
     def change_status(self, change_id: str) -> str: ...
     def decision_exists(self, decision_id: str) -> bool: ...
     def work_state(self, work_id: str) -> str | None: ...
@@ -49,19 +52,20 @@ class DeployPlan:
     paths: tuple[str, ...]
     station: Path
     evidence_dir: Path
+    decision_id: str = ""
 
     def __post_init__(self) -> None:
         reference = self.confirm_ref
         if not reference.startswith(CONFIRM_PREFIX) or len(reference[len(CONFIRM_PREFIX):].strip()) < 6:
             raise LedgerError("缺少用户确认引用：--confirm-ref 写成 user-confirmation:<用户那条消息的时间或编号>；没有它不批准、不部署")
+        if not self.decision_id:
+            # The id carries a date; a resume after UTC midnight must reuse the first run's id, not mint a second Decision.
+            saved = _load_state_file(self.state_file).get("decision_id", "")
+            object.__setattr__(self, "decision_id", saved or f"DEC-{datetime.now(UTC):%Y%m%d}-DEPLOY{self.slug[-8:]}")
 
     @property
     def slug(self) -> str:
         return re.sub(r"[^A-Za-z0-9]+", "-", self.release_id).strip("-").upper()
-
-    @property
-    def decision_id(self) -> str:
-        return f"DEC-{datetime.now(UTC):%Y%m%d}-DEPLOY{self.slug[-8:]}"
 
     @property
     def work_id(self) -> str:
@@ -90,12 +94,16 @@ class Books:
     steps: list[str] = field(default_factory=list)
 
 
-def _load_state(plan: DeployPlan) -> dict[str, str]:
+def _load_state_file(path: Path) -> dict[str, str]:
     try:
-        data = json.loads(plan.state_file.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _load_state(plan: DeployPlan) -> dict[str, str]:
+    return _load_state_file(plan.state_file)
 
 
 def _save_state(plan: DeployPlan, state: dict[str, str]) -> None:
@@ -130,7 +138,17 @@ def open_books(plan: DeployPlan, port: LedgerPort, *, background: str, necessity
 
     books = Books()
     state = _load_state(plan)
+    if state.get("decision_id") != plan.decision_id:
+        state["decision_id"] = plan.decision_id
+        _save_state(plan, state)
     change_id = state.get("change_id", "")
+    if not change_id:
+        # Killed between "change create" and the state write: the order exists in the ledger but not in state.json.
+        change_id = port.find_change(plan.release_id)
+        if change_id:
+            state["change_id"] = change_id
+            _save_state(plan, state)
+            books.steps.append(f"change adopt {change_id}")
     if not change_id:
         out = port.cli(
             "change", "create", "--pid", PROJECT_ID, "--domain", "SCPT", "--nature", "CFG", "--scope", "SYSTEM", "--applicant", plan.approver,
@@ -201,12 +219,18 @@ def close_books(plan: DeployPlan, port: LedgerPort, *, change_id: str, evidence:
             books.steps.append(f"run {target}")
     if port.run_state(plan.run_id) != "SUCCEEDED":
         raise LedgerError(f"Run {plan.run_id} 没到 SUCCEEDED：{port.run_state(plan.run_id)}")
-    while (state := port.work_state(plan.work_id)) != "CLOSED":
+    for _ in range(len(WORK_CLOSE)):
+        state = port.work_state(plan.work_id)
+        if state == "CLOSED":
+            break
         if state not in WORK_CLOSE:
             raise LedgerError(f"Work {plan.work_id} 处于 {state}，不在可续的路径上")
         target = WORK_CLOSE[WORK_CLOSE.index(state) + 1]
         port.cli("continuity", "work", "transition", "--work-id", plan.work_id, "--to", target, "--idempotency-key", f"{plan.slug}-work-{target.lower()}")
         books.steps.append(f"work {target}")
+    else:
+        if port.work_state(plan.work_id) != "CLOSED":
+            raise LedgerError(f"Work {plan.work_id} 发出收口命令后仍没到 CLOSED：{port.work_state(plan.work_id)}")
     _walk(port, change_id, CLOSE_WALK, plan, books, {"completed": conclusion})
     return books
 
