@@ -88,3 +88,34 @@ def test_claim_list_no_fetch_says_the_view_may_be_stale_and_keeps_json_clean(mon
         claim_cli.claim_group, ["list", "--no-fetch", "--json"], obj=type("Ctx", (), {"control_root": "/x", "workspace_root": ""})()
     )
     assert json.loads(result.stdout) == []
+
+
+class _Recording:
+    received: list[tuple[str, ...]] = []
+
+    def __init__(self, root: object) -> None:
+        pass
+
+    def open(self, card: str, *, paths: tuple[str, ...], goal: str, owner: str) -> object:
+        _Recording.received.append(tuple(paths))
+        return type("Claimed", (), {"label": lambda self: f"卡 {card}", "paths": tuple(paths)})()
+
+
+def test_claim_open_hands_the_service_repository_root_paths_and_says_so_on_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, project = _tree(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(claim_cli, "ClaimService", _Recording)
+    _Recording.received = []
+
+    result = CliRunner().invoke(
+        claim_cli.claim_group,
+        ["open", "card-1", "--paths", "auto_pm/x.py", "--paths", "reviews/tools/a.py", "--goal", "g"],
+        obj=type("Ctx", (), {"control_root": str(root), "workspace_root": ""})(),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _Recording.received == [(f"{PROJECT}/auto_pm/x.py", "reviews/tools/a.py")]
+    assert "路径已按仓库根补全：auto_pm/x.py → proj/app/auto_pm/x.py" in result.stderr
+    assert "reviews/tools/a.py →" not in result.stderr, "a path that already is a repository-root path is not mentioned"
