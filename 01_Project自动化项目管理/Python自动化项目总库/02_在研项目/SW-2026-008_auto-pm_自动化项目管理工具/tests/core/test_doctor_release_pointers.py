@@ -14,6 +14,14 @@ from auto_pm.ui.cli.doctor import POINTER_DIR, check_release_pointers
 ACTIVE, PREVIOUS = "1.3.4-aaaaaaa", "1.3.3-bbbbbbb"
 
 
+@pytest.fixture(autouse=True)
+def _not_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub's own runner exports these into the pytest process; every test here starts as a plain local machine."""
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(root), "-c", "user.name=ci", "-c", "user.email=ci@example.invalid", *args],
