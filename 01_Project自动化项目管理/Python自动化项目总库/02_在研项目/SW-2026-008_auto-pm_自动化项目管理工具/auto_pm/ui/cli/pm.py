@@ -1567,3 +1567,8 @@ pm_group.add_command(recover_pm)
 from auto_pm.ui.cli.pm_triage import triage_pm  # noqa: E402
 
 pm_group.add_command(triage_pm)
+
+# Formal close of an old leftover Work (D-109 layer 2): dry run by default, --apply on the user's word.
+from auto_pm.ui.cli.pm_retire import retire_pm  # noqa: E402
+
+pm_group.add_command(retire_pm)

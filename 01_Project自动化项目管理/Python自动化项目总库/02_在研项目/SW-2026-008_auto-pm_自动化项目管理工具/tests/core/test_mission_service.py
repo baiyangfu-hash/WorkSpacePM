@@ -240,6 +240,37 @@ def test_expired_authority_can_only_move_an_active_mission_to_safe_blocked(
         )
 
 
+def test_expired_authority_still_lets_a_mission_be_cancelled_but_nothing_else(tmp_path: Path) -> None:
+    """D-109 ``pm retire``: cancelling is a safe stop like blocking; resuming or activating stays refused."""
+
+    service = _service(tmp_path)
+    _create(service)
+    awaiting = service.transition(
+        mission_id="MISSION-SW008-A1",
+        expected_version=1,
+        new_state=MissionState.AWAITING_APPROVAL,
+        root_work_id=None,
+        idempotency_key="submit-expired-cancel",
+    )
+    expired = _service(tmp_path, now=NOW + timedelta(days=2))
+    with pytest.raises(MissionServiceError, match="已过期"):
+        expired.transition(
+            mission_id=awaiting.mission_id,
+            expected_version=awaiting.version,
+            new_state=MissionState.ACTIVE,
+            root_work_id="WORK-SW008-A1",
+            idempotency_key="activate-expired-cancel",
+        )
+    cancelled = expired.transition(
+        mission_id=awaiting.mission_id,
+        expected_version=awaiting.version,
+        new_state=MissionState.CANCELLED,
+        root_work_id=None,
+        idempotency_key="cancel-expired",
+    )
+    assert cancelled.state is MissionState.CANCELLED
+
+
 def test_v2_store_migrates_additively_and_preserves_existing_work(tmp_path: Path) -> None:
     _git_root(tmp_path)
     registry = WorkRegistryService(tmp_path, now=lambda: NOW.isoformat())
