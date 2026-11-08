@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from auto_pm.ui.cli.__main__ import cli
@@ -32,3 +33,26 @@ def test_plan_rejects_an_unknown_group() -> None:
 def test_judge_on_an_empty_folder_exits_two(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["gate", "judge", str(tmp_path)])
     assert result.exit_code == 2
+
+
+def _run_gate_with_a_recording_guard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *extra: str) -> list[str]:
+    from auto_pm.application.core.gate_run_service import GateRunError, GateRunService
+    from auto_pm.ui.cli import gate as gate_module
+
+    asked: list[str] = []
+    monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": asked.append(candidate_release))
+
+    def stop(*_args: object, **_kwargs: object) -> None:
+        raise GateRunError("stopped for the test")
+
+    monkeypatch.setattr(GateRunService, "run", stop)
+    CliRunner().invoke(cli, ["gate", "run", "--worktree", str(tmp_path), "--out", str(tmp_path / "out"), *extra])
+    return asked
+
+
+def test_gate_run_passes_the_named_candidate_release_to_the_identity_guard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    assert _run_gate_with_a_recording_guard(monkeypatch, tmp_path, "--candidate-release", "1.3.3-cand000") == ["1.3.3-cand000"]
+
+
+def test_gate_run_without_the_option_asks_for_no_candidate_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    assert _run_gate_with_a_recording_guard(monkeypatch, tmp_path) == [""]
