@@ -1,4 +1,4 @@
-# 以指定 agent 的身份运行驾驶舱命令（任何 agent 通用）：只在这一条命令期间带上 AUTO_PM_AGENT=<基名[:备注]>，命令结束立刻还原。
+﻿# 以指定 agent 的身份运行驾驶舱命令（任何 agent 通用）：只在这一条命令期间带上 AUTO_PM_AGENT=<基名[:备注]>，命令结束立刻还原。
 # 命令只认冒号前面那段（基名，见 AGENTS.md WS-001 的工位与前缀表：claude、trae、cursor、vscode、codex）；冒号后只是备注。
 # 用法（在控制根）：  .\00_Infrastructure\bin\pm-as-agent.ps1 cursor pm orient <项目编号> --json
 #                     .\00_Infrastructure\bin\pm-as-agent.ps1 trae:cn pm orient <项目编号> --json

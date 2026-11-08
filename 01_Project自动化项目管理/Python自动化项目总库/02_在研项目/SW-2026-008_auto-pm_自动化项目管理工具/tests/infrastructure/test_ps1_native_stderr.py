@@ -47,7 +47,7 @@ def test_pm_as_agent_runs_the_native_command_under_continue_and_returns_its_exit
     path = REPO_ROOT / "00_Infrastructure" / "bin" / "pm-as-agent.ps1"
     if not path.is_file():
         pytest.skip("not run inside the workspace checkout")
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     call = NATIVE_CALL.search(text)
     assert call is not None
     before = text[: call.start()]
@@ -74,6 +74,54 @@ def test_no_tracked_script_calls_a_native_command_under_stop_without_continue() 
 def test_the_known_unfixed_list_has_no_stale_entry() -> None:
     offenders = {name for name in _tracked_scripts() if _offends((REPO_ROOT / name).read_text(encoding="utf-8-sig"))}
     assert KNOWN_UNFIXED <= offenders, f"已修好的文件要从 KNOWN_UNFIXED 里删掉: {sorted(KNOWN_UNFIXED - offenders)}"
+
+
+BOM = b"\xef\xbb\xbf"
+# Windows PowerShell 5.1 reads a script without a BOM in the machine's ANSI code page (cp936 on a Chinese PC): the bytes of a
+# Chinese comment or string then swallow the characters after them and whole statements disappear.  Scripts with non-ASCII
+# text therefore need a UTF-8 BOM.  Not fixed here (``.trae/`` is Trae's; the four ``session-start.ps1`` copies under
+# 0100_PLC自动化 / SYS-2026-001 come from the ``.trae/project-bootstrap`` template and are PLC / governance paths); the
+# test fails when one of them is fixed, so the entry gets removed.
+KNOWN_NO_BOM = frozenset(
+    {
+        ".trae/bin/bootstrap-project-continuity.ps1",
+        ".trae/bin/export-mermaid.ps1",
+        ".trae/bin/pm-as-trae.ps1",
+        ".trae/project-bootstrap/plc/hooks/scripts/session-end.ps1",
+        ".trae/project-bootstrap/plc/hooks/scripts/session-start.ps1",
+        ".trae/project-bootstrap/software/hooks/scripts/session-end.ps1",
+        ".trae/project-bootstrap/software/hooks/scripts/session-start.ps1",
+        ".trae/project-bootstrap/sys/hooks/scripts/session-start.ps1",
+        "0100_PLC自动化/01_SharedLibraries/SysLib/.github/hooks/scripts/session-start.ps1",
+        "0100_PLC自动化/DJ-2026-000/.github/hooks/scripts/session-start.ps1",
+        "0100_PLC自动化/DJ-2026-005/.github/hooks/scripts/session-start.ps1",
+        "SYS-2026-001_WorkspaceGovernance/.github/hooks/scripts/session-start.ps1",
+    }
+)
+
+
+def _non_ascii_without_bom() -> set[str]:
+    found = set()
+    for name in _tracked_scripts():
+        data = (REPO_ROOT / name).read_bytes()
+        if not data.startswith(BOM) and any(byte > 127 for byte in data):
+            found.add(name)
+    return found
+
+
+def test_pm_as_agent_starts_with_a_utf8_bom() -> None:
+    path = REPO_ROOT / "00_Infrastructure" / "bin" / "pm-as-agent.ps1"
+    if not path.is_file():
+        pytest.skip("not run inside the workspace checkout")
+    assert path.read_bytes().startswith(BOM), "没有 BOM：PowerShell 5.1 会按 cp936 读，中文注释会吞掉后面的语句"
+
+
+def test_no_other_live_script_with_non_ascii_text_lacks_a_bom() -> None:
+    assert _non_ascii_without_bom() - KNOWN_NO_BOM == set()
+
+
+def test_the_known_no_bom_list_has_no_stale_entry() -> None:
+    assert KNOWN_NO_BOM <= _non_ascii_without_bom()
 
 
 def test_the_detector_tells_a_broken_script_from_a_fixed_one() -> None:
