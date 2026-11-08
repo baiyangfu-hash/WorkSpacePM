@@ -73,7 +73,8 @@ _ROOT_WORK_REQUIRED_STATES = frozenset(
     }
 )
 # Parking is a safe stop like blocking: a Mission may still be put down after its authority expired (TD-071).
-_SAFE_STOP_STATES = frozenset({MissionState.BLOCKED, MissionState.PARKED})
+# Cancelling is one too (D-109 ``pm retire``): an old card whose authority ran out must still be closable.
+_SAFE_STOP_STATES = frozenset({MissionState.BLOCKED, MissionState.PARKED, MissionState.CANCELLED})
 
 # The user's own words (one shared rule with the planning approval): parking, unparking, switching and admission
 # releases all use it.  ``user_evidence_problem`` is re-exported from here for its existing callers.
