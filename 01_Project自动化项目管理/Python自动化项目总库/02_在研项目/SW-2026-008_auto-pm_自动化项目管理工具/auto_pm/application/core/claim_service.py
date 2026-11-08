@@ -232,6 +232,8 @@ class ClaimService:
         lease; once it runs out the number is free for a deliberate ``open <NNN>``, but ``auto`` never hands it out again.
         """
 
+        if not goal.strip():
+            raise ClaimError("领号必须写 --goal：一句话说明这个号用来做什么卡，别人看占位表才知道它是谁拿去做什么的")
         return self.open("auto", paths=(), goal=goal, owner=owner, machine=machine, allow_no_paths=True)
 
     def open(
@@ -281,6 +283,8 @@ class ClaimService:
     def _lost_race_message(self, card: str) -> str:
         """The refusal for a lost same-name race: names the winner when the claim list can be read again, else says to look."""
 
+        if card == "auto":  # there is no card called "auto": the numbers were taken by others every time
+            return f"连续 {AUTO_RETRIES} 次领号都被别人抢先了（同时领的人太多）；没有写入任何占位，请稍后再运行一次"
         try:
             winner = next((claim for claim in self.all_claims() if claim.card == card and not claim.free), None)
         except ClaimError:

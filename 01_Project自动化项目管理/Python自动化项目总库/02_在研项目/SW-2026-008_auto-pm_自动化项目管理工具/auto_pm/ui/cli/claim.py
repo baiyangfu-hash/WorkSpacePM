@@ -103,7 +103,7 @@ def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str,
 
 
 @claim_group.command(name="number")
-@click.option("--goal", default="", help="一句话说明这个号用来做什么卡")
+@click.option("--goal", required=True, help="一句话说明这个号用来做什么卡（必填：别人看占位表靠它认出这个号是谁拿去做什么的）")
 @click.option("--as", "owner", default="", help="谁领的；缺省取调用方（agent 名或 user）")
 @click.pass_context
 def number_claim(ctx: click.Context, goal: str, owner: str) -> None:
@@ -140,7 +140,8 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
         click.echo("没有占位。")
     for claim in claims:
         mark = "（已放下或租约到期，视为空闲）" if claim.free else ""
-        click.echo(f"{claim.label()} {claim.claimed_at} 路径：{'、'.join(claim.paths)}{mark}")
+        paths = "、".join(claim.paths) if claim.paths else "（只占号，未补路径）"
+        click.echo(f"{claim.label()} {claim.claimed_at} 路径：{paths}{mark}")
 
 
 @claim_group.command(name="release")
