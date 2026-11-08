@@ -111,6 +111,12 @@ def decision_group() -> None:
 @click.option("--pid", "project_id", default="", help="可选的项目编号")
 @click.option("--file", "approved_files", multiple=True, help="允许修改的文件相对路径，可重复指定")
 @click.option(
+    "--allow-no-files",
+    "allow_empty_files",
+    is_flag=True,
+    help="变更单 §5 涉及文件/交付物为空也签发（批准清单为空 = 不限文件，确有此意才加）",
+)
+@click.option(
     "--condition", "conditions", multiple=True, help="有条件批准的附加条件说明，可重复指定"
 )
 @click.option("--decision-id", default="", help="显式 Decision ID；runtime capability 必填")
@@ -152,6 +158,7 @@ def create_decision(
     approver: str,
     project_id: str,
     approved_files: tuple[str, ...],
+    allow_empty_files: bool,
     conditions: tuple[str, ...],
     decision_id: str,
     runtime_actions: tuple[str, ...],
@@ -193,6 +200,7 @@ def create_decision(
             conditions=list(conditions) if conditions else None,
             decision_id=decision_id,
             runtime_capability=runtime_capability,
+            allow_empty_files=allow_empty_files,
         )
     except (DecisionError, WorktreePolicyError, ValueError) as e:
         console.print(f"[red]错误: {e}[/red]")
