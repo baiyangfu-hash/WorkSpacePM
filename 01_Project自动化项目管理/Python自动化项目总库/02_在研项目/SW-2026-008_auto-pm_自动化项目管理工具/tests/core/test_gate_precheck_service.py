@@ -29,17 +29,35 @@ from auto_pm.ui.cli.gate import gate_group
 def _project(tmp_path: Path) -> Path:
     project = tmp_path / "proj"
     files = {
+        "auto_pm/a/__init__.py": "",
         "auto_pm/a/b.py": "",
         "auto_pm/a/c.py": "",
-        "auto_pm/a/__init__.py": "",
+        "auto_pm/z/__init__.py": "",
+        "auto_pm/z/deep.py": "",
+        "tests/__init__.py": "",
+        "tests/conftest.py": "",
+        "tests/core/__init__.py": "",
         "tests/core/test_imports_dotted.py": "import auto_pm.a.b\n",
+        "tests/core/test_imports_as.py": "import auto_pm.a.b as bee\n",
         "tests/core/test_imports_from_module.py": "from auto_pm.a.b import thing\n",
         "tests/core/test_imports_from_package.py": "from auto_pm.a import b\n",
-        "tests/core/test_imports_from_package_many.py": "from auto_pm.a import c, b  # both\n",
-        "tests/core/test_other.py": "from auto_pm.a import c\n",
-        "tests/core/test_b_named.py": "x = 1\n",
-        "tests/core/test_b2.py": "# mentions auto_pm.a.b only in a comment\n",
-        "tests/conftest.py": "",
+        "tests/core/test_imports_paren_multiline.py": "from auto_pm.a import (\n    c,\n    b,\n)\n",
+        "tests/core/test_imports_in_function.py": "def test_x():\n    from auto_pm.a.b import thing\n",
+        "tests/core/test_only_c.py": "from auto_pm.a import c\n",
+        "tests/core/test_mentions_in_comment.py": "# auto_pm.a.b is only named here\nx = 'auto_pm.a.b'\n",
+        "tests/core/test_via_helper.py": "from tests.core_helper import make\n",
+        "tests/core_helper.py": "from auto_pm.a.b import thing\n",
+        "tests/core/test_via_helper_chain.py": "from tests.chain_two import make\n",
+        "tests/chain_two.py": "from tests.core_helper import make\n",
+        "tests/core/test_relative.py": "from .sibling_helper import make\n",
+        "tests/core/sibling_helper.py": "from auto_pm.a.b import thing\n",
+        "tests/cli/__init__.py": "",
+        "tests/cli/conftest.py": "",
+        "tests/cli/test_one.py": "x = 1\n",
+        "tests/cli/sub/test_two.py": "x = 1\n",
+        "tests/cli/conftest_user/test_three.py": "x = 1\n",
+        "tests/qml/test_reads_qml.py": "x = 'a.qml'\n",
+        "tests/core/test_deep.py": "import auto_pm.z.deep\n",
     }
     for relative, text in files.items():
         path = project / relative
@@ -48,28 +66,52 @@ def _project(tmp_path: Path) -> Path:
     return project
 
 
-def test_a_changed_module_is_related_to_the_tests_that_import_it_or_are_named_after_it(tmp_path: Path) -> None:
+def test_a_changed_module_is_related_to_every_test_that_imports_it_in_any_written_form(tmp_path: Path) -> None:
     tests, note = related_tests(_project(tmp_path), ["auto_pm/a/b.py"])
     assert note == ""
     assert tests == [
-        "tests/core/test_b2.py",  # named test_b*: the name rule is deliberately generous
-        "tests/core/test_b_named.py",
+        "tests/core/test_imports_as.py",
         "tests/core/test_imports_dotted.py",
         "tests/core/test_imports_from_module.py",
         "tests/core/test_imports_from_package.py",
-        "tests/core/test_imports_from_package_many.py",
+        "tests/core/test_imports_in_function.py",
+        "tests/core/test_imports_paren_multiline.py",  # audit 1 of #634: b on the second line of a parenthesised import
+        "tests/core/test_relative.py",  # through a helper reached by a relative import
+        "tests/core/test_via_helper.py",  # through a helper module under tests/
+        "tests/core/test_via_helper_chain.py",  # through two helpers
     ]
 
 
-def test_a_test_that_only_imports_a_sibling_module_is_not_related(tmp_path: Path) -> None:
+def test_a_test_that_only_imports_a_sibling_or_only_names_the_module_in_text_is_not_related(tmp_path: Path) -> None:
     tests, _ = related_tests(_project(tmp_path), ["auto_pm/a/b.py"])
-    assert "tests/core/test_other.py" not in tests
+    assert "tests/core/test_only_c.py" not in tests and "tests/core/test_mentions_in_comment.py" not in tests
+
+
+def test_a_changed_package_init_reaches_every_importer_of_anything_below_it(tmp_path: Path) -> None:
+    tests, _ = related_tests(_project(tmp_path), ["auto_pm/z/__init__.py"])
+    assert tests == ["tests/core/test_deep.py"]
 
 
 def test_a_changed_test_file_is_itself_related_and_a_deleted_one_is_not(tmp_path: Path) -> None:
     project = _project(tmp_path)
-    assert related_tests(project, ["tests/core/test_other.py"])[0] == ["tests/core/test_other.py"]
+    assert related_tests(project, ["tests/core/test_only_c.py"])[0] == ["tests/core/test_only_c.py"]
     assert related_tests(project, ["tests/core/test_gone.py"])[0] == []
+
+
+def test_a_changed_helper_module_is_related_to_the_tests_that_import_it_directly_or_through_another_helper(tmp_path: Path) -> None:
+    tests, _ = related_tests(_project(tmp_path), ["tests/core_helper.py"])
+    assert tests == ["tests/core/test_via_helper.py", "tests/core/test_via_helper_chain.py"]
+
+
+def test_a_changed_sub_conftest_is_related_to_every_test_below_its_folder_only(tmp_path: Path) -> None:
+    tests, _ = related_tests(_project(tmp_path), ["tests/cli/conftest.py"])
+    assert tests == ["tests/cli/conftest_user/test_three.py", "tests/cli/sub/test_two.py", "tests/cli/test_one.py"]
+
+
+def test_a_sub_conftest_change_next_to_a_module_change_does_not_hide_either(tmp_path: Path) -> None:
+    """Audit 1.3: the conftest change used to be ignored as soon as another change had tests."""
+    tests, _ = related_tests(_project(tmp_path), ["tests/cli/conftest.py", "auto_pm/a/c.py"])
+    assert "tests/cli/test_one.py" in tests and "tests/core/test_only_c.py" in tests
 
 
 @pytest.mark.parametrize("path", ["tests/conftest.py", "pyproject.toml", "requirements.txt"])
@@ -78,8 +120,29 @@ def test_a_change_that_can_break_any_test_makes_everything_related_and_says_so(t
     assert tests == ["tests"] and "全部" in note
 
 
+@pytest.mark.parametrize("path", ["qml/Main.qml", "templates/x.jinja", "config/rules.yaml", "data/blob.json", "assets/logo.png"])
+def test_a_changed_non_python_file_makes_everything_related_never_nothing(tmp_path: Path, path: str) -> None:
+    """Audit 1.1: a .qml or .jinja change used to run no test at all and still say PASS."""
+    tests, note = related_tests(_project(tmp_path), [path, "README.md"])
+    assert tests == ["tests"] and "非 Python" in note
+
+
+def test_a_test_file_that_cannot_be_parsed_makes_everything_related(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / "tests/core/test_broken.py").write_text("def broken(:\n", encoding="utf-8")
+    tests, note = related_tests(project, ["auto_pm/a/c.py"])
+    assert tests == ["tests"] and "解析不了" in note
+
+
+def test_a_test_file_with_a_utf8_bom_is_still_parsed(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / "tests/core/test_bom.py").write_bytes(b"\xef\xbb\xbffrom auto_pm.a import c\n")
+    tests, _ = related_tests(project, ["auto_pm/a/c.py"])
+    assert "tests/core/test_bom.py" in tests and tests != ["tests"]
+
+
 def test_a_docs_only_change_has_no_related_tests(tmp_path: Path) -> None:
-    assert related_tests(_project(tmp_path), ["README.md", "docs/x.md"]) == ([], "")
+    assert related_tests(_project(tmp_path), ["README.md", "docs/x.md", "notes/y.rst"]) == ([], "")
 
 
 # ── changed files (real git) ────────────────────────────
@@ -90,6 +153,7 @@ def _git(repo: Path, *args: str) -> str:
         ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return done.stdout.strip()
@@ -196,6 +260,16 @@ def test_many_related_tests_run_in_parallel_few_do_not(monkeypatch: pytest.Monke
     recorder = _Recorder()
     _service_run(monkeypatch, tmp_path, recorder, _py_changed(), (["tests/t.py"], ""))
     assert "-n" not in recorder.calls[-1][1]
+
+
+def test_the_full_tree_runs_in_parallel_and_junit_goes_to_the_logs_not_the_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    recorder = _Recorder()
+    _service_run(monkeypatch, tmp_path, recorder, _py_changed(), (["tests"], "非 Python 文件"))
+    argv = recorder.calls[-1][1]
+    assert argv[argv.index("-n") + 1] != "1" and "loadfile" in argv
+    assert f"--junitxml={tmp_path / 'out' / 'pytest-junit.xml'}" in argv
 
 
 @pytest.mark.parametrize("step", ["ruff", "mypy", "pytest"])

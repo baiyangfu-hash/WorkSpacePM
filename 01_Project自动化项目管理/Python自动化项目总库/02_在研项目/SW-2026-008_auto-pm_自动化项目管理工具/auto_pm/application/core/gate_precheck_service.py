@@ -15,6 +15,7 @@ the step logs go to a temporary folder (or ``--out``).  A step whose tool is not
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -35,7 +36,8 @@ from auto_pm.application.core.gate_run_service import (
 
 DEFAULT_BASE = "origin/main"
 STEP_TIMEOUT_SECONDS = 20 * 60
-PARALLEL_FROM = 4  # more test files than this: run them with xdist
+FULL_TIMEOUT_SECONDS = 45 * 60  # the whole tests/ tree with -n 4 took about 12 minutes on the cloud container (audit of #634)
+PARALLEL_FROM = 4  # this many test files or more (or the whole tree): run them with xdist
 # A change to one of these can break any test: the related set is everything (slow, said out loud in the report).
 EVERYTHING_FILES = frozenset({"tests/conftest.py", "pyproject.toml", "requirements.txt"})
 _NO_MODULE = re.compile(r"No module named")
@@ -81,55 +83,119 @@ def changed_files(worktree: Path, base: str) -> list[str]:
     return sorted({name for name in (tracked + "\0" + untracked).split("\0") if name.strip()})
 
 
-def _module_names(relative: str) -> tuple[str, str]:
-    """``auto_pm/a/b.py`` -> (``auto_pm.a.b``, ``auto_pm.a``); a package ``__init__`` names the package itself."""
+def _dotted(relative: str) -> str:
+    """``auto_pm/a/b.py`` -> ``auto_pm.a.b``; a package ``__init__`` names the package itself."""
 
     parts = Path(relative).with_suffix("").parts
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    dotted = ".".join(parts)
-    return dotted, ".".join(parts[:-1])
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _imports_of(path: Path, relative: str) -> set[str] | None:
+    """Every module name a file may import, read with ``ast`` (multi-line and ``as`` forms, imports inside functions, relative imports).
+
+    ``from a import b, c`` yields ``a``, ``a.b`` and ``a.c`` (``b`` may be a module or a name; both are candidates).  ``None`` when the file
+    cannot be read or parsed: the caller must then assume the file may depend on anything.
+    """
+
+    try:
+        tree = ast.parse(path.read_bytes(), filename=str(path))  # bytes: ast copes with a UTF-8 BOM and the coding cookie
+    except (OSError, SyntaxError, ValueError):
+        return None
+    package = _dotted(relative) if relative.endswith("__init__.py") else _dotted(relative).rpartition(".")[0]
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                anchor = package.split(".")
+                anchor = anchor[: len(anchor) - (node.level - 1)] if node.level > 1 else anchor
+                base = ".".join(part for part in (*anchor, base) if part)
+            if base:
+                found.add(base)
+            found.update(f"{base}.{alias.name}" if base else alias.name for alias in node.names if alias.name != "*")
+    return found
+
+
+def _touches(imports: set[str], module: str, is_package: bool) -> bool:
+    """Does a file with these imports load ``module``?  Importing ``a.b.c`` loads package ``a.b`` first, so a change to a package
+    ``__init__`` reaches every importer of anything below it."""
+
+    return module in imports or (is_package and any(name.startswith(module + ".") for name in imports))
 
 
 def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tuple[list[str], str]:
     """The test files that belong to a change, as paths relative to ``project``; and a note when the set is "everything".
 
-    * a changed ``tests/**/test_*.py`` file is itself related;
-    * a changed ``auto_pm/**/*.py`` module is related to every test file that imports it (``import auto_pm.a.b``,
-      ``from auto_pm.a import b``, ``from auto_pm.a.b import x``) or is named ``test_<module>*.py``;
-    * a change to ``tests/conftest.py`` / ``pyproject.toml`` / ``requirements.txt`` means every test is related.
+    Principle (audit 1 of #634): when the choice is not certain, run more, never report PASS on tests that did not run.
+
+    * a changed ``test_*.py`` is itself related;
+    * a changed Python module (``auto_pm``, ``scripts`` ...) is related to every test file that imports it, **directly or through
+      the helper modules and conftest files under ``tests/``** (parsed with ``ast``);
+    * a changed ``conftest.py`` is related to every test file under its folder; ``tests/conftest.py`` / ``pyproject.toml`` /
+      ``requirements.txt`` mean everything;
+    * a changed file that is neither Python nor documentation (``.qml``, ``.jinja``, ``.yaml`` ...) and a test file that cannot be parsed
+      mean everything, because nothing says which tests read it;
+    * documentation (``.md`` / ``.rst``) relates to nothing.
+
+    Indirect dependence through ``auto_pm`` modules (A imports B, a test imports A) is **not** followed: that would make nearly every
+    change relate to nearly every test.  It is the one known blind spot (CI and ``gate run`` stay the full check).
     """
 
-    changes = [path for path in project_relative_changes if path.endswith((".py", ".toml", ".txt"))]
+    changes = [path for path in project_relative_changes if path and not path.endswith((".md", ".rst"))]
     if any(path in EVERYTHING_FILES for path in changes):
-        return ["tests"], "改到了 conftest/pyproject/requirements：相关测试 = 全部 tests（会比较慢）"
-    found: set[str] = set()
-    modules = [path for path in changes if path.startswith("auto_pm/") and path.endswith(".py")]
-    for path in changes:
-        if path.startswith("tests/") and Path(path).name.startswith("test_") and (project / path).is_file():
-            found.add(path)
-    if modules:
-        patterns = []
-        for module in modules:
-            dotted, package = _module_names(module)
-            leaf = dotted.rsplit(".", 1)[-1]
-            patterns.append(
-                (
-                    re.compile(
-                        rf"(?m)^\s*(?:import\s+{re.escape(dotted)}\b|from\s+{re.escape(dotted)}(?:\.\w+)*\s+import\b"
-                        rf"|from\s+{re.escape(package)}\s+import\s+[^\n#]*\b{re.escape(leaf)}\b)"
-                    ),
-                    leaf,
-                )
-            )
-        for test in sorted((project / "tests").rglob("test_*.py")):
-            relative = test.relative_to(project).as_posix()
-            if relative in found:
-                continue
-            text = test.read_text(encoding="utf-8", errors="replace")  # lenient-decode: only searched for import lines
-            if any(regex.search(text) or test.name.startswith(f"test_{leaf}") for regex, leaf in patterns):
-                found.add(relative)
-    return sorted(found), ""
+        return ["tests"], "改到了 conftest/pyproject/requirements：相关测试 = 全部 tests（并行跑，会比较慢）"
+    others = [path for path in changes if not path.endswith(".py")]
+    if others:
+        return ["tests"], f"改到了非 Python 文件（{others[0]} 等 {len(others)} 个），没有可靠的办法知道哪些测试读它：相关测试 = 全部 tests"
+    python = [path for path in changes if (project / path).is_file() or path.startswith("tests/")]
+    test_files = sorted(p.relative_to(project).as_posix() for p in (project / "tests").rglob("*.py")) if (project / "tests").is_dir() else []
+    imports: dict[str, set[str]] = {}
+    for relative in test_files:
+        parsed = _imports_of(project / relative, relative)
+        if parsed is None:
+            return ["tests"], f"{relative} 读不出/解析不了，没法判断依赖：相关测试 = 全部 tests"
+        imports[relative] = parsed
+    by_dotted = {_dotted(relative): relative for relative in test_files}
+    conftests = [relative for relative in test_files if Path(relative).name == "conftest.py"]
+
+    def conftests_above(relative: str) -> list[str]:
+        folder = Path(relative).parent
+        return [c for c in conftests if folder == Path(c).parent or Path(c).parent in folder.parents]
+
+    related: set[str] = set()
+    changed_modules: list[tuple[str, bool]] = []  # (dotted name, is a package __init__)
+    for path in python:
+        name = Path(path).name
+        if name == "conftest.py":
+            folder = Path(path).parent
+            related.update(t for t in test_files if Path(t).name.startswith("test_") and (folder in Path(t).parents or folder == Path(t).parent))
+        if path.startswith("tests/") and name.startswith("test_") and (project / path).is_file():
+            related.add(path)
+        if path.endswith(".py") and not (path.startswith("tests/") and name.startswith("test_")):
+            changed_modules.append((_dotted(path), name == "__init__.py"))
+    # dependency edges inside tests/: a test depends on the tests-modules it imports and on the conftest files above it
+    depends: dict[str, set[str]] = {}
+    for relative, names in imports.items():
+        targets = {by_dotted[name] for name in names if name in by_dotted}
+        targets.update(conftests_above(relative))
+        depends[relative] = targets - {relative}
+    direct = {
+        relative
+        for relative, names in imports.items()
+        if any(_touches(names, module, is_package) for module, is_package in changed_modules)
+    }
+    changed = set(direct)
+    grew = True
+    while grew:
+        grew = False
+        for relative, targets in depends.items():
+            if relative not in changed and targets & changed:
+                changed.add(relative)
+                grew = True
+    related.update(t for t in changed if Path(t).name.startswith("test_"))
+    return sorted(related), ""
 
 
 def _step_verdict(name: str, exit_code: int | None, log: Path) -> tuple[str, str]:
@@ -181,15 +247,18 @@ class PrecheckService:
             ),
         ]
         if tests:
-            pytest_argv = [python, "-B", "-m", "pytest", *tests, "-p", "no:cacheprovider", "--no-cov", "-q"]
-            if len(tests) >= PARALLEL_FROM and jobs > 1:
+            # the project's addopts write coverage/junit/test-results.xml into the worktree and --no-cov does not stop that: point it at the logs
+            junit = f"--junitxml={logs / 'pytest-junit.xml'}"
+            pytest_argv = [python, "-B", "-m", "pytest", *tests, "-p", "no:cacheprovider", "--no-cov", "-q", junit]
+            if (len(tests) >= PARALLEL_FROM or tests == ["tests"]) and jobs > 1:
                 pytest_argv += ["-n", str(jobs), "--dist", "loadfile"]
             plan.append(("pytest", pytest_argv))
         for name, argv in plan:
             log = logs / f"{name}.txt"
             code: int | None
             try:
-                code = self._runner(argv, project, env, log, timeout_seconds)
+                limit = max(timeout_seconds, FULL_TIMEOUT_SECONDS) if tests == ["tests"] and name == "pytest" else timeout_seconds
+                code = self._runner(argv, project, env, log, limit)
             except (OSError, subprocess.SubprocessError) as error:
                 log.write_text(f"[precheck] could not start: {error}\n", encoding="utf-8")
                 code = None
