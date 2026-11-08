@@ -528,9 +528,42 @@ def test_the_checkpoint_hook_passes_the_runs_owned_paths_and_prints_warnings_on_
 
     monkeypatch.setattr(module, "ClaimService", FakeService)
     monkeypatch.setattr(module, "caller_agent", lambda: "claude")
+    monkeypatch.setattr(module, "caller_alias", lambda: "")
     ctx = SimpleNamespace(find_root=lambda: SimpleNamespace(obj=SimpleNamespace(control_root="/root", workspace_root="")))
 
     module._keep_claims_alive(ctx, ("p/a", "p/b"))  # type: ignore[arg-type]
 
-    assert calls == [("claude", ("p/a", "p/b"))]
+    assert calls == [("claude", ("p/a", "p/b"))], "no session id: fall back to the bare agent name"
     assert "领卡续租没做" in capsys.readouterr().err
+
+
+def test_the_checkpoint_hook_renews_as_the_session_alias_when_there_is_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from auto_pm.ui.cli import continuity as module
+
+    owners: list[str] = []
+
+    class FakeService:
+        keepalive_warnings: list[str] = []
+
+        def __init__(self, root: object) -> None:
+            pass
+
+        def renew_held(self, owner: str, *, paths: tuple[str, ...]) -> list[object]:
+            owners.append(owner)
+            return []
+
+    monkeypatch.setattr(module, "ClaimService", FakeService)
+    monkeypatch.setattr(module, "caller_agent", lambda: "claude")
+    monkeypatch.setattr(module, "caller_alias", lambda: "claude-a1b2c3")
+    ctx = SimpleNamespace(find_root=lambda: SimpleNamespace(obj=SimpleNamespace(control_root="/root", workspace_root="")))
+    module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module, "caller_alias", lambda: "")
+    monkeypatch.setattr(module, "caller_agent", lambda: "?")
+    module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
+    monkeypatch.setattr(module, "caller_agent", lambda: "")
+    module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
+
+    assert owners == ["claude-a1b2c3", "user", "user"]

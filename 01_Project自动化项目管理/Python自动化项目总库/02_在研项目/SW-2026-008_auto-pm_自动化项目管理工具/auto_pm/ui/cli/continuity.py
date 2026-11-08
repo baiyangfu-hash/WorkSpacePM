@@ -17,7 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent
+from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent, caller_alias
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
 from auto_pm.application.core.claim_service import ClaimService
 from auto_pm.application.core.continuity_execution_service import (
@@ -1522,7 +1522,7 @@ def _keep_claims_alive(ctx: click.Context, owned_paths: Sequence[str]) -> None:
         if not root:
             return
         service = ClaimService(root)
-        service.renew_held(caller_agent().strip("?") or "user", paths=owned_paths)
+        service.renew_held(caller_alias() or caller_agent().strip("?") or "user", paths=owned_paths)
         for warning in service.keepalive_warnings:
             click.echo(f"⚠️ {warning}", err=True)
     except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
