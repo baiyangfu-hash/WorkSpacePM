@@ -66,11 +66,14 @@ def test_a_failure_halfway_leaves_the_work_open_and_a_second_run_finishes_the_jo
     assert store.get_work("WORK-OLD").state is WorkState.BLOCKED  # the Work is cancelled last, so it is still open
     assert [store.get_mission(first).state, store.get_mission(second).state].count(MissionState.CANCELLED) == 1  # one done, one not
     assert _service(tmp_path).plan(PROJECT).items  # still listed as a leftover
+    # D-149: the result tells which of the planned Missions really are cancelled
+    assert len(results[0].mission_ids) == 2 and results[0].cancelled_mission_ids == (first,)
 
     monkeypatch.setattr(MissionService, "transition", original)
     retried, _ = _service(tmp_path).apply(PROJECT, [])
 
     assert [r.outcome for r in retried] == ["retired"]
+    assert retried[0].mission_ids == retried[0].cancelled_mission_ids == (second,)  # the first one was already cancelled and is no longer planned
     assert store.get_mission(first).state is MissionState.CANCELLED
     assert store.get_mission(second).state is MissionState.CANCELLED
     assert store.get_work("WORK-OLD").state is WorkState.CANCELLED
