@@ -50,7 +50,7 @@ def _plan_payload(plan: RetirePlan) -> dict[str, Any]:
     }
 
 
-def _result_payload(result: RetireResult) -> dict[str, str]:
+def _result_payload(result: RetireResult) -> dict[str, Any]:
     return {
         "work_id": result.work_id,
         "mission_ids": list(result.mission_ids),
