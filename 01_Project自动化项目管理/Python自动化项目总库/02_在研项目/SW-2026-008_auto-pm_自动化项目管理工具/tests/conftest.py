@@ -118,15 +118,19 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_inherited_cockpit_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_inherited_cockpit_roots() -> Generator[None, None, None]:
     """A test never inherits the cockpit's workspace / control-root variables from the process that started pytest (D-108).
 
     ``long-run --worktree`` exports them for acceptance commands; a pytest run under it would otherwise let the e2e drills'
     child processes treat the real control root as the fixture's root.  A test that needs one sets it with ``monkeypatch.setenv``.
+    It keeps its own ``MonkeyPatch`` (as ``identity_guard_off`` does): a test that calls the shared ``monkeypatch.undo()`` midway
+    would otherwise put the inherited values back (19 such calls in the suite, audit 1 of #617).
     """
 
-    for name in INHERITED_COCKPIT_ENV:
-        monkeypatch.delenv(name, raising=False)
+    with pytest.MonkeyPatch.context() as patcher:
+        for name in INHERITED_COCKPIT_ENV:
+            patcher.delenv(name, raising=False)
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)

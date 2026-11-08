@@ -14,20 +14,33 @@ from tests.ledger_isolation import INHERITED_COCKPIT_ENV, install_tripwire, real
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROBE_FLAG = "LEDGER_ISOLATION_PROBE"
+# Written out here on purpose: the probe must not check the list against itself (audit 1 of #617, mutants 2/3).
+POLLUTION_NAMES = (
+    "AUTO_PM_WORKSPACE",
+    "AUTO_PM_CONTROL_ROOT",
+    "AUTO_PM_RUN_WORKTREE",
+    "AUTO_PM_CALLER_CWD",
+)
 
 
 @pytest.mark.skipif(
     PROBE_FLAG not in os.environ,
     reason="only the outer test runs this, in a child process with a polluted environment",
 )
-def test_probe_sees_a_clean_environment() -> None:
-    leaked = [name for name in INHERITED_COCKPIT_ENV if name in os.environ]
+def test_probe_sees_a_clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert not [name for name in POLLUTION_NAMES if name in os.environ]
+    monkeypatch.undo()  # 19 tests in the suite do this midway; the inherited variables must stay gone
+    leaked = [name for name in POLLUTION_NAMES if name in os.environ]
     assert not leaked, leaked
+
+
+def test_the_list_of_dropped_variables_is_pinned() -> None:
+    assert set(POLLUTION_NAMES) <= set(INHERITED_COCKPIT_ENV)
 
 
 def test_a_polluted_parent_environment_does_not_reach_the_tests() -> None:
     env = dict(os.environ)
-    env.update({name: str(PROJECT_ROOT) for name in INHERITED_COCKPIT_ENV})
+    env.update({name: str(PROJECT_ROOT) for name in POLLUTION_NAMES})
     env[PROBE_FLAG] = "1"
     completed = subprocess.run(  # noqa: S603 - fixed argv
         [
@@ -85,6 +98,9 @@ def test_opening_a_store_on_a_forbidden_ledger_raises_and_a_tmp_ledger_still_ope
         with pytest.raises(AssertionError, match="真账本"):
             ContinuityStore(forbidden_root, forbidden_root / ".auto-pm" / "continuity.db")
         assert ContinuityStore(allowed_root).db_path.parent.name == ".auto-pm"
+        # a safe workspace with an explicit ledger path that is forbidden: the explicit path decides, not the workspace
+        with pytest.raises(AssertionError, match="真账本"):
+            ContinuityStore(allowed_root, forbidden_root / ".auto-pm" / "continuity.db")
     finally:
         remove()
     assert (
