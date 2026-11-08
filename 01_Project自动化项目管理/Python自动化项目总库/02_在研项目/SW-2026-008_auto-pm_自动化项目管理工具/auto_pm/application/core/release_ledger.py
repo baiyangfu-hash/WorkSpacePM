@@ -94,6 +94,20 @@ class Books:
     steps: list[str] = field(default_factory=list)
 
 
+def pick_change(release_id: str, candidates: Sequence[tuple[str, str]]) -> str:
+    """The change order for ``release_id`` among ``(change_id, references)`` rows, or ``""`` when none.
+
+    The match is exact on the ``RELEASE=<id>`` item of the ``;``-separated references (never a substring: ``1.3.3-abc`` must not claim
+    ``1.3.3-abcdef0``), and more than one hit is an error rather than a pick.  The real ledger port feeds its rows through this.
+    """
+
+    wanted = f"RELEASE={release_id}"
+    hits = [change_id for change_id, references in candidates if wanted in (item.strip() for item in references.split(";"))]
+    if len(hits) > 1:
+        raise LedgerError(f"发布号 {release_id} 在账本里有 {len(hits)} 张变更单（{', '.join(hits)}），不能任取一张；请人工确认后删除多余的")
+    return hits[0] if hits else ""
+
+
 def _load_state_file(path: Path) -> dict[str, str]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -119,7 +133,8 @@ def _walk(port: LedgerPort, change_id: str, sequence: Sequence[str], plan: Deplo
     for _ in range(len(sequence) + 1):
         status = port.change_status(change_id)
         if status not in sequence:
-            raise LedgerError(f"变更单 {change_id} 处于 {status or '未知'}，不在可续的路径 {sequence} 上")
+            hint = "（这个发布号已有一张走完的变更单：已完成或已拒绝，不能再续）" if status in ("completed", "rejected", "cancelled") else ""
+            raise LedgerError(f"变更单 {change_id} 处于 {status or '未知'}，不在可续的路径 {sequence} 上{hint}")
         if status == sequence[-1]:
             return
         target = sequence[sequence.index(status) + 1]
