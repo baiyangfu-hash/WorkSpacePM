@@ -157,3 +157,41 @@ def test_add_paths_command_exits_one_with_the_refusal(monkeypatch: pytest.Monkey
     result = CliRunner().invoke(claim_cli.claim_group, ["add-paths", "340", "--paths", "reviews/a.py", "--as", "claude"])
 
     assert result.exit_code == 1 and "拒绝 要追加的路径和别人的占位重叠" in (result.output + (result.stderr if result.stderr_bytes else ""))
+
+
+def test_d34_number_command_reports_the_number_and_how_to_add_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.application.core.claim_service import Claim
+
+    root, _ = _tree(tmp_path)
+    seen: dict[str, object] = {}
+
+    class _Service:
+        def reserve_number(self, *, goal: str, owner: str) -> Claim:
+            seen.update(goal=goal, owner=owner)
+            return Claim("245", owner, "m", (), goal, "t", "c")
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["number", "--goal", "落卡", "--as", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == {"goal": "落卡", "owner": "claude"}
+    assert "已领号 245" in result.output
+    assert "02_规划/245_<名称>_PM.md" in result.output
+    assert "claim add-paths 245 --paths" in result.output
+
+
+def test_d34_number_command_exits_one_with_the_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root, _ = _tree(tmp_path)
+
+    class _Service:
+        def reserve_number(self, *, goal: str, owner: str) -> None:
+            raise ClaimError("推占位分支失败，未领到卡")
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["number", "--as", "claude"])
+
+    assert result.exit_code == 1 and "拒绝 推占位分支失败" in (result.output + (result.stderr if result.stderr_bytes else ""))
