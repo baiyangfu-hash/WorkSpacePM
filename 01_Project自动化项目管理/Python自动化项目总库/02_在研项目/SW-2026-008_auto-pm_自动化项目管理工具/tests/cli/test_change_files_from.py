@@ -82,3 +82,23 @@ def test_files_from_a_missing_file_is_rejected_by_the_option(cli_runner: CliRunn
     result = _edit(cli_runner, tmp_path, number, "--files-from", str(tmp_path / "nope.txt"))
 
     assert result.exit_code == 2
+
+
+def test_a_relative_files_from_path_means_the_callers_folder_not_the_release_folder(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launcher runs the release from its own folder and exports the caller's folder (TD-SW008-232)."""
+
+    number, _ = _new_change(cli_runner, tmp_path)
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "files.txt").write_text("a/b.py\n", encoding="utf-8")
+    release = tmp_path / "release"
+    release.mkdir()
+    monkeypatch.chdir(release)
+    monkeypatch.setenv("AUTO_PM_CALLER_CWD", str(caller))
+
+    result = _edit(cli_runner, tmp_path, number, "--files-from", "files.txt")
+
+    assert result.exit_code == 0, result.output
+    assert "改后: a/b.py" in result.output

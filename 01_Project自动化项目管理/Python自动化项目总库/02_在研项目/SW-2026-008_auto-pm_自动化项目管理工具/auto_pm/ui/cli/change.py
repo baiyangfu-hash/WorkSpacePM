@@ -39,6 +39,7 @@ from auto_pm.change.constants import (
 from auto_pm.change.track_classifier import ChangeTrack, ChangeTrackClassifier
 from auto_pm.models import ChangeRequest
 from auto_pm.ui.cli.approval_pin import refuse_agent_approval, require_approval_pin
+from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity,
     require_runtime_identity_for_change,
@@ -671,7 +672,7 @@ def _read_files_from(ctx: click.Context, source: Path) -> list[str]:
 @click.option(
     "--files-from",
     "files_from",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=CallerPath(exists=True, dir_okay=False, path_type=Path),
     default=None,
     help="从文本文件读 §5 涉及文件清单（UTF-8，一行一条，空行和 # 开头的行忽略）；可与 --file 合用，绕开命令行传中文路径（D-140）",
 )
