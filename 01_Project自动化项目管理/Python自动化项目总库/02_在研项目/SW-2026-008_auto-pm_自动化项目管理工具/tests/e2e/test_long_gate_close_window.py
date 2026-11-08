@@ -174,9 +174,11 @@ def test_the_gate_runs_the_closing_itself_after_the_verdict(lab: dict[str, Path]
         lab,
         run_age_s=60,
         extra={"closing": closing},
-        lease_extra={"hold_until_marker": str(marker)},
+        # D-83/D-94: bound the wait. If the gate skipped ``_run_closing()`` nothing would ever write the marker and the
+        # keeper would hold the lease for the default two hours; with 60 s (the minimum) the regression is a red test.
+        lease_extra={"hold_until_marker": str(marker), "hold_timeout_s": 60},
     )
-    assert _run(cfg, "run").returncode == 0
+    assert _run(cfg, "run", timeout=90).returncode == 0
     assert marker.exists()
     state = _state(lab)
     assert (
