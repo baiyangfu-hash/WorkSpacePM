@@ -217,16 +217,16 @@ def signed(sha: str, user: dict[str, object] | None = None) -> dict[str, object]
     return {"body": f"安全签字 {sha}", "user": user or SIGNER, "html_url": "u"}
 
 
-def test_d117_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
+def test_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
     report = check(tmp_path, plc_pr([]))
     assert failed(report) == {"安全签字"}
 
 
-def test_d117_r12_a_signature_for_an_old_head_blocks(tmp_path: Path) -> None:
+def test_r12_a_signature_for_an_old_head_blocks(tmp_path: Path) -> None:
     assert failed(check(tmp_path, plc_pr([signed(OLD[:12])]))) == {"安全签字"}
 
 
-def test_d117_r13_a_signature_for_the_current_head_by_the_signer_passes(tmp_path: Path) -> None:
+def test_r13_a_signature_for_the_current_head_by_the_signer_passes(tmp_path: Path) -> None:
     assert check(tmp_path, plc_pr([signed(HEAD[:12])])).ready
 
 
@@ -237,18 +237,18 @@ def test_r13b_a_signature_of_10_digits_no_longer_counts(tmp_path: Path) -> None:
     assert "不足 12 位" in "".join(item.detail for item in report.items)
 
 
-def test_d117_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
+def test_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
     other = {"login": "someone", "id": 1}
     assert failed(check(tmp_path, plc_pr([signed(HEAD[:12], other)]))) == {"安全签字"}
 
 
-def test_d117_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
+def test_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
     gh = FakeGh()
     gh.pr["body"] = "## 安全回路\n\n安全回路: 是\n"
     assert failed(check(tmp_path, gh)) == {"安全签字"}
 
 
-def test_d117_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
+def test_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
     gh = FakeGh()
     check(tmp_path, gh)
     assert gh.calls
@@ -258,7 +258,7 @@ def test_d117_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> No
         assert not {"merge", "comment", "edit", "close", "review"} & set(call[:2])
 
 
-def test_d117_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     gh = FakeGh()
     monkeypatch.setattr("auto_pm.application.core.pr_ready_service.default_gh", gh)
     directory = report_dir(tmp_path, GOOD_REPORT)
@@ -293,25 +293,25 @@ WORKFLOWS = [
 ]
 
 
-def test_r11_an_old_failure_covered_by_a_newer_success_of_the_same_job_no_longer_blocks() -> None:
+def test_d117_r11_an_old_failure_covered_by_a_newer_success_of_the_same_job_no_longer_blocks() -> None:
     problems, passed = judge_checks([_check(1, "failure", run=100), _check(2, "success", run=101)], [], WORKFLOWS)
 
     assert problems == [] and passed == ["unit"]
 
 
-def test_r12_the_newest_decides_in_both_directions() -> None:
+def test_d117_r12_the_newest_decides_in_both_directions() -> None:
     problems, _ = judge_checks([_check(1, "success", run=100), _check(2, "failure", run=101)], [], WORKFLOWS)
 
     assert problems == ["unit：failure"]
 
 
-def test_r13_a_cancelled_old_run_does_not_hide_behind_the_newer_one_and_a_running_newer_one_blocks() -> None:
+def test_d117_r13_a_cancelled_old_run_does_not_hide_behind_the_newer_one_and_a_running_newer_one_blocks() -> None:
     problems, _ = judge_checks([_check(1, "cancelled", run=100), _check(2, "success", status="in_progress", run=101)], [], WORKFLOWS)
 
     assert problems == ["unit：还没跑完（in_progress）"]
 
 
-def test_r14_same_named_jobs_of_different_workflows_or_apps_are_different_checks() -> None:
+def test_d117_r14_same_named_jobs_of_different_workflows_or_apps_are_different_checks() -> None:
     different_workflow = [_check(1, "failure", run=100), _check(2, "success", run=200)]
     different_app = [_check(1, "failure", app=1), _check(2, "success", app=2)]
 
@@ -319,7 +319,7 @@ def test_r14_same_named_jobs_of_different_workflows_or_apps_are_different_checks
     assert judge_checks(different_app, [], WORKFLOWS)[0] == ["unit：failure"]
 
 
-def test_r15_an_unknown_run_or_a_check_without_id_is_never_merged() -> None:
+def test_d117_r15_an_unknown_run_or_a_check_without_id_is_never_merged() -> None:
     unknown_run = [_check(1, "failure", run=999), _check(2, "success", run=999)]
     no_id = [{k: v for k, v in _check(1, "failure").items() if k != "id"}, _check(2, "success")]
 
@@ -328,7 +328,7 @@ def test_r15_an_unknown_run_or_a_check_without_id_is_never_merged() -> None:
     assert len(newest_check_runs(WORKFLOWS, unknown_run)) == 2
 
 
-def test_r16_without_the_workflow_runs_every_check_counts() -> None:
+def test_d117_r16_without_the_workflow_runs_every_check_counts() -> None:
     problems, _ = judge_checks([_check(1, "failure", run=100), _check(2, "success", run=101)], [])
 
     assert problems == ["unit：failure"]
@@ -340,7 +340,7 @@ def test_d117_r17_the_service_reads_the_workflow_runs_and_lets_the_newer_success
     assert failed(check(tmp_path, gh)) == set()
 
 
-def test_r18_when_the_workflow_runs_cannot_be_read_the_old_failure_still_blocks(tmp_path: Path) -> None:
+def test_d117_r18_when_the_workflow_runs_cannot_be_read_the_old_failure_still_blocks(tmp_path: Path) -> None:
     gh = FakeGh(runs=[_check(1, "failure", run=100), _check(2, "success", run=101)], workflow_runs=WORKFLOWS, workflow_runs_fail=True)
 
     assert failed(check(tmp_path, gh)) == {"必过检查和 safety-zone"}
@@ -370,5 +370,13 @@ def test_d117_r21_a_workflow_run_without_an_event_is_unknown_and_never_merged() 
     no_event = [{"id": 100, "workflow_id": 1}, {"id": 101, "workflow_id": 1}]
 
     kept = newest_check_runs(no_event, [_check(1, "failure", run=100), _check(2, "success", run=101)])
+
+    assert [c["id"] for c in kept] == [1, 2]
+
+
+def test_d117_r22_a_workflow_run_with_an_event_but_no_workflow_id_is_unknown_and_never_merged() -> None:
+    no_workflow = [{"id": 100, "event": "pull_request"}, {"id": 101, "event": "pull_request"}]
+
+    kept = newest_check_runs(no_workflow, [_check(1, "failure", run=100), _check(2, "success", run=101)])
 
     assert [c["id"] for c in kept] == [1, 2]
