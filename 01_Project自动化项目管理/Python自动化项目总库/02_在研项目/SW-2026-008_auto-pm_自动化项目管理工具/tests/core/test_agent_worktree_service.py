@@ -1438,3 +1438,37 @@ def test_the_full_floor_message_marks_your_own_finished_station_as_yours(
 
     with pytest.raises(StationRefusedError, match=r"worktree close claude`（就是你）"):
         lab.service().open("trae", "CARD-2")
+
+
+def test_sweep_apply_removes_stations_while_holding_the_stations_lock(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-74: the removal must not interleave with a concurrent open/release/close, which all take ``stations.lock``."""
+
+    import os
+
+    fcntl = pytest.importorskip("fcntl", reason="the probe uses fcntl")
+
+    floor = build_mixed_floor(lab)
+    service = lab.service()
+    held: list[bool] = []
+    original = service._remove_station
+
+    def probe(station: Any, **kwargs: Any) -> Any:
+        fd = os.open(lab.root / ".auto-pm" / "stations.lock", os.O_RDWR | os.O_CREAT)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                held.append(True)
+            else:
+                held.append(False)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+        return original(station, **kwargs)
+
+    monkeypatch.setattr(service, "_remove_station", probe)
+
+    report = service.sweep(apply=True)
+
+    assert report.done == [str(floor["merged"])]
+    assert held == [True]

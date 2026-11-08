@@ -293,3 +293,95 @@ def test_a_codex_conversation_opens_and_releases_its_own_station_without_any_cla
 
     assert not station.path.exists() and result.rescue_ref
     assert _git(root, "show", f"{result.rescue_ref}:note.txt") == "unsaved\n"
+
+
+# --- D-76: without a declared CLAUDE_PID the holder pid is unknown (0) and the station is never "stale" ---------------
+
+
+def test_without_claude_pid_the_holder_pid_is_unknown_and_the_station_is_never_reclaimed(tmp_path: Path, as_user: None) -> None:
+    root = _control_root(tmp_path)
+    service = _service(root)
+    service.open("claude-aaaaaa", "c1", fetch=False)
+    note = json.loads((root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json").read_text(encoding="utf-8"))
+    assert note["pid"] == 0  # not os.getppid(): that is usually a short-lived shell
+    _set_note(root, "claude-aaaaaa", heartbeat_at=_hours_ago(50))
+
+    assert service.stale_aliases() == []
+
+
+def test_a_declared_claude_pid_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None) -> None:
+    root = _control_root(tmp_path)
+    monkeypatch.setenv("CLAUDE_PID", "4242")
+    _service(root).open("claude-aaaaaa", "c1", fetch=False)
+    note = json.loads((root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json").read_text(encoding="utf-8"))
+    assert note["pid"] == 4242
+
+
+# --- D-77: a reused parent pid is a new conversation; records of dead parents are removed --------------------------------
+
+
+def _fresh_session(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    from auto_pm.application.core.agent_worktree_service import caller_alias, ensure_session_id
+
+    monkeypatch.delenv("AUTO_PM_SESSION_ID", raising=False)
+    ensure_session_id(root)
+    return caller_alias()
+
+
+def test_a_reused_parent_pid_gets_a_new_session_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_codex: None) -> None:
+    from auto_pm.application.core import agent_worktree_service as module
+
+    root = _control_root(tmp_path)
+    monkeypatch.setattr(module, "_process_start_marker", lambda pid: "start-1")
+    first = _fresh_session(root, monkeypatch)
+    assert first.startswith("codex-")
+    assert _fresh_session(root, monkeypatch) == first  # same process, same start time
+
+    monkeypatch.setattr(module, "_process_start_marker", lambda pid: "start-2")  # the pid number was reused
+    assert _fresh_session(root, monkeypatch) != first
+
+
+def test_session_records_of_dead_parent_processes_are_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_codex: None) -> None:
+    import os
+
+    root = _control_root(tmp_path)
+    folder = root / ".auto-pm" / "session-ids"
+    folder.mkdir(parents=True)
+    (folder / f"{DEAD_PID}.txt").write_text("deadbeef", encoding="utf-8")
+
+    _fresh_session(root, monkeypatch)
+
+    assert not (folder / f"{DEAD_PID}.txt").exists()
+    assert (folder / f"{os.getppid()}.txt").is_file()
+
+
+def test_the_start_marker_of_a_live_process_is_stable_and_a_missing_pid_has_none() -> None:
+    import os
+
+    from auto_pm.application.core.agent_worktree_service import _process_start_marker
+
+    mine = _process_start_marker(os.getpid())
+    assert mine == _process_start_marker(os.getpid())
+    assert _process_start_marker(DEAD_PID) == ""
+
+
+# --- D-87: a borrow record that names nobody on the roster is not a borrower -------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["evil", "claude-ZZZZZZ", "claude-12345", "", "../claude"])
+def test_a_borrow_record_with_a_name_outside_the_roster_is_ignored(tmp_path: Path, as_user: None, name: str) -> None:
+    root = _control_root(tmp_path)
+    service = _service(root)
+    service.open("claude", "c1", fetch=False)
+    service._borrow_file("claude").write_text(json.dumps({"by": name, "branch": "claude/c1"}), encoding="utf-8")
+
+    assert service.borrower("claude") == ""
+
+
+def test_a_borrow_record_with_a_roster_name_is_honoured(tmp_path: Path, as_user: None) -> None:
+    root = _control_root(tmp_path)
+    service = _service(root)
+    service.open("claude", "c1", fetch=False)
+    service._borrow_file("claude").write_text(json.dumps({"by": "claude-b89bc8", "branch": "claude/c1"}), encoding="utf-8")
+
+    assert service.borrower("claude") == "claude-b89bc8"

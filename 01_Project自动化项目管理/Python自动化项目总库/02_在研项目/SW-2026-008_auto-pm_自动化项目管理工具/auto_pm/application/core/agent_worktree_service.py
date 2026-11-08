@@ -136,18 +136,75 @@ def ensure_session_id(control_root: str | Path) -> None:
     if not caller_agent() or caller_agent() == _UNKNOWN_CALLER or session_id():
         return
     folder = Path(control_root) / ".auto-pm" / "session-ids"
-    path = folder / f"{os.getppid()}.txt"
+    parent = os.getppid()
+    path = folder / f"{parent}.txt"
+    marker = _process_start_marker(parent)
     try:
         folder.mkdir(parents=True, exist_ok=True)
+        known = ""
         if path.is_file():
-            known = path.read_text(encoding="utf-8").strip()
-        else:
-            known = hashlib.sha256(f"{os.getppid()}:{time.time_ns()}:{os.getpid()}".encode()).hexdigest()[:32]
-            path.write_text(known, encoding="utf-8")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            known = lines[0].strip() if lines else ""
+            stored = lines[1].strip() if len(lines) > 1 else ""
+            # D-77: the same pid with a different start time is a new process that reused the number -- a new conversation.
+            if known and marker and stored and stored != marker:
+                known = ""
+        if not known:
+            known = hashlib.sha256(f"{parent}:{time.time_ns()}:{os.getpid()}".encode()).hexdigest()[:32]
+        path.write_text(f"{known}\n{marker}\n" if marker else known, encoding="utf-8")
+        _drop_dead_session_records(folder, keep=path)
     except OSError:
         return
     if known:
         os.environ["AUTO_PM_SESSION_ID"] = known
+
+
+def _drop_dead_session_records(folder: Path, *, keep: Path) -> None:
+    """删掉父进程已不在的 session-ids 记录（D-77）；进程还在或读不出来都留着。"""
+
+    for record in folder.glob("*.txt"):
+        if record == keep or not record.stem.isdigit():
+            continue
+        if not _process_alive(int(record.stem)):
+            with contextlib.suppress(OSError):
+                record.unlink()
+
+
+def _process_start_marker(pid: int) -> str:
+    """进程的启动时刻标记（同一个进程号被复用时会不同）；读不出来返回空串。"""
+
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009 - windll 只在 Windows 上有
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return ""
+            try:
+                created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+                if not kernel32.GetProcessTimes(handle, *(ctypes.byref(item) for item in (created, ended, kernel, user))):
+                    return ""
+                return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+            finally:
+                kernel32.CloseHandle(handle)
+        stat = Path(f"/proc/{pid}/stat")
+        if stat.is_file():
+            # field 22 (starttime); the command name in field 2 may contain spaces, so count from the last ")".
+            return stat.read_text(encoding="utf-8", errors="replace").rsplit(")", 1)[1].split()[19]  # lenient-decode: /proc 文本
+        done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",  # lenient-decode: ps 的时间文本只作指纹比较
+            timeout=5,
+            check=False,
+        )
+        return done.stdout.strip()
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError):
+        return ""
 
 
 def acts_for(caller: str, station: str) -> bool:
@@ -471,7 +528,9 @@ class AgentWorktreeService:
             note = {
                 "agent": agent,
                 "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
-                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0) or os.getppid(),
+                # D-76: only a pid the caller declared (CLAUDE_PID) identifies the conversation; ``os.getppid()`` is usually a
+                # short-lived shell, whose exit would make a live conversation look stale.  0 = unknown = never reclaimed.
+                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0),
                 "title": os.environ.get("AUTO_PM_SESSION_TITLE", ""),
                 "opened_at": datetime.now(UTC).isoformat(),
                 "heartbeat_at": datetime.now(UTC).isoformat(),
@@ -804,18 +863,21 @@ class AgentWorktreeService:
         report = SweepReport(items=items, applied=apply, fetch_warning=warning)
         if not apply:
             return report
-        for item, station in plans:
-            if not item.remove:
-                continue
-            try:
-                if station is not None:
-                    self._remove_station(station, require_merged=station.kind in ("agent", "other"))
-                else:
-                    self._delete_local_branch(item.target, require_merged=True)
-                report.done.append(item.target)
-            except AgentWorktreeError as error:
-                report.failed.append(f"{item.target}: {error}")
-        self._git("worktree", "prune")
+        # D-74: removal must not interleave with a concurrent ``open``/``release``/``close``; ``_remove_station`` re-reads the
+        # station just before deleting, but only under the same lock that those commands take.
+        with self._stations_lock():
+            for item, station in plans:
+                if not item.remove:
+                    continue
+                try:
+                    if station is not None:
+                        self._remove_station(station, require_merged=station.kind in ("agent", "other"))
+                    else:
+                        self._delete_local_branch(item.target, require_merged=True)
+                    report.done.append(item.target)
+                except AgentWorktreeError as error:
+                    report.failed.append(f"{item.target}: {error}")
+            self._git("worktree", "prune")
         return report
 
     def _sweep_station(self, station: Station, agent: str | None) -> SweepItem:
