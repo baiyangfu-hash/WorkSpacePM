@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InputFile,
     [string]$OutputFile,
     [ValidateSet("png","svg","pdf")][string]$Format = "png",
