@@ -13,6 +13,7 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core import release_deploy_check as check
+from auto_pm.application.core.release_trial_service import ReleaseTrialError, ReleaseTrialService
 from auto_pm.ui.cli.caller_path import CallerPath
 
 
@@ -65,3 +66,22 @@ def release_deploy(
         for line in report.render():
             click.echo(line)
     ctx.exit(0 if report.ok else 2)
+
+
+@release_group.command(name="trial")
+@click.option("--dest-parent", type=CallerPath(path_type=Path, file_okay=False), help="副本放在哪个目录下（默认系统临时目录；不能在工作区里面）")
+@click.option("--json", "as_json", is_flag=True, help="机器可读输出")
+@click.pass_context
+def release_trial(ctx: click.Context, dest_parent: Path | None, as_json: bool) -> None:
+    """把生效发布拷一份到工作区外的临时目录，用来复现问题；不动 releases/、不写账本，副本用完请自行删除（D-05）。"""
+
+    try:
+        copy = ReleaseTrialService(_root(ctx)).make_copy(dest_parent)
+    except ReleaseTrialError as error:
+        raise click.ClickException(str(error)) from error
+    if as_json:
+        click.echo(json.dumps(copy.to_dict(), ensure_ascii=False, indent=2))
+        return
+    click.echo(f"已拷出发布 {copy.release_id}（{copy.files} 个文件）到 {copy.destination}")
+    click.echo(f"试用：{copy.run_hint}")
+    click.echo("用完请自己删除这个目录；它不在工作区里，不会被提交。")
