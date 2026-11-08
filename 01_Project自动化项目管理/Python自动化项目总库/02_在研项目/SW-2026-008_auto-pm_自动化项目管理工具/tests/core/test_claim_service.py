@@ -635,3 +635,37 @@ def test_add_paths_may_widen_to_a_folder_that_contains_its_own_earlier_path(pair
     pair.laptop.open("348", paths=["p/a"], goal="x", owner="claude", machine="laptop")
 
     assert pair.laptop.add_paths("348", owner="claude", paths=["p"]).paths == ("p/a", "p"), "its own claim is not a rival"
+
+
+def test_d34_reserve_number_gives_each_computer_a_different_number_and_holds_no_path(pair: Pair) -> None:
+    first = pair.laptop.reserve_number(goal="落卡 A", owner="claude", machine="laptop")
+    second = pair.cloud.reserve_number(goal="落卡 B", owner="claude", machine="cloud")
+
+    assert (first.card, second.card) == ("242", "243"), "main 上最大的卡文件是 241"
+    assert first.paths == () and second.paths == ()
+    assert not first.free and not second.free
+
+
+def test_d34_a_reserved_number_blocks_no_other_card_and_is_never_handed_out_again(pair: Pair) -> None:
+    held = pair.laptop.reserve_number(goal="先占个号", owner="claude", machine="laptop")
+
+    pair.cloud.open("300", paths=["p/anything"], goal="别的卡照常领", owner="trae", machine="cloud")
+    pair.laptop.release(held.card, owner="claude")
+    again = pair.cloud.reserve_number(goal="再取一个", owner="trae", machine="cloud")
+
+    assert again.card not in {held.card, "300"}, "放下的号也不会被 auto 再发出去"
+
+
+def test_d34_paths_are_added_later_to_the_reserved_number(pair: Pair) -> None:
+    held = pair.laptop.reserve_number(goal="落卡", owner="claude", machine="laptop")
+
+    widened = pair.laptop.add_paths(held.card, owner="claude", paths=["p/02_规划/242_落卡_PM.md"])
+
+    assert widened.paths == ("p/02_规划/242_落卡_PM.md",)
+    with pytest.raises(ClaimError, match="路径.*重叠"):
+        pair.cloud.open("301", paths=["p/02_规划/242_落卡_PM.md"], goal="撞文件", owner="trae", machine="cloud")
+
+
+def test_d34_open_without_paths_is_still_refused(pair: Pair) -> None:
+    with pytest.raises(ClaimError, match="必须写明要改的路径"):
+        pair.laptop.open("auto", paths=[], goal="x", owner="claude", machine="laptop")

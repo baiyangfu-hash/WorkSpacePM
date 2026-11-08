@@ -224,12 +224,29 @@ class ClaimService:
 
     # ── claim ─────────────────────────────────────────────────────────
 
+    def reserve_number(self, *, goal: str, owner: str, machine: str | None = None) -> Claim:
+        """Take the next free card number and nothing else (D-34): the claim holds no path, so it blocks no other card.
+
+        The number is the remote branch ``claims/<NNN>``, created by a push the server accepts only once, so two computers can
+        never be handed the same number.  Paths follow later with ``add_paths`` when the work starts.  The claim keeps the usual
+        lease; once it runs out the number is free for a deliberate ``open <NNN>``, but ``auto`` never hands it out again.
+        """
+
+        return self.open("auto", paths=(), goal=goal, owner=owner, machine=machine, allow_no_paths=True)
+
     def open(
-        self, card: str, *, paths: Sequence[str], goal: str, owner: str, machine: str | None = None
+        self,
+        card: str,
+        *,
+        paths: Sequence[str],
+        goal: str,
+        owner: str,
+        machine: str | None = None,
+        allow_no_paths: bool = False,
     ) -> Claim:
         """Claim ``card`` (a name, or ``auto`` for the next free number); refuses when taken or when paths overlap a claim."""
 
-        if not paths:
+        if not paths and not allow_no_paths:
             raise ClaimError("领卡必须写明要改的路径（--paths），否则无法判断两边会不会改同一批文件")
         if card != "auto" and not _CARD.match(card):
             raise ClaimError(f"卡号 `{card}` 不能用：只允许字母、数字、点、横线、下划线")

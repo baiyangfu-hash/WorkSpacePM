@@ -132,6 +132,7 @@ COMMANDS: dict[str, CommandSpec] = {
     # cloud clone with no runtime identity, so they carry no guards.
     "claim list": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the remote claim branches"),
     "claim open": CommandSpec(CommandKind.NORMAL, (), (), "pushes claims/<card> to origin; does not touch the ledger"),
+    "claim number": CommandSpec(CommandKind.NORMAL, (), (), "pushes an empty claims/<NNN> for the next free number; holds no path; does not touch the ledger"),
     "claim release": CommandSpec(CommandKind.NORMAL, (), (), "pushes a released marker onto the holder's own claim; deletes nothing"),
     "claim renew": CommandSpec(CommandKind.NORMAL, (), (), "pushes a renewed lease onto the holder's own claim; deletes nothing"),
     "claim add-paths": CommandSpec(CommandKind.NORMAL, (), (), "pushes the widened path list onto the holder's own claim; claimed_at and the lease stay; deletes nothing"),

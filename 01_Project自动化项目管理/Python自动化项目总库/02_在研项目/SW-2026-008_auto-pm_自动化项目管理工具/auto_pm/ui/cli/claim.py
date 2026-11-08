@@ -102,6 +102,22 @@ def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str,
     click.echo(f"已领 {claim.label()}；路径：{'、'.join(claim.paths)}")
 
 
+@claim_group.command(name="number")
+@click.option("--goal", default="", help="一句话说明这个号用来做什么卡")
+@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（agent 名或 user）")
+@click.pass_context
+def number_claim(ctx: click.Context, goal: str, owner: str) -> None:
+    """只领号：取下一个不会撞的卡号，不占任何路径（落卡文件时用；开工时再 `claim add-paths` 补路径）。"""
+    try:
+        claim = _service(ctx).reserve_number(goal=goal, owner=_owner(owner))
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"已领号 {claim.card}（{claim.label()}）")
+    click.echo(f"卡文件名：…/02_规划/{claim.card}_<名称>_PM.md")
+    click.echo(f"开工时补路径：main.py claim add-paths {claim.card} --paths <要改的文件> --as {claim.owner}")
+
+
 @claim_group.command(name="list")
 @click.option("--json", "as_json", is_flag=True, help="stdout 只输出 JSON")
 @click.option("--no-fetch", is_flag=True, help="不联网，只看本机已知的占位")
