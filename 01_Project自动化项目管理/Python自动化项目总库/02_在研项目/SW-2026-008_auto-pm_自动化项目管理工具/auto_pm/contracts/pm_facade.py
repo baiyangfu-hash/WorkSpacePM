@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.intake import IntakeClassification
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.plan_checklist import PlanChecklist
 
@@ -180,6 +181,17 @@ def canonical_plan_paths(
     if declared == execution_grant.declared_dirty_paths:
         return scope, execution_grant
     return scope, execution_grant.model_copy(update={"declared_dirty_paths": declared})
+
+
+class PlanningRequestCheck(BaseModel):
+    """What a ``plan`` request would be filed as, found without writing anything (``pm plan --dry-run``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope_paths: tuple[str, ...]
+    declared_dirty_paths: tuple[str, ...]
+    classification: IntakeClassification | None
+    intake_item_id: str = ""
 
 
 class PlanningScopeCard(BaseModel):

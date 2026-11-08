@@ -404,3 +404,51 @@ def test_pm_mutation_rejects_linked_worktree_before_runtime_initialization(
     display_only = cli_runner.invoke(cli, ["-w", str(linked), "pm", "workflow"])
     assert display_only.exit_code == 0
     assert not (linked / ".auto-pm").exists()
+
+
+def test_pm_plan_dry_run_checks_but_writes_nothing(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-05: ``pm plan --dry-run`` answers "would this be accepted?" without a draft, a CHG number or a ledger row."""
+
+    _setup_planning(tmp_path)
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if ".git/" not in p.as_posix())
+
+    dry = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args(), "--dry-run"])
+
+    assert dry.exit_code == 0, dry.output
+    payload = json.loads(dry.output)
+    assert payload["schema_version"] == "pm-plan-dry-run.v1"
+    assert payload["dry_run"] is True
+    assert payload["scope_paths"] == ["auto_pm/example.py"]
+    assert "plan_hash" not in payload
+    after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if ".git/" not in p.as_posix())
+    assert after == before
+    store = ContinuityStore(tmp_path)
+    assert store.list_missions("SW-TEST-001", include_terminal=True) == ()
+
+    real = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *_planning_args()])
+    assert real.exit_code == 0, real.output
+
+
+def test_pm_plan_dry_run_refuses_what_a_real_plan_refuses(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _setup_planning(tmp_path)
+    good = _planning_args()
+    index = good.index("--risk")
+    bad = good[:index] + good[index + 2 :]  # a plan with no risk named is refused by the checklist
+
+    dry = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *bad, "--dry-run"])
+    real = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", "plan", *bad])
+
+    assert real.exit_code != 0
+    assert dry.exit_code == real.exit_code
+    assert dry.output == real.output
+
+
+def test_pm_plan_dry_run_is_for_new_requests_only(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _setup(tmp_path)
+
+    result = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "pm", "plan", "--mission-id", "MISSION-PM-CLI-001", "--dry-run"]
+    )
+
+    assert result.exit_code != 0
+    assert "--dry-run" in result.output
