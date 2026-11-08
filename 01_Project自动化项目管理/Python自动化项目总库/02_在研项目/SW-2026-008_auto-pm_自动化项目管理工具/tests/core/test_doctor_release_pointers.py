@@ -5,12 +5,21 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from auto_pm.ui.cli.doctor import POINTER_DIR, check_release_pointers
 
 ACTIVE, PREVIOUS = "1.3.4-aaaaaaa", "1.3.3-bbbbbbb"
+
+
+@pytest.fixture(autouse=True)
+def _not_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub's own runner exports these into the pytest process; every test here starts as a plain local machine."""
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -263,3 +272,79 @@ def test_the_payload_tree_check_still_runs_for_a_release_pr(pr_repo: Path) -> No
     _tree(pr_repo, NEW)
     # (the bare fixture manifest has no source_commit, so other lines stay red; only the folder lines must be gone)
     assert not any("目录" in failure for failure in check_release_consistency(str(pr_repo))["failures"])
+
+
+# --- CI pull_request run: the merge ref is a snapshot of an older main; compare with the main it was built on (D-119) -----------
+
+
+@pytest.fixture
+def stale_pr_repo(pr_repo: Path) -> Path:
+    """The PR branch was cut from main A; main then moved on to B, which carries a newer release pointer."""
+
+    (pr_repo / "other.txt").write_text("work", encoding="utf-8")
+    _commit(pr_repo, "unrelated work on the branch")
+    _git(pr_repo, "checkout", "-q", "-b", "main-moves-on", "HEAD~1")
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "main ships a release")
+    _mark_main(pr_repo)
+    _git(pr_repo, "checkout", "-q", "pr")  # the working tree again carries A's pointers: what the CI snapshot contains
+    return pr_repo
+
+
+def _as_ci(monkeypatch: pytest.MonkeyPatch, event: str, actions: str = "true") -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+
+
+def test_in_a_pull_request_run_a_main_that_moved_on_does_not_turn_the_branch_red(
+    stale_pr_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _as_ci(monkeypatch, "pull_request")
+    result = check_release_pointers(str(stale_pr_repo))
+    assert result["status"] == "ok" and result["reasons"] == [], result
+    assert result["ref"] != "origin/main"  # compared with the main the branch was built on
+
+
+@pytest.mark.parametrize(("event", "actions"), [("push", "true"), ("pull_request", "false"), ("pull_request", "")])
+def test_outside_a_pull_request_run_the_comparison_is_still_against_main(
+    stale_pr_repo: Path, monkeypatch: pytest.MonkeyPatch, event: str, actions: str
+) -> None:
+    """The mutation: apply the merge-base rule everywhere -- a control root on a laptop must stay red when main is ahead."""
+
+    _as_ci(monkeypatch, event, actions)
+    result = check_release_pointers(str(stale_pr_repo))
+    assert result["status"] == "fail" and result["ref"] == "origin/main", result
+
+
+def test_in_a_pull_request_run_a_machine_ahead_of_the_base_still_fails(stale_pr_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _as_ci(monkeypatch, "pull_request")
+    _write(stale_pr_repo, "1.3.6-ddddddd", ACTIVE, [PREVIOUS, ACTIVE])  # the checkout disagrees with its own base
+    result = check_release_pointers(str(stale_pr_repo))
+    assert result["status"] == "fail" and "发版后的指针还没入库" in "；".join(result["reasons"]), result
+
+
+def test_in_a_pull_request_run_a_release_pr_is_still_compared_with_its_own_head(pr_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _as_ci(monkeypatch, "pull_request")
+    _write(pr_repo, NEW, ACTIVE, [PREVIOUS, ACTIVE, NEW])
+    _commit(pr_repo, "release pointers + manifest entry")
+    result = check_release_pointers(str(pr_repo))
+    assert result["status"] == "ok" and result["pr_head"] is True, result
+
+
+@pytest.mark.parametrize("how", ["oserror", "no merge base"])
+def test_in_a_pull_request_run_git_failing_to_find_a_merge_base_falls_back_to_main(
+    stale_pr_repo: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    _as_ci(monkeypatch, "pull_request")
+    real = subprocess.run
+
+    def run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+        if "merge-base" in cmd:
+            if how == "oserror":
+                raise OSError("no git")
+            return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"")
+        return real(cmd, *args, **kwargs)
+
+    monkeypatch.setattr("auto_pm.ui.cli.doctor.subprocess.run", run)
+    result = check_release_pointers(str(stale_pr_repo))
+    assert result["status"] == "fail" and result["ref"] == "origin/main", result

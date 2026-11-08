@@ -1,0 +1,46 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261107-CFEC57BB",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-SCPT-2026-501",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/reports/gate-formal-20261107/"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-07T19:56:26.993884+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [
+    "acceptance: 全量九组回归全部通过，gate_verdict 九项 PASS",
+    "risk: 全量门禁约 1.5 小时，占用机器和内存；租约 5 小时上限",
+    "non-goal: 不部署、不切换生效版",
+    "safety-circuit: 否"
+  ],
+  "metadata": {
+    "planning_approval": {
+      "schema_version": "planning-approval.v2",
+      "plan_hash": "1050424cfef7a9765b459f1bf4c7f06c66d9e4298c95b386705861ce26fa146e",
+      "approval_evidence_ref": "user-confirmation:cmsg_013MFzja8RTUptLcFWxTQMox6uocFCgP7C79cbFQN5NwJK",
+      "request_id": "deploy-gate-20261107",
+      "execution_grant": {
+        "adapter": "manual",
+        "approved_model": "claude-sonnet-5-5",
+        "required_worktree_mode": "ISOLATED",
+        "declared_dirty_paths": [
+          ".auto-pm/reports/gate-formal-20261107/"
+        ],
+        "plan_checklist": {
+          "original_request": "走驾驶舱跑（用户 19:53:57Z cmsg_013MFzja8RTUptLcFWxTQMox6uocFCgP7C79cbFQN5NwJK，之前“开始”cmsg_013MFzja8RTUptLcFWxTQMoxDfEj7Aa4XfWDmB95Sfejk3）",
+          "safety_circuit": "否",
+          "acceptance_checks": [
+            {
+              "command": "main.py long-run status --name formal-gate-20261107",
+              "expected_exit_code": 0
+            }
+          ],
+          "rollback": "无代码改动；中止则 long-run stop，Run 记失败放弃"
+        }
+      }
+    }
+  }
+}

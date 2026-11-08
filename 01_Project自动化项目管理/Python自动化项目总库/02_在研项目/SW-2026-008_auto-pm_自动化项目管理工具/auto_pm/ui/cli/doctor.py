@@ -132,6 +132,30 @@ def _pointers_changed_by_head(root: str, base_ref: str) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+def _pull_request_ci_base(root: str, ref: str) -> str:
+    """In a GitHub ``pull_request`` run, the commit the merge ref was built on; otherwise (or on any Git failure) ``ref``.
+
+    CI checks out ``refs/pull/N/merge``: the PR head merged into the main tip *at the time the merge ref was built*.  A PR
+    deploys nothing, so asking "does the machine match the newest main?" turns every pointer check-in on main red for all
+    PRs that were opened before it.  The merge base is the main the PR was built on; a later main changes nothing.  Outside
+    that CI event (a control root on a laptop) the comparison stays exactly against ``ref``.
+    """
+
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+        return ref
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "merge-base", ref, "HEAD"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ref
+    base = result.stdout.decode("utf-8", errors="replace").strip() if result.returncode == 0 else ""  # lenient-decode: a Git object id is ASCII
+    return base or ref
+
+
 def _json_object(text: str | None) -> dict[str, Any] | None:
     if text is None:
         return None
@@ -171,6 +195,8 @@ def check_release_pointers(root: str, ref: str | None = None) -> dict[str, Any]:
     base_ref = ""
     if ref is None:
         ref = "origin/main" if _git_show(root, "origin/main", f"{POINTER_DIR}/active_release.json") is not None else "HEAD"
+        if ref != "HEAD":
+            ref = _pull_request_ci_base(root, ref)
         if ref != "HEAD" and _pointers_changed_by_head(root, ref):
             # A branch that itself moves the pointers (the release PR) can never equal main before it merges, so comparing it
             # with main would be red by construction.  Compare with the branch's own commit instead: the machine must still match
