@@ -1,4 +1,4 @@
-# 以指定 agent 的身份运行驾驶舱命令（任何 agent 通用）：只在这一条命令期间带上 AUTO_PM_AGENT=<基名[:备注]>，命令结束立刻还原。
+﻿# 以指定 agent 的身份运行驾驶舱命令（任何 agent 通用）：只在这一条命令期间带上 AUTO_PM_AGENT=<基名[:备注]>，命令结束立刻还原。
 # 命令只认冒号前面那段（基名，见 AGENTS.md WS-001 的工位与前缀表：claude、trae、cursor、vscode、codex）；冒号后只是备注。
 # 用法（在控制根）：  .\00_Infrastructure\bin\pm-as-agent.ps1 cursor pm orient <项目编号> --json
 #                     .\00_Infrastructure\bin\pm-as-agent.ps1 trae:cn pm orient <项目编号> --json
@@ -22,12 +22,24 @@ $entry = Join-Path $root "main.py"
 
 $previous = $env:AUTO_PM_AGENT
 $env:AUTO_PM_AGENT = $agent
+$stopPreference = $ErrorActionPreference
 try {
-    & $python $entry @rest
+    # D-132：Windows PowerShell 5.1 在 Stop 下会把原生命令写到 stderr 的每一行（如启动器的 "launcher: release verified…"）
+    # 升级成终止错误，命令其实已跑完，脚本却中途退出并返回 -1。调用原生命令这一小段改回 Continue，成败只看退出码。
+    # 调用方用 2>&1 或 2> 文件 收本脚本的 stderr 时，PowerShell 还会把每行 stderr 包成 NativeCommandError 记录，调用方照样会
+    # 中断。所以这里自己把原生 stderr 合进管道，当普通文本直接写到真正的 stderr（[Console]::Error），不产生错误记录；
+    # stdout 的对象原样放行。管道最后一环是 ForEach-Object，$LASTEXITCODE 仍是原生命令的退出码。
+    $ErrorActionPreference = "Continue"
+    & $python $entry @rest 2>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine($_.ToString()) } else { $_ }
+    }
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $stopPreference
     # 直接运行时用 exit 交回退出码（失败必须非 0）；只有被点号引用（. .\pm-as-agent.ps1）时才不 exit，免得关掉调用者的终端
-    if ($MyInvocation.InvocationName -ne '.') { exit $LASTEXITCODE }
+    if ($MyInvocation.InvocationName -ne '.') { exit $exitCode }
 }
 finally {
+    $ErrorActionPreference = $stopPreference
     if ($null -eq $previous) {
         Remove-Item Env:AUTO_PM_AGENT -ErrorAction SilentlyContinue
     }
