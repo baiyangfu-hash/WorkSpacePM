@@ -68,6 +68,7 @@ READ_ONLY: dict[str, tuple[str, ...]] = {
     "gate": ("judge", "plan", "precheck"),  # D-107a: ``plan`` prints commands, ``judge`` re-reads logs; ``precheck`` (pre-push self check) writes only temp logs; ``run`` writes its own folder and is guarded
     "gui": ("",),  # opens the cockpit window; every write inside goes through the guarded services
     "role": ("check", "list"),  # reads the role pack registry
+    "release": ("deploy", "status"),  # D-146 card 1: ``status`` and ``deploy --check-only`` only read; the real deploy is not wired yet and must get a guard (and leave this list) when it is
 }
 
 # Commands that DO write, but only to GitHub (not the ledger, not any project file), and that must run in a cloud clone that has no

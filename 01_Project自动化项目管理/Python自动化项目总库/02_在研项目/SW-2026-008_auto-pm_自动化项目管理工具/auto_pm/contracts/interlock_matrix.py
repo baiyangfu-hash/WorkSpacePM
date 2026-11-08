@@ -128,6 +128,9 @@ COMMANDS: dict[str, CommandSpec] = {
     "pr settle-scan": CommandSpec(CommandKind.READ_ONLY, (), (), "lists merged-but-open Runs and the legal next commands; moves nothing"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm control-root-status": CommandSpec(CommandKind.READ_ONLY, (), (), "branch, uncommitted files and their holders of the control root; no fetch, no write"),
+    # D-146 card 1: ``release status`` and ``release deploy --check-only`` only read; the real deploy is not wired yet (it must get guards when it is).
+    "release status": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the pointers, manifest and last receipt; writes nothing"),
+    "release deploy": CommandSpec(CommandKind.READ_ONLY, (), (), "pre-flight only for now; the real deploy is refused until card 4 is wired"),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a
     # cloud clone with no runtime identity, so they carry no guards.
     "claim list": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the remote claim branches"),
