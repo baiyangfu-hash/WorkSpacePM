@@ -34,6 +34,10 @@ class PlcBaselineError(RuntimeError):
     """基线取不出来（提交不存在、Git 出错）。"""
 
 
+class PlcPluginPanicError(PlcBaselineError):
+    """插件的测试进程 panic 退出：失败清单不完整，这次检查没有“修好／新增”可言，必须按失败处理（D-137）。"""
+
+
 def _git(repo: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
     return run_git_bounded(
         ["git", "-c", "core.quotePath=false", "-C", str(repo), *arguments],
@@ -148,6 +152,11 @@ def checked_keys(
 
     recorder = RecordingLanguageService(service, project) if service is not None else None
     result = PlcChecker(str(workspace), language_service=recorder).check_project(str(project))
+    if recorder is not None and recorder.panic_note:
+        raise PlcPluginPanicError(
+            f"{recorder.panic_note}。进程一崩，哪些用例失败取决于谁先撞上崩点，每次不一样，"
+            "所以不给“新增／修好”结论，按失败处理（根因是插件原生桩，见 D-37）"
+        )
     language = recorder.diagnostics if recorder is not None else None
     incomplete = recorder.incomplete if recorder is not None else False
     return result, failure_keys(result, str(project), language), incomplete
@@ -178,6 +187,7 @@ def check_against_baseline(
 
 __all__ = [
     "PlcBaselineError",
+    "PlcPluginPanicError",
     "baseline_anchor_note",
     "check_against_baseline",
     "checked_keys",

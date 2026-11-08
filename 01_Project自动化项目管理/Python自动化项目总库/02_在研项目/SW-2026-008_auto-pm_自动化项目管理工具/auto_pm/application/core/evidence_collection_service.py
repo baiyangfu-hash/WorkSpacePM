@@ -2074,7 +2074,7 @@ def _plc_check_output(
     exported from the Run baseline commit, and failures already there do not block.
     """
 
-    from auto_pm.application.core.plc_baseline import checked_keys
+    from auto_pm.application.core.plc_baseline import PlcPluginPanicError, checked_keys
 
     service = _plc_language_service()
     result, now, incomplete = checked_keys(candidate, root, service)
@@ -2093,6 +2093,8 @@ def _plc_check_output(
                 note = "开工基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算"
             elif not base_result.not_applicable:
                 base = base_keys
+        except PlcPluginPanicError:
+            raise  # a crashed plugin run has no complete failure list: never turn it into new/fixed lines (D-137)
         except Exception as error:  # the baseline run must never hide a current failure
             note = f"开工基线检查出错（{error}），现在的失败全部按新增算"
     diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))

@@ -38,6 +38,9 @@ class LanguageServiceResult:
     cases_total: int | None = None
     # 全部诊断行（``messages`` 只留前几条给人看；验收门逐条和基线比时要全部）
     diagnostics: tuple[str, ...] = ()
+    # ``test``：插件的 Go 测试进程 panic 退出（D-137/D-37：原生 TON 桩 STUB_BUILTIN）。进程一崩，没轮到的用例根本没跑，
+    # 哪些用例失败取决于谁先撞上崩点，这次的失败清单不完整、不可比。
+    panicked: bool = False
 
     @property
     def passed(self) -> bool:
@@ -123,12 +126,13 @@ def merge_results(command: str, project_root: Path, parts: list[tuple[Path, Lang
         diagnostics.extend((f"[{tag}] {m}" if multi else m) for m in (result.diagnostics or result.messages))
     codes = [r.exit_code for _, r in parts]
     worst = next((c for c in codes if c not in (0, None)), 0)
+    panicked = any(r.panicked for _, r in parts)
     run = [r.cases_run for _, r in parts if r.cases_run is not None]
     total = [r.cases_total for _, r in parts if r.cases_total is not None]
     return LanguageServiceResult(
         command=command, available=True, exit_code=worst, error_count=sum(r.error_count for _, r in parts), messages=tuple(messages[:MAX_SHOWN_MESSAGES]),
         summary=parts[-1][1].summary, binary=parts[0][1].binary, cases_run=sum(run) if run else None, cases_total=sum(total) if total else None,
-        diagnostics=tuple(diagnostics),
+        diagnostics=tuple(diagnostics), panicked=panicked,
     )
 
 
