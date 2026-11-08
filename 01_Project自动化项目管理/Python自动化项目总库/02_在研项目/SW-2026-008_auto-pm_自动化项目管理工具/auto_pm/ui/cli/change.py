@@ -646,6 +646,12 @@ _RISK_LEVEL_CHOICES = ["none", "low", "medium", "high"]
 @click.option("--mitigation", default=None, help="§6.1 缓解措施")
 @click.option("--propagation-chain", default=None, help="§6.3 变更传播链")
 @click.option("--file", "files", multiple=True, help="§5 涉及文件/交付物（仓库相对路径，可重复）；批准范围读这一栏")
+@click.option(
+    "--after-approval",
+    "after_approval",
+    is_flag=True,
+    help="单子已不是草稿时改 §5 涉及文件必须加此开关（批准范围的来源被改动，会打印改前改后清单）",
+)
 @click.option("--pid", default=None, help="项目编号（跨项目单号冲突时必填，TD-A04 修复）")
 @click.pass_context
 def cmd_edit(
@@ -660,6 +666,7 @@ def cmd_edit(
     mitigation: str | None,
     propagation_chain: str | None,
     files: tuple[str, ...],
+    after_approval: bool,
     pid: str | None,
 ) -> None:
     """编辑变更单字段（支持 §4 基本字段 + §6 影响分析字符串字段）
@@ -696,6 +703,27 @@ def cmd_edit(
         console.print("[yellow]未指定要更新的字段，请使用 --background/--necessity 等选项[/yellow]")
         ctx.exit(1)
 
+    before_files: list[str] = []
+    if "files" in updates:
+        # D-97: §5 is where the approved file scope is read from, so editing it after the record left draft is a scope change.
+        existing = svc.get_change_request(change_number, project_id=pid)
+        if existing is None:
+            console.print(f"[red]错误: 变更单不存在: {change_number}[/red]")
+            ctx.exit(1)
+        else:
+            current = svc.read_change_files(change_number, project_id=pid) or []
+            before_files = current
+            if existing.status != "draft" and not after_approval:
+                console.print(
+                    f"[red]拒绝: 变更单 {change_number} 状态为 {existing.status}（不是草稿），改 §5 涉及文件会改动批准范围的来源。"
+                    "确需补写请加 --after-approval；当前清单："
+                    f"{', '.join(current) or '（空）'}[/red]"
+                )
+                ctx.exit(1)
+            if list(updates["files"]) == current and len(updates) == 1:
+                console.print(f"[yellow]没有变化: {change_number} 的 §5 涉及文件已经是这份清单：{', '.join(current)}[/yellow]")
+                return
+
     try:
         cr = svc.update_change_request(change_number, lookup_project_id=pid, **updates)
         if cr is None:
@@ -703,6 +731,9 @@ def cmd_edit(
             ctx.exit(1)
         console.print(f"[green]变更单已更新: {change_number}[/green]")
         console.print(f"  更新字段: {', '.join(updates.keys())}")
+        if "files" in updates:
+            console.print(f"  §5 涉及文件 改前: {', '.join(before_files) or '（空）'}")
+            console.print(f"  §5 涉及文件 改后: {', '.join(updates['files'])}")
         if cr.file_path:
             console.print(f"  文件: {cr.file_path}")
     except click.exceptions.Exit:

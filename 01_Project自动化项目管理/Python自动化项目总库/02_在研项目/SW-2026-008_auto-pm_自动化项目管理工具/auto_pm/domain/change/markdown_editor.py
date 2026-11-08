@@ -200,6 +200,17 @@ class ChangeMarkdownEditor:
             return self.update_domain_impacts(content, value)
         return content
 
+    _FILES_ROW = re.compile(r"(\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*)([^|\n]*?)(\s*\|)")
+
+    def read_files(self, content: str) -> list[str]:
+        """读出 §5 第一行 ``涉及文件/交付物`` 现有的清单；占位（待填写等）算空。"""
+
+        found = self._FILES_ROW.search(content)
+        if not found:
+            return []
+        items = [part.strip() for part in found.group(2).split("<br>")]
+        return [item for item in items if item and item not in ("（待填写）", "(待填写)", "无涉及文件记录")]
+
     def update_files(self, content: str, files: list[str] | tuple[str, ...] | str) -> str:
         """把 §5 里每一行 ``| 涉及文件/交付物 | … |`` 的值换成给定清单（路径之间用 ``<br>``）。
 
@@ -213,12 +224,13 @@ class ChangeMarkdownEditor:
         for item in cleaned:
             if "|" in item or "\n" in item or "\r" in item or "<br>" in item.lower():
                 raise ValueError(f"涉及文件路径含非法字符（| 换行 <br>）：{item!r}")
-        pattern = re.compile(r"(\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*)[^|\n]*?(\s*\|)")
+        pattern = self._FILES_ROW
         if not pattern.search(content):
-            log.warning("更新涉及文件: 未找到 '涉及文件/交付物' 行，跳过")
-            return content
+            # D-97 audit: silently returning the text made `change edit --file` print "updated" for a change record whose §5
+            # has no such row; the operator must hear that nothing was written.
+            raise ValueError("变更单 §5 里没有“涉及文件/交付物”行，未写入任何内容")
         joined = "<br>".join(cleaned)
-        return pattern.sub(lambda m: m.group(1) + joined + m.group(2), content)
+        return pattern.sub(lambda m: m.group(1) + joined + m.group(3), content)
 
     def _update_text_block(self, content: str, label: str, value: str) -> str:
         """更新 §4 中的文本块（**变更背景**：xxx）

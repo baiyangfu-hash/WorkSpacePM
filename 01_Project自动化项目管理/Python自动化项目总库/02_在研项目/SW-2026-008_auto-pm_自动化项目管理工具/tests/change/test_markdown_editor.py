@@ -125,3 +125,20 @@ class TestUpdateFiles:
             except ValueError:
                 continue
             raise AssertionError(f"应当拒绝 {bad!r}")
+
+
+class TestUpdateFilesAudit:
+    def test_a_missing_row_is_an_error_not_a_silent_no_op(self) -> None:
+        content = TestChangeMarkdownEditor()._make_content().replace("涉及文件/交付物", "涉及文档")
+        try:
+            ChangeMarkdownEditor().update_files(content, ["a.py"])
+        except ValueError as exc:
+            assert "没有“涉及文件/交付物”行" in str(exc)
+        else:
+            raise AssertionError("找不到行必须抛 ValueError")
+
+    def test_read_files_returns_the_current_list_and_treats_the_placeholder_as_empty(self) -> None:
+        editor = ChangeMarkdownEditor()
+        content = TestChangeMarkdownEditor()._make_content()
+        assert editor.read_files(content) == []
+        assert editor.read_files(editor.update_files(content, ["a/b.py", "c.py"])) == ["a/b.py", "c.py"]

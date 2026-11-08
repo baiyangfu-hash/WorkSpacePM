@@ -405,6 +405,15 @@ class ChangeService:
         summaries.sort(key=sort_key, reverse=True)
         return summaries
 
+    def read_change_files(self, change_number: str, project_id: str | None = None) -> list[str] | None:
+        """读出变更单 §5 现有的涉及文件清单（占位算空）；找不到单子返回 None（D-97）。"""
+
+        file_path = self._locator.find_change_file(change_number, project_id=project_id, require_unique=True)
+        if not file_path:
+            return None
+        content, _ = read_file_snapshot(file_path)
+        return self._editor.read_files(content) if content else None
+
     def get_change_request(
         self, change_number: str, project_id: str | None = None
     ) -> ChangeRequest | None:
