@@ -394,7 +394,7 @@ class LocalExecutionOrchestrator:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: HEAD is compared with an expected commit id and status is only tested for emptiness; undecodable bytes can neither match nor empty it
             check=False,
             timeout=30,
             env=clean_git_environment(),

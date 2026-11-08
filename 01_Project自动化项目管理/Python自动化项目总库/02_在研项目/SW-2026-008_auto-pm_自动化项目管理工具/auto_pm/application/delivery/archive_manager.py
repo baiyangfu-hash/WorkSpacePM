@@ -296,7 +296,7 @@ class ArchiveManager:
         for doc_name in ["CHANGELOG.md", "README.md"]:
             doc_path = self._delivery_dir / doc_name
             if doc_path.exists():
-                content = doc_path.read_text(encoding="utf-8", errors="replace")
+                content = doc_path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: only a "## [x.y.z]" heading is looked for; a damaged file yields no version
                 for line in content.splitlines():
                     if line.startswith("## [") and "]" in line:
                         # 提取 ## [1.0.0] 格式的版本号

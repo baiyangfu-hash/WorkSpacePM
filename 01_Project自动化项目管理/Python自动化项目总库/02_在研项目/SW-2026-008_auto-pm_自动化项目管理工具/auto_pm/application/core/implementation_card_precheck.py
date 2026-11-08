@@ -118,7 +118,7 @@ def _git_ok(root: Path, *args: str) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: only exit code and hex object ids are used; undecodable bytes can never equal one
             check=False,
             env=clean_git_environment(),
             stdin=subprocess.DEVNULL,

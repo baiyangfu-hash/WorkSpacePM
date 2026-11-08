@@ -229,13 +229,15 @@ class ProjectFactService:
                 capture_output=True,
                 check=False,
                 encoding="utf-8",
-                errors="replace",
                 text=True,
                 timeout=5,
                 env=environment,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise ProjectFactError(f"Git 只读查询失败: {error}") from error
+        except UnicodeDecodeError as error:
+            # Strict: the status lines are stored as evidence and compared later; undecodable bytes must not become '?'.
+            raise ProjectFactError(f"Git 输出不是合法 UTF-8，无法建立可信事实包: {error}") from error
 
     def _find_pm_session(self, project_path: Path, project_id: str) -> Path:
         expected = project_path / f"PM_SESSION_{project_id}.md"
