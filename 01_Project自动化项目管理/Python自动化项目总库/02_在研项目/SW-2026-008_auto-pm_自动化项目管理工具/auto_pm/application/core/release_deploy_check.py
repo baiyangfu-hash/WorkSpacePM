@@ -251,6 +251,24 @@ def _list_processes() -> list[tuple[int, int, str]] | None:
     return rows or None
 
 
+_PYTHON_EXE = re.compile(r"python(\d+(\.\d+)*)?w?(\.exe)?", re.IGNORECASE)
+
+
+def _runs_python(command_line: str) -> bool:
+    """True when the process *is* a Python interpreter: argv[0]'s base name, not any ``python`` further along the line.
+
+    A ``bash -c "...python -m pytest..."`` wrapper mentions both words but is a shell, and is finished when its child is.
+    """
+
+    text = command_line.strip()
+    if text.startswith('"'):
+        end = text.find('"', 1)
+        first = text[1:end] if end > 0 else text[1:]
+    else:
+        first = text.split(maxsplit=1)[0] if text else ""
+    return _PYTHON_EXE.fullmatch(first.replace("\\", "/").rsplit("/", 1)[-1]) is not None
+
+
 def _busy_processes(rows: list[tuple[int, int, str]]) -> list[str]:
     parents = {pid: parent for pid, parent, _line in rows}
     mine: set[int] = set()
@@ -258,7 +276,7 @@ def _busy_processes(rows: list[tuple[int, int, str]]) -> list[str]:
     while pid and pid not in mine:  # this command and whatever launched it are not "busy"
         mine.add(pid)
         pid = parents.get(pid, 0)
-    return [str(pid) for pid, _parent, line in rows if pid not in mine and "python" in line.lower() and any(m in line for m in BUSY_PROCESS_MARKERS)]
+    return [str(pid) for pid, _parent, line in rows if pid not in mine and _runs_python(line) and any(m in line for m in BUSY_PROCESS_MARKERS)]
 
 
 def _check_busy(root: Path, report: Preflight) -> None:

@@ -299,3 +299,32 @@ def test_the_real_process_list_is_readable_here() -> None:
     rows = rdc._list_processes()
 
     assert rows is not None and any(pid == os.getpid() for pid, _parent, _line in rows)
+
+
+def test_a_shell_wrapper_that_merely_mentions_python_and_pytest_is_not_a_busy_process() -> None:
+    """The wrapper's command line holds both words, but the process is bash; only an interpreter running the work counts."""
+
+    rows = [
+        (1, 0, "init"),
+        (10, 1, 'bash -c "cd repo && python -m pytest tests/core"'),
+        (11, 1, "/bin/sh -c 'exec python3 main.py gui'"),
+        (12, 1, r'C:\\Program Files\\Git\\bin\\bash.exe -c "python -m pytest"'),
+        (13, 1, "tail -f /tmp/python-pytest.log"),
+    ]
+
+    assert rdc._busy_processes(rows) == []
+
+
+@pytest.mark.parametrize(
+    "command_line",
+    [
+        "python -m pytest tests/core",
+        "/usr/bin/python3.12 -m pytest",
+        r'"C:\\Program Files\\Python312\\python.exe" -m pytest tests',
+        r"C:\\Python312\\python.exe main.py gui",
+        r"C:\\x\\pythonw.exe boss_main.py",
+    ],
+    ids=["bare", "posix-versioned", "quoted-windows-path", "windows-path", "pythonw"],
+)
+def test_a_python_interpreter_running_tests_or_the_cockpit_is_still_busy(command_line: str) -> None:
+    assert rdc._busy_processes([(1, 0, "init"), (77, 1, command_line)]) == ["77"]
