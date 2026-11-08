@@ -26,6 +26,16 @@ def _spec(run_dir: Path, argv: list[str], *, timeout: float = 60, cwd: Path | No
     (run_dir / "status.json").write_text(json.dumps({"schema_version": core.SCHEMA, "name": run_dir.name, "state": "STARTING"}), encoding="utf-8")
 
 
+# D-158: process start-up on a loaded Windows machine takes seconds to minutes.  The waits below are polls that return the moment the
+# condition holds, so a generous ceiling costs nothing on a healthy machine and only stops a slow one from failing a correct run.
+_STARTUP_CEILING = 300.0
+
+
+def _guard_diagnostics(run_dir: Path) -> str:
+    out = run_dir / "guard.out"
+    return out.read_text(encoding="utf-8", errors="replace") if out.exists() else "(no guard.out yet)"
+
+
 def _wait(predicate, seconds: float = 30.0) -> bool:  # type: ignore[no-untyped-def]
     end = time.monotonic() + seconds
     while time.monotonic() < end:
@@ -376,13 +386,13 @@ def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_t
 
     assert started["state"] == "STARTING" and started["detached"] is True and started["cwd"] == str(repo.resolve())
     assert started["command_text"].startswith(PY) or "time.sleep" in started["command_text"]
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE"), core.read_status(run_dir)
-    assert _wait(lambda: core.read_status(run_dir)["worker_alive"] is False)  # DONE is written a moment before the worker exits
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING), core.read_status(run_dir)
+    assert _wait(lambda: core.read_status(run_dir)["worker_alive"] is False, _STARTUP_CEILING)  # DONE is written a moment before the worker exits
     final = core.read_status(run_dir)
     assert final["exit_code"] == 0 and final["detached"] is True and final["mem_guard"] is True and final["git_dirty"] in (False, None)
-    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, 90)  # a loaded Windows machine takes seconds to start the guard process
+    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, _STARTUP_CEILING), _guard_diagnostics(run_dir)
     guard_pid = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))["guard_pid"]
-    assert _wait(lambda: not core.pid_alive(guard_pid), 20)  # the guard ends after the job
+    assert _wait(lambda: not core.pid_alive(guard_pid), _STARTUP_CEILING)  # the guard ends after the job
     assert b"done" in (run_dir / "run.log").read_bytes()
     assert final["peak_committed_gib"] is None or final["peak_committed_gib"] >= 0
 
@@ -403,9 +413,9 @@ def test_the_guard_starts_whether_or_not_auto_pm_is_importable_for_the_child(
     core.start(tmp_path, "shadow", [PY, "-c", "import time; time.sleep(2)"], cwd=repo, timeout_minutes=5, poll_seconds=0.3)
     run_dir = core.run_directory(tmp_path, "shadow")
 
-    assert _wait(lambda: (run_dir / "guard.json").exists(), 90), (run_dir / "guard.out").read_text(encoding="utf-8", errors="replace")
+    assert _wait(lambda: (run_dir / "guard.json").exists(), _STARTUP_CEILING), _guard_diagnostics(run_dir)
     assert b"Traceback" not in (run_dir / "guard.out").read_bytes()
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
 
 
 def test_start_refuses_a_name_that_was_used_an_empty_command_a_bad_name_and_a_missing_directory(tmp_path: Path) -> None:
@@ -440,7 +450,7 @@ def test_start_is_refused_by_the_memory_preflight_before_anything_is_created(tmp
 def test_stop_kills_a_running_job_and_records_stopped(tmp_path: Path) -> None:
     core.start(tmp_path, "long", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.3)
     run_dir = core.run_directory(tmp_path, "long")
-    assert _wait(lambda: core.read_status(run_dir).get("child_pid"))
+    assert _wait(lambda: core.read_status(run_dir).get("child_pid"), _STARTUP_CEILING)
     child = int(core.read_status(run_dir)["child_pid"])
 
     stopped = core.stop(run_dir)
@@ -591,7 +601,7 @@ def test_the_job_gets_the_requested_environment_but_never_a_lease_credential(tmp
     core.start(tmp_path, "envjob", [PY, "-c", code], cwd=tmp_path, poll_seconds=0.2, env={"LR_X": "from-spec"})
     run_dir = core.run_directory(tmp_path, "envjob")
 
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
     log = (run_dir / "run.log").read_text(encoding="utf-8")
     assert "X=from-spec" in log and "L=-" in log and "very-secret-token" not in log
     assert "very-secret-token" not in (run_dir / "spec.json").read_text(encoding="utf-8")
@@ -630,7 +640,7 @@ def test_a_pid_that_does_not_exist_has_no_tree_and_is_not_alive() -> None:
 def test_stop_unfreezes_a_job_the_guard_has_paused_and_ends_it_at_once(tmp_path: Path) -> None:
     core.start(tmp_path, "frozen", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.2)
     run_dir = core.run_directory(tmp_path, "frozen")
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "RUNNING")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "RUNNING", _STARTUP_CEILING)
     worker = core._worker_pid(run_dir)
     core.suspend(core.process_tree(worker))  # what the guard does when the machine is full: freeze the worker with the job
     (run_dir / "PAUSED").write_text("x", encoding="utf-8")
@@ -683,7 +693,7 @@ def test_the_status_file_only_claims_what_was_started(tmp_path: Path) -> None:
     core.start(tmp_path, "claims", [PY, "-c", "pass"], cwd=tmp_path, poll_seconds=0.2)
     run_dir = core.run_directory(tmp_path, "claims")
 
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
     final = core.read_status(run_dir)
     assert final["mem_guard"] is True and final["detached"] is True  # both really started
 
