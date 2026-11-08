@@ -642,3 +642,42 @@ def test_change_edit_file_after_leaving_draft_needs_the_explicit_switch(cli_runn
     )  # fmt: skip
     assert allowed.exit_code == 0, allowed.output
     assert "改前: a/b.py" in allowed.output and "改后: wider/x.py" in allowed.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_same_number_in_two_projects_asks_for_pid_without_a_traceback(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """D-97 audit 2 (1): the pre-read must not escape the try; the ambiguity hint (TD-SW008-176) must reach the operator."""
+    first = _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    source = next(first.rglob(f"{change_number}.md"))
+    second = _make_plc_project_for_change(tmp_path, "DJ-2026-OTH", "另一个项目")
+    twin = second / source.relative_to(first)
+    twin.parent.mkdir(parents=True, exist_ok=True)
+    twin.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    before = (source.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8"))
+
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a.py"])
+
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert result.exit_code == 1
+    assert "--pid" in result.output
+    assert (source.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8")) == before
+
+
+@pytest.mark.cli
+def test_change_edit_same_file_list_plus_another_field_still_writes_the_other_field(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """D-97 audit 2 (2): the “没有变化” shortcut only applies when --file is the only field."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+
+    result = _edit_files(cli_runner, tmp_path, change_number, "--background", "新的背景说明")
+
+    assert result.exit_code == 0, result.output
+    assert "变更单已更新" in result.output
+    assert "没有变化" not in result.output
+    assert "新的背景说明" in _change_text(tmp_path, change_number)

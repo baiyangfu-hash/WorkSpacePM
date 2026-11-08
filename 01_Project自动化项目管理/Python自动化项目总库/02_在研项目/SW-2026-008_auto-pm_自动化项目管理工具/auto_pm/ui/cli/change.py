@@ -704,27 +704,27 @@ def cmd_edit(
         ctx.exit(1)
 
     before_files: list[str] = []
-    if "files" in updates:
-        # D-97: §5 is where the approved file scope is read from, so editing it after the record left draft is a scope change.
-        existing = svc.get_change_request(change_number, project_id=pid)
-        if existing is None:
-            console.print(f"[red]错误: 变更单不存在: {change_number}[/red]")
-            ctx.exit(1)
-        else:
-            current = svc.read_change_files(change_number, project_id=pid) or []
-            before_files = current
-            if existing.status != "draft" and not after_approval:
-                console.print(
-                    f"[red]拒绝: 变更单 {change_number} 状态为 {existing.status}（不是草稿），改 §5 涉及文件会改动批准范围的来源。"
-                    "确需补写请加 --after-approval；当前清单："
-                    f"{', '.join(current) or '（空）'}[/red]"
-                )
-                ctx.exit(1)
-            if list(updates["files"]) == current and len(updates) == 1:
-                console.print(f"[yellow]没有变化: {change_number} 的 §5 涉及文件已经是这份清单：{', '.join(current)}[/yellow]")
-                return
-
     try:
+        if "files" in updates:
+            # D-97: §5 is where the approved file scope is read from, so editing it after the record left draft is a scope change.
+            existing = svc.get_change_request(change_number, project_id=pid)
+            if existing is None:
+                console.print(f"[red]错误: 变更单不存在: {change_number}[/red]")
+                ctx.exit(1)
+            else:
+                current = svc.read_change_files(change_number, project_id=pid) or []
+                before_files = current
+                if existing.status != "draft" and not after_approval:
+                    console.print(
+                        f"[red]拒绝: 变更单 {change_number} 状态为 {existing.status}（不是草稿），改 §5 涉及文件会改动批准范围的来源。"
+                        "确需补写请加 --after-approval；当前清单："
+                        f"{', '.join(current) or '（空）'}[/red]"
+                    )
+                    ctx.exit(1)
+                if list(updates["files"]) == current and len(updates) == 1:
+                    console.print(f"[yellow]没有变化: {change_number} 的 §5 涉及文件已经是这份清单：{', '.join(current)}[/yellow]")
+                    return
+
         cr = svc.update_change_request(change_number, lookup_project_id=pid, **updates)
         if cr is None:
             console.print(f"[red]错误: 变更单不存在: {change_number}[/red]")
