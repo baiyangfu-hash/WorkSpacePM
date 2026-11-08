@@ -9,7 +9,8 @@ Conditions (the user's merge rule, plus the two the project added for audit and 
 1. the PR is open, not a draft, and merges into main without conflict;
 2. an audit report for this PR exists under ``reviews/`` or a ``--reports-dir`` and its last
    ``放行判定: <head first 8> 过|有条件过|不过`` line for the current head says exactly ``过``;
-3. every check run and status on the current head is successful, and ``safety-zone`` is among them;
+3. every check run and status on the current head is successful, and ``safety-zone`` is among them (of the check runs of one
+   workflow, event and job name only the newest counts, see ``newest_check_runs``);
 4. a PR that touches the safety zone carries a comment ``安全签字 <current head>`` from the named signer
    (judged by ``reviews/tools/safety_zone_check.find_signature``, the same function safety-gate uses).
 """
@@ -138,24 +139,29 @@ ACTIONS_RUN_IN_URL = re.compile(r"/actions/runs/(\d+)")
 
 
 def newest_check_runs(workflow_runs: list[dict[str, Any]], check_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep only the newest check run per (workflow, app, job name, head commit) (D-117; the same rule as ``audit_pr.newest_check_runs``).
+    """Keep only the newest check run per (workflow, event, app, job name, head commit) (D-117).
 
-    A check run belongs to a workflow through the Actions run id in its ``details_url``.  A re-run, or a run cancelled by a
-    newer one, must not keep the PR red for ever.  Same-named jobs of *different* workflows are different checks and all
-    stay; a check run with no ``id`` or whose run is unknown is never merged with another (fail closed: it still counts).
+    A check run belongs to a workflow run through the Actions run id in its ``details_url``; that run names the workflow and
+    the event (``push``, ``pull_request``, ...).  The event is part of the key: a ``push`` run and a ``pull_request`` run of
+    the same workflow on the same commit are two different checks (this repository runs both every day), so a newer green
+    ``pull_request`` job must not hide an older red ``push`` one.  A re-run, or a run cancelled by a newer one, is the same
+    workflow and event again, which is what this merges.  Same-named jobs of different workflows or apps stay apart; a check
+    run with no ``id``, or whose Actions run is unknown or lacks ``workflow_id`` or ``event``, is never merged (fail closed:
+    it still counts).  Known and wanted behaviour: a newer ``skipped``/``neutral`` run covers an older failure of the same
+    key (both pass in ``PASSING_CONCLUSIONS``), a newer ``cancelled`` or unfinished one still blocks.
     """
 
-    workflow_of = {r["id"]: r.get("workflow_id") for r in workflow_runs if "id" in r}
+    owner_of = {r["id"]: (r.get("workflow_id"), r.get("event")) for r in workflow_runs if "id" in r}
     newest: dict[tuple[Any, ...], tuple[int, dict[str, Any]]] = {}
     kept: list[tuple[int, dict[str, Any]]] = []
     for index, check in enumerate(check_runs):
         check_id = check.get("id")
         found = ACTIONS_RUN_IN_URL.search(str(check.get("details_url") or check.get("html_url") or ""))
-        workflow = workflow_of.get(int(found.group(1))) if found else None
-        if not isinstance(check_id, int) or workflow is None:
+        workflow, event = owner_of.get(int(found.group(1)), (None, None)) if found else (None, None)
+        if not isinstance(check_id, int) or workflow is None or not event:
             kept.append((index, check))
             continue
-        key = (workflow, (check.get("app") or {}).get("id"), check.get("name"), check.get("head_sha"))
+        key = (workflow, event, (check.get("app") or {}).get("id"), check.get("name"), check.get("head_sha"))
         if key not in newest or check_id > newest[key][1]["id"]:
             newest[key] = (index, check)
     kept.extend(newest.values())

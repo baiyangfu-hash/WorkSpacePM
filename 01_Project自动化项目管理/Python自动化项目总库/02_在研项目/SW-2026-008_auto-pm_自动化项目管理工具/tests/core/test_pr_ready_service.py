@@ -217,16 +217,16 @@ def signed(sha: str, user: dict[str, object] | None = None) -> dict[str, object]
     return {"body": f"安全签字 {sha}", "user": user or SIGNER, "html_url": "u"}
 
 
-def test_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
+def test_d117_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
     report = check(tmp_path, plc_pr([]))
     assert failed(report) == {"安全签字"}
 
 
-def test_r12_a_signature_for_an_old_head_blocks(tmp_path: Path) -> None:
+def test_d117_r12_a_signature_for_an_old_head_blocks(tmp_path: Path) -> None:
     assert failed(check(tmp_path, plc_pr([signed(OLD[:12])]))) == {"安全签字"}
 
 
-def test_r13_a_signature_for_the_current_head_by_the_signer_passes(tmp_path: Path) -> None:
+def test_d117_r13_a_signature_for_the_current_head_by_the_signer_passes(tmp_path: Path) -> None:
     assert check(tmp_path, plc_pr([signed(HEAD[:12])])).ready
 
 
@@ -237,18 +237,18 @@ def test_r13b_a_signature_of_10_digits_no_longer_counts(tmp_path: Path) -> None:
     assert "不足 12 位" in "".join(item.detail for item in report.items)
 
 
-def test_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
+def test_d117_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
     other = {"login": "someone", "id": 1}
     assert failed(check(tmp_path, plc_pr([signed(HEAD[:12], other)]))) == {"安全签字"}
 
 
-def test_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
+def test_d117_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
     gh = FakeGh()
     gh.pr["body"] = "## 安全回路\n\n安全回路: 是\n"
     assert failed(check(tmp_path, gh)) == {"安全签字"}
 
 
-def test_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
+def test_d117_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
     gh = FakeGh()
     check(tmp_path, gh)
     assert gh.calls
@@ -258,7 +258,7 @@ def test_r16_only_reads_are_issued_and_nothing_merges(tmp_path: Path) -> None:
         assert not {"merge", "comment", "edit", "close", "review"} & set(call[:2])
 
 
-def test_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_d117_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     gh = FakeGh()
     monkeypatch.setattr("auto_pm.application.core.pr_ready_service.default_gh", gh)
     directory = report_dir(tmp_path, GOOD_REPORT)
@@ -285,7 +285,12 @@ def _check(cid: int, conclusion: str, *, run: int = 100, name: str = "unit", app
     }
 
 
-WORKFLOWS = [{"id": 100, "workflow_id": 1}, {"id": 101, "workflow_id": 1}, {"id": 200, "workflow_id": 2}]
+WORKFLOWS = [
+    {"id": 100, "workflow_id": 1, "event": "pull_request"},
+    {"id": 101, "workflow_id": 1, "event": "pull_request"},
+    {"id": 200, "workflow_id": 2, "event": "pull_request"},
+    {"id": 300, "workflow_id": 1, "event": "push"},
+]
 
 
 def test_r11_an_old_failure_covered_by_a_newer_success_of_the_same_job_no_longer_blocks() -> None:
@@ -329,7 +334,7 @@ def test_r16_without_the_workflow_runs_every_check_counts() -> None:
     assert problems == ["unit：failure"]
 
 
-def test_r17_the_service_reads_the_workflow_runs_and_lets_the_newer_success_pass(tmp_path: Path) -> None:
+def test_d117_r17_the_service_reads_the_workflow_runs_and_lets_the_newer_success_pass(tmp_path: Path) -> None:
     gh = FakeGh(runs=[_check(1, "failure", run=100), _check(2, "success", run=101)], workflow_runs=WORKFLOWS)
 
     assert failed(check(tmp_path, gh)) == set()
@@ -339,3 +344,31 @@ def test_r18_when_the_workflow_runs_cannot_be_read_the_old_failure_still_blocks(
     gh = FakeGh(runs=[_check(1, "failure", run=100), _check(2, "success", run=101)], workflow_runs=WORKFLOWS, workflow_runs_fail=True)
 
     assert failed(check(tmp_path, gh)) == {"必过检查和 safety-zone"}
+
+
+def test_d117_r19_an_old_red_push_job_is_not_hidden_by_a_newer_green_pull_request_job_of_the_same_workflow() -> None:
+    """Real shape from #615 head 982f5018: sample-drill ran as a push and as a pull_request, both with a job named ``drill``."""
+
+    problems, _ = judge_checks([_check(1, "failure", run=300, name="drill"), _check(2, "success", run=101, name="drill")], [], WORKFLOWS)
+
+    assert problems == ["drill：failure"]
+
+
+def test_d117_r20_both_events_are_kept_and_each_event_still_keeps_only_its_newest() -> None:
+    checks = [
+        _check(1, "success", run=300, name="drill"),
+        _check(2, "success", run=100, name="drill"),
+        _check(3, "success", run=101, name="drill"),
+    ]
+
+    kept = newest_check_runs(WORKFLOWS, checks)
+
+    assert [c["id"] for c in kept] == [1, 3]  # the push one, and the newer of the two pull_request ones
+
+
+def test_d117_r21_a_workflow_run_without_an_event_is_unknown_and_never_merged() -> None:
+    no_event = [{"id": 100, "workflow_id": 1}, {"id": 101, "workflow_id": 1}]
+
+    kept = newest_check_runs(no_event, [_check(1, "failure", run=100), _check(2, "success", run=101)])
+
+    assert [c["id"] for c in kept] == [1, 2]
