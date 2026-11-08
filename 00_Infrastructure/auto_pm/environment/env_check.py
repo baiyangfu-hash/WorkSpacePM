@@ -151,8 +151,14 @@ def format_report(checks: Sequence[Check]) -> str:
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(errors="replace")  # Windows 的旧代码页终端打印中文时不要崩
+        if reconfigure is None:
+            continue
+        if stream.isatty():
+            reconfigure(errors="replace")  # 真终端：用终端自己的编码，旧代码页打不出的字不要崩
+        else:
+            # 输出被重定向、接管道、被别的程序（CI、AI agent）读走时：Windows 默认是 ANSI 代码页，中文会变成 "?"，
+            # 所以固定写 UTF-8，读的一方按 UTF-8 解就行
+            reconfigure(encoding="utf-8", errors="replace")
     checks = run_checks(repo_root())
     print(format_report(checks))
     if all(check.ok for check in checks):

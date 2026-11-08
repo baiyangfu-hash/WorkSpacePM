@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -210,9 +211,12 @@ def _copy_script_into_a_bare_tree(tmp_path: Path) -> Path:
 def test_the_script_runs_alone_with_a_bare_python_and_exits_1_with_a_remedy(tmp_path: Path) -> None:
     folder = _copy_script_into_a_bare_tree(tmp_path)
 
+    # 管道里的输出固定是 UTF-8，哪怕解释器的默认输出编码打不出中文（Windows 的 ANSI 代码页，#672 的 CI 上发生过）
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
     done = subprocess.run(
-        [sys.executable, "-I", str(folder / "env_check.py")],
+        [sys.executable, str(folder / "env_check.py")],
         cwd=tmp_path,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -232,6 +236,7 @@ def test_the_shell_wrapper_only_hands_over_to_the_script(tmp_path: Path) -> None
 
     done = subprocess.run(
         ["sh", str(folder / "cloud_selfcheck.sh")],
+        env={**os.environ, "PYTHONIOENCODING": "cp1252"},
         cwd=tmp_path,
         capture_output=True,
         text=True,
