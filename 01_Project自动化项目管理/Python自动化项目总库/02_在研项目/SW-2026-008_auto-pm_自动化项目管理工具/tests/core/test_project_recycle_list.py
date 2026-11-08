@@ -82,3 +82,68 @@ def test_cli_lists_json_filters_by_age_and_writes_nothing(tmp_path: Path) -> Non
 def test_cli_on_an_empty_workspace_says_so(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["-w", str(tmp_path), "project", "recycle-list"], catch_exceptions=False)
     assert result.exit_code == 0 and "没有符合条件" in result.output
+
+
+def _stamped(root: Path, project_id: str, stamp: str) -> Path:
+    path = root / RECYCLE_RELATIVE_DIR / project_id / stamp
+    path.mkdir(parents=True)
+    return path
+
+
+def _ids(output: str) -> list[str]:
+    return [item["path"] for item in json.loads(output)]
+
+
+def _recycle_list(root: Path, *args: str) -> str:
+    result = CliRunner().invoke(cli, ["-w", str(root), "project", "recycle-list", *args], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+@pytest.mark.parametrize("older_than", ["0", "1", "30"])
+def test_a_directory_whose_stamp_cannot_be_read_is_never_listed_under_older_than(
+    tmp_path: Path, older_than: str
+) -> None:
+    """手工清理会照着 ``--older-than`` 的清单删：时间未知的目录不能被当成“很旧”列进去（审计 #689 P3）。"""
+    odd = _stamped(tmp_path, "SW-2026-003", "hand-moved")
+    old = _recycle(tmp_path, "SW-2026-001", days_ago=400)
+
+    assert _ids(_recycle_list(tmp_path, "--older-than", older_than, "--json")) == [str(old)]
+    assert str(odd) in _ids(_recycle_list(tmp_path, "--json"))  # 不加条件时仍照样列出，不丢项
+
+
+def test_older_than_counts_whole_days_and_includes_the_boundary(tmp_path: Path) -> None:
+    """审计 #689 P2：搬进来刚好满 N 天算“已满 N 天”，差一天不算。"""
+    just_enough = _recycle(tmp_path, "SW-2026-001", days_ago=30)
+    one_short = _recycle(tmp_path, "SW-2026-002", days_ago=29)
+    output = _recycle_list(tmp_path, "--older-than", "30", "--json")
+
+    assert str(just_enough) in _ids(output)
+    assert str(one_short) not in _ids(output)
+
+
+def test_a_stamp_in_the_future_never_shows_a_negative_age(tmp_path: Path) -> None:
+    """审计 #689 P4：时钟回拨后目录名里的时间比现在晚，年龄钳到 0 天，不能出现负数。"""
+    future = _recycle(tmp_path, "SW-2026-001", days_ago=-5)
+    (item,) = list_recycled(tmp_path)
+
+    assert item.path == future
+    assert item.age_days(NOW) == 0
+
+
+def test_loose_files_are_not_listed_as_recycled_projects(tmp_path: Path) -> None:
+    """审计 #689 P7、P10：回收区根下、项目编号目录下散落的文件不是回收的项目目录，不进清单。"""
+    real = _recycle(tmp_path, "SW-2026-001", days_ago=3)
+    (tmp_path / RECYCLE_RELATIVE_DIR / "stray-at-root.txt").write_text("x", encoding="utf-8")
+    (tmp_path / RECYCLE_RELATIVE_DIR / "SW-2026-001" / "stray-in-project.txt").write_text("x", encoding="utf-8")
+
+    assert [item.path for item in list_recycled(tmp_path)] == [real]
+    assert _ids(_recycle_list(tmp_path, "--json")) == [str(real)]
+
+
+def test_the_listing_ends_with_the_read_only_notice_and_unknown_age_is_spelled_out(tmp_path: Path) -> None:
+    _stamped(tmp_path, "SW-2026-003", "hand-moved")
+    output = _recycle_list(tmp_path)
+
+    assert "时间未知" in output
+    assert output.rstrip().splitlines()[-1].startswith("只读列表：这里不会删除任何东西")

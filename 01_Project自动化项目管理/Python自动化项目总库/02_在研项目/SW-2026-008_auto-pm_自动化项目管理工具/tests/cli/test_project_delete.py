@@ -119,6 +119,7 @@ def test_d05_a_clean_project_moves_into_the_recycle_area_and_can_be_moved_back(
     assert not world.project.exists()
     (moved,) = world.recycled()
     assert (moved / "src" / "a.py").read_text(encoding="utf-8") == "print('keep me')\n"
+    assert "project recycle-list" in result.output  # TD-208：删完告诉用户回收区去哪看
     assert world.audit == [
         {
             "action": "project_delete",
