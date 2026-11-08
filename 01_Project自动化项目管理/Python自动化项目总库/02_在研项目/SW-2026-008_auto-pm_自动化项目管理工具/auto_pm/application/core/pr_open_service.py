@@ -29,6 +29,7 @@ from auto_pm.application.core.agent_worktree_service import (
     MAIN_REF,
     AgentWorktreeError,
     AgentWorktreeService,
+    Station,
     StationRefusedError,
     acts_for,
     base_agent,
@@ -93,6 +94,8 @@ class PrPlan:
     head_sha: str
     scope_report: str = ""
     notes: list[str] = field(default_factory=list)
+    # The station the card is really in; empty means the one named ``agent`` (D-106).
+    station: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,10 +189,7 @@ class PrOpenService:
                 raise AgentWorktreeError(
                     f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch"
                 )
-        station = next(
-            (s for s in self._stations.stations(only=agent) if s.name == agent and s.registered),
-            None,
-        )
+        station = self._station_of_card(agent, branch)
         if station is None or station.kind != "agent":
             raise PrOpenRefusedError(
                 f"{agent} 没有登记的工位；先 `main.py worktree open {agent} {card}`"
@@ -254,6 +254,7 @@ class PrOpenService:
             )
         return PrPlan(
             agent=agent,
+            station=station.name if station.name != agent else "",
             branch=branch,
             title=title or f"[{card}] {card_title}",
             body=body,
@@ -283,7 +284,7 @@ class PrOpenService:
             raise PrOpenRefusedError(
                 f"分支 {plan.branch} 已有打开的 PR：{existing.stdout.strip()}；不重复开，也不改它"
             )
-        station = self._stations.stations_dir / plan.agent
+        station = self._stations.stations_dir / (plan.station or plan.agent)
         self._push(station, plan.branch, plan.head_sha)
         created = self._gh(
             [
@@ -300,6 +301,35 @@ class PrOpenService:
         return PrOpened(plan, int(match.group(1)), match.group(0), pushed=True)
 
     # ── pieces ───────────────────────────────────────────────────────
+
+    def _station_of_card(self, agent: str, branch: str) -> Station | None:
+        """The station named ``agent``, or -- when it is on another card -- the same agent's station that is on ``branch``.
+
+        One conversation has one alias station, so a second card runs in a station under another name of the same agent
+        (D-106); asking for the card's PR must find that station by the card's branch, not only the named one.  A station of
+        another conversation is found the same way but still needs ``_require_caller``.
+        """
+
+        named = next(
+            (s for s in self._stations.stations(only=agent) if s.name == agent and s.registered),
+            None,
+        )
+        if named is not None and named.kind == "agent" and named.branch == branch:
+            return named
+        base = base_agent(agent)
+        for other in self._stations.stations(deep=False):
+            if (
+                other.name != agent
+                and other.registered
+                and other.kind == "agent"
+                and other.branch == branch
+                and base_agent(other.name) == base
+            ):
+                self._require_caller(other.name)
+                deep = next((s for s in self._stations.stations(only=other.name) if s.name == other.name), None)
+                if deep is not None:
+                    return deep
+        return named
 
     def _require_caller(self, agent: str) -> None:
         caller = caller_agent()

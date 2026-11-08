@@ -850,3 +850,63 @@ def test_mutant_judge_counts_only_a_real_test_failure_as_caught(
     """D-85 audit: a pytest crash or timeout must never be read as "the tests caught the mutant"."""
 
     assert _mutants_module().judge(returncode, output) == expected
+
+
+# ── D-106: a second card of one agent is found by its branch ─────────
+
+SECOND_ALIAS = "claude-aaaaaa"
+
+
+def test_the_second_card_is_found_in_the_alias_station_while_the_plain_one_holds_another_card(
+    lab: Lab,
+) -> None:
+    work(lab, "claude", "OTHER-9")
+    second = work(lab, SECOND_ALIAS, "CARD-1")
+
+    plan = service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+    assert plan.branch == "claude/CARD-1"
+    assert plan.station == SECOND_ALIAS
+    assert plan.head_sha == git(second, "rev-parse", "HEAD").strip()
+
+
+def test_open_pushes_from_the_station_that_holds_the_card(lab: Lab) -> None:
+    work(lab, "claude", "OTHER-9")
+    second = work(lab, SECOND_ALIAS, "CARD-1")
+    svc = service(lab, FakeGh())
+
+    opened = svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
+
+    assert opened.number == 101
+    refs = lab.remote_refs()
+    assert "refs/heads/claude/CARD-1" in refs
+    assert "refs/heads/claude/OTHER-9" not in refs
+    assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/claude/CARD-1"
+
+
+def test_the_named_station_still_wins_when_it_is_on_the_card(lab: Lab) -> None:
+    work(lab, "claude", "CARD-1")
+
+    plan = service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+    assert plan.station == ""
+
+
+def test_no_station_on_the_card_is_still_a_refusal_that_names_the_branch(lab: Lab) -> None:
+    work(lab, "claude", "OTHER-9")
+    work(lab, SECOND_ALIAS, "OTHER-8")
+
+    with pytest.raises(PrOpenRefusedError, match="分支名不符"):
+        service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+
+def test_another_conversations_alias_station_is_not_taken_over(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work(lab, "claude", "OTHER-9")
+    work(lab, SECOND_ALIAS, "CARD-1")
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "bbbbbb")
+
+    with pytest.raises(PrOpenRefusedError, match="不能替"):
+        service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
