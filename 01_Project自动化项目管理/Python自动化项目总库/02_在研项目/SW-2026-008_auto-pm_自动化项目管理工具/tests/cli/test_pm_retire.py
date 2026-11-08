@@ -78,3 +78,21 @@ def test_the_user_in_person_retires_the_leftover_and_gets_a_trace(root: Path) ->
     assert [(r["work_id"], r["outcome"]) for r in payload["results"]] == [("WORK-OLD", "retired")]
     assert Path(payload["trace"]).is_file()
     assert _state(root) is WorkState.CANCELLED
+
+
+def test_apply_outside_the_control_root_is_refused_before_anything_is_written(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-134: removing the control-root check used to leave every test green."""
+
+    from auto_pm.application.core.worktree_policy_service import (
+        WorktreePolicyError,
+        WorktreePolicyService,
+    )
+
+    def refuse(self: WorktreePolicyService) -> None:
+        raise WorktreePolicyError("NOT-CONTROL-ROOT")
+
+    monkeypatch.setattr(WorktreePolicyService, "require_control_root", refuse)
+    result = _run(root, "--stale", "--apply")
+    assert result.exit_code != 0 and "NOT-CONTROL-ROOT" in result.output
+    assert _state(root) is WorkState.BLOCKED
+    assert not (root / ".auto-pm" / "reports" / "retire").exists()

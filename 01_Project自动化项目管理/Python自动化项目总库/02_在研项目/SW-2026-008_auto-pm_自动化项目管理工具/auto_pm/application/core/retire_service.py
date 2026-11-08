@@ -48,8 +48,9 @@ class RetireItem:
 
     residue: ResumeResidue
     title: str
-    mission_id: str = ""
-    mission_state: str = ""
+    # D-135: the ledger allows several open Missions under one Work; every one of them is listed and cancelled
+    mission_ids: tuple[str, ...] = ()
+    mission_states: tuple[str, ...] = ()
     # "" when the item can be retired, otherwise why it is left alone
     blocked_reason: str = ""
 
@@ -63,7 +64,7 @@ class RetireResult:
     work_id: str
     outcome: str  # "retired" | "skipped"
     detail: str = ""
-    mission_id: str = ""
+    mission_ids: tuple[str, ...] = ()
 
 
 @dataclass
@@ -93,27 +94,26 @@ class RetireService:
                 continue
             residue = by_id[work_id]
             title = store.get_work(work_id).title
-            mission = self._mission_of(store, project_id, work_id)
+            missions = self._missions_of(store, project_id, work_id)
             blocked = ""
-            if mission is not None and mission.state not in _CANCELLABLE_MISSION_STATES:
-                blocked = f"Mission {mission.mission_id} 处于 {mission.state.value}，要由用户的验收流程处理，不在这里收口"
+            for mission in missions:
+                if mission.state not in _CANCELLABLE_MISSION_STATES:
+                    blocked = f"Mission {mission.mission_id} 处于 {mission.state.value}，要由用户的验收流程处理，不在这里收口"
+                    break
             plan.items.append(
                 RetireItem(
                     residue=residue,
                     title=title,
-                    mission_id=mission.mission_id if mission is not None else "",
-                    mission_state=mission.state.value if mission is not None else "",
+                    mission_ids=tuple(m.mission_id for m in missions),
+                    mission_states=tuple(m.state.value for m in missions),
                     blocked_reason=blocked,
                 )
             )
         return plan
 
     @staticmethod
-    def _mission_of(store: ContinuityStore, project_id: str, work_id: str) -> Mission | None:
-        for mission in store.list_missions(project_id):
-            if mission.root_work_id == work_id:
-                return mission
-        return None
+    def _missions_of(store: ContinuityStore, project_id: str, work_id: str) -> list[Mission]:
+        return [mission for mission in store.list_missions(project_id) if mission.root_work_id == work_id]
 
     # ------------------------------------------------------------------ write
     def apply(
@@ -149,7 +149,7 @@ class RetireService:
             missions.initialize(tool_version)
         for item in plan.items:
             if item.blocked_reason:
-                results.append(RetireResult(item.work_id, "skipped", item.blocked_reason, item.mission_id))
+                results.append(RetireResult(item.work_id, "skipped", item.blocked_reason, item.mission_ids))
                 continue
             results.append(self._retire_one(item, missions, works))
         trace = self._write_trace(project_id, evidence, results) if results else None
@@ -158,33 +158,43 @@ class RetireService:
     def _retire_one(self, item: RetireItem, missions: MissionService, works: WorkRegistryService) -> RetireResult:
         key_tail = f"{item.work_id}-{item.residue.last_run_id}"
         try:
-            if item.mission_id:
-                mission = ContinuityStore(self._root).get_mission(item.mission_id)
+            for mission_id in item.mission_ids:
+                mission = ContinuityStore(self._root).get_mission(mission_id)
                 missions.transition(
                     mission_id=mission.mission_id,
                     expected_version=mission.version,
                     new_state=MissionState.CANCELLED,
                     root_work_id=None,  # CANCELLED takes no root Work (it is already bound)
-                    idempotency_key=f"retire-mission-{key_tail}",
+                    idempotency_key=f"retire-mission-{mission_id}-{key_tail}",
                 )
             works.transition(item.work_id, WorkState.CANCELLED, f"retire-work-{key_tail}")
         except (MissionServiceError, WorkRegistryError, ContinuityStoreError) as error:
-            return RetireResult(item.work_id, "skipped", f"没有收口：{error}", item.mission_id)
-        return RetireResult(item.work_id, "retired", "已取消", item.mission_id)
+            return RetireResult(item.work_id, "skipped", f"没有收口：{error}", item.mission_ids)
+        return RetireResult(item.work_id, "retired", "已取消", item.mission_ids)
 
     def _write_trace(self, project_id: str, evidence: str, results: list[RetireResult]) -> Path:
-        stamp = self._now().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-        path = self._root / REPORT_RELATIVE_DIR / f"retire-{project_id}-{stamp}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        """Write the trace; never overwrite an earlier one (D-134: two applies in the same second used to share a file)."""
+
+        stamp = self._now().astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        folder = self._root / REPORT_RELATIVE_DIR
+        folder.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": "pm-retire-trace.v1",
             "project_id": project_id,
             "at": self._now().astimezone(UTC).isoformat(),
             "approval_evidence_ref": evidence,
             "results": [
-                {"work_id": r.work_id, "mission_id": r.mission_id, "outcome": r.outcome, "detail": r.detail}
+                {"work_id": r.work_id, "mission_ids": list(r.mission_ids), "outcome": r.outcome, "detail": r.detail}
                 for r in results
             ],
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-        return path
+        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        for attempt in range(1000):
+            path = folder / f"retire-{project_id}-{stamp}{'' if attempt == 0 else f'-{attempt}'}.json"
+            try:
+                with path.open("x", encoding="utf-8", newline="\n") as handle:  # exclusive: fails if the name is taken
+                    handle.write(text)
+            except FileExistsError:
+                continue
+            return path
+        raise RetireError("留痕文件名连续冲突，没有写入")

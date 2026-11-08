@@ -20,10 +20,18 @@ PROJECT = "SW-2026-008"
 CREATED = NOW - timedelta(days=6)
 
 
-def _mission(root: Path, work_id: str, *, expired: bool = True, final: MissionState = MissionState.ACTIVE) -> str:
+def _mission(
+    root: Path,
+    work_id: str,
+    *,
+    expired: bool = True,
+    final: MissionState = MissionState.ACTIVE,
+    suffix: str = "",
+    activate: bool = True,
+) -> str:
     """A Mission rooted at ``work_id``, created 6 days ago; by NOW its authority has (by default) expired."""
 
-    mission_id = f"MISSION-{work_id}"
+    mission_id = f"MISSION-{work_id}{suffix}"
     authority = AuthorityEnvelope(
         envelope_id="AUTH-RETIRE-1",
         subject_project_id=PROJECT,
@@ -53,7 +61,7 @@ def _mission(root: Path, work_id: str, *, expired: bool = True, final: MissionSt
         idempotency_key=f"create-{mission_id}",
         root_work_id=work_id,
     )
-    for state in (MissionState.AWAITING_APPROVAL, MissionState.ACTIVE):
+    for state in (MissionState.AWAITING_APPROVAL, MissionState.ACTIVE) if activate else (MissionState.AWAITING_APPROVAL,):
         mission = service.transition(
             mission_id=mission_id,
             expected_version=mission.version,
@@ -86,7 +94,7 @@ def test_dry_run_lists_the_leftover_and_its_mission_and_writes_nothing(tmp_path:
     _leftover(tmp_path, "WORK-OLD", timedelta(days=3))
     mission_id = _mission(tmp_path, "WORK-OLD")
     plan = _service(tmp_path).plan(PROJECT)
-    assert [(i.work_id, i.mission_id, i.blocked_reason) for i in plan.items] == [("WORK-OLD", mission_id, "")]
+    assert [(i.work_id, i.mission_ids, i.blocked_reason) for i in plan.items] == [("WORK-OLD", (mission_id,), "")]
     assert _states(tmp_path, "WORK-OLD", mission_id) == (WorkState.BLOCKED, MissionState.ACTIVE)
     assert not (tmp_path / ".auto-pm" / "reports" / "retire").exists()
 
@@ -113,7 +121,7 @@ def test_a_leftover_without_a_mission_is_retired_alone(tmp_path: Path) -> None:
     _workspace(tmp_path)
     _leftover(tmp_path, "WORK-OLD", timedelta(days=3))
     results, _ = _service(tmp_path).apply(PROJECT, ["WORK-OLD"])
-    assert [(r.outcome, r.mission_id) for r in results] == [("retired", "")]
+    assert [(r.outcome, r.mission_ids) for r in results] == [("retired", ())]
     assert ContinuityStore(tmp_path).get_work("WORK-OLD").state is WorkState.CANCELLED
 
 
@@ -169,3 +177,46 @@ def test_a_committed_pin_is_required_for_apply(tmp_path: Path, monkeypatch: pyte
     assert ContinuityStore(tmp_path).get_work("WORK-OLD").state is WorkState.BLOCKED
     results, _ = _service(tmp_path).apply(PROJECT, [], approval_pin="Retire4815162342x")
     assert results[0].outcome == "retired"
+
+
+def test_every_open_mission_under_the_work_is_listed_and_cancelled(tmp_path: Path) -> None:
+    """D-135: the ledger lets one Work root several open Missions; none may be left behind as an orphan."""
+
+    _workspace(tmp_path)
+    _leftover(tmp_path, "WORK-OLD", timedelta(days=3))
+    active = _mission(tmp_path, "WORK-OLD")
+    waiting = _mission(tmp_path, "WORK-OLD", suffix="-B", activate=False)
+    plan = _service(tmp_path).plan(PROJECT)
+    assert sorted(plan.items[0].mission_ids) == sorted([active, waiting])
+    results, _ = _service(tmp_path).apply(PROJECT, [])
+    assert [r.outcome for r in results] == ["retired"] and sorted(results[0].mission_ids) == sorted([active, waiting])
+    store = ContinuityStore(tmp_path)
+    assert store.get_mission(active).state is MissionState.CANCELLED
+    assert store.get_mission(waiting).state is MissionState.CANCELLED
+    assert store.get_work("WORK-OLD").state is WorkState.CANCELLED
+
+
+def test_one_mission_waiting_for_the_users_verdict_keeps_the_whole_card_untouched(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _leftover(tmp_path, "WORK-OLD", timedelta(days=3))
+    pending = _mission(tmp_path, "WORK-OLD", expired=False, final=MissionState.ACCEPTANCE_PENDING)
+    other = _mission(tmp_path, "WORK-OLD", suffix="-B", activate=False)
+    results, _ = _service(tmp_path).apply(PROJECT, [])
+    assert [r.outcome for r in results] == ["skipped"]
+    store = ContinuityStore(tmp_path)
+    assert store.get_mission(pending).state is MissionState.ACCEPTANCE_PENDING
+    assert store.get_mission(other).state is MissionState.AWAITING_APPROVAL
+    assert store.get_work("WORK-OLD").state is WorkState.BLOCKED
+
+
+def test_two_applies_in_the_same_instant_keep_both_traces(tmp_path: Path) -> None:
+    """D-134: the trace name used to be to-the-second, so the second apply overwrote the first."""
+
+    _workspace(tmp_path)
+    _leftover(tmp_path, "WORK-A", timedelta(days=3))
+    _leftover(tmp_path, "WORK-B", timedelta(days=3))
+    _, first = _service(tmp_path).apply(PROJECT, ["WORK-A"])
+    _, second = _service(tmp_path).apply(PROJECT, ["WORK-B"])
+    assert first is not None and second is not None and first != second
+    assert json.loads(first.read_text(encoding="utf-8"))["results"][0]["work_id"] == "WORK-A"
+    assert json.loads(second.read_text(encoding="utf-8"))["results"][0]["work_id"] == "WORK-B"
