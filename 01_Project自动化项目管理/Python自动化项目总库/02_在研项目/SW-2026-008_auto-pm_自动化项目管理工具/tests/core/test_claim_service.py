@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from auto_pm.application.core.claim_service import ClaimError, ClaimService
+from auto_pm.application.core.claim_service import Claim, ClaimError, ClaimService
 from tests.git_support import git_do, git_out
 
 IDENTITY = ("user.email=t@example.invalid", "user.name=tester")
@@ -669,3 +669,22 @@ def test_d34_paths_are_added_later_to_the_reserved_number(pair: Pair) -> None:
 def test_d34_open_without_paths_is_still_refused(pair: Pair) -> None:
     with pytest.raises(ClaimError, match="必须写明要改的路径"):
         pair.laptop.open("auto", paths=[], goal="x", owner="claude", machine="laptop")
+
+
+def test_d34_the_loser_of_an_auto_race_takes_the_next_number_instead_of_failing(pair: Pair) -> None:
+    """The cloud listed before the laptop pushed 242: its first push is refused, the retry re-reads and gets 243."""
+
+    pair.laptop.reserve_number(goal="先到的", owner="claude", machine="laptop")
+    real = pair.cloud.all_claims
+    calls = {"n": 0}
+
+    def stale_once(**kwargs: object) -> list[Claim]:
+        calls["n"] += 1
+        return [] if calls["n"] == 1 else real(**kwargs)  # type: ignore[arg-type]
+
+    pair.cloud.all_claims = stale_once  # type: ignore[method-assign]  # first look is from before the laptop's push
+
+    loser = pair.cloud.reserve_number(goal="后到的", owner="trae", machine="cloud")
+
+    assert loser.card == "243", "重试要重读占位表，换到下一个号，而不是报输了"
+    assert calls["n"] >= 2
