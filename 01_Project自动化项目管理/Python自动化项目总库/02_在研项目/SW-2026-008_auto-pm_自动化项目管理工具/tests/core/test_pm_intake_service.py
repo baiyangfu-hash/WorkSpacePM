@@ -225,7 +225,7 @@ def test_audit_f06_file_evidence_requires_a_provable_regular_file(
                 desk.propose(ticket=desk.ticket(evidence=evidence))
         assert desk.sql("SELECT * FROM events ORDER BY rowid") == before
         assert desk.service.list_items(PYTHON_PROJECT) == ()
-        assert desk.tables().isdisjoint(INTAKE_TABLES)
+        assert desk.sql("SELECT COUNT(*) FROM intake_items") == [(0,)]  # the tables exist from initialize (073); a refusal stores no row
         ordinary = desk.propose(ticket=desk.ticket(evidence=("file:README.md",)))
         assert ordinary.ticket.evidence == ("file:README.md",)
         after = desk.sql("SELECT * FROM events ORDER BY rowid")
@@ -433,16 +433,20 @@ def test_sv08_an_uninitialised_store_is_refused_and_never_gains_inbox_tables(tmp
         assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")} == {"unrelated"}
 
 
-def test_sv09_the_inbox_tables_appear_with_the_first_write_and_reads_never_create_them(desk: Desk) -> None:
-    assert desk.tables().isdisjoint(INTAKE_TABLES)
+def test_sv09_the_inbox_tables_exist_after_initialize_and_an_old_ledger_without_them_is_only_filled_by_a_write(desk: Desk) -> None:
+    assert INTAKE_TABLES <= desk.tables()  # 073: the base DDL creates them
+    with closing(sqlite3.connect(desk.root / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute("DROP TABLE planning_draft_intake_bindings")
+        conn.execute("DROP TABLE intake_items")
+    assert desk.tables().isdisjoint(INTAKE_TABLES)  # what a ledger from before 073 looks like
     store = IntakeStore(desk.root)
     assert store.list_items(PYTHON_PROJECT) == () and store.summary(PYTHON_PROJECT).is_empty
     assert store.get_planning_classification("REQ-NONE") is None
     with pytest.raises(ContinuityStoreError, match="不存在"):
         store.get_item("INBOX-SW-2026-901-0001")
-    assert desk.tables().isdisjoint(INTAKE_TABLES)
+    assert desk.tables().isdisjoint(INTAKE_TABLES)  # reads never create them
     desk.propose()
-    assert INTAKE_TABLES <= desk.tables()
+    assert INTAKE_TABLES <= desk.tables()  # the first write still works on such a ledger
     ContinuityStore(desk.root).initialize("2026-10-05T01:00:00+00:00", "test")
     assert len(desk.service.list_items(PYTHON_PROJECT)) == 1
 

@@ -25,31 +25,13 @@ from auto_pm.contracts.intake import (
     TriageTicket,
 )
 from auto_pm.contracts.pm_facade import PlanningScopeCard
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    INTAKE_BINDINGS_DDL,
+    INTAKE_ITEMS_DDL,
+    ContinuityStore,
+    ContinuityStoreError,
+)
 
-_INTAKE_ITEMS_DDL = """
-CREATE TABLE IF NOT EXISTS intake_items (
-    item_id TEXT PRIMARY KEY,
-    request_id TEXT NOT NULL UNIQUE,
-    project_id TEXT NOT NULL,
-    seq INTEGER NOT NULL CHECK (seq >= 1),
-    title_key TEXT NOT NULL,
-    status TEXT NOT NULL,
-    ticket_hash TEXT NOT NULL,
-    item_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (project_id, seq)
-)
-"""
-_INTAKE_BINDINGS_DDL = """
-CREATE TABLE IF NOT EXISTS planning_draft_intake_bindings (
-    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
-    classification_json TEXT NOT NULL,
-    item_id TEXT UNIQUE REFERENCES intake_items(item_id),
-    created_at TEXT NOT NULL
-)
-"""
 _QUEUE_LIMIT = 5
 
 
@@ -67,8 +49,8 @@ class IntakeStore(ContinuityStore):
         with self._transaction() as conn:
             if not self._schema_versions(conn):
                 raise ContinuityStoreError("Continuity Store 尚未初始化，拒绝创建收件箱表")
-            conn.execute(_INTAKE_ITEMS_DDL)
-            conn.execute(_INTAKE_BINDINGS_DDL)
+            conn.execute(INTAKE_ITEMS_DDL)
+            conn.execute(INTAKE_BINDINGS_DDL)
             yield conn
 
     @staticmethod
