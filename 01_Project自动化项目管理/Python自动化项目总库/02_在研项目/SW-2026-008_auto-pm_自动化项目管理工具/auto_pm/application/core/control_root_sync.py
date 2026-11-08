@@ -157,7 +157,11 @@ class SyncReport:
         if self.drift_in_scope and not (self.behind or self.dirty_in_scope):
             out.append(f"控制根里归属范围内有 {len(self.drift_in_scope)} 个文件和 origin/main 不一致：" + _shown(self.drift_in_scope) + "。")
         if self.blocks_run_start:
-            out.append("按现在的状态，之后 `run start` 一定会被拒（控制根范围内的文件与开工起点不一致）；先按上面处理，再批准或开工。")
+            # D-104: this report compares the whole project scope; `run start` compares only the Run's own owned paths.
+            out.append(
+                "之后 `run start` 会不会被拒，看开工要改的范围：范围里含上面这些文件就会被拒（与开工起点不一致）；"
+                "不在开工范围内的未提交文件（例如 `pm plan` 刚生成的变更单）不影响开工。含的话先按上面处理，再批准或开工。"
+            )
         out.extend(self._holder_lines())
         return tuple(out)
 
