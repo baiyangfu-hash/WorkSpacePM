@@ -148,6 +148,7 @@ class DecisionService:
         runtime_capability: RuntimeDecisionCapability | None = None,
         planning_plan_hash: str = "",
         approval_evidence_ref: str = "",
+        allow_empty_files: bool = True,
         planning_request_id: str = "",
         planning_execution_grant: dict[str, object] | None = None,
     ) -> DecisionPackageDTO:
@@ -282,6 +283,15 @@ class DecisionService:
                                 effective_files.append(rf_clean)
         # 去重并保持顺序
         effective_files = list(dict.fromkeys(effective_files))
+        if not effective_files and not allow_empty_files:
+            # D-97: an empty list means "no file limit" downstream; that must be said out loud, never reached by a blank cell.
+            # The service default stays permissive (planning and legacy flows build their own lists); the ``decision create``
+            # command passes ``False`` unless the operator adds --allow-no-files.
+            raise DecisionValidationError(
+                f"变更单 {change_id} 的批准文件清单为空：§5 涉及文件/交付物是空的或仍是“（待填写）”。"
+                "用 `change edit <单号> --file <路径>`（可重复）补全，或 `decision create --file <路径>` 逐条指定；"
+                "确实没有文件范围才加 --allow-no-files"
+            )
 
         now_iso = datetime.now(UTC).isoformat()
 
