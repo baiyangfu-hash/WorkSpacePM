@@ -71,6 +71,7 @@ from auto_pm.contracts.pm_facade import (
     PlanningDraft,
     PlanningDraftOverview,
     PlanningExecutionGrant,
+    PlanningRequestCheck,
     PlanningScopeCard,
     PmConfirmationCard,
     PmConfirmationKind,
@@ -463,7 +464,40 @@ class PmFacadeService:
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
-    def _prepare_planning_scope_card(
+    def check_planning_request(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None,
+        classification: IntakeClassification | None,
+        intake_item_id: str = "",
+    ) -> PlanningRequestCheck:
+        """Everything ``plan`` checks before it writes, and nothing else (D-05 ``pm plan --dry-run``).
+
+        Reads the ledger and the inbox, writes nothing: no draft, no CHG number, no change file.  A request ``plan`` would refuse
+        raises here with the same message.
+        """
+
+        scope_paths, execution_grant, filing, item_id = self._validate_planning_request(
+            intent,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+            classification=classification,
+            intake_item_id=intake_item_id,
+        )
+        return PlanningRequestCheck(
+            scope_paths=scope_paths,
+            declared_dirty_paths=execution_grant.declared_dirty_paths if execution_grant is not None else (),
+            classification=filing,
+            intake_item_id=item_id,
+        )
+
+    def _validate_planning_request(
         self,
         intent: PmIntent,
         *,
@@ -473,8 +507,9 @@ class PmFacadeService:
         execution_grant: PlanningExecutionGrant | None,
         classification: IntakeClassification | None,
         intake_item_id: str,
-    ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
-        """Run the real contract's pure validation before reserving files or durable identities."""
+    ) -> tuple[tuple[str, ...], PlanningExecutionGrant | None, IntakeClassification | None, str]:
+        """The pure and read-only part of preparing a card: contract validation, classification, the seven-field checklist."""
+
         scope_paths, execution_grant = canonical_plan_paths(scope_paths, execution_grant)
         try:
             draft = PlanningDraft.from_intent(intent)
@@ -502,6 +537,29 @@ class PmFacadeService:
             scope_paths=scope_paths,
             risks=risks,
             acceptance_criteria=intent.acceptance_criteria,
+            intake_item_id=intake_item_id,
+        )
+        return scope_paths, execution_grant, filing, intake_item_id
+
+    def _prepare_planning_scope_card(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None,
+        classification: IntakeClassification | None,
+        intake_item_id: str,
+    ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
+        """Run the real contract's pure validation before reserving files or durable identities."""
+        scope_paths, execution_grant, filing, intake_item_id = self._validate_planning_request(
+            intent,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+            classification=classification,
             intake_item_id=intake_item_id,
         )
 
