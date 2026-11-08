@@ -59,6 +59,8 @@ class ReleaseTrialService:
         relative = data.get("release_path") if isinstance(data, dict) else None
         if not isinstance(release_id, str) or not isinstance(relative, str) or not release_id or not relative:
             raise ReleaseTrialError(f"{pointer} 里没有可用的 release_id / release_path")
+        if release_id != Path(release_id).name or "\\" in release_id or release_id in {".", ".."}:
+            raise ReleaseTrialError(f"release_id 不能含路径分隔符：{release_id}")
         if relative != Path(relative).name or relative in {".", ".."}:
             raise ReleaseTrialError(f"release_path 必须是 releases/ 下的单层目录名：{relative}")
         releases = self._root / RELEASES_RELATIVE
@@ -74,6 +76,9 @@ class ReleaseTrialService:
             raise ReleaseTrialError(f"试验副本不能放在工作区里面（{base}）；请换一个工作区外的目录")
         if not base.is_dir():
             raise ReleaseTrialError(f"目录不存在：{base}")
+        links = [item for item in source.rglob("*") if item.is_symlink()]
+        if links:
+            raise ReleaseTrialError(f"发布里有符号链接，拷贝会把它展开成实体文件，已拒绝：{links[0]}")
         destination = Path(tempfile.mkdtemp(prefix=f"auto-pm-trial-{release_id}-", dir=base))
         target = destination / "release"
         try:
