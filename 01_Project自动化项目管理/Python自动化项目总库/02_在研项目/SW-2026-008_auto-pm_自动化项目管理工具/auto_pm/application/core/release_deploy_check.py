@@ -85,7 +85,7 @@ def _git(root: Path, *args: str) -> str | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: git 输出只用来判断和展示，坏字节不该让只读预检崩溃
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
         )
@@ -254,7 +254,8 @@ def exact_tree_ok(base: Path, release_id: str) -> tuple[bool, str]:
     try:
         done = subprocess.run(  # noqa: S603 - fixed argv, no shell
             [sys.executable, "-B", "-c", code, str(base), release_id],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=EXACT_TREE_TIMEOUT_SECONDS, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",  # lenient-decode: 子进程输出只用来展示失败原因
+            timeout=EXACT_TREE_TIMEOUT_SECONDS, check=False,
         )
     except (OSError, subprocess.SubprocessError) as error:
         return False, str(error)
