@@ -955,7 +955,8 @@ def test_missing_evidence_refuses_the_closure_and_never_reports_completed(
             "(SELECT state FROM mission_items WHERE mission_id=?)",
             (_CLOSE_WORK, _CLOSE_MISSION),
         ).fetchone()
-    assert tuple(states) == ("IN_PROGRESS", "ACCEPTED")
+    # D-109 layer 3: the failed Run no longer leaves its Work IN_PROGRESS with nobody on it; the same transaction blocks it.
+    assert tuple(states) == ("BLOCKED", "ACCEPTED")
 
 
 def test_work_that_is_not_in_progress_refuses_the_closure(

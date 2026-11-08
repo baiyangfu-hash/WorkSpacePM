@@ -1,0 +1,24 @@
+# CST-SKILL-001: 技能变更必须通过 CHG 流程
+#
+# .trae/skills/ 下的技能文件是 AI 协作行为的配置文件，属于 auto-pm 生态的一部分。
+# 修改技能文件必须创建 CHG 变更单，挂靠在 SW-2026-008 项目下，使用 SCPT 域。
+#
+# 变更单模板参考: CHG-SCPT-2026-139（技能与驾驶舱上下文桥接）
+
+id: "CST-SKILL-001"
+name: "技能变更必须通过 CHG 流程"
+description: "修改 .trae/skills/ 下的技能文件必须先创建 CHG-SCPT 变更单，挂靠在 SW-2026-008 项目下"
+type: workflow
+severity: warning
+scope:
+  patterns:
+    - ".trae/skills/**/SKILL.md"
+    - ".trae/skills/**/refs/*.md"
+    - ".trae/skills/README.md"
+  exclude:
+    - ".trae/skills/**/__pycache__/**"
+rules:
+  - type: "skill_change_requires_chg"
+    description: "技能文件变更必须关联 CHG-SCPT 变更单，使用 auto-pm change create --pid SW-2026-008 --domain SCPT"
+    cli_command: "auto-pm change create --pid SW-2026-008 --domain SCPT"
+auto_fix: false
