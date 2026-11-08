@@ -90,6 +90,7 @@ class Claim:
     status: str = "active"
     expires_at: str = ""
     renewed_at: str = ""  # the last *explicit* renewal; the keep-alive never writes it, so it cannot extend its own cap
+    paths_added_at: str = ""  # the last time ``add_paths`` widened the claim; ``claimed_at`` and the lease stay as they were (D-125)
 
     @property
     def free(self) -> bool:
@@ -218,6 +219,7 @@ class ClaimService:
             status=str(data.get("status", "active")),
             expires_at=str(data.get("expires_at", "")),
             renewed_at=str(data.get("renewed_at", "")),
+            paths_added_at=str(data.get("paths_added_at", "")),
         )
 
     # ── claim ─────────────────────────────────────────────────────────
@@ -367,6 +369,42 @@ class ClaimService:
         payload["renewed_at"] = now.isoformat(timespec="seconds")
         return self._push_on_top(claim, payload, "续租没推成功")
 
+    def add_paths(self, card: str, *, owner: str, paths: Sequence[str]) -> Claim:
+        """The holder widens the claim to more paths (D-125): the same overlap rule as ``open``, ``claimed_at`` and the lease unchanged.
+
+        Without it a card that turns out to need one more file has to be released and opened again; that resets ``claimed_at``,
+        so every commit already made falls before the claim and the gate refuses the PR.  Known limit: a path added now was not
+        held when an earlier commit touched it, and the gate cannot see that.
+        """
+
+        if not paths:
+            raise ClaimError("追加路径必须写明路径（--paths）")
+        existing = self.all_claims()
+        claim = next((item for item in existing if item.card == card), None)
+        if claim is None:
+            raise ClaimError(f"没有叫 {card} 的占位")
+        problem = holder_problem(claim, owner, self._machine)
+        if problem:
+            raise ClaimError(f"{problem}；只有持有者能追加路径")
+        if claim.free:
+            raise ClaimError(f"卡 {card} 的占位已放下、被收回或已到期，不能追加路径；重新 `claim open {card} --paths … --goal …`")
+        new = [path for path in dict.fromkeys(paths) if not authority_path_covered(path, claim.paths)]
+        if not new:
+            return claim  # everything is already inside the claim
+        for other in existing:
+            if other.card == card or other.free:
+                continue
+            clash = claim_overlap(new, other.paths)
+            if clash:
+                raise ClaimError(
+                    f"要追加的路径和别人的占位重叠：{'、'.join(clash[:5])} ↔ {other.label()}。"
+                    "两边不能同时改同一批文件；等对方放下，或请用户决定"
+                )
+        payload = self._payload(claim, "active")
+        payload["paths"] = [*claim.paths, *new]
+        payload["paths_added_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+        return self._push_on_top(claim, payload, "追加路径没推成功")
+
     def renew_held(self, owner: str, *, paths: Sequence[str]) -> list[Claim]:
         """Keep alive the live claims ``owner`` holds **that cover ``paths``** (the checkpointing Run's owned paths), as a side effect
         of work the agent does anyway (D-39 follow-up).
@@ -464,6 +502,7 @@ class ClaimService:
             "claimed_at": claim.claimed_at,
             "expires_at": claim.expires_at,
             **({"renewed_at": claim.renewed_at} if claim.renewed_at else {}),
+            **({"paths_added_at": claim.paths_added_at} if claim.paths_added_at else {}),
         }
 
     def _push_on_top(self, claim: Claim, payload: dict[str, object], failure: str, *, timeout: float | None = None) -> Claim:

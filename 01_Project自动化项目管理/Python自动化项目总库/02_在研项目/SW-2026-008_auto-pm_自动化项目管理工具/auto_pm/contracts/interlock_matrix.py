@@ -134,6 +134,7 @@ COMMANDS: dict[str, CommandSpec] = {
     "claim open": CommandSpec(CommandKind.NORMAL, (), (), "pushes claims/<card> to origin; does not touch the ledger"),
     "claim release": CommandSpec(CommandKind.NORMAL, (), (), "pushes a released marker onto the holder's own claim; deletes nothing"),
     "claim renew": CommandSpec(CommandKind.NORMAL, (), (), "pushes a renewed lease onto the holder's own claim; deletes nothing"),
+    "claim add-paths": CommandSpec(CommandKind.NORMAL, (), (), "pushes the widened path list onto the holder's own claim; claimed_at and the lease stay; deletes nothing"),
     "claim reclaim": CommandSpec(CommandKind.NORMAL, (), (), "pushes a reclaimed marker onto a silent holder's claim, only on the user's word; deletes nothing"),
     "gate plan": CommandSpec(CommandKind.READ_ONLY, (), (), "prints the official gate groups; runs nothing"),
     "gate precheck": CommandSpec(CommandKind.READ_ONLY, (), (), "pre-push self check: ruff, mypy and the related tests; writes only its own temp logs, never the ledger or the worktree"),
