@@ -190,18 +190,40 @@ def switch(root: Path, new: str, old: str, backup: Path, identity: Identity) -> 
     return {"active": new, "previous": old, "backup": str(backup), "identity": seen}
 
 
+def _check_backup_sums(backup: Path) -> None:
+    """The backup's ``SHA256SUMS`` must list exactly the three backup files, once each, and every hash must match.
+
+    An empty or short file used to pass (nothing to check), which let a doctored pointer through; the old script's
+    ``sha256sum -c`` failed on a file with no checksum lines.
+    """
+
+    sums = backup / "SHA256SUMS"
+    if not sums.is_file():
+        raise ReleaseOpsError(f"备份里没有 SHA256SUMS：{backup}")
+    try:
+        lines = sums.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ReleaseOpsError(f"读不出备份的 SHA256SUMS：{error}") from error
+    listed: dict[str, str] = {}
+    for line in lines:
+        digest, _, name = line.partition("  ")
+        if not digest or not name or name in listed:
+            raise ReleaseOpsError(f"备份的 SHA256SUMS 有坏行或重复行：{line!r}")
+        listed[name] = digest
+    if set(listed) != set(BACKUP_FILES):
+        raise ReleaseOpsError(f"备份的 SHA256SUMS 必须正好列出 {', '.join(BACKUP_FILES)}，实际是：{', '.join(sorted(listed)) or '空'}")
+    for name, digest in listed.items():
+        path = backup / name
+        if not path.is_file() or _sha256(path) != digest:
+            raise ReleaseOpsError(f"备份文件被改过或缺失：{name}")
+
+
 def rollback(root: Path, backup: Path, identity: Identity) -> dict[str, Any]:
     """Restore both pointers from ``backup`` (after its checksum check).  The manifest and the database stay as they are."""
 
     container = container_of(root)
     backup = Path(backup)
-    sums = backup / "SHA256SUMS"
-    if not sums.is_file():
-        raise ReleaseOpsError(f"备份里没有 SHA256SUMS：{backup}")
-    for line in sums.read_text(encoding="utf-8").splitlines():
-        digest, _, name = line.partition("  ")
-        if not name or _sha256(backup / name) != digest:
-            raise ReleaseOpsError(f"备份文件被改过或缺失：{name or line}")
+    _check_backup_sums(backup)
     target = pointer_release(backup, "active_release.json")
     for slot in POINTERS:
         shutil.copyfile(backup / slot, container / (slot + ".tmp"))

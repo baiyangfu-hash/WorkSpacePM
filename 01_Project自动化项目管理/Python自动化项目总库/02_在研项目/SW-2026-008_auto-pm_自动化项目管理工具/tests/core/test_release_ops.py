@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,8 @@ def project_version(repo, commit, project_root): return "1.3.3"
 def build(repo, commit, project_root, output, release_id):
     output.mkdir(parents=True)
     (output / "payload.txt").write_text("payload", encoding="utf-8")
+    if os.environ.get("FAKE_BUILD") == "broken_tree":
+        (output / "BROKEN").write_text("", encoding="utf-8")  # the builder's own verify passes, the launcher's exact-tree check does not
     if os.environ.get("FAKE_BUILD") == "crash":
         raise RuntimeError("builder crashed after creating the folder")
     return Result({"payload.txt": "sha"})
@@ -245,3 +248,138 @@ def test_a_rollback_whose_identity_is_not_the_old_release_is_an_error(world: Wor
 
     with pytest.raises(ops.ReleaseOpsError, match="回退后运行身份"):
         ops.rollback(world.root, backup, lambda _root: {"configured_release_id": new, "effective_release_id": new, "runtime_fallback_reason": ""})
+
+
+# --- audit round 1 (#671): the empty-checksum hole and the surviving mutants ---
+
+
+def _switched(world: World, tmp_path: Path) -> tuple[str, Path]:
+    new = _built(world)
+    backup = tmp_path / "backup"
+    ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
+    return new, backup
+
+
+def _doctor_active_pointer(backup: Path) -> None:
+    (backup / "active_release.json").write_text(json.dumps({"release_id": "9.9.9-evil"}), encoding="utf-8")
+
+
+@pytest.mark.parametrize("damage", ["empty", "blank_line", "missing_one", "extra_name", "duplicate", "listed_file_gone", "no_digest"])
+def test_rollback_needs_a_checksum_file_that_lists_exactly_the_three_backup_files(world: World, tmp_path: Path, damage: str) -> None:
+    _new, backup = _switched(world, tmp_path)
+    switched = world.pointers()
+    if damage != "duplicate":  # a duplicate line is refused for being a duplicate, so nothing else may be wrong in that case
+        _doctor_active_pointer(backup)  # with a working check this alone is caught; the damaged list must not hide it
+    lines = (backup / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    text = {
+        "empty": "",
+        "blank_line": "\n",
+        "missing_one": "\n".join(lines[:-1]) + "\n",
+        "extra_name": "\n".join(lines) + "\n" + "0" * 64 + "  other.json\n",
+        "duplicate": "\n".join(lines + lines[:1]) + "\n",
+        "listed_file_gone": "\n".join(lines) + "\n",
+        "no_digest": "  active_release.json\n",
+    }[damage]
+    (backup / "SHA256SUMS").write_text(text, encoding="utf-8")
+    if damage == "listed_file_gone":
+        (backup / "deployment_manifest.json").unlink()
+
+    with pytest.raises(ops.ReleaseOpsError):
+        ops.rollback(world.root, backup, world.identity)
+
+    assert world.pointers() == switched, "a refused rollback moves nothing"
+
+
+def test_an_emptied_checksum_file_is_refused_even_when_nothing_else_was_touched(world: World, tmp_path: Path) -> None:
+    _new, backup = _switched(world, tmp_path)
+    (backup / "SHA256SUMS").write_text("", encoding="utf-8")
+
+    with pytest.raises(ops.ReleaseOpsError, match="必须正好列出"):
+        ops.rollback(world.root, backup, world.identity)
+
+
+def test_a_build_whose_own_verify_passes_but_whose_exact_tree_check_fails_is_undone(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launcher's exact-tree check at the end of the build is a separate gate from the builder's own verify."""
+
+    monkeypatch.setenv("FAKE_BUILD", "broken_tree")
+    before = world.manifest_bytes()
+
+    with pytest.raises(ops.ReleaseOpsError, match="逐文件校验没过"):
+        ops.build(world.root, world.root, world.commit)
+
+    assert not (world.container / "releases" / world.new_id).exists() and world.manifest_bytes() == before
+
+
+def test_a_pointer_that_does_not_read_back_as_written_is_an_error(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    new = _built(world)
+    real = ops._write_pointer
+
+    def lying(container: Path, slot: str, release: str) -> None:
+        real(container, slot, "9.9.9-evil" if slot == "active_release.json" else release)
+
+    monkeypatch.setattr(ops, "_write_pointer", lying)
+
+    with pytest.raises(ops.ReleaseOpsError, match="读回"):
+        ops.switch(world.root, new, "1.3.2-aaaaaaa", tmp_path / "backup", world.identity)
+
+
+@pytest.mark.parametrize("seen", ["fallback", "effective_differs", "configured_differs"])
+def test_every_part_of_the_runtime_identity_must_name_the_new_release(world: World, tmp_path: Path, seen: str) -> None:
+    new = _built(world)
+    identity = {
+        "fallback": {"configured_release_id": new, "effective_release_id": new, "runtime_fallback_reason": "loaded_package_outside_runtime_releases"},
+        "effective_differs": {"configured_release_id": new, "effective_release_id": "1.3.2-aaaaaaa", "runtime_fallback_reason": ""},
+        "configured_differs": {"configured_release_id": "1.3.2-aaaaaaa", "effective_release_id": new, "runtime_fallback_reason": ""},
+    }[seen]
+
+    with pytest.raises(ops.ReleaseOpsError, match="运行身份"):
+        ops.switch(world.root, new, "1.3.2-aaaaaaa", tmp_path / "backup", lambda _root: identity)
+
+
+@pytest.mark.parametrize("seen", ["fallback", "effective_differs"])
+def test_the_runtime_identity_after_a_rollback_is_checked_the_same_way(world: World, tmp_path: Path, seen: str) -> None:
+    _new, backup = _switched(world, tmp_path)
+    old = "1.3.2-aaaaaaa"
+    identity = {
+        "fallback": {"configured_release_id": old, "effective_release_id": old, "runtime_fallback_reason": "loaded_package_file_unavailable"},
+        "effective_differs": {"configured_release_id": old, "effective_release_id": "1.3.1-bbbbbbb", "runtime_fallback_reason": ""},
+    }[seen]
+
+    with pytest.raises(ops.ReleaseOpsError, match="回退后运行身份"):
+        ops.rollback(world.root, backup, lambda _root: identity)
+
+
+def test_rollback_leaves_a_manifest_that_changed_after_the_backup_exactly_as_it_is(world: World, tmp_path: Path) -> None:
+    """Pins "the manifest is not rolled back": here the backup's manifest and the current one differ."""
+
+    _new, backup = _switched(world, tmp_path)
+    manifest = json.loads(world.manifest_bytes())
+    manifest["releases"]["1.3.4-later00"] = {}
+    (world.container / "deployment_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    current = world.manifest_bytes()
+
+    ops.rollback(world.root, backup, world.identity)
+
+    assert world.manifest_bytes() == current
+
+
+def test_the_loaded_builder_module_is_not_left_in_sys_modules_after_a_build_or_a_failed_build(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAKE_BUILD", "crash")
+    with pytest.raises(RuntimeError):
+        ops.build(world.root, world.root, world.commit)
+    assert "pmf_build" not in sys.modules
+
+    monkeypatch.delenv("FAKE_BUILD")
+    ops.build(world.root, world.root, world.commit)
+    assert "pmf_build" not in sys.modules
+
+
+def test_the_release_is_built_by_the_frozen_commits_own_builder_not_the_working_tree_copy(world: World) -> None:
+    """D02/D04: the working tree's ``pmf_build.py`` is changed after the commit; the commit's copy must be the one that runs."""
+
+    builder = world.root / PROJECT_DIR / "scripts" / "pmf_build.py"
+    builder.write_text(FAKE_BUILDER.replace('"payload"', '"FROM-THE-WORKING-TREE"'), encoding="utf-8")
+
+    ops.build(world.root, world.root, world.commit)
+
+    assert (world.container / "releases" / world.new_id / "payload.txt").read_text(encoding="utf-8") == "payload"
