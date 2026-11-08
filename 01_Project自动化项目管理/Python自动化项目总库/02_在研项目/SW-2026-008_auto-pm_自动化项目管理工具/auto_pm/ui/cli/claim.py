@@ -7,21 +7,70 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
+from pathlib import Path
 
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import caller_agent
+from auto_pm.application.core.agent_worktree_service import caller_agent, caller_alias
 from auto_pm.application.core.claim_service import ClaimError, ClaimService
 
 
-def _service(ctx: click.Context) -> ClaimService:
+def _root(ctx: click.Context) -> str:
     app_ctx: AppContext = ctx.obj
-    return ClaimService(app_ctx.control_root or app_ctx.workspace_root or os.getcwd())
+    return app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
+
+
+def _service(ctx: click.Context) -> ClaimService:
+    return ClaimService(_root(ctx))
+
+
+def normalise_paths(root: Path, cwd: Path, paths: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Claim paths are repository-root paths (D-115); a path written relative to the folder the agent stands in is lifted to one.
+
+    ``pr_overlap_check`` compares a PR's changed files, which are repository-root paths, against the claim: ``auto_pm/x.py`` typed
+    from inside the project folder would never cover ``<project folder>/auto_pm/x.py``.  Returns (paths, notes about what was
+    rewritten); an absolute path inside the repository becomes relative to it, one outside it is refused by the caller.
+    """
+
+    root = root.resolve()
+    cwd = cwd.resolve()
+    result: list[str] = []
+    notes: list[str] = []
+    for raw in paths:
+        text = raw.strip().replace("\\", "/")
+        path = Path(text)
+        if path.is_absolute():
+            try:
+                fixed = path.resolve().relative_to(root).as_posix()
+            except ValueError:
+                raise click.UsageError(f"路径 {raw} 在仓库 {root} 之外；领卡只认仓库内的路径") from None
+            notes.append(f"{raw} → {fixed}")
+            result.append(fixed)
+            continue
+        text = text.removeprefix("./")
+        first = text.split("/", 1)[0]
+        lifted = ""
+        if first and not (root / first).exists() and cwd != root and (cwd / first).exists():
+            try:
+                lifted = (cwd / text).relative_to(root).as_posix()
+            except ValueError:
+                lifted = ""
+        if lifted:
+            notes.append(f"{raw} → {lifted}")
+        result.append(lifted or text)
+    return result, notes
 
 
 def _owner(explicit: str) -> str:
-    return explicit.strip() or caller_agent().strip("?") or "user"
+    """Default owner is this conversation's alias (``claude-a119dc``), so two conversations of one agent never share a claim (D-112).
+
+    No session id (or the user's own terminal) falls back to the bare agent name, as before.  A claim made before D-112 carries the
+    bare name; only an explicit ``--as claude`` can release or renew it.
+    """
+
+    return explicit.strip() or caller_alias() or caller_agent().strip("?") or "user"
 
 
 def _fail(error: ClaimError) -> None:
@@ -42,8 +91,11 @@ def claim_group() -> None:
 @click.pass_context
 def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str, owner: str) -> None:
     """领卡。CARD 写卡号，或写 auto 取下一个空号。"""
+    fixed, notes = normalise_paths(Path(_root(ctx)), Path.cwd(), paths)
+    for note in notes:
+        click.echo(f"路径已按仓库根补全：{note}", err=True)
     try:
-        claim = _service(ctx).open(card, paths=paths, goal=goal, owner=_owner(owner))
+        claim = _service(ctx).open(card, paths=fixed, goal=goal, owner=_owner(owner))
     except ClaimError as error:
         _fail(error)
         return
@@ -60,7 +112,11 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
         claims = _service(ctx).all_claims(fetch=not no_fetch)
     except ClaimError as error:
         click.echo(f"错误 {error}", err=True)
+        if not no_fetch:
+            click.echo("离线或连不上 GitHub 时，可加 --no-fetch 看本机上次抓到的占位（可能不是最新，不能当作没人占着）", err=True)
         raise SystemExit(2) from error
+    if no_fetch:
+        click.echo("（离线视图：只含本机上次抓取时的占位，可能不是最新；开卡、开 PR 前以联网结果为准）", err=True)
     if as_json:
         click.echo(json.dumps([claim.as_json() for claim in claims], ensure_ascii=False, indent=2))
         return
