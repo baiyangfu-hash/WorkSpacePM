@@ -33,6 +33,7 @@ from auto_pm.application.core.agent_worktree_service import (
     acts_for,
     base_agent,
     caller_agent,
+    caller_alias,
 )
 from auto_pm.application.core.claim_service import claim_refusal
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
@@ -194,9 +195,16 @@ class PrOpenService:
                 f"{agent} 没有登记的工位；先 `main.py worktree open {agent} {card}`"
             )
         if station.branch != branch:
+            own = caller_alias()
+            hint = (
+                f"；{agent} 是同名对话共用的工位，这一张卡请在本对话自己的工位 {own} 上做"
+                f"（main.py worktree open {own} {card}，再 pr open {own} {card}）"
+                if own and own != agent
+                else ""
+            )
             raise PrOpenRefusedError(
                 f"工位在分支 {station.branch or '(无)'}，应为 {branch}（前缀 {prefix} + 卡号 {card}）；"
-                "分支名不符，不开 PR"
+                f"分支名不符，不开 PR{hint}"
             )
         claim_problem = claim_refusal(self._root, card, agent)
         if claim_problem:

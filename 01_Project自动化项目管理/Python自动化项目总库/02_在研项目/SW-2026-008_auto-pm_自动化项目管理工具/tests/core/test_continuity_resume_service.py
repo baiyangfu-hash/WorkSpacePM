@@ -739,7 +739,7 @@ def test_multiple_nonterminal_runs_for_selected_work_fail_closed_without_guessin
     monkeypatch.setattr(
         service._store,
         "list_runs",
-        lambda work_id: (original_run, synthetic_run),
+        lambda work_id, include_terminal=False: (original_run, synthetic_run),
     )
     monkeypatch.setattr(
         service._store,
