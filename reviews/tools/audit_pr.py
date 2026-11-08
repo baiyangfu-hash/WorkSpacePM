@@ -280,7 +280,7 @@ ACTIONS_RUN_IN_URL = re.compile(r"/actions/runs/(\d+)")
 
 
 def newest_check_runs(runs: list[dict], check_runs: list[dict]) -> list[dict]:
-    """Keep only the newest check run per (workflow, app, job name) (D-71).
+    """Keep only the newest check run per (workflow, app, job name, head commit) (D-71).
 
     A check run belongs to a workflow through the Actions run id in its ``details_url``.  Same-named jobs of *different*
     workflows are different checks and all stay; a check run with no ``id`` or an unknown run is never merged with another.
@@ -296,7 +296,9 @@ def newest_check_runs(runs: list[dict], check_runs: list[dict]) -> list[dict]:
         if not isinstance(cid, int) or workflow is None:
             kept.append((index, c))
             continue
-        key = (workflow, (c.get("app") or {}).get("id"), c.get("name"))
+        # The head commit is part of the key: this script fetches check runs of both the head and the merge commit, and a
+        # re-run on another commit must not cover the result on this one.
+        key = (workflow, (c.get("app") or {}).get("id"), c.get("name"), c.get("head_sha"))
         if key not in newest or cid > newest[key][1]["id"]:
             newest[key] = (index, c)
     kept.extend(newest.values())
