@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from auto_pm.domain.change.change_service import ChangeService
+from auto_pm.domain.change.constants import TransitionGuardError
 from auto_pm.domain.change.status_journal import TABLE, journal_path
 
 from .test_abandon_flow import CHG, _file, _workspace
@@ -111,3 +112,37 @@ def test_another_field_edit_after_approval_keeps_the_approval(tmp_path: Path) ->
 
 def _journal_exists(workspace: str) -> bool:
     return journal_path(workspace).exists() and bool(_journal(workspace))
+
+
+# ── once the work has started the list is frozen (coordinator ruling): refuse, change nothing ─────────────────────
+
+
+@pytest.mark.parametrize("status", ["implementing", "pending_acceptance", "accepting", "completed", "closed", "archived"])
+def test_changing_the_list_after_work_started_is_refused_and_writes_nothing(tmp_path: Path, status: str) -> None:
+    workspace = _workspace_with_files(tmp_path, status)
+    before = _file(workspace).read_text(encoding="utf-8")
+
+    with pytest.raises(TransitionGuardError, match="实施中不能改文件清单.*另开变更单.*撤回重批"):
+        ChangeService(workspace).update_change_request(CHG, files=["a.py", "b.py", "c.py"])
+
+    assert _file(workspace).read_text(encoding="utf-8") == before
+    assert not _journal_exists(workspace)
+
+
+def test_writing_the_same_list_while_implementing_is_not_a_change(tmp_path: Path) -> None:
+    workspace = _workspace_with_files(tmp_path, "implementing")
+
+    ChangeService(workspace).update_change_request(CHG, files=["b.py", "a.py"])
+
+    assert _status(workspace) == "implementing"
+    assert not _journal_exists(workspace)
+    text = _file(workspace).read_text(encoding="utf-8")
+    assert "a.py" in text and "b.py" in text
+
+
+def test_other_fields_can_still_be_edited_while_implementing(tmp_path: Path) -> None:
+    workspace = _workspace_with_files(tmp_path, "implementing")
+
+    ChangeService(workspace).update_change_request(CHG, background="实施中补充背景")
+
+    assert _status(workspace) == "implementing"

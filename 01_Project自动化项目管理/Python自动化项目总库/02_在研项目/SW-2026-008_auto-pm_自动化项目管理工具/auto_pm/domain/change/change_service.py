@@ -101,6 +101,7 @@ _PROJECT_MONITOR_DIRS = (PG_MONITORING_DIR, "11_监控")
 
 # D-154: states in which the §5 file list is an approved scope, and where editing it sends the record
 _APPROVED_STATUSES = frozenset({"approved", "conditionally_approved"})
+_IN_PROGRESS_STATUSES = frozenset({"implementing", "pending_acceptance", "accepting", "completed", "closed", "archived"})
 _REVOKED_TO_STATUS = "under_review"
 _REVOKER = "系统(D-154)"
 
@@ -977,10 +978,17 @@ class ChangeService:
         # D-154: adding or removing files after approval widens (or narrows) what was approved; the old approval no longer
         # covers it, so the record goes back to review and says why.  Only the list's members count, not their order.
         revoke_reason = ""
-        if files_before is not None and status_before in _APPROVED_STATUSES and "files" in updated_fields:
+        if files_before is not None and status_before in (_APPROVED_STATUSES | _IN_PROGRESS_STATUSES) and "files" in updated_fields:
             files_after = self._editor.read_files(content)
             added = [item for item in files_after if item not in files_before]
             removed = [item for item in files_before if item not in files_after]
+            if (added or removed) and status_before in _IN_PROGRESS_STATUSES:
+                # Sending a record that is already being carried out back to review would rewind the work, and leaving it
+                # alone would let the scope grow unnoticed: refuse, nothing is written.
+                raise TransitionGuardError(
+                    f"变更单 {change_number} 状态为 {status_before}，实施中不能改文件清单，"
+                    "请另开变更单，或先显式撤回重批；没有写入任何内容"
+                )
             if added or removed:
                 revoke_reason = (
                     f"§5 涉及文件清单在批准后变更（增 {len(added)}：{_brief(added)}；减 {len(removed)}：{_brief(removed)}），"
