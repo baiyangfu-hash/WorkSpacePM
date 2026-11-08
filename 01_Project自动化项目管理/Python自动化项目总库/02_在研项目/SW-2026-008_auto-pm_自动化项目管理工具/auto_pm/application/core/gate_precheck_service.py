@@ -9,8 +9,11 @@ official gate (:func:`gate_run_service.child_environment`):
 3. the pytest files that belong to the change (see :func:`related_tests`).
 
 It is the quick check before a push, **not** the release gate: ``gate run`` stays the full pre-deploy gate.  It never writes the
-ledger or the worktree (no caches: ``--no-cache``, ``--cache-dir=/dev/null``, ``-p no:cacheprovider``, ``PYTHONDONTWRITEBYTECODE``);
-the step logs go to a temporary folder (or ``--out``).  A step whose tool is not installed is ``UNVERIFIED``, never a pass.
+ledger; its own arguments write nothing into the worktree (no caches: ``--no-cache``, ``--cache-dir=/dev/null``,
+``-p no:cacheprovider``, ``PYTHONDONTWRITEBYTECODE``; junit goes to the log folder).  A test inside a full run that starts pytest in
+the worktree again can still leave a git-ignored ``coverage/junit/test-results.xml``; ``git status`` and the index do not change.  The
+step logs go to a temporary folder (or ``--out``).  A change outside the project folder (``AGENTS.md``, ``reviews/``, workflows) has no
+step here: it is listed and the verdict is at best ``UNVERIFIED``.  A step whose tool is not installed is ``UNVERIFIED``, never a pass.
 """
 
 from __future__ import annotations
@@ -60,12 +63,15 @@ class PrecheckReport:
     related_tests: list[str]
     scope_note: str
     steps: list[StepResult] = field(default_factory=list)
+    outside_changes: list[str] = field(default_factory=list)  # changed files outside the project folder: no step of this check looks at them
 
     @property
     def verdict(self) -> str:
         verdicts = {step.verdict for step in self.steps}
         if "FAIL" in verdicts:
             return "FAIL"
+        if self.outside_changes:
+            return "UNVERIFIED"
         return "PASS" if verdicts <= {"PASS", "SKIPPED"} and "PASS" in verdicts else "UNVERIFIED"
 
 
@@ -90,11 +96,24 @@ def _dotted(relative: str) -> str:
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
 
-def _imports_of(path: Path, relative: str) -> set[str] | None:
-    """Every module name a file may import, read with ``ast`` (multi-line and ``as`` forms, imports inside functions, relative imports).
+_DOTTED_NAME = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$")
 
-    ``from a import b, c`` yields ``a``, ``a.b`` and ``a.c`` (``b`` may be a module or a name; both are candidates).  ``None`` when the file
-    cannot be read or parsed: the caller must then assume the file may depend on anything.
+
+def _imports_of(path: Path, relative: str) -> set[str] | None:
+    """The module names a file may import (see :func:`_references_of`); ``None`` when it cannot be read or parsed."""
+
+    found = _references_of(path, relative)
+    return None if found is None else found[0]
+
+
+def _references_of(path: Path, relative: str) -> tuple[set[str], set[str]] | None:
+    """What a test file refers to: ``(module names, string constants)``, read with ``ast``.
+
+    Module names: every import (multi-line and ``as`` forms, imports inside functions, relative imports); ``from a import b, c`` yields
+    ``a``, ``a.b`` and ``a.c`` (``b`` may be a module or a name; both are candidates).  A string constant that looks like a dotted name
+    (``monkeypatch.setattr("auto_pm.x.y.func", ...)``, ``importlib.import_module("auto_pm.x")``) counts as a reference to every dotted
+    prefix of it.  Strings: every string constant, so a test that opens a file by its path or name can be matched to that file.
+    ``None`` when the file cannot be read or parsed: the caller must then assume it may depend on anything.
     """
 
     try:
@@ -103,8 +122,14 @@ def _imports_of(path: Path, relative: str) -> set[str] | None:
         return None
     package = _dotted(relative) if relative.endswith("__init__.py") else _dotted(relative).rpartition(".")[0]
     found: set[str] = set()
+    strings: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            strings.add(node.value)
+            if _DOTTED_NAME.match(node.value):
+                parts = node.value.split(".")
+                found.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
+        elif isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             base = node.module or ""
@@ -115,7 +140,7 @@ def _imports_of(path: Path, relative: str) -> set[str] | None:
             if base:
                 found.add(base)
             found.update(f"{base}.{alias.name}" if base else alias.name for alias in node.names if alias.name != "*")
-    return found
+    return found, strings
 
 
 def _touches(imports: set[str], module: str, is_package: bool) -> bool:
@@ -123,6 +148,34 @@ def _touches(imports: set[str], module: str, is_package: bool) -> bool:
     ``__init__`` reaches every importer of anything below it."""
 
     return module in imports or (is_package and any(name.startswith(module + ".") for name in imports))
+
+
+_SOURCE_TREE_WORDS = ("auto_pm", "scripts", "tests")
+_WALKERS = frozenset({"rglob", "glob", "walk", "scandir"})
+
+
+def _scans_the_tree(path: Path) -> bool:
+    """A guard test: it walks a source folder (``rglob``/``glob``/``os.walk``/``scandir`` call) and names ``auto_pm``, ``scripts`` or ``tests``.
+
+    Such a test does not import the module a change touches, it reads every file, so any Python file written wrongly turns it red.
+    Unreadable or unparsable counts as a guard (run more).
+    """
+
+    try:
+        raw = path.read_bytes()
+        tree = ast.parse(raw, filename=str(path))
+    except (OSError, SyntaxError, ValueError):
+        return True
+    text = raw.decode("utf-8", errors="ignore")  # lenient-decode: only looks for three words
+    if not any(word in text for word in _SOURCE_TREE_WORDS):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            if name in _WALKERS:
+                return True
+    return False
 
 
 def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tuple[list[str], str]:
@@ -137,7 +190,15 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
       ``requirements.txt`` mean everything;
     * a changed file that is neither Python nor documentation (``.qml``, ``.jinja``, ``.yaml`` ...) and a test file that cannot be parsed
       mean everything, because nothing says which tests read it;
-    * documentation (``.md`` / ``.rst``) relates to nothing.
+    * documentation (``.md`` / ``.rst``) relates to nothing;
+    * **any changed Python file also pulls in every guard test** (audit 2 of #634): a test file that calls ``rglob``/``glob``/``os.walk``/
+      ``scandir`` (found with ``ast``, no hand-kept list) and mentions ``auto_pm``, ``scripts`` or ``tests`` in its text.  These read the
+      whole source tree (no unexplained ``errors="replace"``, subprocess encodings and timeouts, layer imports ...) and never import the
+      changed module, so the import graph cannot select them.  The criterion is deliberately wide (about 84 of 440 files; 22 of them
+      ``rglob("*.py")`` the tree); a test that walks the tree by other means (``iterdir`` recursion, ``git ls-files``) is not recognised.
+
+    A string constant counts too: a dotted name (``monkeypatch.setattr("auto_pm.x.y", ...)``, ``import_module``) refers to the module and its
+    packages, and a path or file name (``"main.py"``) refers to the file (audit 2 self-check: 18 tests reach a module only that way).
 
     Indirect dependence through ``auto_pm`` modules (A imports B, a test imports A) is **not** followed: that would make nearly every
     change relate to nearly every test.  It is the one known blind spot (CI and ``gate run`` stay the full check).
@@ -152,11 +213,12 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
     python = [path for path in changes if (project / path).is_file() or path.startswith("tests/")]
     test_files = sorted(p.relative_to(project).as_posix() for p in (project / "tests").rglob("*.py")) if (project / "tests").is_dir() else []
     imports: dict[str, set[str]] = {}
+    strings: dict[str, set[str]] = {}
     for relative in test_files:
-        parsed = _imports_of(project / relative, relative)
+        parsed = _references_of(project / relative, relative)
         if parsed is None:
             return ["tests"], f"{relative} 读不出/解析不了，没法判断依赖：相关测试 = 全部 tests"
-        imports[relative] = parsed
+        imports[relative], strings[relative] = parsed
     by_dotted = {_dotted(relative): relative for relative in test_files}
     conftests = [relative for relative in test_files if Path(relative).name == "conftest.py"]
 
@@ -186,6 +248,17 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
         for relative, names in imports.items()
         if any(_touches(names, module, is_package) for module, is_package in changed_modules)
     }
+    # a test that names a changed file in a string (opens "main.py" or "auto_pm/x/y.py" by path) depends on it without importing it
+    named = [path for path in python if Path(path).name not in {"__init__.py", "conftest.py"} and not Path(path).name.startswith("test_")]
+    direct.update(
+        relative
+        for relative, texts in strings.items()
+        if any(
+            path in text or text == Path(path).name or text.endswith("/" + Path(path).name)
+            for path in named
+            for text in texts
+        )
+    )
     changed = set(direct)
     grew = True
     while grew:
@@ -195,6 +268,10 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
                 changed.add(relative)
                 grew = True
     related.update(t for t in changed if Path(t).name.startswith("test_"))
+    guards = sorted(t for t in test_files if Path(t).name.startswith("test_") and _scans_the_tree(project / t))
+    if changes:
+        related.update(guards)
+        return sorted(related), f"含 {len(guards)} 个扫整棵源码树的守卫类测试（任何 Python 改动都会带上）"
     return sorted(related), ""
 
 
@@ -234,7 +311,8 @@ class PrecheckService:
         prefix = project.resolve().relative_to(Path(top).resolve()).as_posix() + "/" if top else ""
         inside = [path[len(prefix) :] for path in changed if path.startswith(prefix)]
         tests, note = related_tests(project, inside)
-        report = PrecheckReport(base=base, changed=changed, related_tests=tests, scope_note=note)
+        outside = [path for path in changed if not path.startswith(prefix)]
+        report = PrecheckReport(base=base, changed=changed, related_tests=tests, scope_note=note, outside_changes=outside)
         logs = out_dir or Path(tempfile.mkdtemp(prefix="gate-precheck-"))
         logs.mkdir(parents=True, exist_ok=True)
         env = child_environment()

@@ -44,7 +44,7 @@ def _project(tmp_path: Path) -> Path:
         "tests/core/test_imports_paren_multiline.py": "from auto_pm.a import (\n    c,\n    b,\n)\n",
         "tests/core/test_imports_in_function.py": "def test_x():\n    from auto_pm.a.b import thing\n",
         "tests/core/test_only_c.py": "from auto_pm.a import c\n",
-        "tests/core/test_mentions_in_comment.py": "# auto_pm.a.b is only named here\nx = 'auto_pm.a.b'\n",
+        "tests/core/test_mentions_in_comment.py": "# auto_pm.a.b is only named in a comment here\nx = 1\n",
         "tests/core/test_via_helper.py": "from tests.core_helper import make\n",
         "tests/core_helper.py": "from auto_pm.a.b import thing\n",
         "tests/core/test_via_helper_chain.py": "from tests.chain_two import make\n",
@@ -58,6 +58,12 @@ def _project(tmp_path: Path) -> Path:
         "tests/cli/conftest_user/test_three.py": "x = 1\n",
         "tests/qml/test_reads_qml.py": "x = 'a.qml'\n",
         "tests/core/test_deep.py": "import auto_pm.z.deep\n",
+        "tests/core/test_string_dotted.py": "def test_x(monkeypatch):\n    monkeypatch.setattr('auto_pm.a.c.thing', 1)\n",
+        "tests/core/test_string_path.py": "def test_x():\n    open('auto_pm/a/c.py')\n    open('main.py')\n",
+        "tests/infrastructure/test_guard_rglob.py": "from pathlib import Path\ndef test_x():\n    list(Path('auto_pm').rglob('*.py'))\n",
+        "tests/infrastructure/test_guard_walk.py": "import os\ndef test_x():\n    list(os.walk('scripts'))\n",
+        "tests/infrastructure/test_walks_elsewhere.py": "from pathlib import Path\ndef test_x():\n    list(Path('other').rglob('*'))\n",
+        "tests/infrastructure/test_names_tree_no_walk.py": "x = 'auto_pm'\n",
     }
     for relative, text in files.items():
         path = project / relative
@@ -67,9 +73,9 @@ def _project(tmp_path: Path) -> Path:
 
 
 def test_a_changed_module_is_related_to_every_test_that_imports_it_in_any_written_form(tmp_path: Path) -> None:
-    tests, note = related_tests(_project(tmp_path), ["auto_pm/a/b.py"])
-    assert note == ""
-    assert tests == [
+    tests, note = _graph(_project(tmp_path), ["auto_pm/a/b.py"])
+    assert "守卫" in note
+    assert [t for t in tests if "infrastructure" not in t] == [
         "tests/core/test_imports_as.py",
         "tests/core/test_imports_dotted.py",
         "tests/core/test_imports_from_module.py",
@@ -82,48 +88,76 @@ def test_a_changed_module_is_related_to_every_test_that_imports_it_in_any_writte
     ]
 
 
+def test_any_python_change_pulls_in_every_guard_test_that_walks_the_source_tree(tmp_path: Path) -> None:
+    # audit 2 of #634: tests that rglob/os.walk the whole tree never import the changed module, so the import graph cannot pick them
+    for change in ("auto_pm/z/deep.py", "tests/core/test_only_c.py"):
+        tests, note = related_tests(_project(tmp_path / change.replace("/", "_")), [change])
+        assert {"tests/infrastructure/test_guard_rglob.py", "tests/infrastructure/test_guard_walk.py"} <= set(tests)
+        assert "2 个" in note
+        assert "tests/infrastructure/test_walks_elsewhere.py" not in tests  # walks, but names none of the three words
+
+
+def test_a_test_that_names_a_module_or_file_in_a_string_is_related(tmp_path: Path) -> None:
+    # audit 2 self-check: monkeypatch.setattr("pkg.mod.func", ...) and open("main.py") load/read the file without importing it
+    project = _project(tmp_path)
+    assert "tests/core/test_string_dotted.py" in _graph(project, ["auto_pm/a/c.py"])[0]
+    assert "tests/core/test_string_dotted.py" not in _graph(project, ["auto_pm/a/b.py"])[0]
+    assert "tests/core/test_string_path.py" in _graph(project, ["auto_pm/a/c.py"])[0]
+    (project / "main.py").write_text("", encoding="utf-8")
+    assert "tests/core/test_string_path.py" in _graph(project, ["main.py"])[0]
+
+
+def test_a_test_that_walks_a_folder_without_naming_the_source_tree_or_names_it_without_walking_is_not_a_guard(tmp_path: Path) -> None:
+    tests, _ = _graph(_project(tmp_path), ["auto_pm/a/c.py"])
+    assert "tests/infrastructure/test_names_tree_no_walk.py" not in tests
+
+
+def test_a_documentation_only_change_pulls_in_no_guard(tmp_path: Path) -> None:
+    assert _graph(_project(tmp_path), ["docs/x.md"]) == ([], "")
+
+
 def test_a_test_that_only_imports_a_sibling_or_only_names_the_module_in_text_is_not_related(tmp_path: Path) -> None:
-    tests, _ = related_tests(_project(tmp_path), ["auto_pm/a/b.py"])
+    tests, _ = _graph(_project(tmp_path), ["auto_pm/a/b.py"])
     assert "tests/core/test_only_c.py" not in tests and "tests/core/test_mentions_in_comment.py" not in tests
 
 
 def test_a_changed_package_init_reaches_every_importer_of_anything_below_it(tmp_path: Path) -> None:
-    tests, _ = related_tests(_project(tmp_path), ["auto_pm/z/__init__.py"])
+    tests, _ = _graph(_project(tmp_path), ["auto_pm/z/__init__.py"])
     assert tests == ["tests/core/test_deep.py"]
 
 
 def test_a_changed_test_file_is_itself_related_and_a_deleted_one_is_not(tmp_path: Path) -> None:
     project = _project(tmp_path)
-    assert related_tests(project, ["tests/core/test_only_c.py"])[0] == ["tests/core/test_only_c.py"]
-    assert related_tests(project, ["tests/core/test_gone.py"])[0] == []
+    assert _graph(project, ["tests/core/test_only_c.py"])[0] == ["tests/core/test_only_c.py"]
+    assert _graph(project, ["tests/core/test_gone.py"])[0] == []
 
 
 def test_a_changed_helper_module_is_related_to_the_tests_that_import_it_directly_or_through_another_helper(tmp_path: Path) -> None:
-    tests, _ = related_tests(_project(tmp_path), ["tests/core_helper.py"])
+    tests, _ = _graph(_project(tmp_path), ["tests/core_helper.py"])
     assert tests == ["tests/core/test_via_helper.py", "tests/core/test_via_helper_chain.py"]
 
 
 def test_a_changed_sub_conftest_is_related_to_every_test_below_its_folder_only(tmp_path: Path) -> None:
-    tests, _ = related_tests(_project(tmp_path), ["tests/cli/conftest.py"])
+    tests, _ = _graph(_project(tmp_path), ["tests/cli/conftest.py"])
     assert tests == ["tests/cli/conftest_user/test_three.py", "tests/cli/sub/test_two.py", "tests/cli/test_one.py"]
 
 
 def test_a_sub_conftest_change_next_to_a_module_change_does_not_hide_either(tmp_path: Path) -> None:
     """Audit 1.3: the conftest change used to be ignored as soon as another change had tests."""
-    tests, _ = related_tests(_project(tmp_path), ["tests/cli/conftest.py", "auto_pm/a/c.py"])
+    tests, _ = _graph(_project(tmp_path), ["tests/cli/conftest.py", "auto_pm/a/c.py"])
     assert "tests/cli/test_one.py" in tests and "tests/core/test_only_c.py" in tests
 
 
 @pytest.mark.parametrize("path", ["tests/conftest.py", "pyproject.toml", "requirements.txt"])
 def test_a_change_that_can_break_any_test_makes_everything_related_and_says_so(tmp_path: Path, path: str) -> None:
-    tests, note = related_tests(_project(tmp_path), [path])
+    tests, note = _graph(_project(tmp_path), [path])
     assert tests == ["tests"] and "全部" in note
 
 
 @pytest.mark.parametrize("path", ["qml/Main.qml", "templates/x.jinja", "config/rules.yaml", "data/blob.json", "assets/logo.png"])
 def test_a_changed_non_python_file_makes_everything_related_never_nothing(tmp_path: Path, path: str) -> None:
     """Audit 1.1: a .qml or .jinja change used to run no test at all and still say PASS."""
-    tests, note = related_tests(_project(tmp_path), [path, "README.md"])
+    tests, note = _graph(_project(tmp_path), [path, "README.md"])
     assert tests == ["tests"] and "非 Python" in note
 
 
@@ -142,7 +176,7 @@ def test_a_test_file_with_a_utf8_bom_is_still_parsed(tmp_path: Path) -> None:
 
 
 def test_a_docs_only_change_has_no_related_tests(tmp_path: Path) -> None:
-    assert related_tests(_project(tmp_path), ["README.md", "docs/x.md", "notes/y.rst"]) == ([], "")
+    assert _graph(_project(tmp_path), ["README.md", "docs/x.md", "notes/y.rst"]) == ([], "")
 
 
 # ── changed files (real git) ────────────────────────────
@@ -210,6 +244,13 @@ class _Recorder:
         return code
 
 
+def _graph(project: Path, changes: Sequence[str]) -> tuple[list[str], str]:
+    """``related_tests`` without the guard tests (``tests/infrastructure`` in the fixture), to look at the import graph alone."""
+
+    tests, note = related_tests(project, changes)
+    return [t for t in tests if "infrastructure" not in t], note
+
+
 def _repo_root() -> Path:
     here = Path(pre.__file__).resolve()
     return next(p for p in here.parents if (p / ".git").exists())
@@ -225,6 +266,11 @@ def _service_run(
     monkeypatch.setattr(pre, "changed_files", lambda worktree, base: changed)
     monkeypatch.setattr(pre, "related_tests", lambda project, inside: tests)
     return PrecheckService(runner=recorder).run(_repo_root(), out_dir=tmp_path / "out")
+
+
+def _inside(name: str) -> str:
+    project = project_dir_in(_repo_root())
+    return f"{project.relative_to(_repo_root()).as_posix()}/{name}"
 
 
 def _py_changed() -> list[str]:
@@ -315,16 +361,25 @@ def test_python_changed_but_no_test_found_is_unverified_never_pass(monkeypatch: 
 
 def test_no_python_change_skips_pytest_and_can_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorder = _Recorder()
-    report = _service_run(monkeypatch, tmp_path, recorder, ["README.md"], ([], ""))
+    report = _service_run(monkeypatch, tmp_path, recorder, [_inside("README.md")], ([], ""))
     assert report.verdict == "PASS" and [name for name, *_ in recorder.calls] == ["ruff", "mypy"]
     assert next(s for s in report.steps if s.name == "pytest").verdict == "SKIPPED"
+
+
+def test_a_change_outside_the_project_folder_is_listed_and_the_verdict_is_never_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # audit 2 of #634: only AGENTS.md at the repository root changed; ruff/mypy "PASS" say nothing about it
+    recorder = _Recorder()
+    report = _service_run(monkeypatch, tmp_path, recorder, ["AGENTS.md", _inside("README.md")], ([], ""))
+    assert report.outside_changes == ["AGENTS.md"] and report.verdict == "UNVERIFIED"
+    failing = _service_run(monkeypatch, tmp_path, _Recorder({"ruff": (1, "E501\n")}), ["AGENTS.md"], ([], ""))
+    assert failing.verdict == "FAIL"
 
 
 def test_a_runner_that_cannot_start_is_a_failure_not_a_crash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def broken(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int) -> int:
         raise OSError("no such interpreter")
 
-    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: ["README.md"])
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: [_inside("README.md")])
     report = PrecheckService(runner=broken).run(_repo_root(), out_dir=tmp_path / "out")
     assert report.verdict == "FAIL"
 
@@ -341,7 +396,7 @@ def test_a_folder_without_tests_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_command_exit_codes_and_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: ["README.md"])
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: [_inside("README.md")])
     monkeypatch.setattr("auto_pm.ui.cli.gate.PrecheckService", lambda: PrecheckService(runner=_Recorder()))
     result = CliRunner().invoke(gate_group, ["precheck", "--worktree", str(_repo_root()), "--out", str(tmp_path / "o")])
     assert result.exit_code == 0 and "自检结论 PASS" in result.output and "gate run" in result.output
@@ -352,7 +407,7 @@ def test_the_command_exit_codes_and_output(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_the_command_exits_one_on_a_failed_step_and_two_when_it_cannot_start(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: ["README.md"])
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: [_inside("README.md")])
     failing = _Recorder({"ruff": (1, "E501\n")})
     monkeypatch.setattr("auto_pm.ui.cli.gate.PrecheckService", lambda: PrecheckService(runner=failing))
     failed = CliRunner().invoke(gate_group, ["precheck", "--worktree", str(_repo_root()), "--out", str(tmp_path / "o")])

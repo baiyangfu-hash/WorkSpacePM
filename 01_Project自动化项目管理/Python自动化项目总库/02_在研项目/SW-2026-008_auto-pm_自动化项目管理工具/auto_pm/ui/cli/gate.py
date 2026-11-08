@@ -151,6 +151,9 @@ def _precheck_report(report: PrecheckReport) -> None:
     click.echo(f"对照 {report.base}：改动 {len(report.changed)} 个文件，相关测试 {len(report.related_tests)} 个")
     if report.scope_note:
         click.echo(f"  注意：{report.scope_note}")
+    if report.outside_changes:
+        shown = "、".join(report.outside_changes[:8]) + (" 等" if len(report.outside_changes) > 8 else "")
+        click.echo(f"  工程目录之外的改动（预检没有对应的检查，结论最高只到 UNVERIFIED）：{shown}")
     for step in report.steps:
         click.echo(f"{step.verdict:<10} {step.name:<7}" + (f" exit={step.exit}" if step.exit is not None else "") + (f"  {step.why}" if step.why else ""))
         if step.verdict == "FAIL" and step.log:
