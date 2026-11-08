@@ -737,6 +737,7 @@ def cmd_edit(
         ctx.exit(1)
 
     before_files: list[str] = []
+    status_before = ""
     try:
         if "files" in updates:
             # D-97: §5 is where the approved file scope is read from, so editing it after the record left draft is a scope change.
@@ -747,6 +748,7 @@ def cmd_edit(
             else:
                 current = svc.read_change_files(change_number, project_id=pid) or []
                 before_files = current
+                status_before = existing.status
                 if existing.status != "draft" and not after_approval:
                     console.print(
                         f"[red]拒绝: 变更单 {change_number} 状态为 {existing.status}（不是草稿），改 §5 涉及文件会改动批准范围的来源。"
@@ -767,6 +769,10 @@ def cmd_edit(
         if "files" in updates:
             console.print(f"  §5 涉及文件 改前: {', '.join(before_files) or '（空）'}")
             console.print(f"  §5 涉及文件 改后: {', '.join(updates['files'])}")
+            if status_before and cr.status != status_before:  # D-154: the approval no longer covers the new list
+                console.print(
+                    f"[yellow]  文件清单变了，原批准不再覆盖：状态 {status_before} → {cr.status}，需要重新批准后才能继续实施[/yellow]"
+                )
         if cr.file_path:
             console.print(f"  文件: {cr.file_path}")
     except click.exceptions.Exit:
