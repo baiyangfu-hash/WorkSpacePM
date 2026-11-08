@@ -46,7 +46,11 @@ def _external_worktree(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _swap_git_marker_to_foreign_clone(worktree: Path, foreign_clone: Path) -> None:
-    (worktree / ".git").write_text(f"gitdir: {foreign_clone / '.git'}\n", encoding="utf-8")
+    marker = worktree / ".git"
+    # Windows: git marks ``.git`` hidden (core.hideDotFiles), and opening a hidden file for writing raises PermissionError,
+    # so replace the file instead of rewriting it in place.
+    marker.unlink()
+    marker.write_text(f"gitdir: {foreign_clone / '.git'}\n", encoding="utf-8")
 
 
 def _prepare(tmp_path: Path) -> tuple[Any, Path, Path]:
