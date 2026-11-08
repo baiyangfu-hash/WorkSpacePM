@@ -347,6 +347,7 @@ def tree_state(worktree: Path, project: Path) -> TreeState:
         "--others",
         "--ignored",
         "--exclude-standard",
+        "-z",  # D-126: without it git quotes a non-ASCII name as "\\350..." and the suffix test below would miss it
         "--",
         "auto_pm",
         "tests",
@@ -355,7 +356,7 @@ def tree_state(worktree: Path, project: Path) -> TreeState:
     )
     listed = sorted(
         line
-        for line in (ignored or "").splitlines()
+        for line in (ignored or "").split("\0")
         if line.endswith(_CODE_SUFFIXES) and "__pycache__" not in line
     )
     if ignored is None:  # git could not list them: that is "unknown", never "none"
