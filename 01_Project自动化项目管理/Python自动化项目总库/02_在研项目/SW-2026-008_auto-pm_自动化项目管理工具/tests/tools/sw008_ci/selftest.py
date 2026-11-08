@@ -111,6 +111,14 @@ def main() -> int:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", "clean")
         check("clean addition -> scan passes", run(str(SCAN), "main", cwd=repo), 0)
+        # D-70 audit: the one rule only this scan has (credentials inside a URL) must stay.  Own branch from main, so the
+        # commits above do not make the scan fail for another reason.  Built at run time, no literal in this file.
+        git(repo, "checkout", "-q", "-b", "url-credentials", "main")
+        (repo / "url.txt").write_text("remote = " + "https://" + "deploy" + ":" + "hunter2hunter2" + "@" + "example.invalid/repo.git\n", encoding="utf-8")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "url with credentials")
+        check("credentials inside a URL -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        git(repo, "checkout", "-q", "feature")
         # Built at run time so that this file itself never contains a token-shaped literal.
         (repo / "leak.txt").write_text("k = " + "ghp_" + "Z" * 36 + "\n", encoding="utf-8")
         git(repo, "add", ".")
