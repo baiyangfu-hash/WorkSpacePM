@@ -13,6 +13,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -616,7 +617,7 @@ def test_the_declaration_check_itself_refuses_a_plc_change_without_an_answer_and
 ) -> None:
     """``plan`` hands this method an already validated card answer, so its own two refusals are only reachable directly:
     they are the second line of defence if the card reader ever changes (mutation D-85)."""
-    from auto_pm.application.core.pr_open_service import MAIN_REF
+    from auto_pm.application.core.agent_worktree_service import MAIN_REF
 
     station = work(lab)
     commit_plc_file(station)
@@ -817,7 +818,7 @@ def test_closing_the_station_clears_the_loan(lab: Lab, monkeypatch: pytest.Monke
     assert svc.borrower("vscode") == ""
 
 
-def _mutants_module():  # type: ignore[no-untyped-def]
+def _mutants_module() -> Any:
     import importlib.util
     from pathlib import Path
 
@@ -844,8 +845,8 @@ def _mutants_module():  # type: ignore[no-untyped-def]
     ],
 )
 def test_mutant_judge_counts_only_a_real_test_failure_as_caught(
-    returncode, output, expected
-) -> None:  # type: ignore[no-untyped-def]
+    returncode: int | None, output: str, expected: str
+) -> None:
     """D-85 audit: a pytest crash or timeout must never be read as "the tests caught the mutant"."""
 
     assert _mutants_module().judge(returncode, output) == expected
