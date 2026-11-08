@@ -59,7 +59,7 @@ from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification, IntakeKind
-from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.mission import InternalRoutingPolicy, Mission, MissionState
 from auto_pm.contracts.plan_checklist import (
     AcceptanceCheck,
     PlanChecklist,
@@ -77,6 +77,7 @@ from auto_pm.contracts.pm_facade import (
     PmIntent,
     PmRunOutcome,
     SubmittedPlanningScopeCard,
+    canonical_plan_paths,
 )
 from auto_pm.contracts.protected_files import (
     enforcement_for_run,
@@ -376,6 +377,7 @@ class PmFacadeService:
         intake_item_id: str = "",
     ) -> PlanningScopeCard:
         """Rebuild an existing plan for approval validation without any durable write."""
+        scope_paths, execution_grant = canonical_plan_paths(scope_paths, execution_grant)
         filing, item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
@@ -473,6 +475,7 @@ class PmFacadeService:
         intake_item_id: str,
     ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
         """Run the real contract's pure validation before reserving files or durable identities."""
+        scope_paths, execution_grant = canonical_plan_paths(scope_paths, execution_grant)
         try:
             draft = PlanningDraft.from_intent(intent)
             if execution_grant is not None:
@@ -578,7 +581,25 @@ class PmFacadeService:
             )
         return ("safety-circuit: 否",)
 
+    @staticmethod
+    def _require_materializable(card: PlanningScopeCard) -> None:
+        """Refuse before any write what the Mission authority would refuse after the CHG and Decision are written.
+
+        Approval writes the CHG, then the Decision, and only then builds the Mission authority, whose routing policy
+        demands canonical declared paths (D-103). A card the authority would reject must stop here, not leave a Decision
+        without a Mission behind.
+        """
+
+        try:
+            InternalRoutingPolicy(declared_dirty_paths=card.execution_grant.declared_dirty_paths)
+        except ValueError as error:
+            raise PmFacadeError(
+                "范围卡的 declared_dirty_paths 不是规范写法，批准会留下只有 Decision 的残留；"
+                f"请重新 plan（plan 会自动规范化路径）：{error}"
+            ) from error
+
     def _require_card_checklist(self, card: PlanningScopeCard) -> None:
+        self._require_materializable(card)
         self._require_plan_checklist(
             card.execution_grant,
             scope_paths=card.scope_paths,
