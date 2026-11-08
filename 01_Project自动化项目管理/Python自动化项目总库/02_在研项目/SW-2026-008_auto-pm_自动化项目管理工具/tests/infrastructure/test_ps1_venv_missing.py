@@ -29,6 +29,8 @@ def _read(script: str) -> str:
 @pytest.mark.parametrize("script", WRAPPERS)
 def test_the_wrapper_checks_the_interpreter_before_it_sets_the_agent_marker_or_calls_it(script: str) -> None:
     text = _read(script)
+    # the guard fires when the interpreter is NOT there: a flipped condition (no ``-not``) would refuse every working setup
+    assert "if (-not (Test-Path -LiteralPath $python)) {" in text
     guard = text.index("Test-Path -LiteralPath $python")
     assert guard < text.index("$env:AUTO_PM_AGENT =")  # nothing to put back when the guard fires
     assert guard < NATIVE_VENV_CALL.search(text).start()  # type: ignore[union-attr]
