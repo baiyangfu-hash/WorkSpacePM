@@ -274,7 +274,10 @@ def _strict(raw: bytes, encoding: str, what: str) -> str:
     try:
         return raw.decode(encoding)
     except UnicodeDecodeError as error:
-        raise click.ClickException(f"Git 事实采集无法按 {encoding} 解码（{what}）：{error}；路径含非法字节，请先改名再继续") from error
+        raise GuardClickRefusal(
+            "G-DECISION-GIT-BINDING",
+            f"Git 事实采集无法按 {encoding} 解码（{what}）：{error}；路径含非法字节，请先改名再继续",
+        ) from error
 
 
 def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
