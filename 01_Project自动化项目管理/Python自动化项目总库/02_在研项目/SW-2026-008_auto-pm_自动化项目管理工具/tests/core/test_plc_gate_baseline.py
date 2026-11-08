@@ -210,6 +210,58 @@ def test_b06_a_plugin_run_that_did_not_finish_is_an_error_not_a_comparison(
     assert "没有跑完" in receipt.gates[0].output_summary
 
 
+class PanickingTestLsp(FakeSiemensLsp):
+    """``test`` 命令的进程 panic 退出（D-137/D-37）；``only`` 限定在哪个目录里崩（None = 到处崩）。"""
+
+    def __init__(self, only: Callable[[Path], bool] | None = None) -> None:
+        super().__init__()
+        self.only = only
+
+    def test(self, root: Path) -> LanguageServiceResult:
+        if self.only is not None and not self.only(root):
+            return super().test(root)
+        self.calls.append(("test", root))
+        note = "插件测试进程 panic 退出（panic: STUB_BUILTIN: B_TON [recovered, repanicked]）：没跑完的用例没有结果，这次测试不算数"
+        return LanguageServiceResult(
+            "test", True, -1, 1, (note,), note, diagnostics=(note, "--- FAIL: TestUserCase001 (0.00s)"), panicked=True
+        )
+
+
+def test_d137_a_plugin_panic_on_the_current_run_is_an_error_with_no_new_or_fixed_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ecs, "_plc_language_service", lambda: PanickingTestLsp())
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    assert receipt.gates[0].exit_code is None
+    summary = receipt.gates[0].output_summary
+    assert "panic" in summary and "D-37" in summary
+    assert "new | " not in summary and "fixed | " not in summary and "known | " not in summary
+
+
+def test_d137_a_plugin_panic_only_on_the_baseline_run_is_an_error_not_everything_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The baseline export lives in a ``pmb-`` temp directory; a crash there must not turn the current failures into 'new' lines."""
+
+    monkeypatch.setattr(ecs, "_plc_language_service", lambda: PanickingTestLsp(only=lambda root: "pmb-" in str(root)))
+
+    receipt = gate(tmp_path, fb())
+
+    assert receipt.status == "FAIL"
+    summary = receipt.gates[0].output_summary
+    assert "panic" in summary and "new | " not in summary and "全部按新增算" not in summary
+
+
+def test_d137_plc_check_baseline_refuses_to_compare_a_panicked_run(tmp_path: Path) -> None:
+    workspace, candidate, baseline = dj005(tmp_path)
+
+    with pytest.raises(plc_baseline.PlcPluginPanicError, match="D-37"):
+        plc_baseline.check_against_baseline(workspace, candidate / PROJECT, baseline, PanickingTestLsp())
+
+
 def test_b07_owned_scl_lint_errors_already_there_pass_and_new_ones_block(tmp_path: Path) -> None:
     workspace, candidate, _ = plc_workspace(tmp_path)
     scl = candidate / PROJECT / "OB1" / "FB_Bad.scl"

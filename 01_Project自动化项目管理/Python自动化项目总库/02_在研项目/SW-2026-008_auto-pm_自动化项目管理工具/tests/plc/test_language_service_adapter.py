@@ -117,3 +117,60 @@ def test_ls10_a_timeout_or_launch_error_is_a_failure_not_a_pass(tmp_path: Path) 
 def test_ls11_terminal_colour_codes_do_not_hide_an_error(tmp_path: Path, text: str) -> None:
     result = sls.SiemensLanguageService(BINARY, runner=_runner(1, text)).check(tmp_path)
     assert result.error_count == 1 and "\x1b" not in result.messages[0]
+
+
+# D-137 / D-37: the plugin's Go test process dies on the native TON stub.  Whichever case reaches TON first fails, then the process
+# panics and exits, so which cases got a verdict changes from run to run.  The text below follows the panic block of the archived
+# plugin failure (.trae/specs/_archive/analyze-siemens-plugin-test-failure) with the TON stub name from the local runs; the three raw
+# local outputs themselves were not available in the cloud (未核实 against them).
+PANIC_RUN_A = (
+    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
+    "=== RUN   TestUserCase001_Test1\n"
+    "--- FAIL: TestUserCase001_Test1 (0.00s)\n"
+    "    panic: STUB_BUILTIN: B_TON [recovered, repanicked]\n"
+    "\n"
+    "goroutine 6 [running]:\n"
+    "testing.tRunner.func1.2({0x7ff6, 0xc000})\n"
+    "FAIL\tplc-autogen/runtime\t0.412s\n"
+)
+PANIC_RUN_B = (
+    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
+    "=== RUN   TestUserCase007_Timer\n"
+    "panic: STUB_BUILTIN: B_TON [recovered]\n"
+    "\tpanic: STUB_BUILTIN: B_TON\n"
+    "\n"
+    "goroutine 18 [running]:\n"
+    "FAIL\tplc-autogen/runtime\t0.388s\n"
+)
+ORDINARY_FAIL = (
+    "siemens-lsp test: running 34/34 cases from 5 file(s)\n"
+    "--- FAIL: TestUserCase029_TCMB04RcvIdShortStopAtZero (0.00s)\n"
+    "    user_tests_autogen_test.go:7949: ASSERT failed at Test/modbus_client_test.scltest:103:5 step 21: got=ABC op== expected=ABC\n"
+    "FAIL\nFAIL\tplc-autogen/runtime\t0.778s\n"
+)
+
+
+@pytest.mark.parametrize("output", [PANIC_RUN_A, PANIC_RUN_B])
+def test_d137_a_plugin_test_run_that_panicked_is_incomplete_and_says_why(tmp_path: Path, output: str) -> None:
+    service = sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout=output))
+
+    result = service.test(tmp_path)
+
+    assert result.panicked is True
+    assert result.exit_code == -1, "the recorder treats -1 as 'did not finish'"
+    assert result.passed is False and result.error_count >= 1
+    assert "panic" in result.messages[0] and "不算数" in result.messages[0]
+    assert "STUB_BUILTIN: B_TON" in result.messages[0]
+
+
+def test_d137_an_ordinary_failing_test_run_is_not_a_panic(tmp_path: Path) -> None:
+    result = sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout=ORDINARY_FAIL)).test(tmp_path)
+
+    assert result.panicked is False and result.exit_code == 1
+    assert any("TestUserCase029" in line for line in result.diagnostics)
+
+
+def test_d137_a_panic_in_check_output_is_not_treated_as_a_test_panic(tmp_path: Path) -> None:
+    result = sls.SiemensLanguageService(BINARY, runner=_runner(1, stdout="./a.scl:3:5: ERROR: bad\npanic: x\n")).check(tmp_path)
+
+    assert result.panicked is False
