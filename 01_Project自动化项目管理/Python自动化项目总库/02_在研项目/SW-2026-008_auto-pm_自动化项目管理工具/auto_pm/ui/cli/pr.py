@@ -14,14 +14,14 @@ import click
 from rich.console import Console
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import AgentWorktreeError
+from auto_pm.application.core.agent_worktree_service import AgentWorktreeError, AgentWorktreeService
 from auto_pm.application.core.pr_open_service import PrOpenRefusedError, PrOpenService
 from auto_pm.application.core.pr_ready_service import PrReadyService, render
 from auto_pm.application.core.pr_settle_service import PrSettleError, PrSettleService
 from auto_pm.application.core.pr_settle_service import render as render_settle
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
-from auto_pm.ui.cli.worktree import AGENTS
+from auto_pm.ui.cli.worktree import AGENTS, resolve_station_name
 
 console = Console()
 
@@ -74,6 +74,7 @@ def open_cmd(
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
     try:
         service = PrOpenService(root)
+        agent = resolve_station_name(AgentWorktreeService(root, measure_size=False), agent)
         plan = service.plan(
             agent,
             card,

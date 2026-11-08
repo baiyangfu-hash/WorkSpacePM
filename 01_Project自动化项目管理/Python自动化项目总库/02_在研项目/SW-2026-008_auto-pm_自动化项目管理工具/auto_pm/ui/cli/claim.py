@@ -11,7 +11,7 @@ import os
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import caller_agent
+from auto_pm.application.core.agent_worktree_service import caller_agent, caller_alias
 from auto_pm.application.core.claim_service import ClaimError, ClaimService
 
 
@@ -21,7 +21,13 @@ def _service(ctx: click.Context) -> ClaimService:
 
 
 def _owner(explicit: str) -> str:
-    return explicit.strip() or caller_agent().strip("?") or "user"
+    """Default owner is this conversation's alias (``claude-a119dc``), so two conversations of one agent never share a claim (D-112).
+
+    No session id (or the user's own terminal) falls back to the bare agent name, as before.  A claim made before D-112 carries the
+    bare name; only an explicit ``--as claude`` can release or renew it.
+    """
+
+    return explicit.strip() or caller_alias() or caller_agent().strip("?") or "user"
 
 
 def _fail(error: ClaimError) -> None:
