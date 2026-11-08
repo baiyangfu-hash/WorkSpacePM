@@ -86,7 +86,7 @@ def verify(root: Path, release_id: str) -> str:
 
 def _git(repo: Path, *args: str) -> str:
     done = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",  # lenient-decode: git 输出只用来取提交号和展示错误
         timeout=GIT_TIMEOUT_SECONDS, check=False,
     )
     if done.returncode != 0:
