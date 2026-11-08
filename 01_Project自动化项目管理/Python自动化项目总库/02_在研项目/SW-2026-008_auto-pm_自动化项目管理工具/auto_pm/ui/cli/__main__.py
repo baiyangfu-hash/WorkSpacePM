@@ -50,6 +50,7 @@ from rich.console import Console  # noqa: E402
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
+from auto_pm.ui.cli.argv_guard import ARGV_EXIT_CODE, broken_argument_message  # noqa: E402
 from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
 from auto_pm.ui.cli.claim import claim_group  # noqa: E402
@@ -108,6 +109,11 @@ class _CliGroup(click.Group):
         """
 
         kwargs.setdefault("windows_expand_args", False)
+        given = args[0] if args and args[0] is not None else kwargs.get("args")
+        problem = broken_argument_message(list(given) if given is not None else sys.argv[1:])
+        if problem is not None:  # D-133: refuse at the door, before any command touches a file
+            click.echo(f"错误：{problem}", err=True)
+            raise SystemExit(ARGV_EXIT_CODE)
         return super().main(*args, **kwargs)
 
     def invoke(self, ctx: click.Context) -> object:
