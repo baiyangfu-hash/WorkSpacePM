@@ -1,17 +1,21 @@
 """D-152 (#653 audit suggestions): the refusal texts and the goal rule of ``claim number``.
 
-Kept apart from ``test_claim_service.py`` (another card holds that file); it reuses that file's two-computer fixture.
+Kept apart from ``test_claim_service.py`` (another card holds that file); it builds the same two-computer ``Pair`` as that file.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from auto_pm.application.core.claim_service import ClaimError
-from tests.core.test_claim_service import (  # noqa: F401  # ``pair`` is a fixture, imported to be collected here
-    Pair,
-    pair,
-)
+from tests.core.test_claim_service import Pair
+
+
+@pytest.fixture
+def pair(tmp_path: Path) -> Pair:
+    return Pair(tmp_path)
 
 
 def test_d152_exhausted_auto_retries_do_not_blame_a_card_called_auto(pair: Pair, monkeypatch: pytest.MonkeyPatch) -> None:
