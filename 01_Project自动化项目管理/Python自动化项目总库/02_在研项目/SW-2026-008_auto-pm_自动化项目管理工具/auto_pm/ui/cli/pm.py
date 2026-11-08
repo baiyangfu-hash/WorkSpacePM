@@ -1343,6 +1343,12 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
         click.echo(f"出口: {hint}")
     for warning in payload.hold_warnings:
         click.echo(f"🔴 {warning}")
+    for item in payload.residue:
+        click.echo(
+            f"⚠ 陈年残留（不算冲突，但没人收口）: {item.work_id} [{item.work_state}]，"
+            f"最后一个 Run {item.last_run_id} [{item.last_run_state}] 在 {item.last_run_ended_at} 结束，"
+            "之后没有动静；由用户决定取消（D-109）"
+        )
     if payload.run is not None and payload.run.state.value == "RUNNING":
         # TD-SW008-074: after a controller restart the ledger still says RUNNING even when the executor process is gone.
         click.echo(
