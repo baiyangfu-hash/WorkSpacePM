@@ -14,6 +14,7 @@ from click.testing import CliRunner
 from auto_pm.application.core.pr_ready_service import (
     PrReadyService,
     judge_checks,
+    newest_check_runs,
     render,
 )
 from auto_pm.ui.cli.__main__ import cli
@@ -40,6 +41,8 @@ class FakeGh:
         self.runs: list[dict[str, object]] = list(GOOD_RUNS)
         self.status: dict[str, object] = dict(GOOD_STATUS)
         self.comments: list[dict[str, object]] = []
+        self.workflow_runs: list[dict[str, object]] = []
+        self.workflow_runs_fail = False
         self.calls: list[tuple[str, ...]] = []
         self.__dict__.update(over)
 
@@ -48,6 +51,10 @@ class FakeGh:
         a = list(args)
         if a[:2] == ["pr", "view"]:
             out: object = self.pr
+        elif a[0] == "api" and "/actions/runs" in a[1]:
+            if self.workflow_runs_fail:
+                return subprocess.CompletedProcess(args, 1, "", "HTTP 403")
+            out = [{"workflow_runs": self.workflow_runs}]
         elif a[0] == "api" and a[1].endswith("/check-runs"):
             out = [{"check_runs": self.runs}]
         elif a[0] == "api" and a[1].endswith("/status"):
@@ -261,3 +268,74 @@ def test_r18_cli_exit_codes_and_plain_words(tmp_path: Path, monkeypatch: pytest.
     gh.pr["mergeable"] = "CONFLICTING"
     bad = CliRunner().invoke(cli, [*args, "--reports-dir", str(directory)])
     assert bad.exit_code == 1 and "不能合并，缺：与 main 无冲突" in bad.output
+
+
+# ── D-117: a re-run of the same job in the same workflow counts once, the newest ─────────────
+
+
+def _check(cid: int, conclusion: str, *, run: int = 100, name: str = "unit", app: int = 15368, status: str = "completed") -> dict[str, Any]:
+    return {
+        "id": cid,
+        "name": name,
+        "status": status,
+        "conclusion": conclusion if status == "completed" else None,
+        "head_sha": HEAD,
+        "app": {"id": app},
+        "details_url": f"https://github.com/o/r/actions/runs/{run}/job/{cid}",
+    }
+
+
+WORKFLOWS = [{"id": 100, "workflow_id": 1}, {"id": 101, "workflow_id": 1}, {"id": 200, "workflow_id": 2}]
+
+
+def test_r11_an_old_failure_covered_by_a_newer_success_of_the_same_job_no_longer_blocks() -> None:
+    problems, passed = judge_checks([_check(1, "failure", run=100), _check(2, "success", run=101)], [], WORKFLOWS)
+
+    assert problems == [] and passed == ["unit"]
+
+
+def test_r12_the_newest_decides_in_both_directions() -> None:
+    problems, _ = judge_checks([_check(1, "success", run=100), _check(2, "failure", run=101)], [], WORKFLOWS)
+
+    assert problems == ["unit：failure"]
+
+
+def test_r13_a_cancelled_old_run_does_not_hide_behind_the_newer_one_and_a_running_newer_one_blocks() -> None:
+    problems, _ = judge_checks([_check(1, "cancelled", run=100), _check(2, "success", status="in_progress", run=101)], [], WORKFLOWS)
+
+    assert problems == ["unit：还没跑完（in_progress）"]
+
+
+def test_r14_same_named_jobs_of_different_workflows_or_apps_are_different_checks() -> None:
+    different_workflow = [_check(1, "failure", run=100), _check(2, "success", run=200)]
+    different_app = [_check(1, "failure", app=1), _check(2, "success", app=2)]
+
+    assert judge_checks(different_workflow, [], WORKFLOWS)[0] == ["unit：failure"]
+    assert judge_checks(different_app, [], WORKFLOWS)[0] == ["unit：failure"]
+
+
+def test_r15_an_unknown_run_or_a_check_without_id_is_never_merged() -> None:
+    unknown_run = [_check(1, "failure", run=999), _check(2, "success", run=999)]
+    no_id = [{k: v for k, v in _check(1, "failure").items() if k != "id"}, _check(2, "success")]
+
+    assert len(judge_checks(unknown_run, [], WORKFLOWS)[0]) == 1
+    assert len(judge_checks(no_id, [], WORKFLOWS)[0]) == 1
+    assert len(newest_check_runs(WORKFLOWS, unknown_run)) == 2
+
+
+def test_r16_without_the_workflow_runs_every_check_counts() -> None:
+    problems, _ = judge_checks([_check(1, "failure", run=100), _check(2, "success", run=101)], [])
+
+    assert problems == ["unit：failure"]
+
+
+def test_r17_the_service_reads_the_workflow_runs_and_lets_the_newer_success_pass(tmp_path: Path) -> None:
+    gh = FakeGh(runs=[_check(1, "failure", run=100), _check(2, "success", run=101)], workflow_runs=WORKFLOWS)
+
+    assert failed(check(tmp_path, gh)) == set()
+
+
+def test_r18_when_the_workflow_runs_cannot_be_read_the_old_failure_still_blocks(tmp_path: Path) -> None:
+    gh = FakeGh(runs=[_check(1, "failure", run=100), _check(2, "success", run=101)], workflow_runs=WORKFLOWS, workflow_runs_fail=True)
+
+    assert failed(check(tmp_path, gh)) == {"必过检查和 safety-zone"}
