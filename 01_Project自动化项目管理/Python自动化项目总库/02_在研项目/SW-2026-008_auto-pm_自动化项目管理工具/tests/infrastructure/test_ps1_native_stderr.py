@@ -19,9 +19,8 @@ STOP = re.compile(r'^\s*\$ErrorActionPreference\s*=\s*"Stop"', re.MULTILINE)
 CONTINUE = re.compile(r'^\s*\$ErrorActionPreference\s*=\s*"Continue"', re.MULTILINE)
 # ``& $python …`` / ``& $MMDC …``: a native command called through a variable (not a cmdlet)
 NATIVE_CALL = re.compile(r"^\s*&\s+\$\w+", re.MULTILINE)
-# Same defect, in files other AIs may not edit (``.trae/`` is Trae's, changed only on the user's word).  Listed so the check
-# stays honest; an entry must be removed when its file is fixed (the second test below fails if one is stale).
-KNOWN_UNFIXED = frozenset({".trae/bin/pm-as-trae.ps1", ".trae/bin/export-mermaid.ps1"})
+# An entry may be added here only with a defect number (D-142 fixed the last two).
+KNOWN_UNFIXED: frozenset[str] = frozenset()
 
 
 def _tracked_scripts() -> list[str]:
@@ -38,13 +37,17 @@ def _tracked_scripts() -> list[str]:
 
 
 def _offends(text: str) -> bool:
-    """Stop is set, a native command is called through a variable, and nothing ever switches to Continue."""
+    """Stop is set and a native command is called through a variable before anything switched to Continue."""
 
-    return bool(STOP.search(text) and NATIVE_CALL.search(text) and not CONTINUE.search(text))
+    call = NATIVE_CALL.search(text)
+    if not (STOP.search(text) and call):
+        return False
+    return CONTINUE.search(text[: call.start()]) is None
 
 
-def test_pm_as_agent_runs_the_native_command_under_continue_and_returns_its_exit_code() -> None:
-    path = REPO_ROOT / "00_Infrastructure" / "bin" / "pm-as-agent.ps1"
+@pytest.mark.parametrize("script", ["00_Infrastructure/bin/pm-as-agent.ps1", ".trae/bin/pm-as-trae.ps1"])
+def test_the_wrapper_runs_the_native_command_under_continue_and_returns_its_exit_code(script: str) -> None:
+    path = REPO_ROOT / script
     if not path.is_file():
         pytest.skip("not run inside the workspace checkout")
     text = path.read_text(encoding="utf-8-sig")
@@ -112,3 +115,18 @@ def test_the_detector_tells_a_broken_script_from_a_fixed_one() -> None:
     fixed = '$ErrorActionPreference = "Stop"\n$ErrorActionPreference = "Continue"\n& $python $entry @rest\n'
     assert _offends(broken) and not _offends(fixed)
     assert not _offends('$ErrorActionPreference = "Stop"\nNew-Item x\n')
+
+
+def test_export_mermaid_forwards_mmdc_under_continue() -> None:
+    path = REPO_ROOT / ".trae" / "bin" / "export-mermaid.ps1"
+    if not path.is_file():
+        pytest.skip("not run inside the workspace checkout")
+    text = path.read_text(encoding="utf-8-sig")
+    call = NATIVE_CALL.search(text)
+    assert call is not None and CONTINUE.search(text[: call.start()])
+    assert "$ErrorActionPreference = $stopPreference" in text[call.start() :]
+
+
+def test_the_detector_wants_continue_before_the_call_not_just_somewhere() -> None:
+    late = '$ErrorActionPreference = "Stop"\n& $python $entry\n$ErrorActionPreference = "Continue"\n'
+    assert _offends(late)
