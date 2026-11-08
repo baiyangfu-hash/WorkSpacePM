@@ -151,7 +151,7 @@ COMMANDS: dict[str, CommandSpec] = {
     # The guards of the two commands below are not inventoried yet (their checks sit in services, not in the command body):
     # P1 fills them in; until then the deadlock check cannot see them, which the contract test lists as unmodelled.
     "pm close": CommandSpec(CommandKind.NORMAL, (), (), "guards not inventoried yet (P1)"),
-    "pm retire": CommandSpec(CommandKind.NORMAL, ("identity=clean", "operator=user"), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL"), "dry run by default; --apply cancels an old leftover Mission and Work through their own services, on the user's word"),
+    "pm retire": CommandSpec(CommandKind.NORMAL, ("identity=clean", "operator=user", "workspace=control_root"), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL", "G-MUTATION-ROOT"), "dry run by default; --apply cancels an old leftover Mission and Work through their own services, on the user's word"),
     "pm unpark": CommandSpec(CommandKind.NORMAL, ("operator=user",), (), "guards not inventoried yet (P1)"),
     "ledger reconcile": CommandSpec(CommandKind.NORMAL, ("workspace=control_root",), ("G-MUTATION-ROOT",)),
     "pm approver-pin init": CommandSpec(CommandKind.NORMAL, ("operator=user",), ("G-AGENT-APPROVAL",), "does not read the ledger"),

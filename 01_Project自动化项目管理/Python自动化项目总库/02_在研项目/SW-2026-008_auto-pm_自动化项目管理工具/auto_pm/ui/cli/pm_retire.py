@@ -39,8 +39,8 @@ def _plan_payload(plan: RetirePlan) -> dict[str, Any]:
                 "last_run_id": item.residue.last_run_id,
                 "last_run_state": item.residue.last_run_state,
                 "last_run_ended_at": item.residue.last_run_ended_at,
-                "mission_id": item.mission_id,
-                "mission_state": item.mission_state,
+                "mission_ids": list(item.mission_ids),
+                "mission_states": list(item.mission_states),
                 "can_retire": not item.blocked_reason,
                 "blocked_reason": item.blocked_reason,
             }
@@ -50,10 +50,10 @@ def _plan_payload(plan: RetirePlan) -> dict[str, Any]:
     }
 
 
-def _result_payload(result: RetireResult) -> dict[str, str]:
+def _result_payload(result: RetireResult) -> dict[str, Any]:
     return {
         "work_id": result.work_id,
-        "mission_id": result.mission_id,
+        "mission_ids": list(result.mission_ids),
         "outcome": result.outcome,
         "detail": result.detail,
     }
