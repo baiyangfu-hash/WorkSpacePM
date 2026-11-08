@@ -27,6 +27,7 @@ class FakeLedger:
         self.stations: list[Path] = []
         self.crash_at = crash_at
         self.created = 0
+        self.references: dict[str, str] = {}
 
     def cli(self, *args: str) -> str:
         if self.crash_at is not None and len(self.commands) + 1 == self.crash_at:
@@ -37,6 +38,7 @@ class FakeLedger:
             self.created += 1
             self.change_state = "draft"
             self.change = f"CHG-SCPT-2026-9{self.created:02d}"
+            self.references[self.change] = args[args.index("--references") + 1]
             return f"已创建 {self.change}"
         if head == ("change", "transition"):
             self.change_state = args[args.index("--to") + 1]
@@ -57,7 +59,7 @@ class FakeLedger:
         return ""
 
     def find_change(self, release_id: str) -> str:
-        return self.change
+        return rl.pick_change(release_id, list(self.references.items()))
 
     def change_status(self, change_id: str) -> str:
         return self.change_state
@@ -261,3 +263,46 @@ def test_close_books_stops_with_an_error_when_the_work_state_does_not_advance(tm
         _close(plan, port, books.change_id)
 
     assert len([c for c in port.commands if c[:3] == ["continuity", "work", "transition"]]) <= len(rl.WORK_CLOSE) + 1
+
+
+def test_another_releases_change_order_is_never_adopted(tmp_path: Path) -> None:
+    port = FakeLedger()
+    other = rl.DeployPlan(
+        release_id="1.3.3-abcdef012", old_release="1.3.3-1234567", commit="b" * 40, confirm_ref=CONFIRM, approver="fubai",
+        paths=PATHS, station=tmp_path / "s2", evidence_dir=tmp_path / "e2",
+    )
+    first = _open(other, port).change_id  # a change order for a release whose id merely starts like ours
+
+    books = _open(_plan(tmp_path), port)
+
+    assert port.created == 2 and books.change_id != first and not any(step.startswith("change adopt") for step in books.steps)
+
+
+def test_pick_change_matches_the_release_item_exactly_and_refuses_two() -> None:
+    rows = [("CHG-1", "RELEASE=1.3.3-abcdef0; COMMIT=x; PREVIOUS=y; user-confirmation:a"), ("CHG-2", "RELEASE=1.3.3-abcdef01; COMMIT=x")]
+    assert rl.pick_change("1.3.3-abcdef0", rows) == "CHG-1"
+    assert rl.pick_change("1.3.3-abc", rows) == "" and rl.pick_change("1.3.3-abcdef0", []) == ""
+    with pytest.raises(rl.LedgerError, match="2 张"):
+        rl.pick_change("1.3.3-abcdef0", [*rows, ("CHG-3", "COMMIT=z; RELEASE=1.3.3-abcdef0")])
+
+
+def test_an_explicit_decision_id_is_used_and_kept(tmp_path: Path) -> None:
+    port = FakeLedger()
+    plan = rl.DeployPlan(
+        release_id="1.3.3-abcdef0", old_release="1.3.3-1234567", commit="a" * 40, confirm_ref=CONFIRM, approver="fubai",
+        paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence", decision_id="DEC-20260101-CUSTOM01",
+    )
+
+    _open(plan, port)
+
+    assert port.decisions == {"DEC-20260101-CUSTOM01"} and plan.decision_id == "DEC-20260101-CUSTOM01"
+    assert _plan(tmp_path).decision_id == "DEC-20260101-CUSTOM01", "a later plan for the same release reads it back"
+
+
+def test_a_finished_change_order_for_this_release_is_reported_as_such(tmp_path: Path) -> None:
+    port, plan = FakeLedger(), _plan(tmp_path)
+    _open(plan, port)
+    port.change_state = "completed"
+
+    with pytest.raises(rl.LedgerError, match="已有一张走完"):
+        _open(plan, port)
