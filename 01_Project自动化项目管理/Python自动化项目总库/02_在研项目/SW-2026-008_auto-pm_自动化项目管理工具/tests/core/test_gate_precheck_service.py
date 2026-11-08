@@ -112,6 +112,14 @@ def test_a_test_that_walks_a_folder_without_naming_the_source_tree_or_names_it_w
     assert "tests/infrastructure/test_names_tree_no_walk.py" not in tests
 
 
+def test_a_deleted_or_renamed_module_still_selects_the_tests_that_import_its_old_name(tmp_path: Path) -> None:
+    # D-128 (audit 3 of #634): the old path no longer exists, yet the tests importing it must run (they fail with ImportError)
+    project = _project(tmp_path)
+    (project / "auto_pm/a/b.py").unlink()
+    tests, _ = _graph(project, ["auto_pm/a/b.py", "auto_pm/a/b_renamed.py"])
+    assert "tests/core/test_imports_dotted.py" in tests and "tests/core/test_via_helper.py" in tests
+
+
 def test_a_documentation_only_change_pulls_in_no_guard(tmp_path: Path) -> None:
     assert _graph(_project(tmp_path), ["docs/x.md"]) == ([], "")
 
