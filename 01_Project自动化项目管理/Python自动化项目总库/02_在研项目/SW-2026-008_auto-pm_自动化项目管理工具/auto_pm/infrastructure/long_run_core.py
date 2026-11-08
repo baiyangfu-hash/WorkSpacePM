@@ -374,6 +374,12 @@ else:
         return state != "Z"
 
 
+# -B: no .pyc files next to the sources.  -P (Python >= 3.11): keep the script's own directory out of sys.path.  Without it
+# auto_pm/infrastructure/ becomes sys.path[0] and its ``logging/`` sub-package shadows the standard library ``logging``, so the guard
+# crashes at start whenever ``auto_pm`` is importable (D-123).
+_LAUNCH_FLAGS = ("-B", "-P")
+
+
 def launch_detached(argv: list[str], log: Path, cwd: Path) -> int:
     """Start ``argv`` detached from the caller (no console, own process group, own session); its output goes to ``log``.  Returns the pid."""
 
@@ -702,13 +708,13 @@ def start(
     _write_json(run_dir / "status.json", status)
     # The guard first: a job must never run unprotected.  If the worker cannot start afterwards, the guard is taken down with it.
     try:
-        guard = launch_detached([interpreter, "-B", script, "guard", str(run_dir)], run_dir / "guard.out", working)
+        guard = launch_detached([interpreter, *_LAUNCH_FLAGS, script, "guard", str(run_dir)], run_dir / "guard.out", working)
     except (OSError, LongRunError) as error:
         _abandon(run_dir, f"内存守卫起不来（{error}），任务没有启动", [])
         raise LongRunError(f"内存守卫起不来（{error}）；任务没有启动，没有无保护地跑") from error
     _update_status(run_dir, mem_guard=True, guard_launcher_pid=guard)
     try:
-        worker = launch_detached([interpreter, "-B", script, "worker", str(run_dir)], run_dir / "worker.out", working)
+        worker = launch_detached([interpreter, *_LAUNCH_FLAGS, script, "worker", str(run_dir)], run_dir / "worker.out", working)
     except (OSError, LongRunError) as error:
         _abandon(run_dir, f"工作进程起不来（{error}）", [guard])
         raise LongRunError(f"工作进程起不来（{error}）；已收掉守卫") from error
