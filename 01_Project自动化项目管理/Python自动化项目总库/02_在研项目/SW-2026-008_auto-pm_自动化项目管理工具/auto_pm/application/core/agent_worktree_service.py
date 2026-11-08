@@ -22,8 +22,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,6 +67,7 @@ STALE_DAYS = 3
 RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
 # Ignored entries that are only regenerable tool caches do not hold a directory back (coordinator ruling 11-02);
 # any other ignored file still does.  ``__pycache__`` counts only for its ``*.pyc`` files.
+DEEP_SCAN_WORKERS = 4  # stations inspected at once by ``stations(deep=True)``
 CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
@@ -745,12 +748,13 @@ class AgentWorktreeService:
 
         self._require_main_ref()
         registered = self._worktrees()
-        stations: list[Station] = []
-        for path, info in registered.items():
-            if only is not None and path.name != only:
-                continue
+        targets = [(path, info) for path, info in registered.items() if only is None or path.name == only]
+        progress_lock = threading.Lock()
+
+        def inspect_one(path: Path, info: _Registered) -> Station:
             if progress is not None:
-                progress(path.name)
+                with progress_lock:
+                    progress(path.name)
             inspected = self._inspect(
                 path,
                 registered=True,
@@ -759,7 +763,24 @@ class AgentWorktreeService:
                 locked=info.locked,
                 deep=deep,
             )
-            stations.append(replace(inspected, idle_seconds=_idle_seconds(path)))
+            return replace(inspected, idle_seconds=_idle_seconds(path))
+
+        stations: list[Station]
+        if deep and len(targets) > 1:
+            # Each station's Git scan is a separate child process on its own work tree (I/O bound): run them side by
+            # side. Results keep the registration order; the first failure in that order is the one raised.
+            with ThreadPoolExecutor(max_workers=min(len(targets), DEEP_SCAN_WORKERS)) as pool:
+                futures = [pool.submit(inspect_one, path, info) for path, info in targets]
+                stations = []
+                try:
+                    for future in futures:
+                        stations.append(future.result())
+                except BaseException:
+                    for future in futures:
+                        future.cancel()
+                    raise
+        else:
+            stations = [inspect_one(path, info) for path, info in targets]
         if self._stations_dir.is_dir():
             for child in sorted(self._stations_dir.iterdir()):
                 if only is not None and child.name != only:
@@ -1146,23 +1167,21 @@ class AgentWorktreeService:
         merged = False
         untouched = False
         if head:
-            status = self._git("status", "--porcelain=v1", "-z", "--untracked-files=all", cwd=path)
+            # One scan answers both questions: ``--ignored=traditional`` with ``-uall`` lists every ignored file
+            # on its own ``!!`` line, exactly what ``ls-files --others --ignored --exclude-standard`` listed.
+            status = self._git(
+                "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", cwd=path
+            )
             if status.returncode != 0:
                 raise AgentWorktreeError(f"读不到工位状态 {path}：{_detail(status)}")
-            dirty = tuple(
-                sorted(entry[3:] for entry in status.stdout.split("\0") if len(entry) > 3)
-            )
-            hidden = self._git(
-                "ls-files", "--others", "--ignored", "--exclude-standard", "-z", cwd=path
-            )
-            if hidden.returncode != 0:
-                raise AgentWorktreeError(f"读不到工位里被忽略的文件 {path}：{_detail(hidden)}")
+            entries = [entry for entry in status.stdout.split("\0") if len(entry) > 3]
+            dirty = tuple(sorted(entry[3:] for entry in entries if not entry.startswith("!! ")))
             ignored = tuple(
                 sorted(
                     {
-                        entry.split("/", 1)[0] + ("/" if "/" in entry else "")
-                        for entry in hidden.stdout.split("\0")
-                        if entry and not _is_tool_cache(entry)
+                        name.split("/", 1)[0] + ("/" if "/" in name else "")
+                        for name in (entry[3:] for entry in entries if entry.startswith("!! "))
+                        if not _is_tool_cache(name)
                     }
                 )
             )

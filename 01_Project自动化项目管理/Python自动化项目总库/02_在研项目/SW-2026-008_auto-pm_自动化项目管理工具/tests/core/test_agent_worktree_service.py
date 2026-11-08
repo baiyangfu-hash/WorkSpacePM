@@ -1346,20 +1346,20 @@ def test_a_timestamp_in_the_future_counts_as_zero_idle(lab: Lab, frozen_now: flo
     assert station.idle_seconds == 0 and station.idle_days == 0 and not station.stale
 
 
-def test_a_failing_ignored_files_scan_stops_the_sweep(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failing_status_scan_stops_the_sweep(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     other_station(lab, "m3-pr-n")
     original = AgentWorktreeService._git
 
     def failing(self: AgentWorktreeService, *args: str, **kwargs: Any) -> Any:
         result = original(self, *args, **kwargs)
-        if args and args[0] == "ls-files":
+        if args and args[0] == "status" and "--ignored=traditional" in args:
             result.returncode = 128
             result.stdout = ""
         return result
 
     monkeypatch.setattr(AgentWorktreeService, "_git", failing)
 
-    with pytest.raises(AgentWorktreeError, match="被忽略的文件"):
+    with pytest.raises(AgentWorktreeError, match="读不到工位状态"):
         lab.service().sweep(apply=True)
 
 

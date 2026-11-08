@@ -141,8 +141,8 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "缓存目录也算被忽略的文件",
-        "if entry and not _is_tool_cache(entry)",
-        "if entry",
+        "if not _is_tool_cache(name)",
+        "if name",
     ),
     (
         "__pycache__ 里的非 pyc 文件也当缓存",
@@ -160,9 +160,9 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         '        if False:\n            hold = self._other_hold(fresh)',
     ),
     (
-        "读不到被忽略的文件按没有处理",
-        "            if hidden.returncode != 0:\n",
-        "            if False:\n",
+        "读不到工位状态（含被忽略的文件）按没有处理",
+        '"--ignored=traditional", cwd=path\n            )\n            if status.returncode != 0:\n',
+        '"--ignored=traditional", cwd=path\n            )\n            if False:\n',
     ),
     (
         "--only 找不到目录不报错",
