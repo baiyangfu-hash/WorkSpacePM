@@ -20,6 +20,14 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $python = Join-Path $root ".venv\Scripts\python.exe"
 $entry = Join-Path $root "main.py"
 
+# D-150：.venv 还没建好时 `& $python` 在 Windows PowerShell 5.1 里只抛一个看不懂的 CommandNotFoundException；先查，给人话和固定退出码 3。
+# 放在设置 AUTO_PM_AGENT 之前，所以没有什么需要还原；被点号引用时只 return，免得关掉调用者的终端。
+if (-not (Test-Path -LiteralPath $python)) {
+    [Console]::Error.WriteLine("找不到 .venv，先跑 setup_env.bat（期望的 python：${python}）")
+    if ($MyInvocation.InvocationName -ne '.') { exit 3 }
+    return
+}
+
 $previous = $env:AUTO_PM_AGENT
 $env:AUTO_PM_AGENT = $agent
 $stopPreference = $ErrorActionPreference
