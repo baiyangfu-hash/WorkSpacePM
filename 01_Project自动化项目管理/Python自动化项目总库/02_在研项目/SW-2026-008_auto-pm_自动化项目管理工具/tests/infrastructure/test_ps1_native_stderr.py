@@ -53,6 +53,15 @@ def test_pm_as_agent_runs_the_native_command_under_continue_and_returns_its_exit
     before = text[: call.start()]
     assert CONTINUE.search(before), "the native call must run after $ErrorActionPreference is set to Continue"
     assert "$exitCode = $LASTEXITCODE" in text and "exit $exitCode" in text
+    # A caller that collects our stderr with ``2>&1`` / ``2> file`` makes PowerShell 5.1 wrap each native stderr line in a
+    # NativeCommandError record and stop the caller: the script merges the native stderr into the pipe itself, turns the
+    # error records back into plain text and writes them to the real stderr, so no error record ever leaves the script.
+    call_line = text[call.start() : text.index("\n", call.start())]
+    assert "2>&1" in call_line and "ForEach-Object" in call_line
+    assert "System.Management.Automation.ErrorRecord" in text and "[Console]::Error.WriteLine" in text
+    # the exit code is read right after the pipeline, before anything else can overwrite it
+    after_call = text[call.start() :]
+    assert after_call.index("$exitCode = $LASTEXITCODE") < after_call.index("$ErrorActionPreference = $stopPreference")
     # Stop is put back for the rest of the script and when the call fails half way
     assert text.count("$ErrorActionPreference = $stopPreference") >= 2
 

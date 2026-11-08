@@ -26,8 +26,13 @@ $stopPreference = $ErrorActionPreference
 try {
     # D-132：Windows PowerShell 5.1 在 Stop 下会把原生命令写到 stderr 的每一行（如启动器的 "launcher: release verified…"）
     # 升级成终止错误，命令其实已跑完，脚本却中途退出并返回 -1。调用原生命令这一小段改回 Continue，成败只看退出码。
+    # 调用方用 2>&1 或 2> 文件 收本脚本的 stderr 时，PowerShell 还会把每行 stderr 包成 NativeCommandError 记录，调用方照样会
+    # 中断。所以这里自己把原生 stderr 合进管道，当普通文本直接写到真正的 stderr（[Console]::Error），不产生错误记录；
+    # stdout 的对象原样放行。管道最后一环是 ForEach-Object，$LASTEXITCODE 仍是原生命令的退出码。
     $ErrorActionPreference = "Continue"
-    & $python $entry @rest
+    & $python $entry @rest 2>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine($_.ToString()) } else { $_ }
+    }
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $stopPreference
     # 直接运行时用 exit 交回退出码（失败必须非 0）；只有被点号引用（. .\pm-as-agent.ps1）时才不 exit，免得关掉调用者的终端
