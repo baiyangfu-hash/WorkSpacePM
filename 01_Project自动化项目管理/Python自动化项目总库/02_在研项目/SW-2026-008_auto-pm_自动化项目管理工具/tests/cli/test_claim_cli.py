@@ -192,6 +192,33 @@ def test_d34_number_command_exits_one_with_the_refusal(monkeypatch: pytest.Monke
     monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
     monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
 
-    result = CliRunner().invoke(claim_cli.claim_group, ["number", "--as", "claude"])
+    result = CliRunner().invoke(claim_cli.claim_group, ["number", "--goal", "落卡", "--as", "claude"])
 
     assert result.exit_code == 1 and "拒绝 推占位分支失败" in (result.output + (result.stderr if result.stderr_bytes else ""))
+
+
+def test_d152_number_command_requires_a_goal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root, _ = _tree(tmp_path)
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["number", "--as", "claude"])
+
+    assert result.exit_code == 2 and "--goal" in result.output
+
+
+def test_d152_list_shows_a_number_only_claim_as_such(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.application.core.claim_service import Claim
+
+    root, _ = _tree(tmp_path)
+
+    class _Service:
+        def all_claims(self, *, fetch: bool = True) -> list[Claim]:
+            return [Claim("245", "claude", "m", (), "落卡", "2026-11-08T00:00:00+00:00", "c")]
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "路径：（只占号，未补路径）" in result.output
