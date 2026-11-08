@@ -119,3 +119,41 @@ def test_claim_open_hands_the_service_repository_root_paths_and_says_so_on_stder
     assert _Recording.received == [(f"{PROJECT}/auto_pm/x.py", "reviews/tools/a.py")]
     assert "路径已按仓库根补全：auto_pm/x.py → proj/app/auto_pm/x.py" in result.stderr
     assert "reviews/tools/a.py →" not in result.stderr, "a path that already is a repository-root path is not mentioned"
+
+
+def test_add_paths_command_lifts_paths_to_the_root_and_reports_the_new_list(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.application.core.claim_service import Claim
+
+    root, project = _tree(tmp_path)
+    seen: dict[str, object] = {}
+
+    class _Service:
+        def add_paths(self, card: str, *, owner: str, paths: list[str]) -> Claim:
+            seen.update(card=card, owner=owner, paths=paths)
+            return Claim(card, owner, "m", ("a", *paths), "g", "t", "c")
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["add-paths", "340", "--paths", "auto_pm/x.py", "--as", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == {"card": "340", "owner": "claude", "paths": [f"{PROJECT}/auto_pm/x.py"]}
+    assert "已追加路径" in result.output and "领卡时间和到期时间不变" in result.output
+
+
+def test_add_paths_command_exits_one_with_the_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root, _ = _tree(tmp_path)
+
+    class _Service:
+        def add_paths(self, card: str, *, owner: str, paths: list[str]) -> None:
+            raise ClaimError("要追加的路径和别人的占位重叠")
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+    monkeypatch.chdir(root)
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["add-paths", "340", "--paths", "reviews/a.py", "--as", "claude"])
+
+    assert result.exit_code == 1 and "拒绝 要追加的路径和别人的占位重叠" in (result.output + (result.stderr if result.stderr_bytes else ""))

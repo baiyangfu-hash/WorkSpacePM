@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -567,3 +568,70 @@ def test_the_checkpoint_hook_renews_as_the_session_alias_when_there_is_one(monke
     module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
 
     assert owners == ["claude-a1b2c3", "user", "user"]
+
+
+def test_add_paths_widens_the_claim_without_moving_claimed_at_or_the_lease(pair: Pair) -> None:
+    # D-125: a card that needs one more file must not be released and opened again (that resets claimed_at)
+    opened = pair.laptop.open("340", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    time.sleep(1.1)  # timestamps have one-second resolution: without it "unchanged" and "reset" look the same
+
+    widened = pair.laptop.add_paths("340", owner="claude", paths=["p/b", "p/a/inner.py"])
+
+    assert widened.paths == ("p/a", "p/b"), "p/a/inner.py is already inside p/a and is not repeated"
+    assert widened.claimed_at == opened.claimed_at and widened.expires_at == opened.expires_at and widened.paths_added_at
+    on_server = next(c for c in pair.cloud.all_claims() if c.card == "340")
+    assert on_server.paths == ("p/a", "p/b") and on_server.claimed_at == opened.claimed_at, "it is on the server, not only returned"
+
+
+def test_add_paths_with_nothing_new_pushes_nothing(pair: Pair) -> None:
+    opened = pair.laptop.open("341", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+
+    assert pair.laptop.add_paths("341", owner="claude", paths=["p/a/x.py"]).commit == opened.commit
+
+
+def test_add_paths_is_refused_when_another_live_claim_holds_the_path_and_changes_nothing(pair: Pair) -> None:
+    pair.laptop.open("342", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.cloud.open("343", paths=["p/taken"], goal="y", owner="trae", machine="cloud")
+
+    with pytest.raises(ClaimError, match=r"追加的路径和别人的占位重叠.*p/taken"):
+        pair.laptop.add_paths("342", owner="claude", paths=["p/b", "p/taken/file.py"])
+
+    assert next(c for c in pair.laptop.all_claims() if c.card == "342").paths == ("p/a",)
+
+
+def test_add_paths_may_cover_what_a_released_claim_held(pair: Pair) -> None:
+    pair.cloud.open("344", paths=["p/old"], goal="y", owner="trae", machine="cloud")
+    pair.cloud.release("344", owner="trae")
+    pair.laptop.open("345", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+
+    assert pair.laptop.add_paths("345", owner="claude", paths=["p/old"]).paths == ("p/a", "p/old")
+
+
+def test_only_the_holder_adds_paths_and_a_released_claim_cannot(pair: Pair) -> None:
+    pair.laptop.open("346", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.cloud.all_claims()
+
+    with pytest.raises(ClaimError, match="只有持有者能追加路径"):
+        pair.cloud.add_paths("346", owner="trae", paths=["p/b"])
+    with pytest.raises(ClaimError, match="没有叫 999 的占位"):
+        pair.laptop.add_paths("999", owner="claude", paths=["p/b"])
+    with pytest.raises(ClaimError, match="必须写明路径"):
+        pair.laptop.add_paths("346", owner="claude", paths=[])
+    pair.laptop.release("346", owner="claude")
+    with pytest.raises(ClaimError, match="不能追加路径"):
+        pair.laptop.add_paths("346", owner="claude", paths=["p/b"])
+
+
+def test_renew_keeps_the_added_paths_marker(pair: Pair) -> None:
+    pair.laptop.open("347", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+    pair.laptop.add_paths("347", owner="claude", paths=["p/b"])
+
+    renewed = pair.laptop.renew("347", owner="claude")
+
+    assert renewed.paths == ("p/a", "p/b") and renewed.paths_added_at
+
+
+def test_add_paths_may_widen_to_a_folder_that_contains_its_own_earlier_path(pair: Pair) -> None:
+    pair.laptop.open("348", paths=["p/a"], goal="x", owner="claude", machine="laptop")
+
+    assert pair.laptop.add_paths("348", owner="claude", paths=["p"]).paths == ("p/a", "p"), "its own claim is not a rival"

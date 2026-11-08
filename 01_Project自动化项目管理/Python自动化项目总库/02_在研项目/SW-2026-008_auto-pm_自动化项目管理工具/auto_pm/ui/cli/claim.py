@@ -155,6 +155,24 @@ def renew_claim(ctx: click.Context, card: str, owner: str) -> None:
     click.echo(f"已续租 {renewed.label()}，到期 {renewed.expires_at}")
 
 
+@claim_group.command(name="add-paths")
+@click.argument("card")
+@click.option("--paths", "paths", multiple=True, required=True, help="要追加的路径，可重复；目录覆盖其下全部文件")
+@click.option("--as", "owner", default="", help="谁在追加；必须与领卡时一致")
+@click.pass_context
+def add_paths_claim(ctx: click.Context, card: str, paths: tuple[str, ...], owner: str) -> None:
+    """给自己的占位追加路径：领卡后发现还要改别的文件时用，不必放下重领（重领会重置领卡时间，已有提交就排到领卡之前）。"""
+    fixed, notes = normalise_paths(Path(_root(ctx)), Path.cwd(), paths)
+    for note in notes:
+        click.echo(f"路径已按仓库根补全：{note}", err=True)
+    try:
+        claim = _service(ctx).add_paths(card, owner=_owner(owner), paths=fixed)
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"已追加路径 {claim.label()}；现在的路径：{'、'.join(claim.paths)}（领卡时间和到期时间不变）")
+
+
 @claim_group.command(name="reclaim")
 @click.argument("card")
 @click.option("--reason", required=True, help="为什么收回（对方没动静、状态未知等）")
