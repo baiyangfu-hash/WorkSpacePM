@@ -193,7 +193,7 @@
 | D-03 | 长门禁收口窗口只剩 3 分钟，租约夜里过期 | P0 | 卡 225 A、⑥ | 已核 | #558 |
 | D-04 | 发布目录没有写保护（缓存残留） | P1 | 第 11 节第 8 项；第二份反馈（笔记本 011／009／000 会话，证据日志 `.auto-pm/reports/m3-settle-1106/real_run1.log`、`real_run2.log`，转述）C7 | 读码＋转述 | 未立卡；【11-08 17:17Z 协调者裁决】启动器 `bootstrap.py` 已对字节码残留拒绝启动，并提供 `--purge-bytecode`，不再另加提示；证据随云端P1 的 D-05 PR 提供，该 PR 合并后按“已被现有机制覆盖”关闭（转述，我未读 bootstrap.py）。；【11-08 19:47Z】由 bootstrap.py 覆盖，随 D-05 一起关（协调者）。 |
 | D-05 | 没有安全的发布版试验副本；第二份反馈补充：没有官方演练沙箱，也没有 `--dry-run`；笔记本会话 11-06 使用体验补充（协调者转述）：`inbox add`、`plan`、`approve` 都没有 `--dry-run` | P1 | 第 11 节第 10 项；第二份反馈（笔记本 011／009／000 会话，证据日志 `.auto-pm/reports/m3-settle-1106/real_run1.log`、`real_run2.log`，转述）D2 | 转述 | 未立卡；【11-08 19:47Z】部分已合：A 部分 #670 aa7b274b7 已合未上线；B 部分 #676（`pm plan --dry-run`）未合；D-05 仍记未解决（协调者）。 |
-| D-06 | `pm orient` 与 `pm resume` 的下一步互相矛盾；resume 仍读退役的 PM_SESSION | P1 | R-01、R-06 | 读码 | 未立卡 |
+| D-06 | `pm orient` 与 `pm resume` 的下一步互相矛盾；resume 仍读退役的 PM_SESSION | P1 | R-01、R-06 | 读码 | 未立卡；【11-08 19:52Z 已核实关闭】云端P1 核实复现不了（协调者转述，P1 原文我未读，main 7a166b24）：`pm resume` 与 `orient` 走同一 `PmFacadeService._query` 和同一渲染；`test_orient_and_resume_json_carry_the_same_query_block` 锁定；真仓库两条命令 `--json` 的 next_legal_action/conflicts/exit_hints 完全一致；PM_SESSION 只剩显式开关 `pm resume --legacy-v1`，该残留不另立缺陷（协调者）。 |
 | D-07 | `cockpit-entry` 第 6 步教 `git worktree add --detach`，建出关不掉的工位 | P1 | 第 11 节第 3 项 | 已核 | 使用规划 G-03 |
 | D-08 | `cockpit-entry` 两处过时，活文档写死旧版本号；SysLib 线程 11-06 使用体验补充（协调者转述）：绕行用的 `pm plan --kind` 在 `cockpit-entry` 里没写，得读源码才知道 | P1 | R-10、R-04 | 已核 | 使用规划规则文件批 |
 | D-09 | 删除工位没有机械护栏 | P1 | 卡 225 ⑤ | 已核 | #558 |
