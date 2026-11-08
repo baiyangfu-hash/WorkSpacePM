@@ -387,6 +387,27 @@ def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_t
     assert final["peak_committed_gib"] is None or final["peak_committed_gib"] >= 0
 
 
+@pytest.mark.parametrize("project_importable", [True, False], ids=["PYTHONPATH-at-project-root", "no-PYTHONPATH-fallback"])
+def test_the_guard_starts_whether_or_not_auto_pm_is_importable_for_the_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project_importable: bool
+) -> None:
+    """D-123: run as a plain script the guard must not put auto_pm/infrastructure/ on sys.path (its logging/ would shadow the stdlib)."""
+
+    project_root = Path(core.__file__).resolve().parents[2]
+    if project_importable:
+        monkeypatch.setenv("PYTHONPATH", str(project_root))
+    else:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    core.start(tmp_path, "shadow", [PY, "-c", "import time; time.sleep(2)"], cwd=repo, timeout_minutes=5, poll_seconds=0.3)
+    run_dir = core.run_directory(tmp_path, "shadow")
+
+    assert _wait(lambda: (run_dir / "guard.json").exists(), 90), (run_dir / "guard.out").read_text(encoding="utf-8", errors="replace")
+    assert b"Traceback" not in (run_dir / "guard.out").read_bytes()
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+
+
 def test_start_refuses_a_name_that_was_used_an_empty_command_a_bad_name_and_a_missing_directory(tmp_path: Path) -> None:
     core.start(tmp_path, "once", [PY, "-c", "pass"], cwd=tmp_path, poll_seconds=0.2)
 
@@ -625,7 +646,7 @@ def test_a_guard_that_cannot_start_means_no_job_and_a_failed_record(tmp_path: Pa
     launched: list[str] = []
 
     def launch(argv: list[str], log: Path, cwd: Path) -> int:
-        launched.append(argv[3])
+        launched.append(argv[-2])
         raise core.LongRunError("no process for you")
 
     monkeypatch.setattr(core, "launch_detached", launch)
@@ -643,7 +664,7 @@ def test_a_worker_that_cannot_start_takes_the_guard_down_with_it(tmp_path: Path,
     killed: list[int] = []
 
     def launch(argv: list[str], log: Path, cwd: Path) -> int:
-        if argv[3] == "worker":
+        if argv[-2] == "worker":
             raise core.LongRunError("no process for you")
         return 4242
 

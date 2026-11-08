@@ -93,3 +93,52 @@ class TestChangeMarkdownEditor:
 
         # 验证结论已写入 §10.2 区域（旧结构）
         assert "| **验证结论** | 全部通过 |" in new_content
+
+
+# --- D-97: the §5 file cells are the source of the approved scope and must be fillable by `change edit --file` --------
+
+
+class TestUpdateFiles:
+    def _content(self) -> str:
+        return TestChangeMarkdownEditor()._make_content()
+
+    def test_fills_both_file_cells_and_leaves_the_rest_alone(self) -> None:
+        content = self._content()
+        assert content.count("| 涉及文件/交付物 | （待填写） |") == 2
+
+        updated = ChangeMarkdownEditor().update_files(content, ["a/b.py", "tests/test_b.py"])
+
+        assert updated.count("| 涉及文件/交付物 | a/b.py<br>tests/test_b.py |") == 2
+        assert "| 涉及文件/交付物 | （待填写） |" not in updated
+        assert updated.replace("a/b.py<br>tests/test_b.py", "（待填写）") == content
+
+    def test_update_field_dispatches_files(self) -> None:
+        updated = ChangeMarkdownEditor().update_field(self._content(), "files", ["x.py"])
+        assert "| 涉及文件/交付物 | x.py |" in updated
+
+    def test_rejects_an_empty_list_and_cell_breaking_paths(self) -> None:
+        editor = ChangeMarkdownEditor()
+        content = self._content()
+        for bad in ([], ["", "  "], ["a|b.py"], ["a\nb.py"], ["a<br>b.py"]):
+            try:
+                editor.update_files(content, bad)
+            except ValueError:
+                continue
+            raise AssertionError(f"应当拒绝 {bad!r}")
+
+
+class TestUpdateFilesAudit:
+    def test_a_missing_row_is_an_error_not_a_silent_no_op(self) -> None:
+        content = TestChangeMarkdownEditor()._make_content().replace("涉及文件/交付物", "涉及文档")
+        try:
+            ChangeMarkdownEditor().update_files(content, ["a.py"])
+        except ValueError as exc:
+            assert "没有“涉及文件/交付物”行" in str(exc)
+        else:
+            raise AssertionError("找不到行必须抛 ValueError")
+
+    def test_read_files_returns_the_current_list_and_treats_the_placeholder_as_empty(self) -> None:
+        editor = ChangeMarkdownEditor()
+        content = TestChangeMarkdownEditor()._make_content()
+        assert editor.read_files(content) == []
+        assert editor.read_files(editor.update_files(content, ["a/b.py", "c.py"])) == ["a/b.py", "c.py"]

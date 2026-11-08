@@ -1,7 +1,7 @@
 """变异反证：把 ``pr open`` 的每一道拒绝条件逐个拿掉，``test_pr_open_service.py`` 都必须变红。
 
 用法（在 SW-2026-008 项目目录）：``python -B tests/core/pr_open_mutants.py``。
-每个变异只改内存里的一份副本写回源文件、跑完立即还原；退出码 0＝全部变异都被测试抓住。
+每个变异只改内存里的一份副本写回源文件、跑完立即还原；退出码 0＝基线全绿且全部变异都被测试抓住；1＝有漏网；2＝锚点失效或基线不绿；3＝有变异的 pytest 运行无效。
 """
 
 from __future__ import annotations
@@ -13,13 +13,20 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[2]
 SOURCE = PROJECT / "auto_pm" / "application" / "core" / "pr_open_service.py"
-TESTS = "tests/core/test_pr_open_service.py"
+# The PR description is built in its own module (D-85: three anchors still pointed at pr_open_service.py after the split).
+BODY_SOURCE = PROJECT / "auto_pm" / "application" / "core" / "pr_body_builder.py"
+SOURCES = (SOURCE, BODY_SOURCE)
+TESTS = ("tests/core/test_pr_open_service.py", "tests/core/test_pr_body_builder.py")
 
 # (名字, 原文, 变异后)：每条都是“去掉一道拒绝条件”或“放开一个动作”。
 MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("名册外的 agent 也开", "        if prefix is None:\n", "        if False:\n"),
     ("认不出调用方时放行", "        if caller == UNKNOWN_CALLER:\n", "        if False:\n"),
-    ("可以替别的 agent 开 PR", "        if caller and caller != agent:\n", "        if False:\n"),
+    (
+        "可以替别的 agent 开 PR",
+        "        if not acts_for(caller, agent) and not self._stations.lent_to_caller(agent):\n",
+        "        if False:\n",
+    ),
     (
         "没有工位也往下走",
         '        if station is None or station.kind != "agent":\n',
@@ -74,8 +81,8 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "PR 描述丢了任务卡行",
-        'lines = [f"任务卡: {task_card}"]\n',
-        "lines = []\n",
+        'out += ["## 可改范围", "", f"任务卡: {task_card}", ""]\n',
+        'out += ["## 可改范围", "", ""]\n',
     ),
     (
         "PLC 改动不声明也放行",
@@ -87,7 +94,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
         "        if declared is not None and declared not in SAFETY_ANSWERS:\n",
         "        if False:\n",
     ),
-    ("声明不进描述", "        if safety_circuit:\n", "        if False:\n"),
+    ("声明不进描述", 'f"安全回路: {safety_circuit}", ""]', '"安全回路: 否", ""]'),
     (
         "推送不用显式 refspec",
         'self._git(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")',
@@ -106,48 +113,108 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("gh pr create 带无关参数", '"--body-file", "-",', '"--body-file", "-", "--fill",'),
     ("查已有 PR 失败也往下走", "        if existing.returncode != 0:\n", "        if False:\n"),
     ("pr create 失败只看网址", "if created.returncode != 0 or match is None:", "if match is None:"),
-    ("没有证据时假装有", '["- 未提供（由审计者自行核验）"]', '["- 已验证"]'),
+    ("没有证据时假装有", 'or [f"- {UNPROVIDED}"]', 'or ["- 已验证"]'),
 )
 
 
+def _locate(before: str, originals: dict[Path, str]) -> Path | None:
+    """The one source file that holds ``before`` exactly once and no other file holds it; None otherwise."""
+
+    holders = [path for path, text in originals.items() if text.count(before) >= 1]
+    if len(holders) != 1 or originals[holders[0]].count(before) != 1:
+        return None
+    return holders[0]
+
+
+LABELS = {"caught": "抓住", "survived": "漏网", "invalid": "无效"}
+RUN_TIMEOUT_SECONDS = 600
+
+
+def judge(returncode: int | None, output: str) -> str:
+    """ "caught" only when pytest itself reports failed tests (exit 1); exit 0 is "survived" (all green).
+
+    Exit 2/3/4/5, a signal exit, or a timeout (``None``) means pytest crashed or never judged: "invalid".
+    Exit 1 without a "failed" line in the output is also "invalid" (e.g. collection trouble reported as 1).
+    """
+
+    if returncode == 0:
+        return "survived"
+    if returncode == 1 and "failed" in output:
+        return "caught"
+    return "invalid"
+
+
+def run_tests() -> tuple[int | None, str]:
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "pytest",
+                "-q",
+                "-x",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+                *TESTS,
+            ],
+            cwd=PROJECT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=RUN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, ""
+    return result.returncode, result.stdout + result.stderr
+
+
 def main() -> int:
-    original = SOURCE.read_text(encoding="utf-8")
+    originals = {path: path.read_text(encoding="utf-8") for path in SOURCES}
+    # D-85: check every anchor before running anything, and list ALL stale ones (not just the first), so a refactor
+    # that moves code cannot hide behind an early exit.
+    stale = [name for name, before, _after in MUTANTS if _locate(before, originals) is None]
+    if stale:
+        for name in stale:
+            print(f"[错误] 变异“{name}”的原文在源文件里不是恰好一处，脚本需要更新")
+        print(f"{len(stale)}/{len(MUTANTS)} 个变异的锚点失效；不运行任何变异")
+        return 2
     signal.signal(
         signal.SIGTERM, lambda *_: sys.exit(3)
-    )  # a killed run still restores the source in finally
+    )  # a killed run still restores the sources in finally
+    invalid: list[str] = []
     survivors: list[str] = []
     try:
+        # A red or crashing baseline would make every mutant look "caught".
+        base_verdict = judge(*run_tests())
+        if base_verdict != "survived":
+            print(f"[错误] 未变异的基线不是全绿（判定：{base_verdict}）；不运行任何变异")
+            return 2
         for name, before, after in MUTANTS:
-            if original.count(before) != 1:
-                print(f"[错误] 变异“{name}”的原文在源文件里不是恰好一处，脚本需要更新")
-                return 2
-            SOURCE.write_text(original.replace(before, after), encoding="utf-8")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "-x",
-                    "-p",
-                    "no:cacheprovider",
-                    "-o",
-                    "addopts=",
-                    TESTS,
-                ],
-                cwd=PROJECT,
-                capture_output=True,
-                text=True, encoding="utf-8", errors="replace",
-                check=False,
-            )
-            caught = result.returncode != 0
-            print(f"[{'抓住' if caught else '漏网'}] {name}")
-            if not caught:
+            target = _locate(before, originals)
+            assert target is not None  # checked above
+            target.write_text(originals[target].replace(before, after), encoding="utf-8")
+            verdict = judge(*run_tests())
+            target.write_text(originals[target], encoding="utf-8")
+            print(f"[{LABELS[verdict]}] {name}")
+            if verdict == "survived":
                 survivors.append(name)
+            elif verdict == "invalid":
+                invalid.append(name)
     finally:
-        SOURCE.write_text(original, encoding="utf-8")
-    print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} 个变异被测试抓住")
+        for path, text in originals.items():
+            path.write_text(text, encoding="utf-8")
+    caught = len(MUTANTS) - len(survivors) - len(invalid)
+    print(f"{caught}/{len(MUTANTS)} 个变异被测试抓住")
+    if invalid:
+        print(
+            f"{len(invalid)} 个变异的 pytest 运行无效（崩溃、超时或被杀，不算抓住）：{'、'.join(invalid)}"
+        )
+        return 3
     return 1 if survivors else 0
 
 
