@@ -210,7 +210,9 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
     others = [path for path in changes if not path.endswith(".py")]
     if others:
         return ["tests"], f"改到了非 Python 文件（{others[0]} 等 {len(others)} 个），没有可靠的办法知道哪些测试读它：相关测试 = 全部 tests"
-    python = [path for path in changes if (project / path).is_file() or path.startswith("tests/")]
+    # a deleted or renamed module stays in the list (D-128): the tests that import its old name now fail with ImportError, and mypy's
+    # ignore_missing_imports hides that, so only a test run shows it
+    python = list(changes)
     test_files = sorted(p.relative_to(project).as_posix() for p in (project / "tests").rglob("*.py")) if (project / "tests").is_dir() else []
     imports: dict[str, set[str]] = {}
     strings: dict[str, set[str]] = {}
