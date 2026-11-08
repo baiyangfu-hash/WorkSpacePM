@@ -4,7 +4,8 @@
 删了就没了。这里只提供两件事，谁能下令删（用户本人的口令或原话、agent 一律不行）由命令层负责：
 
 - ``delete_blockers``：列出挡住删除的原因（开着的 Mission、Work、Run；项目目录里没提交的改动；读不出来也算挡住）；
-- ``recycle_project``：把项目目录整体搬到 ``<工作区>/.auto-pm/recycle/<项目编号>/<时间戳>/``，可原样搬回。
+- ``recycle_project``：把项目目录整体搬到 ``<工作区>/.auto-pm/recycle/<项目编号>/<时间戳>/``，可原样搬回；
+- ``list_recycled``：只读列出回收区里有什么、搬进来多久了（TD-208）。回收区没有任何自动清理，列表只为让人决定要不要手工清，这里不删任何东西。
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -147,3 +149,43 @@ def recycle_project(
             f"搬进回收区失败（项目目录保持原样或请手工核对）：{error}"
         ) from error
     return destination
+
+
+@dataclass(frozen=True)
+class RecycledProject:
+    """回收区里的一份项目目录：搬进来的时间从目录名里的时间戳读，读不出来时 ``recycled_at`` 为 None。"""
+
+    project_id: str
+    stamp: str
+    path: Path
+    recycled_at: datetime | None
+
+    def age_days(self, now: datetime) -> int | None:
+        return None if self.recycled_at is None else max(0, (now - self.recycled_at).days)
+
+
+def _stamp_time(stamp: str) -> datetime | None:
+    try:
+        return datetime.strptime(stamp, "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def list_recycled(workspace_root: str | Path) -> list[RecycledProject]:
+    """只读：列出 ``<工作区>/.auto-pm/recycle/<项目编号>/<时间戳>/``，最近搬进来的在前；回收区不存在时返回空表。
+
+    只看目录名，不递归、不统计大小、不改任何文件；认不出时间戳的目录照样列出（``recycled_at`` 为 None），不丢项。
+    """
+
+    recycle_root = Path(workspace_root) / RECYCLE_RELATIVE_DIR
+    if not recycle_root.is_dir():
+        return []
+    found: list[RecycledProject] = []
+    for project_dir in sorted(recycle_root.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        for entry in sorted(project_dir.iterdir()):
+            if entry.is_dir():
+                found.append(RecycledProject(project_dir.name, entry.name, entry, _stamp_time(entry.name)))
+    found.sort(key=lambda item: (item.recycled_at or datetime.min.replace(tzinfo=UTC), item.stamp), reverse=True)
+    return found
