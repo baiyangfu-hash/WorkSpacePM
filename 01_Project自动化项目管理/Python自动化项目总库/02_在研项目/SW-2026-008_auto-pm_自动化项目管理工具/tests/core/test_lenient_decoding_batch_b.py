@@ -72,6 +72,23 @@ def test_project_fact_git_query_refuses_undecodable_output(monkeypatch: pytest.M
     assert service._run_git("rev-parse", "HEAD").stdout == "abc"
 
 
+def test_project_fact_git_query_reads_bytes_not_text_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Windows: ``subprocess.run(text=True)`` decodes in a reader thread that swallows the error and returns stdout=None.
+
+    Only a bytes-mode call lets the strict decode happen in our own frame on every platform; pin that on the call itself.
+    """
+
+    seen: dict[str, Any] = {}
+
+    def run(command: Any, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, b"abc", b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ProjectFactService(str(tmp_path))._run_git("rev-parse", "HEAD").stdout == "abc"
+    assert not seen.get("text") and "encoding" not in seen and "errors" not in seen and not seen.get("universal_newlines")
+
+
 def test_unreadable_change_order_counts_as_not_closed(tmp_path: Path) -> None:
     """The closing gate used to drop the bad bytes and judge the rest of the file; a file it cannot read cannot be shown closed."""
 
