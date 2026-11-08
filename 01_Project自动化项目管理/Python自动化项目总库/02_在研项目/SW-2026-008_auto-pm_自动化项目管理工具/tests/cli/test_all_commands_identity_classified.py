@@ -65,6 +65,7 @@ UNDECIDED: dict[str, tuple[str, ...]] = {}
 READ_ONLY: dict[str, tuple[str, ...]] = {
     "context": ("resolve",),  # prints the identity card; it is the check itself
     "doctor": ("",),  # environment diagnosis, prints only
+    "gate": ("judge", "plan", "precheck"),  # D-107a: ``plan`` prints commands, ``judge`` re-reads logs; ``precheck`` (pre-push self check) writes only temp logs; ``run`` writes its own folder and is guarded
     "gui": ("",),  # opens the cockpit window; every write inside goes through the guarded services
     "role": ("check", "list"),  # reads the role pack registry
 }

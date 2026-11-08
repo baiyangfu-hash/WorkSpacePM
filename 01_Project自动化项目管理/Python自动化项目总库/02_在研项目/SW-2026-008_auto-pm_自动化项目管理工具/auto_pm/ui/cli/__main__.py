@@ -62,6 +62,7 @@ from auto_pm.ui.cli.delivery import delivery_group  # noqa: E402
 from auto_pm.ui.cli.doc import doc_group  # noqa: E402
 from auto_pm.ui.cli.doctor import doctor_command  # noqa: E402
 from auto_pm.ui.cli.dogfood import dogfood_group  # noqa: E402
+from auto_pm.ui.cli.gate import gate_group  # noqa: E402
 from auto_pm.ui.cli.git_hook import git_hook_group  # noqa: E402
 from auto_pm.ui.cli.gui import gui_command  # noqa: E402
 from auto_pm.ui.cli.handoff import handoff_group  # noqa: E402
@@ -178,6 +179,7 @@ cli.add_command(clean_cmd)
 cli.add_command(worktree_group)
 cli.add_command(claim_group)
 cli.add_command(long_run_group)
+cli.add_command(gate_group)
 cli.add_command(pr_group)
 cli.add_command(role_group)
 
