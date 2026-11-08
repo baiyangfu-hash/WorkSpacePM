@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ PASS, FAIL, UNVERIFIED = "PASS", "FAIL", "UNVERIFIED"
 GIT_TIMEOUT_SECONDS = 30
 EXACT_TREE_TIMEOUT_SECONDS = 120
 MIN_FREE_BYTES = 2 * 1024**3
+PROCESS_LIST_TIMEOUT_SECONDS = 30
 BUSY_PROCESS_MARKERS = ("pytest", "boss_main", "main.py gui")
 HEAVY_GATES_MARKER = Path(".auto-pm") / "reports" / "HEAVY_GATES_RUNNING"
 # Part of the one-command release that later cards add; printed so a green preflight is not read as the whole safety net.
@@ -193,46 +195,81 @@ def _check_gate(path: Path | None, commit: str, report: Preflight) -> None:
         report.add("门禁判决", PASS, f"{result[:80]}")
 
 
-def _check_audit(path: Path | None, commit: str, report: Preflight) -> None:
+AUDIT_LINE = re.compile(r"^audit:AUD-001 independent-audit (?P<token>\S+) (?P<run>\S+) (?P<commit>[0-9a-f]{40}) verdict-sha256=(?P<sha>[0-9a-f]{16})(?:\s|$)", re.MULTILINE)
+
+
+def _check_audit(path: Path | None, commit: str, gate_path: Path | None, report: Preflight) -> None:
+    """Only the machine-readable audit line counts: the token must be exactly ``PASS``, name this commit, and carry the first 16 hex
+    digits of the SHA-256 of the gate verdict file given to this command.  Prose (\"放行\", \"不放行\", \"PASS 了 3 项\") is never read."""
+
+    name = "独立审计签字"
     if path is None:
-        report.add("独立审计签字", FAIL, "没给 --audit-signoff；部署必须有独立审计的放行记录")
+        report.add(name, FAIL, "没给 --audit-signoff；部署必须有独立审计的放行记录")
         return
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        report.add("独立审计签字", FAIL, f"读不出 {path}")
+        report.add(name, FAIL, f"读不出 {path}")
         return
-    if commit[:12] not in text.lower():
-        report.add("独立审计签字", FAIL, f"签字文件里没有提交 {commit[:12]}")
-    elif "有保留项" in text or "with-notes" in text.lower():
-        report.add("独立审计签字", FAIL, "审计是“放行（有保留项）”：不允许一键继续，需要用户确认引用点名每一条保留项（裁决 11-08）")
-    elif "放行" not in text and "PASS" not in text:
-        report.add("独立审计签字", FAIL, "签字文件里没有“放行”或 PASS")
+    lines = list(AUDIT_LINE.finditer(text))
+    if not lines:
+        report.add(name, FAIL, "签字文件里没有机器可读的审计行（audit:AUD-001 independent-audit <PASS|PASS-with-notes> <Run> <40位提交> verdict-sha256=<16位> …）")
+        return
+    line = lines[-1]  # the last line is the audit's final word
+    if not commit or line["commit"] != commit.lower():
+        report.add(name, FAIL, f"审计行里的提交 {line['commit'][:12]} 不是待发布提交 {commit[:12] or '空'}")
+    elif line["token"] == "PASS-with-notes":
+        report.add(name, FAIL, "审计是 PASS-with-notes（放行但有保留项）：不允许一键继续，需要用户确认引用点名每一条保留项（裁决 11-08）")
+    elif line["token"] != "PASS":
+        report.add(name, FAIL, f"审计结论是 {line['token']}，不是 PASS")
+    elif gate_path is None or not gate_path.is_file() or _sha256(gate_path)[:16] != line["sha"]:
+        report.add(name, FAIL, "审计行里的 verdict-sha256 和传入的门禁判决文件对不上（审的不是这份判决）")
     else:
-        report.add("独立审计签字", PASS, path.name)
+        report.add(name, PASS, f"{line['run']} {path.name}")
 
 
-def _busy_processes(psutil: Any) -> list[str]:
-    busy: list[str] = []
-    me = psutil.Process()
-    mine = {me.pid, *(parent.pid for parent in me.parents())}  # the command itself (and whatever launched it) is not "busy"
-    for process in psutil.process_iter(["pid", "cmdline"]):
-        line = " ".join(process.info.get("cmdline") or [])
-        if process.info["pid"] not in mine and "python" in line.lower() and any(m in line for m in BUSY_PROCESS_MARKERS):
-            busy.append(f"{process.info['pid']}")
-    return busy
+def _list_processes() -> list[tuple[int, int, str]] | None:
+    """(pid, parent pid, command line) of every running process, from the operating system's own tools; ``None`` when it cannot be listed."""
+
+    try:
+        if sys.platform == "win32":
+            script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
+            command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+        else:
+            command = ["ps", "-eo", "pid=,ppid=,args="]
+        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",  # lenient-decode: 进程命令行只用来匹配关键字
+                              timeout=PROCESS_LIST_TIMEOUT_SECONDS, check=False)  # noqa: S603 - fixed argv, no shell
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    rows: list[tuple[int, int, str]] = []
+    for raw in done.stdout.splitlines():
+        parts = raw.strip().split("|", 2) if sys.platform == "win32" else raw.strip().split(None, 2)
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            rows.append((int(parts[0]), int(parts[1]), parts[2] if len(parts) > 2 else ""))
+    return rows or None
+
+
+def _busy_processes(rows: list[tuple[int, int, str]]) -> list[str]:
+    parents = {pid: parent for pid, parent, _line in rows}
+    mine: set[int] = set()
+    pid = os.getpid()
+    while pid and pid not in mine:  # this command and whatever launched it are not "busy"
+        mine.add(pid)
+        pid = parents.get(pid, 0)
+    return [str(pid) for pid, _parent, line in rows if pid not in mine and "python" in line.lower() and any(m in line for m in BUSY_PROCESS_MARKERS)]
 
 
 def _check_busy(root: Path, report: Preflight) -> None:
     if (root / HEAVY_GATES_MARKER).exists():
         report.add("没有重型门禁在跑", FAIL, f"{HEAVY_GATES_MARKER.as_posix()} 存在")
         return
-    try:
-        import psutil
-    except ImportError:
-        report.add("没有测试或驾驶舱进程在跑", UNVERIFIED, "没有 psutil，没法数进程")
+    rows = _list_processes()
+    if rows is None:
+        report.add("没有测试或驾驶舱进程在跑", UNVERIFIED, "系统进程列表读不出来，没法确认")
         return
-    busy = _busy_processes(psutil)
+    busy = _busy_processes(rows)
     report.add("没有测试或驾驶舱进程在跑", FAIL if busy else PASS, f"在跑的进程：{','.join(busy[:5])}" if busy else "无")
 
 
@@ -289,7 +326,7 @@ def preflight(
     _check_consistency(root, report)
     _check_exact_trees(base, ids, report)
     _check_gate(gate_verdict, report.commit, report)
-    _check_audit(audit_signoff, report.commit, report)
+    _check_audit(audit_signoff, report.commit, gate_verdict, report)
     _check_busy(root, report)
     _check_disk(root, report)
     return report

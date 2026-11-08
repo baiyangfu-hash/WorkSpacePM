@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -68,14 +69,21 @@ class Repo:
             for p in sorted(self.root.rglob("*")) if p.is_file() and ".git" not in p.parts
         }
 
-    def verdict(self, tmp: Path, commit: str, text: str = "PASS (9 groups)") -> Path:
-        path = tmp / "verdict.json"
+    def verdict(self, tmp: Path, commit: str, text: str = "PASS (9 groups)", name: str = "verdict.json") -> Path:
+        path = tmp / name
         path.write_text(json.dumps({"commit": commit, "verdict": text}), encoding="utf-8")
         return path
 
-    def audit(self, tmp: Path, commit: str, body: str = "结论：**放行**。") -> Path:
+    def audit(self, tmp: Path, commit: str, token: str = "PASS", verdict_name: str = "verdict.json", sha: str | None = None, prose: str = "") -> Path:
+        """The signed-off file: free prose plus the machine-readable audit line, bound to the verdict file ``verdict_name``."""
+
+        gate = tmp / verdict_name
+        digest = sha if sha is not None else (hashlib.sha256(gate.read_bytes()).hexdigest()[:16] if gate.exists() else "0" * 16)
         path = tmp / "audit.md"
-        path.write_text(f"# 独立审计结论，候选 {commit}\n{body}\n", encoding="utf-8")
+        path.write_text(
+            f"# 独立审计结论，候选 {commit}\n{prose}\naudit:AUD-001 independent-audit {token} RUN-TEST {commit} verdict-sha256={digest} 2026-11-08T16:00Z {path}\n",
+            encoding="utf-8",
+        )
         return path
 
 
@@ -83,7 +91,7 @@ class Repo:
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
     made = Repo(tmp_path)
     monkeypatch.setattr(rdc, "check_release_consistency", lambda _root: {"status": "ok", "failures": [], "warnings": []})
-    monkeypatch.setattr(rdc, "_busy_processes", lambda _psutil: [])  # other test workers are not a real deployment in flight
+    monkeypatch.setattr(rdc, "_list_processes", lambda: [(1, 0, "init")])  # other test workers are not a real deployment in flight
     return made
 
 
@@ -144,33 +152,73 @@ def test_a_manifest_entry_alone_also_takes_the_slot(repo: Repo, tmp_path: Path) 
     assert _by_name(_happy(repo, tmp_path))["发布槽位空闲"].status == rdc.FAIL
 
 
-@pytest.mark.parametrize("case", ["missing", "other_commit", "not_pass"])
+@pytest.mark.parametrize("case", ["missing", "other_commit", "short_commit", "not_pass", "unreadable"])
 def test_the_gate_verdict_must_name_this_commit_and_pass(repo: Repo, tmp_path: Path, case: str) -> None:
     gate = {
         "missing": None,
-        "other_commit": repo.verdict(tmp_path, "0" * 40),
-        "not_pass": repo.verdict(tmp_path, repo.merge, "FAIL (core)"),
+        "other_commit": repo.verdict(tmp_path, "0" * 40, name="other.json"),
+        "short_commit": repo.verdict(tmp_path, repo.merge[:8], name="short.json"),
+        "not_pass": repo.verdict(tmp_path, repo.merge, "FAIL (core)", name="fail.json"),
+        "unreadable": tmp_path / "nowhere.json",
     }[case]
 
-    report = rdc.preflight(repo.root, repo.merge, gate_verdict=gate, audit_signoff=repo.audit(tmp_path, repo.merge))
+    report = rdc.preflight(repo.root, repo.merge, gate_verdict=gate, audit_signoff=repo.audit(tmp_path, repo.merge, verdict_name=gate.name if gate else "verdict.json"))
 
-    assert not report.ok and _by_name(report)["门禁判决"].status == rdc.FAIL
+    gate_check = _by_name(report)["门禁判决"]
+    assert not report.ok and gate_check.status == rdc.FAIL
+    if case == "other_commit":
+        assert "不是待发布提交" in gate_check.detail, "must fail on the commit, not on the result text"
+    if case == "not_pass":
+        assert "不是 PASS" in gate_check.detail
 
 
-def test_an_audit_that_passed_with_reservations_does_not_allow_one_click(repo: Repo, tmp_path: Path) -> None:
-    signoff = repo.audit(tmp_path, repo.merge, "结论：**放行（有保留项）**。")
+def _audit_check(repo: Repo, tmp_path: Path, *, token: str = "PASS", sha: str | None = None, prose: str = "") -> rdc.Check:
+    gate = repo.verdict(tmp_path, repo.merge)
+    report = rdc.preflight(repo.root, repo.merge, gate_verdict=gate, audit_signoff=repo.audit(tmp_path, repo.merge, token=token, sha=sha, prose=prose))
+    return _by_name(report)["独立审计签字"]
 
-    report = rdc.preflight(repo.root, repo.merge, gate_verdict=repo.verdict(tmp_path, repo.merge), audit_signoff=signoff)
 
-    audit = _by_name(report)["独立审计签字"]
-    assert not report.ok and audit.status == rdc.FAIL and "用户确认引用" in audit.detail
+@pytest.mark.parametrize(
+    "prose",
+    ["结论：**放行**。", "不放行，打回", "打回，不能放行", "审计 FAIL，未通过（PASS 了 3 项）", "放行，没有保留项", ""],
+)
+def test_only_the_machine_readable_audit_line_counts_whatever_the_prose_says(repo: Repo, tmp_path: Path, prose: str) -> None:
+    assert _audit_check(repo, tmp_path, prose=prose).status == rdc.PASS
+
+
+@pytest.mark.parametrize("token", ["FAIL", "REJECT", "NOT-PASS", "pass", "PASS,"])
+def test_an_audit_line_whose_token_is_not_exactly_pass_is_refused(repo: Repo, tmp_path: Path, token: str) -> None:
+    assert _audit_check(repo, tmp_path, token=token).status == rdc.FAIL
+
+
+def test_an_audit_that_passed_with_notes_does_not_allow_one_click(repo: Repo, tmp_path: Path) -> None:
+    check = _audit_check(repo, tmp_path, token="PASS-with-notes")
+
+    assert check.status == rdc.FAIL and "用户确认引用" in check.detail
+
+
+def test_an_audit_of_another_verdict_file_is_refused(repo: Repo, tmp_path: Path) -> None:
+    check = _audit_check(repo, tmp_path, sha="1" * 16)
+
+    assert check.status == rdc.FAIL and "verdict-sha256" in check.detail
+
+
+def test_prose_alone_without_the_audit_line_is_refused(repo: Repo, tmp_path: Path) -> None:
+    gate = repo.verdict(tmp_path, repo.merge)
+    signoff = tmp_path / "prose.md"
+    signoff.write_text(f"# 独立审计结论，候选 {repo.merge}\n结论：**放行**。PASS\n", encoding="utf-8")
+
+    check = _by_name(rdc.preflight(repo.root, repo.merge, gate_verdict=gate, audit_signoff=signoff))["独立审计签字"]
+
+    assert check.status == rdc.FAIL and "机器可读" in check.detail
 
 
 def test_an_audit_for_another_commit_or_none_at_all_is_refused(repo: Repo, tmp_path: Path) -> None:
+    gate = repo.verdict(tmp_path, repo.merge)
     other = repo.audit(tmp_path, "f" * 40)
-    none = rdc.preflight(repo.root, repo.merge, gate_verdict=repo.verdict(tmp_path, repo.merge))
+    none = rdc.preflight(repo.root, repo.merge, gate_verdict=gate)
 
-    assert _by_name(rdc.preflight(repo.root, repo.merge, audit_signoff=other))["独立审计签字"].status == rdc.FAIL
+    assert _by_name(rdc.preflight(repo.root, repo.merge, gate_verdict=gate, audit_signoff=other))["独立审计签字"].status == rdc.FAIL
     assert _by_name(none)["独立审计签字"].status == rdc.FAIL
 
 
@@ -223,8 +271,31 @@ def test_status_reports_pointers_installed_releases_and_the_last_receipt(repo: R
 
 
 def test_a_running_test_or_cockpit_process_blocks_the_deploy(repo: Repo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rdc, "_busy_processes", lambda _psutil: ["4242"])
+    rows = [(1, 0, "init"), (4242, 1, "python -m pytest tests/core"), (4243, 1, "/usr/bin/python3 main.py gui")]
+    monkeypatch.setattr(rdc, "_list_processes", lambda: rows)
 
     report = _happy(repo, tmp_path)
 
-    assert not report.ok and _by_name(report)["没有测试或驾驶舱进程在跑"].status == rdc.FAIL
+    busy = _by_name(report)["没有测试或驾驶舱进程在跑"]
+    assert not report.ok and busy.status == rdc.FAIL and "4242" in busy.detail and "4243" in busy.detail
+
+
+def test_this_command_and_its_ancestors_are_not_busy_processes() -> None:
+    me = os.getpid()
+    rows = [(1, 0, "init"), (50, 1, "python -m pytest"), (me, 50, "python main.py release deploy"), (900, 1, "python other.py")]
+
+    assert rdc._busy_processes(rows) == []
+
+
+def test_a_process_list_that_cannot_be_read_is_unverified_not_ok(repo: Repo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rdc, "_list_processes", lambda: None)
+
+    report = _happy(repo, tmp_path)
+
+    assert not report.ok and _by_name(report)["没有测试或驾驶舱进程在跑"].status == rdc.UNVERIFIED
+
+
+def test_the_real_process_list_is_readable_here() -> None:
+    rows = rdc._list_processes()
+
+    assert rows is not None and any(pid == os.getpid() for pid, _parent, _line in rows)
