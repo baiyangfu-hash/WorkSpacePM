@@ -681,3 +681,23 @@ def test_change_edit_same_file_list_plus_another_field_still_writes_the_other_fi
     assert "变更单已更新" in result.output
     assert "没有变化" not in result.output
     assert "新的背景说明" in _change_text(tmp_path, change_number)
+
+
+@pytest.mark.cli
+def test_d154_change_edit_file_is_refused_with_exit_one_once_work_has_started(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-154 ruling: after ``implementing`` the file list may not change at all, even with --after-approval."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+    path = next(tmp_path.rglob(f"{change_number}.md"))
+    path.write_text(path.read_text(encoding="utf-8").replace("| 变更状态 | draft |", "| 变更状态 | implementing |"), encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+
+    refused = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "wider/x.py", "--after-approval"],
+        catch_exceptions=False,
+    )  # fmt: skip
+
+    assert refused.exit_code == 1
+    assert "实施中不能改文件清单" in refused.output and "另开变更单" in refused.output
+    assert path.read_text(encoding="utf-8") == before
