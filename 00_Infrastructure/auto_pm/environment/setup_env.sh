@@ -52,7 +52,17 @@ echo "[3/5] 正在按锁定文件安装依赖..."
 
 # 4. Qt（PySide6）需要的系统库：缺了图形界面和 Qt 相关测试会在导入时失败
 echo "[4/5] 正在检查 Qt 运行库..."
-if ! QT_QPA_PLATFORM=offscreen "$VENV_PY" -c "from PySide6.QtWidgets import QApplication" >/dev/null 2>&1; then
+qt_ok() { QT_QPA_PLATFORM=offscreen "$VENV_PY" -c "from PySide6.QtWidgets import QApplication" >/dev/null 2>&1; }
+# D-116：云端会话（CLAUDE_CODE_REMOTE=true）或显式设了 AUTO_PM_INSTALL_SYSLIBS=1 时，缺库就自己装一遍再检查
+if ! qt_ok && { [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ "${AUTO_PM_INSTALL_SYSLIBS:-}" = "1" ]; } \
+    && command -v apt-get >/dev/null 2>&1; then
+    SUDO=""
+    [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+    echo "      正在安装 Qt 系统库..."
+    $SUDO apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 >/dev/null 2>&1 || true
+fi
+if ! qt_ok; then
     echo "[警告] PySide6 无法加载（通常缺 libEGL/libGL 等系统库）。命令行可用，界面和 Qt 测试不可用。" >&2
     echo "       Ubuntu/Debian: sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3" >&2
 fi
