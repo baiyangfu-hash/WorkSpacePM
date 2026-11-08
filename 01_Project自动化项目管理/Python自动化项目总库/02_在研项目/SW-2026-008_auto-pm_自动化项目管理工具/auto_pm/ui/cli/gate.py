@@ -97,12 +97,18 @@ def plan_command(worktree: Path, jobs: int, only: str) -> None:
 @click.option("--jobs", default=8, show_default=True, help="并行组的 xdist 进程数")
 @click.option("--only", default="", help="只跑这些组（逗号分隔）；少于全部组时总判定最多是 PARTIAL")
 @click.option("--timeout-minutes", default=180, show_default=True, help="每组的超时")
+@click.option(
+    "--candidate-release",
+    default="",
+    help="候选发布预检（D-157）：给待部署、已装好但还没切换的发布号，才允许用它自己的代码出门禁；"
+    "发布必须在清单里、逐文件校验通过、实际加载的就是它、指针指的当前发布也完好，缺一就照常拒绝",
+)
 @click.pass_context
 def run_command(
-    ctx: click.Context, worktree: Path, out_dir: Path, jobs: int, only: str, timeout_minutes: int
+    ctx: click.Context, worktree: Path, out_dir: Path, jobs: int, only: str, timeout_minutes: int, candidate_release: str
 ) -> None:
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
-    require_runtime_identity_for_workspace(ctx)
+    require_runtime_identity_for_workspace(ctx, candidate_release)
     try:
         summary = GateRunService().run(
             worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60
