@@ -22,12 +22,19 @@ $entry = Join-Path $root "main.py"
 
 $previous = $env:AUTO_PM_AGENT
 $env:AUTO_PM_AGENT = $agent
+$stopPreference = $ErrorActionPreference
 try {
+    # D-132：Windows PowerShell 5.1 在 Stop 下会把原生命令写到 stderr 的每一行（如启动器的 "launcher: release verified…"）
+    # 升级成终止错误，命令其实已跑完，脚本却中途退出并返回 -1。调用原生命令这一小段改回 Continue，成败只看退出码。
+    $ErrorActionPreference = "Continue"
     & $python $entry @rest
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $stopPreference
     # 直接运行时用 exit 交回退出码（失败必须非 0）；只有被点号引用（. .\pm-as-agent.ps1）时才不 exit，免得关掉调用者的终端
-    if ($MyInvocation.InvocationName -ne '.') { exit $LASTEXITCODE }
+    if ($MyInvocation.InvocationName -ne '.') { exit $exitCode }
 }
 finally {
+    $ErrorActionPreference = $stopPreference
     if ($null -eq $previous) {
         Remove-Item Env:AUTO_PM_AGENT -ErrorAction SilentlyContinue
     }
