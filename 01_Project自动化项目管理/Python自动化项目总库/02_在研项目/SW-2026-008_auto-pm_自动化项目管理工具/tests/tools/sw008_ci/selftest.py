@@ -116,6 +116,16 @@ def main() -> int:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", "leak")
         check("token-shaped addition -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        # D-70: the CI scan uses the commit hook's rule list, so a shape only the hook knew is now caught here too.
+        (repo / "leak.txt").write_text("k = " + "sk-" + "Z" * 25 + "\n", encoding="utf-8")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "other shape")
+        check("hook-only shape (sk-) -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        # A scan that cannot load its rules must say so with exit 2, not look like "secrets found" (exit 1).
+        lonely = d / "lonely" / "tests" / "tools" / "sw008_ci"
+        lonely.mkdir(parents=True)
+        (lonely / "secret_scan.py").write_text(SCAN.read_text(encoding="utf-8"), encoding="utf-8")
+        check("rules missing -> scan could not run (exit 2)", run(str(lonely / "secret_scan.py"), "main", cwd=repo), 2)
         (repo / "leak.txt").unlink()
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "remove the leak again")
