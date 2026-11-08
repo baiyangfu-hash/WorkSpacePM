@@ -93,6 +93,31 @@ def _is_verification_passed(conclusion: str) -> bool:
     return "通过" in conclusion
 
 
+#: 结构化验证结果（D-48）：completed 的放行依据；关键词匹配只留给没带这个选项的旧入口。
+VERIFICATION_RESULTS = ("pass", "fail", "partial")
+
+
+def _check_verification_result(result: str, conclusion: str, *, allow_partial: bool, change_number: str) -> None:
+    """结构化验证结果的门禁：只有 pass（或显式允许的 partial）能完成验收；结论文字不再决定放不放行。
+
+    文字与结果自相矛盾（结果 pass 却写着“不通过”）也拒绝：两处说法不一致时，不替用户猜哪个是真的。
+    """
+    if result not in VERIFICATION_RESULTS:
+        raise TransitionGuardError(f"变更单 {change_number} 的验证结果 '{result}' 不认识，只能是 {'/'.join(VERIFICATION_RESULTS)}")
+    if result == "fail":
+        raise TransitionGuardError(
+            f"变更单 {change_number} 验证结果为 fail，不能完成验收；请使用「退回返工」(accepting → implementing)"
+        )
+    if result == "partial" and not allow_partial:
+        raise TransitionGuardError(
+            f"变更单 {change_number} 验证结果为 partial，只有同时带 --allow-partial-verification 才能部分验证闭环"
+        )
+    if result == "pass" and any(word in conclusion for word in ("不通过", "部分通过", "未通过")):
+        raise TransitionGuardError(
+            f"变更单 {change_number} 验证结果为 pass，但验证结论文字写着'{conclusion}'，两处说法矛盾；请改正其中一处"
+        )
+
+
 # 台帐状态文案映射（TD-T10 修复：transition 流转后自动更新台帐状态行）
 _LEDGER_STATUS_MAP = LEDGER_STATUS_MAP  # 向后兼容别名（CHG-108 缺陷 1：常量已提取到 constants.py）
 # 项目根的识别标记：标准布局 04_监控，模板 PLC 项目的历史布局 11_监控（TD-SW008-035）。
@@ -614,6 +639,7 @@ class ChangeService:
         verification_conclusion: str = "全部通过",
         allow_partial_verification: bool = False,
         project_id: str | None = None,
+        verification_result: str | None = None,
     ) -> ChangeRequest | None:
         """状态流转（PM-042 V2.2.0 §5.2 状态机）
 
@@ -657,10 +683,15 @@ class ChangeService:
 
         if new_status == "completed":
             # [PM-042 §5.2] accepting → completed: 验证通过路径
-            # 门禁1: verification_conclusion 必须包含"通过"且不包含"不通过"（V0.3.0-M0.5-Phase1 BUG-001 修复）
+            # 门禁1（D-48）：带 verification_result 时按结构化字段判；没带的旧入口仍按 verification_conclusion 的中文关键词判
+            # verification_conclusion 必须包含"通过"且不包含"不通过"（V0.3.0-M0.5-Phase1 BUG-001 修复）
             # 允许自然表达：全部通过 / 全部通过（附说明）/ 通过，存在观察项 等
             # 拒绝：不通过 / 部分不通过 / 未通过 等
-            if not _is_verification_passed(verification_conclusion):
+            if verification_result is not None:
+                _check_verification_result(
+                    verification_result, verification_conclusion, allow_partial=allow_partial_verification, change_number=change_number
+                )
+            elif not _is_verification_passed(verification_conclusion):
                 raise TransitionGuardError(
                     f"变更单 {change_number} 验证结论为'{verification_conclusion}'，"
                     "需包含'通过'且不包含'不通过'才能完成验收；"

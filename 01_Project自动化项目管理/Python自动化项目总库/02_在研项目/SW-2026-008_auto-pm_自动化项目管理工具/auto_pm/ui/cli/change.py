@@ -552,7 +552,15 @@ def cmd_verify(
 @click.option("--to", "new_status", type=click.Choice(_STATUS_CHOICES), required=True, help="目标状态")
 @click.option("--approver", default="", help="审批人/实施人")
 @click.option("--comment", default="", help="审批意见/返工原因")
-@click.option("--verification-conclusion", default="全部通过", help="验证结论（completed 状态必填）")
+@click.option("--verification-conclusion", default="全部通过", help="验证结论文字（写进 §10.3；completed 状态必填）")
+@click.option(
+    "--verification-result",
+    "verification_result",
+    type=click.Choice(["pass", "fail", "partial"]),
+    default=None,
+    help="验证结果（结构化，completed 的放行依据）：pass 通过；fail 不通过（请退回返工）；partial 部分通过（须同时带 --allow-partial-verification）。"
+    "不带本选项时仍按 --verification-conclusion 的中文关键词判断（旧用法，将弃用）",
+)
 @click.option(
     "--allow-partial-verification",
     is_flag=True,
@@ -574,6 +582,7 @@ def cmd_transition(
     approver: str,
     comment: str,
     verification_conclusion: str,
+    verification_result: str | None,
     allow_partial_verification: bool,
     pid: str | None,
     approval_evidence_ref: str,
@@ -596,6 +605,8 @@ def cmd_transition(
     # After the approval PIN (audit 72): a PIN refusal comes first, as it always did; no write happens before this check.
     require_runtime_identity_for_change(ctx, change_number, pid)
     svc = ChangeService(app_ctx.workspace_root)
+    if new_status == "completed" and verification_result is None:
+        console.print("[yellow]提示: 没带 --verification-result，验收结论仍按 --verification-conclusion 的中文关键词判断；该用法将弃用，请改用 --verification-result pass|fail|partial[/yellow]")
 
     try:
         cr = svc.transition_status(
@@ -606,6 +617,7 @@ def cmd_transition(
             verification_conclusion=verification_conclusion,
             allow_partial_verification=allow_partial_verification,
             project_id=pid,
+            verification_result=verification_result,
         )
         if cr is None:
             console.print(f"[red]错误: 变更单不存在: {change_number}[/red]")

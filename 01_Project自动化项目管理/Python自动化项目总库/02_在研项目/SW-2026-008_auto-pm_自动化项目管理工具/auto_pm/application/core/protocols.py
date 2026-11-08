@@ -200,6 +200,7 @@ class ChangeServiceProtocol(Protocol):
         verification_conclusion: str = "全部通过",
         allow_partial_verification: bool = False,
         project_id: str | None = None,
+        verification_result: str | None = None,
     ) -> ChangeRequest | None:
         """状态流转"""
         ...
