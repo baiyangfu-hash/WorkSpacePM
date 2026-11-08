@@ -15,6 +15,7 @@ from auto_pm.application.core.evidence_collection_service import (
     EvidenceCollectionService,
     PythonQualityGate,
     PythonQualityReceipt,
+    _QualityTargets,
     quality_failure_summary,
     write_quality_failure_report,
 )
@@ -228,7 +229,8 @@ def test_real_python_quality_gates_run_in_run_candidate_project_root(tmp_path: P
     pytest_gate, ruff_gate, mypy_gate = receipt.gates
     assert pytest_gate.command[-1] == "test_quality_gate.py"
     assert ruff_gate.command[-2:] == ("auto_pm/__init__.py", "test_quality_gate.py")
-    assert mypy_gate.command[-1] == "auto_pm/__init__.py"
+    # TD-SW008-245: mypy checks every owned .py, the same set as ruff (it used to skip test files)
+    assert mypy_gate.command[-2:] == ("auto_pm/__init__.py", "test_quality_gate.py")
     assert service.quality_receipt_is_current(_quality_run(candidate, baseline), candidate, receipt)
 
 
@@ -257,7 +259,10 @@ def test_quality_receipt_becomes_invalid_when_evidence_changes(tmp_path: Path) -
     assert not service.quality_receipt_is_current(run, candidate, receipt)
 
 
-def test_missing_owned_quality_category_returns_failure_receipt(tmp_path: Path) -> None:
+def test_a_test_only_run_now_gets_a_real_mypy_gate_instead_of_a_missing_target_failure(
+    tmp_path: Path,
+) -> None:
+    """TD-SW008-245: mypy used to check production files only, so a Run owning just a test file failed on a missing target."""
     workspace, candidate, baseline = _workspace_with_candidate(tmp_path)
 
     receipt = EvidenceCollectionService(workspace).run_python_quality_gates(
@@ -265,9 +270,42 @@ def test_missing_owned_quality_category_returns_failure_receipt(tmp_path: Path) 
     )
 
     mypy = next(gate for gate in receipt.gates if gate.name == "mypy")
+    assert mypy.command[-1] == "test_quality_gate.py"
+    assert mypy.exit_code == 0
+    assert "缺少已批准" not in mypy.output_summary
+
+
+def test_a_run_that_owns_no_python_file_still_fails_the_same_way_as_before(tmp_path: Path) -> None:
+    """Unchanged: no .py at all means no target for any tool (ruff and mypy alike), so a non-Python Run is not newly refused."""
+    workspace, candidate, baseline = _workspace_with_candidate(tmp_path)
+
+    receipt = EvidenceCollectionService(workspace).run_python_quality_gates(
+        _run(candidate, baseline), candidate
+    )
+
+    ruff = next(gate for gate in receipt.gates if gate.name == "ruff")
+    mypy = next(gate for gate in receipt.gates if gate.name == "mypy")
     assert receipt.status == "FAIL"
-    assert mypy.exit_code is None
-    assert "缺少已批准" in mypy.output_summary
+    assert ruff.exit_code is None and mypy.exit_code is None
+    assert "缺少已批准的 .py 质量门目标" in ruff.output_summary
+    assert "缺少已批准的 .py 质量门目标" in mypy.output_summary
+
+
+def test_every_python_profile_gives_mypy_the_same_targets_as_ruff() -> None:
+    """TD-SW008-245: the C02, C03 and generic profiles must not disagree about which owned files mypy checks."""
+    service = EvidenceCollectionService
+    targets = _QualityTargets(
+        tests=("tests/test_a.py",),
+        python=("auto_pm/a.py", "tests/test_a.py"),
+        production=("auto_pm/a.py",),
+    )
+    for commands in (
+        service._python_quality_commands(targets),
+        service._c03_checkpoint_quality_commands(targets),
+        service._generic_quality_commands(targets),
+    ):
+        by_name = {name: command for name, command, _ in commands}
+        assert by_name["mypy"][-2:] == by_name["ruff"][-2:] == ("auto_pm/a.py", "tests/test_a.py")
 
 
 def test_quality_gate_launch_failure_returns_failure_receipt(

@@ -1097,8 +1097,8 @@ class EvidenceCollectionService:
             ),
             (
                 "mypy",
-                mypy + targets.production,
-                None if targets.production else "缺少已批准的生产 .py 质量门目标",
+                mypy + targets.python,
+                None if targets.python else "缺少已批准的 .py 质量门目标",
             ),
         )
 
@@ -1131,8 +1131,8 @@ class EvidenceCollectionService:
             ),
             (
                 "mypy",
-                mypy + targets.production,
-                None if targets.production else "缺少已批准的生产 .py 质量门目标",
+                mypy + targets.python,
+                None if targets.python else "缺少已批准的 .py 质量门目标",
             ),
         )
 

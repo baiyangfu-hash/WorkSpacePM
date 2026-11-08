@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "template_version": "1.0.0",
+  "project_id": "{{ project_id }}",
+  "project_name": "{{ project_name }}",
+  "resolution": "1280x800",
+  "target_hmi": "ProFace GP4501 / Siemens Comfort / Weintek",
+  "tags": [
+    {
+      "element_id": "val-actual-pos-x1",
+      "page_id": "main",
+      "scl_db_var": "DB_HMI.ActualPos_X1",
+      "data_type": "Real",
+      "address": "%MD100",
+      "description": "X1轴实际坐标(mm)"
+    },
+    {
+      "element_id": "led-station-ready",
+      "page_id": "main",
+      "scl_db_var": "DB_HMI.StationReady",
+      "data_type": "Bool",
+      "address": "%M10.0",
+      "description": "工站就绪信号"
+    },
+    {
+      "element_id": "btn-station-start",
+      "page_id": "auto",
+      "scl_db_var": "DB_HMI.Btn_AutoStart",
+      "data_type": "Bool",
+      "address": "%M10.1",
+      "description": "自动启动按钮"
+    }
+  ]
+}

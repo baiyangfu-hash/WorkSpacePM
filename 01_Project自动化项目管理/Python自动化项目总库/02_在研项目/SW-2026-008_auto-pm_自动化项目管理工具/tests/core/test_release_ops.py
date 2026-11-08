@@ -264,11 +264,11 @@ def _doctor_active_pointer(backup: Path) -> None:
     (backup / "active_release.json").write_text(json.dumps({"release_id": "9.9.9-evil"}), encoding="utf-8")
 
 
-@pytest.mark.parametrize("damage", ["empty", "blank_line", "missing_one", "extra_name", "duplicate", "listed_file_gone", "no_digest"])
+@pytest.mark.parametrize("damage", ["empty", "blank_line", "missing_one", "extra_name", "duplicate", "listed_file_gone", "no_digest", "not_utf8"])
 def test_rollback_needs_a_checksum_file_that_lists_exactly_the_three_backup_files(world: World, tmp_path: Path, damage: str) -> None:
     _new, backup = _switched(world, tmp_path)
     switched = world.pointers()
-    if damage != "duplicate":  # a duplicate line is refused for being a duplicate, so nothing else may be wrong in that case
+    if damage not in ("duplicate", "listed_file_gone"):  # these two are refused for their own reason; a doctored pointer would mask a missing check
         _doctor_active_pointer(backup)  # with a working check this alone is caught; the damaged list must not hide it
     lines = (backup / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
     text = {
@@ -279,8 +279,12 @@ def test_rollback_needs_a_checksum_file_that_lists_exactly_the_three_backup_file
         "duplicate": "\n".join(lines + lines[:1]) + "\n",
         "listed_file_gone": "\n".join(lines) + "\n",
         "no_digest": "  active_release.json\n",
+        "not_utf8": "",
     }[damage]
-    (backup / "SHA256SUMS").write_text(text, encoding="utf-8")
+    if damage == "not_utf8":
+        (backup / "SHA256SUMS").write_bytes(b"\xff\xfe\x00bad\x80")
+    else:
+        (backup / "SHA256SUMS").write_text(text, encoding="utf-8")
     if damage == "listed_file_gone":
         (backup / "deployment_manifest.json").unlink()
 

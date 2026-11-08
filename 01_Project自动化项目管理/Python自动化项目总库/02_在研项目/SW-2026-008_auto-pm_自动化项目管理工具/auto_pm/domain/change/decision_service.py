@@ -379,7 +379,7 @@ class DecisionService:
             )
             if identity_before != identity_after:
                 raise DecisionValidationError(f"Decision 文件读取期间发生漂移: {resolved_id}")
-            text = raw.decode("utf-8", errors="replace")
+            text = raw.decode("utf-8", errors="replace")  # lenient-decode: U+FFFD is rejected on the next line, so this is strict in effect
             if "\ufffd" in text:
                 raise DecisionValidationError(f"决策包包含无效 UTF-8: {resolved_id}")
             data = json.loads(text, object_pairs_hook=self._reject_duplicate_json_fields)
@@ -737,7 +737,7 @@ class DecisionService:
                 registry_path,
                 label="Workspace Registry",
             )
-            text = registry_path.read_text(encoding="utf-8", errors="replace")
+            text = registry_path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: U+FFFD is rejected below, so this is strict in effect
             identity_after = self._unique_regular_file_identity(
                 registry_path,
                 label="Workspace Registry",
