@@ -8385,6 +8385,17 @@ class ContinuityStore:
             )
         return self._get_run(conn, str(rows[0]["run_id"]))
 
+    @staticmethod
+    def _expired_lease_park_hint(run_id: str) -> str:
+        """What follows "lease 已过期" when parking (D-49): the card can be neither parked nor renewed any more, the way out is a takeover."""
+
+        return (
+            "：租约过期后既不能搁着也不能续租，要先换人接手。"
+            "完整出口：python main.py continuity recovery plan --pid <项目号> --state LEASE_EXPIRED；"
+            f"最短一条：python main.py continuity run reclaim --run-id {run_id} --claimant <另一个 agent 名> --reason <原因>"
+            "（接手方须和原持有者不同；原持有者进程是否还活着查不出来时，由用户本人运行 pm sign-risk）"
+        )
+
     def park_mission(
         self,
         *,
@@ -8499,7 +8510,12 @@ class ContinuityStore:
             if self._open_park_row(conn, "run_id", run.run_id) is not None:
                 raise ContinuityStoreError("这个 Run 已有未拿回的搁着记录")
             lease = self._require_lease_in_tx(
-                conn, run_id=run.run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None
+                conn,
+                run_id=run.run_id,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                expected_epoch=None,
+                expired_hint=self._expired_lease_park_hint(run.run_id),
             )
             if git_head != run.git_head:
                 raise ContinuityStoreError("断点 git_head 与 Run 基线不一致（Git baseline drift）")
@@ -9034,6 +9050,7 @@ class ContinuityStore:
         owner_id: str,
         lease_token: str,
         expected_epoch: int | None,
+        expired_hint: str = "",
     ) -> LeaseItem:
         """Check the holder, the expiry and (when presented) the epoch INSIDE the write transaction, so a transfer cannot slip in between the check and the write.
 
@@ -9052,7 +9069,7 @@ class ContinuityStore:
                 + self._holder_notice(conn, run_id)
             )
         if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
-            raise ContinuityStoreError("lease 已过期")
+            raise ContinuityStoreError("lease 已过期" + expired_hint)
         if expected_epoch is not None:  # no epoch presented: accepted during the compatibility period, and the grant event is not even read
             verdict = check_write_epoch(self._grant_epoch(conn, run_id), expected_epoch)
             if not verdict.accepted:
