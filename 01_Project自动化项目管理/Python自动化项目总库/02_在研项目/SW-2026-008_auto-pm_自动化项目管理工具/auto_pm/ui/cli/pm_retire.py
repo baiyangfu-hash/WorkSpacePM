@@ -54,6 +54,7 @@ def _result_payload(result: RetireResult) -> dict[str, Any]:
     return {
         "work_id": result.work_id,
         "mission_ids": list(result.mission_ids),
+        "cancelled_mission_ids": list(result.cancelled_mission_ids),
         "outcome": result.outcome,
         "detail": result.detail,
     }
