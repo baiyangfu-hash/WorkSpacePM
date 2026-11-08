@@ -19,7 +19,7 @@ def _tree_hash(root: Path) -> str:
     return digest.hexdigest()
 
 
-def _workspace(tmp_path: Path, *, release_path: str = "1.0.0-abc") -> Path:
+def _workspace(tmp_path: Path, *, release_path: str = "1.0.0-abc", release_id: str = "1.0.0-abc") -> Path:
     root = tmp_path / "ws"
     release = root / "00_Infrastructure" / "auto_pm" / "releases" / "1.0.0-abc"
     (release / "auto_pm" / "__pycache__").mkdir(parents=True)
@@ -29,7 +29,7 @@ def _workspace(tmp_path: Path, *, release_path: str = "1.0.0-abc") -> Path:
     (release / "release_meta.json").write_text("{}", encoding="utf-8")
     pointer = root / "00_Infrastructure" / "auto_pm" / "active_release.json"
     pointer.write_text(
-        json.dumps({"release_id": "1.0.0-abc", "release_path": release_path}), encoding="utf-8"
+        json.dumps({"release_id": release_id, "release_path": release_path}), encoding="utf-8"
     )
     return root
 
@@ -85,3 +85,27 @@ def test_a_missing_pointer_or_release_says_so(tmp_path: Path) -> None:
     root = _workspace(tmp_path, release_path="9.9.9-none")
     with pytest.raises(ReleaseTrialError, match="不存在"):
         ReleaseTrialService(root).active_release_dir()
+
+
+@pytest.mark.parametrize("bad", ["a/b", "..", ".", "x\\y", "../up"])
+def test_a_release_id_with_a_path_separator_is_refused_not_a_traceback(tmp_path: Path, bad: str) -> None:
+    root = _workspace(tmp_path, release_id=bad)
+
+    with pytest.raises(ReleaseTrialError, match="路径分隔符"):
+        ReleaseTrialService(root).make_copy(tmp_path)
+
+
+def test_a_symlink_inside_the_release_is_refused_and_nothing_is_created(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    release = root / "00_Infrastructure" / "auto_pm" / "releases" / "1.0.0-abc"
+    try:
+        (release / "link.py").symlink_to(release / "auto_pm" / "mod.py")
+    except OSError:
+        pytest.skip("symlinks are not available here")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    with pytest.raises(ReleaseTrialError, match="符号链接"):
+        ReleaseTrialService(root).make_copy(scratch)
+
+    assert list(scratch.iterdir()) == []
