@@ -290,6 +290,8 @@ class ContinuityResumeService:
                     )
                 except ContinuityStoreError:  # no lease row for this Run
                     expiries[run.run_id] = None
+                except ValueError:  # lease time is not a time: cannot prove it expired, so it counts as "not expired"
+                    expiries[run.run_id] = datetime.max.replace(tzinfo=UTC)
             item = classify_residue(candidate, runs, expiries, now)
             if item is not None:
                 found.append(item)

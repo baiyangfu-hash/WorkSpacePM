@@ -27,6 +27,16 @@ _LEFTOVER_WORK_STATES = frozenset({WorkState.IN_PROGRESS, WorkState.BLOCKED})
 _TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
 
 
+def _aware_time(text: str) -> datetime | None:
+    """The time with a zone, or None when ``text`` is not a time or has no zone (old ledger rows may be either)."""
+
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def classify_residue(
     work: WorkItem,
     runs: Sequence[RunItem],
@@ -40,11 +50,21 @@ def classify_residue(
         return None
     if any(run.state not in _TERMINAL_RUN_STATES for run in runs):
         return None
-    if any((expiry := lease_expiries.get(run.run_id)) is not None and expiry > now for run in runs):
-        return None
-    last = max(runs, key=lambda run: run.updated_at)
-    ended = datetime.fromisoformat(last.updated_at)
-    if now - ended <= STALE_AFTER:
+    for run in runs:
+        expiry = lease_expiries.get(run.run_id)
+        if expiry is None:
+            continue
+        # A lease time without a time zone cannot be compared with ``now``: treat it as "not expired" (cannot prove a leftover).
+        if expiry.tzinfo is None or expiry > now:
+            return None
+    ended_at: dict[str, datetime] = {}
+    for run in runs:
+        parsed = _aware_time(run.updated_at)
+        if parsed is None:  # unreadable or zone-less end time: cannot prove it is old, never raise
+            return None
+        ended_at[run.run_id] = parsed
+    last = max(runs, key=lambda run: ended_at[run.run_id])
+    if now - ended_at[last.run_id] <= STALE_AFTER:
         return None
     return ResumeResidue(
         work_id=work.work_id,
