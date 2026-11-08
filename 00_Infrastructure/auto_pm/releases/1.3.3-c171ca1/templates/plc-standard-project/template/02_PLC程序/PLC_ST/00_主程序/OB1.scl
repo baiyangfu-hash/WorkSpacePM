@@ -1,0 +1,65 @@
+// ============================================================================
+// OB1.scl - 边框缓存机主组织块 (V9.0.0 全工站结构体整块传递架构)
+// ============================================================================
+// 描述:
+//   DJ-2026-005 边框缓存机 PLC 控制系统主循环程序.
+//   全工站通过 VAR_IN_OUT 结构体整块传递 (Struct Chunk Passing).
+//
+// 变更记录:
+//   V9.0.0 (2026-07-26): CHG-PLC-2026-006 终极基准重构 (全工站结构体整块传递)
+//          - 5大工站 FB 全部升级为 VAR_IN_OUT 结构体整块传递模式
+//          - 增加 VAR_IN_OUT 回写同步句，兼容 TIA 引用传递与 LSP 仿真仿真引擎
+// ============================================================================
+ORGANIZATION_BLOCK OB1
+
+BEGIN
+    // ============================================================================
+    // 第1部分：外部设备交互 (ST_ExternalDevice)
+    // ============================================================================
+    GlobalVars.fbExternalDevice(io_stExternal := GlobalVars.stExternal);
+    GlobalVars.stExternal := GlobalVars.fbExternalDevice.io_stExternal;
+
+    // ============================================================================
+    // 第2部分：四层输送机 (ST_SingleLayerConveyor ARRAY[1..4])
+    // ============================================================================
+    GlobalVars.fbConveyor_L1(io_stLayer := GlobalVars.stConveyor.astLayer[1]);
+    GlobalVars.stConveyor.astLayer[1] := GlobalVars.fbConveyor_L1.io_stLayer;
+
+    GlobalVars.fbConveyor_L2(io_stLayer := GlobalVars.stConveyor.astLayer[2]);
+    GlobalVars.stConveyor.astLayer[2] := GlobalVars.fbConveyor_L2.io_stLayer;
+
+    GlobalVars.fbConveyor_L3(io_stLayer := GlobalVars.stConveyor.astLayer[3]);
+    GlobalVars.stConveyor.astLayer[3] := GlobalVars.fbConveyor_L3.io_stLayer;
+
+    GlobalVars.fbConveyor_L4(io_stLayer := GlobalVars.stConveyor.astLayer[4]);
+    GlobalVars.stConveyor.astLayer[4] := GlobalVars.fbConveyor_L4.io_stLayer;
+
+    // ============================================================================
+    // 第3部分：取放料机构 (ST_PickPlace + ST_ServoAxis[1..2])
+    // ============================================================================
+    GlobalVars.fbPickPlace(
+        io_stPickPlace := GlobalVars.stPickPlace,
+        io_stZAxis     := GlobalVars.astServoAxis[1],
+        io_stX1Axis    := GlobalVars.astServoAxis[2]
+    );
+    GlobalVars.stPickPlace := GlobalVars.fbPickPlace.io_stPickPlace;
+    GlobalVars.astServoAxis[1] := GlobalVars.fbPickPlace.io_stZAxis;
+    GlobalVars.astServoAxis[2] := GlobalVars.fbPickPlace.io_stX1Axis;
+
+    // ============================================================================
+    // 第4部分：打胶机送料机构 (ST_GlueFeeder + ST_ServoAxis[3])
+    // ============================================================================
+    GlobalVars.fbGlueFeeder(
+        io_stFeeder := GlobalVars.stFeeder,
+        io_stX2Axis := GlobalVars.astServoAxis[3]
+    );
+    GlobalVars.stFeeder := GlobalVars.fbGlueFeeder.io_stFeeder;
+    GlobalVars.astServoAxis[3] := GlobalVars.fbGlueFeeder.io_stX2Axis;
+
+    // ============================================================================
+    // 第5部分：公共报警管理 (ST_CommonAlarm)
+    // ============================================================================
+    GlobalVars.fbCommonAlarm(io_stGlobal := GlobalVars.stGlobal);
+    GlobalVars.stGlobal := GlobalVars.fbCommonAlarm.io_stGlobal;
+
+END_ORGANIZATION_BLOCK

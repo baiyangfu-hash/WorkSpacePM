@@ -58,7 +58,9 @@ def test_real_conftest_fails_marked_tests_without_tools_and_skips_them_with_the_
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={**env, **extra}, cwd=project, check=False,
         )
-        return result.stdout
+        # D-114: a child pytest that cannot even start (e.g. pytest-cov missing, so ``--no-cov`` is rejected) prints to stderr
+        # only; keep it in the text so the assertion below shows why instead of ``'1 failed' in ''``.
+        return result.stdout + result.stderr
 
     # 被标记的 1 个测试 + 同文件里没标记的 1 个（后者任何情况下都必须照常通过）
     default = run({})
