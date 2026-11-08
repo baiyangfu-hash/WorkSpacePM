@@ -2,7 +2,8 @@
 
 ``gate plan``   show the commands of the groups (read-only);
 ``gate run``    run the groups from a clean test environment, judge each one, write ``gate_summary.json``;
-``gate judge``  recompute the verdict from the logs of an earlier run (read-only).
+``gate judge``  recompute the verdict from the logs of an earlier run (read-only);
+``gate precheck`` the quick pre-push self check: ruff, mypy (win32) and the tests that belong to the change (read-only).
 
 Exit codes: 0 PASS; 1 the gate ran and did not pass (a failed group, a missing group, a dirty worktree); 2 it could not start.
 Run it detached with ``main.py long-run start --name <n> --cwd <control root> --worktree <W> -- python -B main.py gate run ...``.
@@ -16,6 +17,11 @@ from pathlib import Path
 
 import click
 
+from auto_pm.application.core.gate_precheck_service import (
+    DEFAULT_BASE,
+    PrecheckReport,
+    PrecheckService,
+)
 from auto_pm.application.core.gate_run_service import (
     SUMMARY_FILE,
     GateRunError,
@@ -139,3 +145,46 @@ def judge_command(out_dir: Path, as_json: bool, expect_sha256: str, worktree: Pa
     else:
         _report(summary)
     raise SystemExit(0 if summary.verdict == "PASS" else 1)
+
+
+def _precheck_report(report: PrecheckReport) -> None:
+    click.echo(f"对照 {report.base}：改动 {len(report.changed)} 个文件，相关测试 {len(report.related_tests)} 个")
+    if report.scope_note:
+        click.echo(f"  注意：{report.scope_note}")
+    for step in report.steps:
+        click.echo(f"{step.verdict:<10} {step.name:<7}" + (f" exit={step.exit}" if step.exit is not None else "") + (f"  {step.why}" if step.why else ""))
+        if step.verdict == "FAIL" and step.log:
+            click.echo(f"           完整输出: {step.log}")
+    click.echo(f"自检结论 {report.verdict}（这只是推送前的快检，部署前的全量门禁仍是 gate run）")
+
+
+@gate_group.command(name="precheck")
+@click.option(
+    "--worktree",
+    default=".",
+    show_default=True,
+    type=CallerPath(file_okay=False, exists=True, path_type=Path),
+    help="要自检的工作树",
+)
+@click.option("--base", default=DEFAULT_BASE, show_default=True, help="对照哪个分支算“改了什么”")
+@click.option("--jobs", default=4, show_default=True, help="相关测试多时的 xdist 进程数")
+@click.option(
+    "--out",
+    "out_dir",
+    default=None,
+    type=CallerPath(file_okay=False, path_type=Path),
+    help="各步输出放哪（默认放系统临时目录）",
+)
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
+def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None, as_json: bool) -> None:
+    """只读：推送前一条命令跑 ruff + mypy(win32) + 与改动相关的 pytest；不写账本、不写工作树。"""
+    try:
+        report = PrecheckService().run(worktree, base=base, out_dir=out_dir, jobs=jobs)
+    except GateRunError as error:
+        click.echo(f"无法自检: {error}", err=True)
+        raise SystemExit(2) from error
+    if as_json:
+        click.echo(json.dumps({**asdict(report), "verdict": report.verdict}, ensure_ascii=False, indent=2))
+    else:
+        _precheck_report(report)
+    raise SystemExit(0 if report.verdict == "PASS" else 1)
