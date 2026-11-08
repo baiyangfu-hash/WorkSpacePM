@@ -27,6 +27,9 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     independent_staged_changes,
     is_excluded_from_production,
 )
+from auto_pm.ui.cli.__main__ import (
+    cli,  # noqa: F401  # D-153: load every command module BEFORE ``identity_guard_off`` runs
+)
 from tests.git_support import git_out
 
 # These tests are about the command's own behaviour; the runtime-identity guard has its own test (test_remaining_groups_runtime_identity.py).
@@ -472,8 +475,6 @@ def _install_real_hooks(primary: Path) -> dict[str, str]:
     import sys
 
     from click.testing import CliRunner
-
-    from auto_pm.ui.cli.__main__ import cli
 
     source_root = Path(__file__).resolve().parents[2]
     (primary / "main.py").write_text(
