@@ -17,16 +17,21 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+# 类型别名只给类型检查器看：`dict[...] | None` 在 Python 3.9 及以下运行时求值会崩，
+# 而本脚本要在任何旧系统 Python 上先跑起来
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    Probe = Callable[[Sequence[str], dict[str, str] | None], tuple[int, str]]
 
 REQUIRED_PYTHON = (3, 12)  # 依赖锁定文件只覆盖 3.12
 # 开发依赖：缺任何一个，测试会以难懂的方式失败（pytest-cov、xdist 是 pytest 的插件）
 REQUIRED_MODULES = ("pytest", "pytest_cov", "xdist", "click", "rich", "PySide6")
 PROBE_TIMEOUT_SECONDS = 180
-
-Probe = Callable[[Sequence[str], dict[str, str] | None], tuple[int, str]]
 
 
 @dataclass(frozen=True)

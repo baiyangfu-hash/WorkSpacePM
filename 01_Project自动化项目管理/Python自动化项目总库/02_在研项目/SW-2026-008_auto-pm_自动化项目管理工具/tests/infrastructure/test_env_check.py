@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import shutil
@@ -245,3 +246,55 @@ def test_the_shell_wrapper_only_hands_over_to_the_script(tmp_path: Path) -> None
     )
 
     assert done.returncode == 1 and "[失败] 没有 .venv" in done.stdout
+
+
+def _runtime_nodes(tree: ast.Module) -> list[ast.AST]:
+    """模块里会在导入时真正求值的节点：跳过 TYPE_CHECKING 块和各种注解（有 __future__ annotations 时它们是字符串）。"""
+
+    skipped: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.dump(node.test):
+            skipped.update(id(n) for n in ast.walk(node))
+        annotations: list[ast.AST | None] = []
+        if isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            annotations.append(node.returns)
+            args = node.args
+            all_args = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+            annotations.extend(a.annotation for a in all_args if a is not None)
+        for annotation in annotations:
+            if annotation is not None:
+                skipped.update(id(n) for n in ast.walk(annotation))
+    return [n for n in ast.walk(tree) if id(n) not in skipped]
+
+
+def _unsafe_for_py39(source: str) -> list[str]:
+    nodes = _runtime_nodes(ast.parse(source))
+    found = [
+        f"第 {n.lineno} 行：运行时 `X | Y`"
+        for n in nodes
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr)
+    ]
+    builtins_generic = {"dict", "list", "tuple", "set", "frozenset", "type"}
+    found += [
+        f"第 {n.lineno} 行：运行时 `{n.value.id}[...]`"
+        for n in nodes
+        if isinstance(n, ast.Subscript)
+        and isinstance(n.value, ast.Name)
+        and n.value.id in builtins_generic
+    ]
+    return found
+
+
+def test_d156_no_module_level_expression_that_crashes_on_python_39() -> None:
+    """env_check.py 要在任何旧系统 Python 上先跑起来：不能有导入时求值的 `X | Y`、`dict[...]`（≤3.9 会 TypeError）。"""
+
+    assert _unsafe_for_py39(SCRIPT.read_text(encoding="utf-8")) == []
+
+
+def test_d156_the_py39_scan_catches_the_old_alias() -> None:
+    old = "from collections.abc import Callable, Sequence\nProbe = Callable[[Sequence[str], dict[str, str] | None], tuple[int, str]]\n"
+    assert len(_unsafe_for_py39(old)) == 3
+    guarded = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    Probe = dict[str, str] | None\ndef f(x: dict[str, str] | None) -> list[int]: ...\n"
+    assert _unsafe_for_py39(guarded) == []
