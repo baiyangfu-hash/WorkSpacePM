@@ -61,11 +61,10 @@ def test_gate_run_without_the_option_asks_for_no_candidate_release(monkeypatch: 
 def test_d168_gate_run_and_precheck_arm_the_memory_gate_before_the_heavy_work(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from auto_pm.application.core.gate_precheck_service import PrecheckService
     from auto_pm.application.core.gate_run_service import GateRunError, GateRunService
-    from auto_pm.infrastructure import memory_preflight
     from auto_pm.ui.cli import gate as gate_module
 
     order: list[str] = []
-    monkeypatch.setattr(memory_preflight, "arm", lambda label, **_kw: order.append(f"arm:{label}"))
+    monkeypatch.setattr(gate_module, "arm_for_heavy_job", lambda label: order.append(f"arm:{label}"))
     monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": None)
 
     def stop_run(*_args: object, **_kwargs: object) -> None:

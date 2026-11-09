@@ -1285,7 +1285,7 @@ def test_d168_at_most_eight_records_count_and_a_missing_folder_or_unknown_boot_t
     assert _read(w, tmp_path / "b", boot=None)[0] == [100]  # an unreadable boot time skips only that one rule
 
 
-def test_d168_the_gate_clears_stale_records_at_start_and_find_arm_dir_prefers_the_auto_pm_ancestor(tmp_path: Path) -> None:
+def test_d168_the_gate_clears_stale_records_at_start_and_find_arm_dir_prefers_the_auto_pm_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     folder = tmp_path / ".auto-pm" / mg.ARM_DIR_NAME
     _record(folder, 100)
     (folder / "100.json.tmp").write_text("x", encoding="utf-8")
@@ -1299,10 +1299,11 @@ def test_d168_the_gate_clears_stale_records_at_start_and_find_arm_dir_prefers_th
     inner = tmp_path / ".auto-pm" / "worktrees" / "w" / "proj" / "scripts" / mg.CONFIG_FILE
     (inner.parent.parent.parent / ".auto-pm").mkdir(parents=True)  # a worktree that holds an .auto-pm of its own
     assert mg.find_arm_dir(inner) == folder  # the ancestor named .auto-pm wins over the nearer folder that merely contains one
-    assert mg.find_arm_dir(tmp_path.parent / "elsewhere" / "scripts" / mg.CONFIG_FILE) is None
+    monkeypatch.setattr(mg, "ARM_SEARCH_LEVELS", 1)  # see the writer test: a runner's home may hold an .auto-pm further up
+    assert mg.find_arm_dir(tmp_path / "elsewhere" / "scripts" / mg.CONFIG_FILE) is None
 
 
-def test_d168_the_writer_and_the_gate_agree_on_the_record_format_the_limits_and_the_creation_time(tmp_path: Path) -> None:
+def test_d168_the_writer_and_the_gate_agree_on_the_record_format_the_limits_and_the_creation_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pre = mg.Host().preflight
     assert pre.ARM_SCHEMA == mg.ARM_SCHEMA and pre.ARM_DIR_NAME == mg.ARM_DIR_NAME
     assert {label: cap for label, (_default, cap) in pre.ARM_LABEL_LIMITS.items()} == mg.ARM_LABEL_CAPS
@@ -1331,4 +1332,5 @@ def test_d168_the_writer_and_the_gate_agree_on_the_record_format_the_limits_and_
     assert not path.exists()
     pre.disarm(path)  # already gone is fine
     assert pre.arm("nonsense", start=start) is None
-    assert pre.arm("pm-verify", start=tmp_path.parent / "no-auto-pm-here" / "f.py") is None
+    monkeypatch.setattr(pre, "ARM_SEARCH_LEVELS", 1)  # a CI runner's home may hold an .auto-pm further up: look only at the start and its parent
+    assert pre.arm("pm-verify", start=tmp_path / "no-auto-pm-here" / "f.py") is None
