@@ -1472,3 +1472,79 @@ def test_sweep_apply_removes_stations_while_holding_the_stations_lock(lab: Lab, 
 
     assert report.done == [str(floor["merged"])]
     assert held == [True]
+
+
+# ── D-166: every reclaim leaves a record ─────────────────────────────────────
+
+
+def _reclaim_log(lab: Lab) -> list[dict[str, Any]]:
+    path = lab.root / ".auto-pm" / "logs" / "station-reclaim.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _alias_station(lab: Lab, alias: str = "claude-abcdef") -> Path:
+    lab.service().open(alias, "CARD-9")
+    return lab.station(alias)
+
+
+def test_releasing_a_clean_station_is_logged_even_though_no_rescue_ref_exists(lab: Lab) -> None:
+    _alias_station(lab)
+    lab.service().release("claude-abcdef", via="release-self")
+    (entry,) = _reclaim_log(lab)
+    assert entry["outcome"] == "removed"
+    assert entry["agent"] == "claude-abcdef"
+    assert entry["via"] == "release-self"
+    assert entry["rescue_ref"] == ""
+    assert entry["branch"] and entry["head"] and entry["at"]
+
+
+def test_releasing_a_dirty_station_logs_the_rescue_ref(lab: Lab) -> None:
+    station = _alias_station(lab)
+    (station / "wip.txt").write_text("unsaved\n", encoding="utf-8")
+    result = lab.service().release("claude-abcdef")
+    (entry,) = _reclaim_log(lab)
+    assert entry["rescue_ref"] == result.rescue_ref != ""
+
+
+def test_a_refused_release_is_logged_and_the_station_stays(lab: Lab) -> None:
+    station = _alias_station(lab)
+    with pytest.raises(AgentWorktreeError):
+        lab.service().release("claude-999999")
+    (entry,) = _reclaim_log(lab)
+    assert entry["outcome"] == "refused" and entry["agent"] == "claude-999999"
+    assert station.exists()
+
+
+def test_reclaim_stale_apply_logs_each_station_with_its_trigger(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _alias_station(lab)
+    monkeypatch.setattr(AgentWorktreeService, "stale_aliases", lambda self: [("claude-abcdef", "test")])
+    lab.service().reclaim_stale(apply=True)
+    (entry,) = _reclaim_log(lab)
+    assert entry["via"] == "reclaim-stale" and entry["outcome"] == "removed"
+
+
+def test_listing_stale_stations_without_apply_removes_and_logs_nothing(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    station = _alias_station(lab)
+    monkeypatch.setattr(AgentWorktreeService, "stale_aliases", lambda self: [("claude-abcdef", "test")])
+    lab.service().reclaim_stale(apply=False)
+    assert station.exists() and _reclaim_log(lab) == []
+
+
+def test_cli_release_self_logs_the_session_end_trigger(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-166: the SessionEnd hook calls ``worktree release --self``; its record must say so."""
+
+    # The lab is not a registered workspace; the identity guard is not what this test is about.
+    monkeypatch.setattr("auto_pm.ui.cli.worktree.require_runtime_identity_for_workspace", lambda _ctx: None)
+    lab.service().open("claude-abcdef", "CARD-9")
+    runner = CliRunner(env={"AUTO_PM_AGENT": "claude", "AUTO_PM_SESSION_ID": "abcdef0123456789"})
+    result = runner.invoke(cli, ["--workspace", str(lab.root), "worktree", "release", "--self"])
+    assert result.exit_code == 0, result.output
+    (entry,) = _reclaim_log(lab)
+    assert entry["via"] == "release-self" and entry["agent"] == "claude-abcdef"
+    assert not lab.station("claude-abcdef").exists()

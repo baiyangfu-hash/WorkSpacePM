@@ -306,7 +306,7 @@ def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
             return
     assert agent is not None
     try:
-        result = service.release(agent)
+        result = service.release(agent, via="release-self" if mine else "release")
     except AgentWorktreeError as error:
         _fail(error)
     console.print(f"[green]已回收工位[/green] {result.path}（分支 {result.branch} 保留）")
