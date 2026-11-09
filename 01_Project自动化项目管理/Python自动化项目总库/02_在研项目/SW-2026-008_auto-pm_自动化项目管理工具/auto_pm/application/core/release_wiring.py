@@ -29,6 +29,7 @@ from typing import Any, Protocol
 
 from auto_pm.application.core import release_deploy as rd
 from auto_pm.application.core import release_ops as ops
+from auto_pm.application.core.memory_gate_arming import disarm_this_process
 from auto_pm.application.core.release_deploy import REQUIRED_SELF_CHECKS, DeployError, SelfCheck
 from auto_pm.application.core.release_deploy_check import CONTAINER, exact_tree_ok
 from auto_pm.application.core.release_ledger import PROJECT_ID, DeployPlan, LedgerError, pick_change
@@ -205,6 +206,7 @@ class ReleaseOpsAdapter:
             raise DeployError(f"构建发布失败，什么都没留下：{error}") from error
 
     def switch(self, backup: Path) -> dict[str, Any]:
+        disarm_this_process()  # D-174: from here until the process exits the memory gate must not be able to freeze a half-verified switch
         return ops.switch(self._root, self._release_id, self.active_release(), backup, self._identity)
 
     def rollback(self, backup: Path) -> dict[str, Any]:

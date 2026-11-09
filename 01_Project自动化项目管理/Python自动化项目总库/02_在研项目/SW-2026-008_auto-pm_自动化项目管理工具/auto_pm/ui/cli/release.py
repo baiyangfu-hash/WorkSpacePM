@@ -78,7 +78,7 @@ def release_deploy(
         missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--card-file", card_file), ("--drill-script", drill_script)) if not value]
         if missing:
             raise click.ClickException("真部署还缺：" + "、".join(missing))
-        arm_for_heavy_job("deploy-gate")  # D-168: build, switch, self-checks and the pre-commit dry run are a heavy job the memory gate must not freeze; never raises
+        arm_for_heavy_job("deploy-gate")  # D-168: armed = the memory gate MAY freeze this process tree while it builds and checks; D-174: the adapter disarms before the pointers move; never raises
     report = check.preflight(_root(ctx), commit, gate_verdict=gate_verdict, audit_signoff=audit_signoff)
     if as_json and check_only:
         click.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
