@@ -60,6 +60,26 @@ def run_process(argv: Sequence[str], cwd: Path, *, timeout: int = COMMAND_TIMEOU
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
+def first_json_object(output: str) -> dict[str, Any] | None:
+    """The first JSON object in a command's combined output.
+
+    The launcher prints its own lines and the control root may print a sync warning before or after the JSON, so the output as a whole is
+    not JSON; take the first ``{`` that starts a complete, non-empty object and ignore whatever surrounds it.
+    """
+
+    decoder = json.JSONDecoder()
+    start = output.find("{")
+    while start != -1:
+        try:
+            data, _end = decoder.raw_decode(output[start:])
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data:
+            return data
+        start = output.find("{", start + 1)
+    return None
+
+
 class WiringError(RuntimeError):
     """The real ports cannot be built or used as asked."""
 
@@ -232,9 +252,8 @@ def build_self_checks(
             code, output = run(["pm", "orient", project, "--json"])
             if code != 0:
                 return False, f"exit={code} {output.strip()[-120:]}"
-            try:
-                data = json.loads(output[output.index("{"):])
-            except (ValueError, json.JSONDecodeError):
+            data = first_json_object(output)
+            if data is None:
                 return False, "orient 输出读不成 JSON"
             conflicts = data.get("conflicts") or []
             return not conflicts, f"conflicts={conflicts}"
@@ -248,7 +267,7 @@ def build_self_checks(
         return check
 
     def precheck() -> tuple[bool, str]:
-        code, output = run(["cli", "implementation-card", "precheck", "--card-file", str(card_file)])
+        code, output = run(["implementation-card", "precheck", "--card-file", str(card_file)])
         return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-120:]}"
 
     def hook_dry_run() -> tuple[bool, str]:
@@ -322,11 +341,8 @@ def cockpit_identity(root: Path, *, python: str = sys.executable, run: Exec = ru
     """
 
     code, output = run([python, "-B", str(Path(root) / "main.py"), "pm", "resume", IDENTITY_PROJECT, "--json"], Path(root))
-    if code != 0 or "{" not in output:
-        return {}
-    try:
-        data, _end = json.JSONDecoder().raw_decode(output[output.index("{"):])
-    except ValueError:
+    data = first_json_object(output) if code == 0 else None
+    if data is None:
         return {}
     context = data.get("context") or {}
     result = {key: context.get(key) for key in ("configured_release_id", "effective_release_id", "runtime_load_path", "runtime_fallback_reason")}

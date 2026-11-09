@@ -245,6 +245,42 @@ def test_help_and_smoke_checks_pass_on_exit_zero_and_clean_orient(env: Env) -> N
     assert not checks["smoke pm orient SYS-2026-001"]()[0]
 
 
+def test_the_smoke_check_reads_the_json_between_launcher_lines_and_warnings(env: Env) -> None:
+    """Real output of ``main.py pm orient`` (2026-11-08 dry run): a launcher line before the JSON and a control-root sync warning after it."""
+
+    noisy = 'launcher: release verified\n{"conflicts": [], "context": {"x": 1}}\n⚠ 控制根同步提示：落后 main 2 个提交 {sync}\n'
+    env.run_reply["orient"] = (0, noisy)
+    assert env.checks()["smoke pm orient SW-2026-008"]()[0]
+    env.run_reply["orient"] = (0, noisy.replace('"conflicts": []', '"conflicts": ["DIVERGENCE"]'))
+    assert not env.checks()["smoke pm orient SW-2026-008"]()[0]
+    assert rw.first_json_object("{} {\"a\": 1}") == {"a": 1} and rw.first_json_object("no json {") is None
+
+
+def test_every_command_the_checks_run_exists_in_the_real_command_tree(env: Env) -> None:
+    """The fake runner cannot tell a wrong command name from a right one (the first real dry run found ``cli implementation-card``)."""
+
+    import click
+
+    from auto_pm.ui.cli.__main__ import cli
+
+    for name, check in env.checks().items():
+        if name.startswith(("help ", "smoke ", "ledger ")) or name == "card precheck":
+            check()
+    assert env.runs
+    for argv in env.runs:
+        command: click.Command = cli
+        for token in argv:
+            if token.startswith("-") or not isinstance(command, click.Group):
+                break
+            child = command.get_command(click.Context(command), token)
+            if child is None:
+                break
+            command = child
+        else:
+            continue
+        assert command is not cli and command.name in argv, f"main.py {' '.join(argv)}：命令树里找不到这条"
+
+
 def test_ledger_check_needs_the_clean_line_and_never_passes_fix(env: Env) -> None:
     checks = env.checks()
 
@@ -260,8 +296,8 @@ def test_card_precheck_runs_the_precheck_command_on_the_card_file(env: Env) -> N
     checks = env.checks()
 
     assert checks["card precheck"]()[0]
-    assert ["cli", "implementation-card", "precheck", "--card-file", str(env.card)] in env.runs
-    env.run_reply[f"cli implementation-card precheck --card-file {env.card}"] = (1, "bad card")
+    assert ["implementation-card", "precheck", "--card-file", str(env.card)] in env.runs
+    env.run_reply[f"implementation-card precheck --card-file {env.card}"] = (1, "bad card")
     assert not checks["card precheck"]()[0]
 
 
