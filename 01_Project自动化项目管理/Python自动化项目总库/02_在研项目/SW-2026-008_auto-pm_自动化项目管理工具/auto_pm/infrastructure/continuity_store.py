@@ -870,7 +870,7 @@ class ContinuityStore:
             raise ContinuityStoreError("Decision Git immutable 事实无法复核") from error
         if result.returncode != 0:
             raise ContinuityStoreError("Decision Git commit/blob 不存在或无法读取")
-        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: diagnostic text for the refusal message; the refusal itself rests on the exit code
         if diagnostic:
             raise ContinuityStoreError(f"Decision Git 事实包含诊断: {diagnostic[:1000]}")
         return result.stdout
@@ -909,7 +909,7 @@ class ContinuityStore:
             )
         except OSError as error:
             raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
-        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: diagnostic text for the refusal message; the refusal itself rests on the exit code
         if result.returncode == 1:
             raise ContinuityStoreError(
                 "Decision immutable snapshot 未跟踪或相对恢复 Run git_head 存在脏改漂移"

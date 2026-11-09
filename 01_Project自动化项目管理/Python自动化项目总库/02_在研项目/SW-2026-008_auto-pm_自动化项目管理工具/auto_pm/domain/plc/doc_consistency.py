@@ -308,7 +308,7 @@ def parse_scl_file(path: Path) -> list[CodeObject]:
         except OSError:
             return []
     try:
-        return parse_scl_text(path.read_text(encoding="utf-8-sig", errors="replace"), str(path))
+        return parse_scl_text(path.read_text(encoding="utf-8-sig", errors="replace"), str(path))  # lenient-decode: a damaged name can only fail to match the document, which the consistency check reports
     except OSError:
         return []
 
@@ -384,7 +384,7 @@ def parse_doc_lines(lines: Sequence[str]) -> tuple[list[DocHeading], list[DocTab
 
 
 def _read_lines(path: str) -> list[str]:
-    return Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    return Path(path).read_text(encoding="utf-8", errors="replace").splitlines()  # lenient-decode: a damaged cell can only fail to match the SCL side, which the consistency check reports
 
 
 # --------------------------------------------------------------------------------------

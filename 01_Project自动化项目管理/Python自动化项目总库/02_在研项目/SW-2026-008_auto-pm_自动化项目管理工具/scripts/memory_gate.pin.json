@@ -1,10 +1,10 @@
 {
-  "bundle_sha256": "0735f6b88bff3782c960bcc3ac51c98d4a2fce85994f687afb85a1d3d63e9f70",
+  "bundle_sha256": "0851f1cd1d1938b8c40982690304e04013e1b80ea6e4e019428944f421dbe9ae",
   "files": {
-    "auto_pm/infrastructure/long_run_core.py": "0782fd34c452f1916094de0050b598a0f1e95ac1ae08337e4427e2f3c065d75c",
-    "auto_pm/infrastructure/memory_preflight.py": "1f545517cf4f7d27820baca9fb7ec7aefe94e4510395a7a29dc75d3764d76913",
+    "auto_pm/infrastructure/long_run_core.py": "5c7a09797daf99eddd7a5b6dedf622009d77c4616eab07a53563a80b47217a3e",
+    "auto_pm/infrastructure/memory_preflight.py": "a50509421d30d6b6dd93a894dfb042f33086abe992e1dc204e20cab6f2243683",
     "scripts/install_memory_gate.ps1": "f937a3d7267af802e46cebd228307acae87a3a21f55ed1575a2578c39edd2046",
-    "scripts/memory_gate.py": "28f9507e60fc8b687303227682be13f0474ccc8aeb2e7679cca2288344e909ee"
+    "scripts/memory_gate.py": "fddc292ea16bc4a85b863f003140be64157d345cad402d02fb8fcd8afb0b820a"
   },
   "note": "合并哈希覆盖 BUNDLE_FILES 四个文件；改总闸文件必须同时更新本文件，经 PR、独立审计、手动 sw008-ci，由用户合并"
 }

@@ -18,6 +18,31 @@ from auto_pm.infrastructure import long_run_core as core
 PY = sys.executable
 
 
+_REAL_PREFLIGHT_MODULE = core._preflight_module
+
+
+class _Arming:
+    """D-168: the worker arms itself for the memory gate; a test must never write a record into the real control root."""
+
+    def __init__(self) -> None:
+        self.armed: list[tuple[str, float | None]] = []
+        self.fail = False
+
+    def arm(self, label: str, *, timeout_seconds: float | None = None) -> None:
+        if self.fail:
+            raise RuntimeError("arm exploded")
+        self.armed.append((label, timeout_seconds))
+
+
+@pytest.fixture(autouse=True)
+def _arming(monkeypatch: pytest.MonkeyPatch) -> _Arming:
+    recorder = _Arming()
+    module = _REAL_PREFLIGHT_MODULE()  # the real module, with only ``arm`` replaced
+    monkeypatch.setattr(module, "arm", recorder.arm)
+    monkeypatch.setattr(core, "_preflight_module", lambda: module)
+    return recorder
+
+
 def _spec(run_dir: Path, argv: list[str], *, timeout: float = 60, cwd: Path | None = None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "spec.json").write_text(
@@ -60,6 +85,18 @@ def test_the_worker_records_a_successful_command_with_the_log_hash_and_a_done_ma
     assert (run_dir / "DONE").exists() and not (run_dir / "FAILED").exists()
     assert status["child_pid"] and status["worker_pid"] == os.getpid() and status["ended_at"] >= status["running_at"]
     assert (run_dir / "worker.pid").read_text(encoding="ascii") == str(os.getpid())
+
+
+def test_d168_the_worker_arms_itself_for_the_memory_gate_with_the_spec_timeout_and_an_arming_failure_never_stops_the_job(tmp_path: Path, _arming: _Arming) -> None:
+    ok = tmp_path / "armed"
+    _spec(ok, [PY, "-c", "pass"], timeout=123)
+    assert core.worker_main(ok) == 0
+    assert _arming.armed == [("long-run", 123.0)]
+
+    _arming.fail = True
+    broken = tmp_path / "broken"
+    _spec(broken, [PY, "-c", "pass"])
+    assert core.worker_main(broken) == 0 and (broken / "DONE").exists()
 
 
 def test_the_worker_records_a_failing_command_as_failed_with_its_exit_code(tmp_path: Path) -> None:
@@ -568,7 +605,7 @@ def test_the_preflight_falls_back_to_the_sibling_file_when_the_package_is_not_im
 
     monkeypatch.setattr(importlib, "import_module", refuse)
 
-    module = core._preflight_module()
+    module = _REAL_PREFLIGHT_MODULE()
 
     assert callable(module.require_headroom) and module.__name__ == "long_run_memory_preflight"
 
@@ -726,6 +763,107 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
 
 
+# ------------------------------------------------------------------ D-165: a status file a reader holds open (Windows os.replace)
+def _sharing_error() -> PermissionError:
+    return PermissionError(13, "simulated sharing violation: the file is open in a reader")
+
+
+def test_a_status_file_replace_that_hits_a_reader_is_retried_and_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_replace = os.replace
+    calls = {"count": 0}
+
+    def flaky(source: object, target: object) -> None:
+        calls["count"] += 1
+        if calls["count"] <= 3:
+            raise _sharing_error()
+        real_replace(source, target)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr(core, "WRITE_RETRY_SECONDS", 0.0)
+
+    core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == 4 and json.loads((tmp_path / "status.json").read_text(encoding="utf-8")) == {"state": "DONE"}
+    assert [entry.name for entry in tmp_path.iterdir()] == ["status.json"]
+
+
+def test_a_status_file_replace_that_never_succeeds_raises_after_the_retries_and_cleans_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def always(source: object, target: object) -> None:
+        calls["count"] += 1
+        raise _sharing_error()
+
+    monkeypatch.setattr(os, "replace", always)
+    monkeypatch.setattr(core, "WRITE_RETRY_SECONDS", 0.0)
+
+    with pytest.raises(PermissionError):
+        core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == core.WRITE_RETRIES + 1 and list(tmp_path.iterdir()) == []
+
+
+def test_an_error_that_is_not_a_sharing_conflict_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def broken(source: object, target: object) -> None:
+        calls["count"] += 1
+        raise FileNotFoundError(2, "gone")
+
+    monkeypatch.setattr(os, "replace", broken)
+
+    with pytest.raises(FileNotFoundError):
+        core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == 1
+
+
+def _fail_nth_status_write(monkeypatch: pytest.MonkeyPatch, which: set[int]) -> None:
+    """Make the worker's n-th (1-based) status-file write fail for good, as a reader that never lets go would."""
+
+    real_write = core._write_json
+    seen = {"count": 0}
+
+    def write(path: Path, payload: dict[str, object]) -> None:
+        if path.name == "status.json":
+            seen["count"] += 1
+            if seen["count"] in which:
+                raise _sharing_error()
+        real_write(path, payload)
+
+    monkeypatch.setattr(core, "_write_json", write)
+
+
+def test_a_failed_running_update_does_not_turn_the_commands_exit_code_into_127(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "running-lost"
+    _spec(run_dir, [PY, "-c", "raise SystemExit(3)"])
+    _fail_nth_status_write(monkeypatch, {1})  # the RUNNING update
+
+    code = core.worker_main(run_dir)
+
+    status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+    assert code == 3 and status["state"] == "FAILED" and status["exit_code"] == 3
+    assert "cannot start" not in (run_dir / "run.log").read_text(encoding="utf-8")
+    assert status["detached"] is True and status["child_pid"] and status["worker_pid"] == os.getpid()  # the lost RUNNING fields are written at the end
+    assert status["status_write_errors"] and status["status_write_errors"][0].startswith("RUNNING:")
+    assert (run_dir / "FAILED").exists() and not (run_dir / "DONE").exists()
+
+
+def test_a_failed_final_update_still_writes_an_end_marker_and_never_a_done_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "final-lost"
+    _spec(run_dir, [PY, "-c", "print('fine')"])
+    _fail_nth_status_write(monkeypatch, {2})  # the final update (the first one, RUNNING, went through)
+
+    code = core.worker_main(run_dir)  # does not raise: a worker that dies here leaves the state RUNNING for ever
+
+    assert code == 0
+    assert json.loads((run_dir / "status.json").read_text(encoding="utf-8"))["state"] == "RUNNING"  # the record could not be completed
+    marker = run_dir / "FAILED"
+    assert marker.exists() and not (run_dir / "DONE").exists()
+    text = marker.read_text(encoding="utf-8")
+    assert "exit 0" in text and "status-write-errors: final: PermissionError" in text
+
+
 def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_and_records_what_it_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -745,7 +883,9 @@ def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_a
     status = core.read_status(core.run_directory(tmp_path, "stripped"))
     log = (core.run_directory(tmp_path, "stripped") / "run.log").read_text(encoding="utf-8")
 
-    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log
+    worker_out = core.run_directory(tmp_path, "stripped") / "worker.out"  # D-165: say what the worker printed when this fails
+    diagnostics = f"{status}\nworker.out: {worker_out.read_text(encoding='utf-8', errors='replace') if worker_out.exists() else '(none)'}"
+    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log, diagnostics
     assert sorted(status["env_stripped"], key=str.upper) == ["PYTEST_ADDOPTS", "pytest_disable_plugin_autoload", "PYTEST_PLUGINS"]
 
 

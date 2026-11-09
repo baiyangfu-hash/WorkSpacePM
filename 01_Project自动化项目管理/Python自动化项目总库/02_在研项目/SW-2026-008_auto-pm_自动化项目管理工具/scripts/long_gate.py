@@ -1166,6 +1166,26 @@ def _memory_preflight_refusal() -> str:
     return ""
 
 
+def _arm_memory_gate() -> None:
+    """D-168: the runner (not the launcher) is the heavy process, so it arms itself for the memory gate; any failure is silent (the gate then simply stays out of the way)."""
+
+    path = Path(__file__).resolve().parent.parent / "auto_pm" / "infrastructure" / "memory_preflight.py"
+    name = "long_gate_memory_arm"
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            return
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+            module.arm("long-gate")
+        finally:
+            sys.modules.pop(name, None)
+    except Exception:  # noqa: BLE001, S110 - arming is best effort and must never stop a gate round
+        pass
+
+
 def cmd_launch(config_path: Path, wait_s: int) -> int:
     cfg, _ = load_config(config_path)
     out = Path(cfg["out_dir"])
@@ -1240,6 +1260,7 @@ def main(argv: list[str] | None = None) -> int:
             if refusal:
                 print(refusal)
                 return EXIT_CODES["REFUSED"]
+            _arm_memory_gate()
             cfg, sha = load_config(config_path)
             runner = Runner(cfg, sha)
             runner.task_name = a.task_name
