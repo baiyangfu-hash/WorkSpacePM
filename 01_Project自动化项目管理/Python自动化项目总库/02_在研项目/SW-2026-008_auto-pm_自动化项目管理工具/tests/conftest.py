@@ -164,6 +164,9 @@ def _memory_headroom_is_fine(request: pytest.FixtureRequest, monkeypatch: pytest
     monkeypatch.setattr(
         memory_preflight, "read_commit", lambda: memory_preflight.CommitSnapshot(committed=4 * 2**30, limit=64 * 2**30, physical=32 * 2**30)
     )
+    # D-168: ``require_headroom(label=...)`` arms the caller for the memory gate by writing a record into the real control root's
+    # ``.auto-pm/memory-gate-arm``; no test may do that (the arming itself is tested with an explicit ``start`` in test_memory_gate.py).
+    monkeypatch.setattr(memory_preflight, "arm_dir", lambda start=None: None)
 
 
 @pytest.fixture(autouse=True)

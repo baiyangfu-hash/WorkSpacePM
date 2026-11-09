@@ -56,3 +56,28 @@ def test_gate_run_passes_the_named_candidate_release_to_the_identity_guard(monke
 
 def test_gate_run_without_the_option_asks_for_no_candidate_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert _run_gate_with_a_recording_guard(monkeypatch, tmp_path) == [""]
+
+
+def test_d168_gate_run_and_precheck_arm_the_memory_gate_before_the_heavy_work(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.application.core.gate_precheck_service import PrecheckService
+    from auto_pm.application.core.gate_run_service import GateRunError, GateRunService
+    from auto_pm.ui.cli import gate as gate_module
+
+    order: list[str] = []
+    monkeypatch.setattr(gate_module, "arm_for_heavy_job", lambda label: order.append(f"arm:{label}"))
+    monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": None)
+
+    def stop_run(*_args: object, **_kwargs: object) -> None:
+        order.append("run")
+        raise GateRunError("stopped for the test")
+
+    def stop_precheck(*_args: object, **_kwargs: object) -> None:
+        order.append("precheck")
+        raise GateRunError("stopped for the test")
+
+    monkeypatch.setattr(GateRunService, "run", stop_run)
+    monkeypatch.setattr(PrecheckService, "run", stop_precheck)
+    CliRunner().invoke(cli, ["gate", "run", "--worktree", str(tmp_path), "--out", str(tmp_path / "out")])
+    CliRunner().invoke(cli, ["gate", "precheck", "--worktree", str(tmp_path)])
+
+    assert order == ["arm:long-gate", "run", "arm:full-tests", "precheck"]

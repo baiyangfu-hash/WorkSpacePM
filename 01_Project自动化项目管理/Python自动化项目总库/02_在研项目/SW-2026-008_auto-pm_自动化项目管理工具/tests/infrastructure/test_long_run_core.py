@@ -18,6 +18,31 @@ from auto_pm.infrastructure import long_run_core as core
 PY = sys.executable
 
 
+_REAL_PREFLIGHT_MODULE = core._preflight_module
+
+
+class _Arming:
+    """D-168: the worker arms itself for the memory gate; a test must never write a record into the real control root."""
+
+    def __init__(self) -> None:
+        self.armed: list[tuple[str, float | None]] = []
+        self.fail = False
+
+    def arm(self, label: str, *, timeout_seconds: float | None = None) -> None:
+        if self.fail:
+            raise RuntimeError("arm exploded")
+        self.armed.append((label, timeout_seconds))
+
+
+@pytest.fixture(autouse=True)
+def _arming(monkeypatch: pytest.MonkeyPatch) -> _Arming:
+    recorder = _Arming()
+    module = _REAL_PREFLIGHT_MODULE()  # the real module, with only ``arm`` replaced
+    monkeypatch.setattr(module, "arm", recorder.arm)
+    monkeypatch.setattr(core, "_preflight_module", lambda: module)
+    return recorder
+
+
 def _spec(run_dir: Path, argv: list[str], *, timeout: float = 60, cwd: Path | None = None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "spec.json").write_text(
@@ -60,6 +85,18 @@ def test_the_worker_records_a_successful_command_with_the_log_hash_and_a_done_ma
     assert (run_dir / "DONE").exists() and not (run_dir / "FAILED").exists()
     assert status["child_pid"] and status["worker_pid"] == os.getpid() and status["ended_at"] >= status["running_at"]
     assert (run_dir / "worker.pid").read_text(encoding="ascii") == str(os.getpid())
+
+
+def test_d168_the_worker_arms_itself_for_the_memory_gate_with_the_spec_timeout_and_an_arming_failure_never_stops_the_job(tmp_path: Path, _arming: _Arming) -> None:
+    ok = tmp_path / "armed"
+    _spec(ok, [PY, "-c", "pass"], timeout=123)
+    assert core.worker_main(ok) == 0
+    assert _arming.armed == [("long-run", 123.0)]
+
+    _arming.fail = True
+    broken = tmp_path / "broken"
+    _spec(broken, [PY, "-c", "pass"])
+    assert core.worker_main(broken) == 0 and (broken / "DONE").exists()
 
 
 def test_the_worker_records_a_failing_command_as_failed_with_its_exit_code(tmp_path: Path) -> None:
@@ -568,7 +605,7 @@ def test_the_preflight_falls_back_to_the_sibling_file_when_the_package_is_not_im
 
     monkeypatch.setattr(importlib, "import_module", refuse)
 
-    module = core._preflight_module()
+    module = _REAL_PREFLIGHT_MODULE()
 
     assert callable(module.require_headroom) and module.__name__ == "long_run_memory_preflight"
 
