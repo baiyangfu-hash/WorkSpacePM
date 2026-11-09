@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -11,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 _VENV_TIMEOUT_SECONDS = 600.0
 
@@ -190,7 +191,7 @@ class DogfoodRunner:
             with temp_path.open(
                 "w",
                 encoding="utf-8",
-                errors="replace",
+                errors="replace",  # lenient-decode: diagnostic report written for people; a lone surrogate must not stop the isolation review
                 newline="\n",
             ) as stream:
                 json.dump(report, stream, ensure_ascii=False, indent=2)
@@ -240,7 +241,7 @@ class DogfoodRunner:
             if any(part in self.EXCLUDED_DIRS for part in path.relative_to(root).parts):
                 continue
             relative_path = path.relative_to(root).as_posix()
-            digest.update(relative_path.encode("utf-8", errors="replace"))
+            digest.update(os.fsencode(relative_path))  # exact file-system bytes: names that differ only in undecodable bytes must not collide
             digest.update(b"\0")
             digest.update(path.read_bytes())
             digest.update(b"\0")
@@ -260,7 +261,7 @@ class DogfoodRunner:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                errors="replace",
+                errors="replace",  # lenient-decode: venv creation stderr only quoted in the error text; the exit code decides
                 check=False,
                 timeout=_VENV_TIMEOUT_SECONDS,
             )
@@ -309,7 +310,7 @@ class DogfoodRunner:
         return path.replace("\\", "/")
 
     def _run_git(self, path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return run_git_bounded_text(
+        return run_git_bounded_strict_text(
             ["git", "-C", str(path), *args],
             default_timeout=300.0,
             error_cls=DogfoodIsolationError,

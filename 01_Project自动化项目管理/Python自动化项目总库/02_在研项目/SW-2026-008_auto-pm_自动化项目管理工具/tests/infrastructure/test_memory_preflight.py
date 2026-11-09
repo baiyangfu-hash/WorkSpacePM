@@ -89,6 +89,19 @@ def test_require_headroom_raises_with_the_refusal_text_and_returns_the_unverifie
     assert mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: _snap(1.0))) == ""
 
 
+def test_d168_require_headroom_arms_the_caller_only_after_a_pass_and_only_when_asked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, float | None]] = []
+    monkeypatch.setattr(mp, "arm", lambda label, *, timeout_seconds=None: seen.append((label, timeout_seconds)))
+    ok = lambda: mp.run_preflight(read=lambda: _snap(1.0))  # noqa: E731
+    mp.require_headroom(run=ok)
+    assert seen == []
+    mp.require_headroom(run=ok, label="pm-verify", timeout_seconds=7)
+    assert seen == [("pm-verify", 7)]
+    with pytest.raises(mp.MemoryPreflightRefusedError):
+        mp.require_headroom(run=lambda: mp.run_preflight(read=lambda: _snap(60.0), list_all=lambda: ()), label="pm-verify")
+    assert len(seen) == 1  # a refused preflight arms nothing
+
+
 def test_there_is_no_switch_to_continue_anyway() -> None:
     """The check exists to stop agents, so no argument, environment variable or option may turn it off."""
 

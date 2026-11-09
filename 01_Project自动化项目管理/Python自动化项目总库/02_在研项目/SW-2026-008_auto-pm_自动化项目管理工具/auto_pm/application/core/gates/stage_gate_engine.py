@@ -121,7 +121,7 @@ class StageGateEngine:
         # 2. 检查是否有 Non-Goals 或定位说明
         has_nongoals = False
         if has_pm_session:
-            content = pm_session_files[0].read_text(encoding="utf-8", errors="ignore")
+            content = pm_session_files[0].read_text(encoding="utf-8", errors="ignore")  # lenient-decode: keyword search in the retired PM_SESSION file; a miss only lowers the check
             if "non_goals" in content or "Non-Goals" in content or "定位" in content:
                 has_nongoals = True
 
@@ -216,7 +216,7 @@ class StageGateEngine:
         pm_session_files = list(p.glob("PM_SESSION_*.md"))
         session_content = ""
         if pm_session_files:
-            session_content = pm_session_files[0].read_text(encoding="utf-8", errors="ignore")
+            session_content = pm_session_files[0].read_text(encoding="utf-8", errors="ignore")  # lenient-decode: keyword search in the retired PM_SESSION file, history only
 
         # 2. 检查是否有未闭环的 P0/阻断缺陷
         has_blocker_defects = "P0" in session_content and "未修复" in session_content
@@ -277,7 +277,12 @@ class StageGateEngine:
         chg_files = list(p.glob("**/CHG-*.md"))
         unclosed_chgs: list[str] = []
         for cf in chg_files:
-            txt = cf.read_text(encoding="utf-8", errors="ignore")
+            try:
+                txt = cf.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # Fail closed: a change order that cannot be read cannot be shown to be closed.
+                unclosed_chgs.append(cf.name)
+                continue
             if not _chg_is_closed(txt):
                 unclosed_chgs.append(cf.name)
 

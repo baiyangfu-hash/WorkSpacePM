@@ -234,3 +234,31 @@ def test_the_identity_recheck_costs_no_git_process(tmp_path: Path) -> None:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     assert worktree_path_identity_problem(tmp_path.resolve()) == ""
     assert worktree_path_identity_problem(tmp_path / "gone") != ""
+
+
+def test_a_git_marker_swapped_for_a_link_is_refused_inside_the_lock(tmp_path: Path) -> None:
+    """D-84: the in-lock identity re-check also refuses a work tree whose ``.git`` marker became a symlink/junction."""
+    from auto_pm.infrastructure.control_root_guard import worktree_path_identity_problem
+
+    _, service = _services(tmp_path, Clock())
+    store = service._store
+    station = tmp_path / "station"
+    station.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    subprocess.run(["git", "init", str(elsewhere)], check=True, capture_output=True)
+    try:
+        (station / ".git").symlink_to(elsewhere / ".git", target_is_directory=True)
+    except OSError:  # pragma: no cover - no symlink right on this platform
+        pytest.skip("symlinks unavailable")
+
+    assert "symlink/junction" in worktree_path_identity_problem(station.resolve())
+    with pytest.raises(ContinuityStoreError, match="symlink/junction"):
+        store._confirm_run_snapshot_in_lock(str(station.resolve()), "0" * 40, (), ())
+
+
+def test_a_real_git_marker_passes_the_identity_recheck(tmp_path: Path) -> None:
+    """The counterpart: with an ordinary ``.git`` the check says nothing, so the test above fails for the link only."""
+    from auto_pm.infrastructure.control_root_guard import worktree_path_identity_problem
+
+    subprocess.run(["git", "init", str(tmp_path / "ok")], check=True, capture_output=True)
+    assert worktree_path_identity_problem((tmp_path / "ok").resolve()) == ""

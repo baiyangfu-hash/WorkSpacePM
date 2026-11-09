@@ -70,7 +70,7 @@ class ProcessEntry:
 
 
 def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+    return hashlib.sha256(value.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def local_host_id() -> str:
@@ -94,9 +94,9 @@ def local_host_id() -> str:
     else:
         for candidate in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
             try:
-                raw = Path(candidate).read_text(encoding="utf-8", errors="replace").strip()
-            except OSError:
-                continue
+                raw = Path(candidate).read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                continue  # an id that does not decode is "cannot be read" (empty identity), not a hash of replacement characters
             if raw:
                 break
     return "host:" + _sha256_text(raw)[:32] if raw else ""
@@ -293,7 +293,7 @@ def _view_problem() -> str:
 def _linux_observe(pid: int) -> tuple[ProcessObservation, str | None] | None:
     base = _PROC_ROOT / str(pid)
     try:
-        stat = (base / "stat").read_text(encoding="utf-8", errors="replace")
+        stat = (base / "stat").read_text(encoding="utf-8", errors="replace")  # lenient-decode: the process name (comm) may legitimately hold any bytes; only the numeric fields and the casefolded name are used, and a strict decode would make a live process unobservable
     except FileNotFoundError:
         if _view_problem():
             return None  # absent from a table that may not show it: not proof of death
@@ -312,7 +312,7 @@ def _linux_observe(pid: int) -> tuple[ProcessObservation, str | None] | None:
     except OSError:
         image = None
     try:
-        command = (base / "cmdline").read_bytes().decode("utf-8", errors="replace")
+        command = (base / "cmdline").read_bytes().decode("utf-8", errors="replace")  # lenient-decode: a command line may legitimately hold any bytes; it is only matched against the expected launcher text
     except OSError:
         command = ""
     name = stat[stat.find("(") + 1 : closing].casefold() if closing != -1 else None
@@ -364,7 +364,7 @@ def start_time_to_datetime(start_time: str | None) -> datetime | None:
         try:
             boot = next(
                 int(line.split()[1])
-                for line in Path("/proc/stat").read_text(encoding="utf-8", errors="replace").splitlines()
+                for line in Path("/proc/stat").read_text(encoding="utf-8", errors="replace").splitlines()  # lenient-decode: only the numeric btime line is read
                 if line.startswith("btime ")
             )
             hertz = os.sysconf("SC_CLK_TCK")
@@ -401,7 +401,7 @@ def _parent_pid(pid: int) -> tuple[int, str] | None:
         return entry.parent_pid, parent.image_name if parent is not None else ""
     elif sys.platform.startswith("linux"):
         try:
-            stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
+            stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")  # lenient-decode: only the numeric parent-pid field is read; the name may hold any bytes
         except OSError:
             return None
         closing = stat.rfind(")")

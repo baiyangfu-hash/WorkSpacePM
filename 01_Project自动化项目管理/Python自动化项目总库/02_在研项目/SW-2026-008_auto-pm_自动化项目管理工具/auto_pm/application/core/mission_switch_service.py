@@ -398,7 +398,7 @@ class MissionSwitchService:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                errors="replace",
+                errors="replace",  # lenient-decode: the output is parsed as an integer count; anything else is treated as unknown
                 env=clean_git_environment(),
                 timeout=30,
                 check=False,

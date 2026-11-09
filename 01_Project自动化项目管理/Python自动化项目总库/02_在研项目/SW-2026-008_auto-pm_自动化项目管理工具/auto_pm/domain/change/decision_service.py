@@ -148,6 +148,7 @@ class DecisionService:
         runtime_capability: RuntimeDecisionCapability | None = None,
         planning_plan_hash: str = "",
         approval_evidence_ref: str = "",
+        allow_empty_files: bool = True,
         planning_request_id: str = "",
         planning_execution_grant: dict[str, object] | None = None,
     ) -> DecisionPackageDTO:
@@ -282,6 +283,15 @@ class DecisionService:
                                 effective_files.append(rf_clean)
         # 去重并保持顺序
         effective_files = list(dict.fromkeys(effective_files))
+        if not effective_files and not allow_empty_files:
+            # D-97: an empty list means "no file limit" downstream; that must be said out loud, never reached by a blank cell.
+            # The service default stays permissive (planning and legacy flows build their own lists); the ``decision create``
+            # command passes ``False`` unless the operator adds --allow-no-files.
+            raise DecisionValidationError(
+                f"变更单 {change_id} 的批准文件清单为空：§5 涉及文件/交付物是空的或仍是“（待填写）”。"
+                "用 `change edit <单号> --file <路径>`（可重复）补全，或 `decision create --file <路径>` 逐条指定；"
+                "确实没有文件范围才加 --allow-no-files"
+            )
 
         now_iso = datetime.now(UTC).isoformat()
 
@@ -369,7 +379,7 @@ class DecisionService:
             )
             if identity_before != identity_after:
                 raise DecisionValidationError(f"Decision 文件读取期间发生漂移: {resolved_id}")
-            text = raw.decode("utf-8", errors="replace")
+            text = raw.decode("utf-8", errors="replace")  # lenient-decode: U+FFFD is rejected on the next line, so this is strict in effect
             if "\ufffd" in text:
                 raise DecisionValidationError(f"决策包包含无效 UTF-8: {resolved_id}")
             data = json.loads(text, object_pairs_hook=self._reject_duplicate_json_fields)
@@ -727,7 +737,7 @@ class DecisionService:
                 registry_path,
                 label="Workspace Registry",
             )
-            text = registry_path.read_text(encoding="utf-8", errors="replace")
+            text = registry_path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: U+FFFD is rejected below, so this is strict in effect
             identity_after = self._unique_regular_file_identity(
                 registry_path,
                 label="Workspace Registry",

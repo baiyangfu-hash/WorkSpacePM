@@ -342,3 +342,117 @@ def test_resume_uses_structured_control_mapping(tmp_path: Path) -> None:
     )
 
     assert result == control.resolve()
+
+
+# --- D-157: pre-check of an installed, not-yet-switched release (``gate run --candidate-release``) ---
+
+LIVE = "1.3.3-live000"
+CANDIDATE = "1.3.3-cand000"
+
+
+def _precheck_setup(tmp_path: Path, *, in_manifest: bool = True, loaded: str = CANDIDATE) -> tuple[Path, Path]:
+    """The pointer names LIVE; the code that runs is the package of release ``loaded``; both are installed."""
+
+    project = _project(tmp_path, "SW-2026-008")
+    runtime = tmp_path / "runtime"
+    packages = {LIVE: _runtime_package(runtime, LIVE), CANDIDATE: _runtime_package(runtime, CANDIDATE)}
+    if loaded not in packages:
+        packages[loaded] = _runtime_package(runtime, loaded)
+    (runtime / "active_release.json").write_text(json.dumps({"release_id": LIVE}), encoding="utf-8")
+    releases: dict[str, dict[str, str]] = {LIVE: {}}
+    if in_manifest:
+        releases[CANDIDATE] = {}
+    (runtime / "deployment_manifest.json").write_text(json.dumps({"releases": releases}), encoding="utf-8")
+    _registry(tmp_path, _mapping("SW-2026-008", runtime_root="runtime"))
+    return project, packages[loaded]
+
+
+def _precheck(
+    tmp_path: Path,
+    project: Path,
+    package_file: Path,
+    *,
+    candidate: str = CANDIDATE,
+    intact: tuple[str, ...] = (LIVE, CANDIDATE),
+) -> tuple[str, ...]:
+    def checker(_base: Path, release_id: str) -> tuple[bool, str]:
+        return (release_id in intact, "ok" if release_id in intact else "files differ from the manifest")
+
+    return (
+        WorkspaceContextService(
+            str(tmp_path),
+            package_file_provider=lambda: package_file,
+            candidate_release_id=candidate,
+            exact_tree_checker=checker,
+        )
+        .resolve(start_path=project)
+        .conflicts
+    )
+
+
+def test_without_the_candidate_option_a_not_yet_switched_release_is_still_a_divergence(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path)
+
+    assert _precheck(tmp_path, project, package_file, candidate="") == ("RUNTIME_IDENTITY_DIVERGENCE",)
+
+
+def test_the_candidate_option_lifts_the_divergence_only_when_all_four_conditions_hold(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path)
+
+    assert _precheck(tmp_path, project, package_file) == ()
+
+
+def test_a_candidate_that_is_not_in_the_manifest_is_refused(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path, in_manifest=False)
+
+    conflicts = _precheck(tmp_path, project, package_file)
+
+    assert conflicts[0] == "RUNTIME_IDENTITY_DIVERGENCE" and any("CANDIDATE_NOT_IN_MANIFEST" in item for item in conflicts)
+
+
+def test_a_candidate_that_is_not_the_code_actually_loaded_is_refused(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path, loaded="1.3.3-other00")
+
+    conflicts = _precheck(tmp_path, project, package_file)
+
+    assert conflicts[0] == "RUNTIME_IDENTITY_DIVERGENCE" and any("CANDIDATE_NOT_LOADED" in item for item in conflicts)
+
+
+def test_a_candidate_whose_files_do_not_match_is_refused(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path)
+
+    conflicts = _precheck(tmp_path, project, package_file, intact=(LIVE,))
+
+    assert conflicts[0] == "RUNTIME_IDENTITY_DIVERGENCE" and any("CANDIDATE_TREE_MISMATCH" in item for item in conflicts)
+
+
+def test_a_live_release_that_is_not_intact_is_refused(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path)
+
+    conflicts = _precheck(tmp_path, project, package_file, intact=(CANDIDATE,))
+
+    assert conflicts[0] == "RUNTIME_IDENTITY_DIVERGENCE" and any("LIVE_RELEASE_NOT_INTACT" in item for item in conflicts)
+
+
+def test_a_checker_that_cannot_run_is_a_refusal_never_a_pass(tmp_path: Path) -> None:
+    project, package_file = _precheck_setup(tmp_path)
+
+    def broken(_base: Path, _release_id: str) -> tuple[bool, str]:
+        raise OSError("launcher missing")
+
+    conflicts = WorkspaceContextService(
+        str(tmp_path), package_file_provider=lambda: package_file, candidate_release_id=CANDIDATE, exact_tree_checker=broken
+    ).resolve(start_path=project).conflicts
+
+    assert "RUNTIME_IDENTITY_DIVERGENCE" in conflicts and any("CANDIDATE_TREE_MISMATCH" in item for item in conflicts)
+
+
+def test_the_candidate_option_never_lifts_an_unverified_identity(tmp_path: Path) -> None:
+    project, _package_file = _precheck_setup(tmp_path)
+    outside = tmp_path / "elsewhere" / "auto_pm" / "__init__.py"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("# not a release package\n", encoding="utf-8")
+
+    conflicts = _precheck(tmp_path, project, outside)
+
+    assert conflicts == ("RUNTIME_IDENTITY_UNVERIFIED",)

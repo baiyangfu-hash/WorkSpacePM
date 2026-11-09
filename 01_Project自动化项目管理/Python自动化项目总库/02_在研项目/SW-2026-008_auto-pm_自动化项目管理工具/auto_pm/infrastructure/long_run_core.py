@@ -62,6 +62,8 @@ GUARD_POLL_SECONDS = 20
 #: (winerror 32).  The writer keeps the file for microseconds, so a read retries a few times before it calls the file unreadable.
 READ_RETRIES = 8
 READ_RETRY_SECONDS = 0.05
+WRITE_RETRIES = 40  # D-165: os.replace of a status file a reader has open fails on Windows; the reader lets go within milliseconds
+WRITE_RETRY_SECONDS = 0.05
 _SHARING_ERRORS = (5, 32)
 MAX_SECONDS = 8 * 3600  # the guard and keep-awake never outlive this
 DEFAULT_TIMEOUT_MINUTES = 240
@@ -82,13 +84,26 @@ def _now() -> str:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Replace ``path`` atomically (a reader never sees half a file)."""
+    """Replace ``path`` atomically (a reader never sees half a file).
+
+    D-165: on Windows ``os.replace`` fails with a permission / sharing error while a reader has ``path`` open (``status`` and the tests poll it
+    every 0.1 s), so that error is retried ``WRITE_RETRIES`` times, like the reading side; every other error, and the last one, is raised.
+    """
 
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(temporary, path)
+        retries = 0
+        while True:
+            try:
+                os.replace(temporary, path)
+                return
+            except OSError as error:
+                if not _is_sharing_error(error) or retries >= WRITE_RETRIES:
+                    raise
+                retries += 1
+                time.sleep(WRITE_RETRY_SECONDS)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
@@ -374,6 +389,12 @@ else:
         return state != "Z"
 
 
+# -B: no .pyc files next to the sources.  -P (Python >= 3.11): keep the script's own directory out of sys.path.  Without it
+# auto_pm/infrastructure/ becomes sys.path[0] and its ``logging/`` sub-package shadows the standard library ``logging``, so the guard
+# crashes at start whenever ``auto_pm`` is importable (D-123).
+_LAUNCH_FLAGS = ("-B", "-P")
+
+
 def launch_detached(argv: list[str], log: Path, cwd: Path) -> int:
     """Start ``argv`` detached from the caller (no console, own process group, own session); its output goes to ``log``.  Returns the pid."""
 
@@ -418,6 +439,8 @@ def worker_main(run_dir: Path) -> int:
 
     spec = _read_json(run_dir / "spec.json")
     (run_dir / "worker.pid").write_text(str(os.getpid()), encoding="ascii")
+    with contextlib.suppress(Exception):  # D-168: arm for the memory gate until this worker exits; a failure here must never stop the job
+        _preflight_module().arm("long-run", timeout_seconds=float(spec["timeout_seconds"]))
     log = run_dir / "run.log"
     argv = [str(item) for item in spec["argv"]]
     flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
@@ -427,14 +450,18 @@ def worker_main(run_dir: Path) -> int:
     stripped = sorted(name for name in environment if name.upper() in STRIPPED_ENV)
     for name in stripped:
         del environment[name]
+    running: dict[str, Any] = {}
+    write_errors: list[str] = []  # D-165: a status file that cannot be written must never change what the command's exit code is recorded as
     try:
         with log.open("ab", buffering=0) as out:
             child = subprocess.Popen(  # noqa: S603
                 argv, cwd=spec["cwd"], env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags
             )
-            _update_status(
-                run_dir, state="RUNNING", detached=True, child_pid=child.pid, worker_pid=os.getpid(), running_at=_now(), env_stripped=stripped
-            )
+            running = {"state": "RUNNING", "detached": True, "child_pid": child.pid, "worker_pid": os.getpid(), "running_at": _now(), "env_stripped": stripped}
+            try:
+                _update_status(run_dir, **running)
+            except (OSError, LongRunError) as error:
+                write_errors.append(f"RUNNING: {type(error).__name__}: {error}")  # the final write below repeats these fields
             try:
                 code = child.wait(timeout=spec["timeout_seconds"])
             except subprocess.TimeoutExpired:
@@ -457,8 +484,19 @@ def worker_main(run_dir: Path) -> int:
     except LongRunError as error:
         guard_error = str(error)  # present but unreadable is not the same as absent: say so in the record
     changes: dict[str, Any] = {"guard_read_error": guard_error} if guard_error else {}
-    _update_status(run_dir, state=final, exit_code=code, ended_at=_now(), log_sha256=digest, log_bytes=size, peak_committed_gib=peak, **changes)
-    (run_dir / ("DONE" if final == "DONE" else "FAILED")).write_text(f"{_now()} exit {code}\n", encoding="utf-8")
+    if write_errors:
+        changes["status_write_errors"] = list(write_errors)
+    try:
+        _update_status(
+            run_dir, **{**running, "state": final, "exit_code": code, "ended_at": _now(), "log_sha256": digest, "log_bytes": size, "peak_committed_gib": peak, **changes}
+        )
+    except (OSError, LongRunError) as error:
+        # The record could not be completed: the end marker still goes down (the guard and ``status`` stop on it) but as FAILED, never as DONE,
+        # and says why; a half-written record must not be able to pass for a finished one.
+        write_errors.append(f"final: {type(error).__name__}: {error}")
+        final = "FAILED" if final == "DONE" else final
+    note = f" status-write-errors: {'; '.join(write_errors)}" if write_errors else ""
+    (run_dir / ("DONE" if final == "DONE" else "FAILED")).write_text(f"{_now()} exit {code}{note}\n", encoding="utf-8")
     return code
 
 
@@ -702,13 +740,13 @@ def start(
     _write_json(run_dir / "status.json", status)
     # The guard first: a job must never run unprotected.  If the worker cannot start afterwards, the guard is taken down with it.
     try:
-        guard = launch_detached([interpreter, "-B", script, "guard", str(run_dir)], run_dir / "guard.out", working)
+        guard = launch_detached([interpreter, *_LAUNCH_FLAGS, script, "guard", str(run_dir)], run_dir / "guard.out", working)
     except (OSError, LongRunError) as error:
         _abandon(run_dir, f"内存守卫起不来（{error}），任务没有启动", [])
         raise LongRunError(f"内存守卫起不来（{error}）；任务没有启动，没有无保护地跑") from error
     _update_status(run_dir, mem_guard=True, guard_launcher_pid=guard)
     try:
-        worker = launch_detached([interpreter, "-B", script, "worker", str(run_dir)], run_dir / "worker.out", working)
+        worker = launch_detached([interpreter, *_LAUNCH_FLAGS, script, "worker", str(run_dir)], run_dir / "worker.out", working)
     except (OSError, LongRunError) as error:
         _abandon(run_dir, f"工作进程起不来（{error}）", [guard])
         raise LongRunError(f"工作进程起不来（{error}）；已收掉守卫") from error

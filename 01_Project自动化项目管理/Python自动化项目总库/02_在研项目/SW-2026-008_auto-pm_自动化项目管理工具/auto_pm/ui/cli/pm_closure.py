@@ -88,7 +88,7 @@ def verify_pm(
     # Before anything is read or written: a verification runs ~15 min of real tests, and a machine near its commit limit must not
     # start one (11-03 laptop memory P1).  There is no option to continue anyway.
     try:
-        unverified = memory_preflight.require_headroom()
+        unverified = memory_preflight.require_headroom(label="pm-verify")
     except memory_preflight.MemoryPreflightRefusedError as error:
         raise click.ClickException(str(error)) from error
     if unverified:

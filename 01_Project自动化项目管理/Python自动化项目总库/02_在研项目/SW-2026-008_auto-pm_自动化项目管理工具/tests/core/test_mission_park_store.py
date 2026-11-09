@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.contracts.continuity import RunState, WorkKind
 from auto_pm.contracts.lease_reclaim import (
@@ -871,3 +872,28 @@ def test_d5_with_no_live_run_the_refusal_says_how_to_get_one(scene: Scene) -> No
     with pytest.raises(ContinuityStoreError, match=r"实际 0 个.*continuity run start"):
         scene.park()
     assert scene.snapshot() == before
+
+
+def test_d49_an_expired_lease_cannot_park_or_renew_and_the_refusal_names_the_way_out(scene: Scene) -> None:
+    scene.clock.value = scene.clock.value + timedelta(hours=2)
+    assert scene.store.get_run("RUN-001").state is RunState.RUNNING  # expiry alone does not end the Run
+    before = scene.snapshot()
+
+    with pytest.raises(ContinuityStoreError, match="lease 已过期") as parked:
+        scene.park()
+    message = str(parked.value)
+    assert "continuity recovery plan --pid <项目号> --state LEASE_EXPIRED" in message
+    assert "continuity run reclaim --run-id RUN-001 --claimant" in message
+    assert "pm sign-risk" in message
+    # Renewing after the expiry is refused too, so a later park fails the same way: the way out is the takeover, not a retry.
+    with pytest.raises(ContinuityExecutionError, match="lease 已过期"):
+        scene.execution.renew_lease("RUN-001", "agent-a", "lease-secret", 3600, "renew-after-expiry")
+    with pytest.raises(ContinuityStoreError, match="continuity run reclaim"):
+        scene.park(idempotency_key="park-after-failed-renew")
+    assert scene.snapshot() == before
+
+
+def test_d49_other_lease_refusals_keep_their_own_text(scene: Scene) -> None:
+    with pytest.raises(ContinuityStoreError, match="lease ownership 不匹配") as wrong:
+        scene.park(lease_token="not-the-token", idempotency_key="park-wrong-token")
+    assert "LEASE_EXPIRED" not in str(wrong.value)

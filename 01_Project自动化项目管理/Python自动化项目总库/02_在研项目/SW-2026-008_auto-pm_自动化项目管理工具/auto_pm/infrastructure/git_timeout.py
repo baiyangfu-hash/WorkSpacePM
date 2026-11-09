@@ -106,9 +106,50 @@ def run_git_bounded_text(
     where: Path | str,
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
-    """Bounded Git run returning UTF-8 text output (``errors="replace"``, DEV-ENC-001)."""
-    kwargs.update(text=True, encoding="utf-8", errors="replace")
+    """Bounded Git run returning UTF-8 text output (``errors="replace"``, DEV-ENC-001).
+
+    Lenient: a byte that is not UTF-8 becomes U+FFFD.  Use it only where the answer is an exit code, an object id or a message shown
+    to a person.  When the output carries PATHS that a scope, protected-path or identity comparison reads, use
+    :func:`run_git_bounded_strict_text` — ``tests/infrastructure/test_git_text_callers.py`` lists every caller of this function with its reason.
+    """
+    kwargs.update(text=True, encoding="utf-8", errors="replace")  # lenient-decode: D-162 — callers are judged on exit codes and ASCII ids; a strict text-mode decode would lose the whole output on Windows (reader thread swallows the error), so any caller that compares text needs its own bytes path
     return cast(
         "subprocess.CompletedProcess[str]",
         _run_bounded(command, default_timeout=default_timeout, error_cls=error_cls, where=where, **kwargs),
     )
+
+
+def run_git_bounded_strict_text(
+    command: Sequence[str],
+    *,
+    default_timeout: float,
+    error_cls: type[Exception],
+    where: Path | str,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[str]:
+    """Bounded Git run whose text output must be valid UTF-8; otherwise ``error_cls`` is raised (fail closed).
+
+    The output is captured as bytes and decoded HERE.  ``text=True`` would decode in a reader thread, and on Windows a decode error
+    there is swallowed and the caller silently gets ``stdout=None``.  ``check=True`` keeps its meaning (``CalledProcessError`` carrying
+    the decoded output) and a ``str`` ``input`` is encoded as UTF-8; ``text`` / ``encoding`` / ``errors`` are not accepted.
+    """
+    for forbidden in ("text", "encoding", "errors", "universal_newlines"):
+        if forbidden in kwargs:
+            raise TypeError(f"run_git_bounded_strict_text decodes by itself; do not pass {forbidden}=")
+    check = bool(kwargs.pop("check", False))
+    if isinstance(kwargs.get("input"), str):
+        kwargs["input"] = kwargs["input"].encode("utf-8")
+    raw = cast(
+        "subprocess.CompletedProcess[bytes]",
+        _run_bounded(command, default_timeout=default_timeout, error_cls=error_cls, where=where, check=False, **kwargs),
+    )
+    try:
+        stdout = None if raw.stdout is None else raw.stdout.decode("utf-8")
+        stderr = None if raw.stderr is None else raw.stderr.decode("utf-8")
+    except UnicodeDecodeError as error:
+        verb = next((part for part in command[1:] if not part.startswith("-") and part != str(where)), "")
+        raise error_cls(f"git {verb} 的输出不是合法 UTF-8，无法可信地比对路径或名称: {error}") from error
+    done: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(raw.args, raw.returncode, stdout, stderr)
+    if check and raw.returncode != 0:
+        raise subprocess.CalledProcessError(raw.returncode, raw.args, output=stdout, stderr=stderr)
+    return done

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import (
@@ -17,6 +18,7 @@ from pydantic import (
 )
 
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind, WorktreeMode
+from auto_pm.contracts.intake import IntakeClassification
 from auto_pm.contracts.mission import MissionState
 from auto_pm.contracts.plan_checklist import PlanChecklist
 
@@ -147,6 +149,49 @@ class PlanningExecutionGrant(BaseModel):
         if len(set(cleaned)) != len(cleaned):
             raise ValueError("declared_dirty_paths must be unique")
         return cleaned
+
+
+def canonical_plan_path(raw: str) -> str:
+    """The one spelling of a plan path: trimmed, no trailing or doubled slash, no ``./``.
+
+    ``pm plan`` keeps scope and declared paths as typed, but ``approve`` later builds the Mission authority,
+    which demands the canonical spelling for declared paths (D-103). Normalising both at plan time makes the two
+    rules agree. Anything unsafe (blank, backslash, wildcard, absolute, ``..``, ``.``) is returned unchanged so the
+    existing validators refuse it with their own message.
+    """
+
+    text = raw.strip()
+    if not text or "\\" in text or "*" in text:
+        return text
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts or str(path) == ".":
+        return text
+    return path.as_posix()
+
+
+def canonical_plan_paths(
+    scope_paths: tuple[str, ...], execution_grant: PlanningExecutionGrant | None
+) -> tuple[tuple[str, ...], PlanningExecutionGrant | None]:
+    """Canonical spelling for the scope paths and the grant's declared dirty paths (same function for both)."""
+
+    scope = tuple(canonical_plan_path(path) for path in scope_paths)
+    if execution_grant is None:
+        return scope, None
+    declared = tuple(canonical_plan_path(path) for path in execution_grant.declared_dirty_paths)
+    if declared == execution_grant.declared_dirty_paths:
+        return scope, execution_grant
+    return scope, execution_grant.model_copy(update={"declared_dirty_paths": declared})
+
+
+class PlanningRequestCheck(BaseModel):
+    """What a ``plan`` request would be filed as, found without writing anything (``pm plan --dry-run``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope_paths: tuple[str, ...]
+    declared_dirty_paths: tuple[str, ...]
+    classification: IntakeClassification | None
+    intake_item_id: str = ""
 
 
 class PlanningScopeCard(BaseModel):
