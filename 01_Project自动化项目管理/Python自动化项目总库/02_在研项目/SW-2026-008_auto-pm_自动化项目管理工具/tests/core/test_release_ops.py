@@ -166,7 +166,7 @@ def test_switch_backs_up_then_writes_previous_before_active(world: World, tmp_pa
         real(container, slot, release)
 
     monkeypatch.setattr(ops, "_write_pointer", recording)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
 
     result = ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
 
@@ -180,7 +180,7 @@ def test_switch_backs_up_then_writes_previous_before_active(world: World, tmp_pa
 @pytest.mark.parametrize("problem", ["wrong_old", "new_broken", "old_broken", "backup_exists"])
 def test_switch_refuses_before_writing_anything(world: World, tmp_path: Path, problem: str) -> None:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     old = "1.3.2-aaaaaaa"
     if problem == "wrong_old":
         old = "1.3.1-bbbbbbb"
@@ -189,7 +189,7 @@ def test_switch_refuses_before_writing_anything(world: World, tmp_path: Path, pr
     elif problem == "old_broken":
         (world.container / "releases" / "1.3.2-aaaaaaa" / "BROKEN").write_text("", encoding="utf-8")
     else:
-        backup.mkdir()
+        backup.mkdir(parents=True)
     pointers, manifest = world.pointers(), world.manifest_bytes()
 
     with pytest.raises(ops.ReleaseOpsError):
@@ -201,7 +201,7 @@ def test_switch_refuses_before_writing_anything(world: World, tmp_path: Path, pr
 
 def test_a_wrong_runtime_identity_after_the_switch_is_an_error_and_the_backup_can_undo_it(world: World, tmp_path: Path) -> None:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     wrong = lambda _root: {"configured_release_id": new, "effective_release_id": "1.3.2-aaaaaaa", "runtime_fallback_reason": "fell back"}  # noqa: E731
 
     with pytest.raises(ops.ReleaseOpsError, match="运行身份"):
@@ -214,7 +214,7 @@ def test_a_wrong_runtime_identity_after_the_switch_is_an_error_and_the_backup_ca
 
 def test_rollback_restores_only_the_pointers_and_keeps_the_installed_release(world: World, tmp_path: Path) -> None:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
     manifest_after_build = world.manifest_bytes()
 
@@ -227,7 +227,7 @@ def test_rollback_restores_only_the_pointers_and_keeps_the_installed_release(wor
 
 def test_rollback_refuses_a_tampered_or_missing_backup_without_touching_the_pointers(world: World, tmp_path: Path) -> None:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
     switched = world.pointers()
 
@@ -237,13 +237,13 @@ def test_rollback_refuses_a_tampered_or_missing_backup_without_touching_the_poin
     assert world.pointers() == switched
 
     with pytest.raises(ops.ReleaseOpsError, match="SHA256SUMS"):
-        ops.rollback(world.root, tmp_path / "nowhere", world.identity)
+        ops.rollback(world.root, world.root / ".auto-pm" / "reports" / "nowhere", world.identity)
     assert world.pointers() == switched
 
 
 def test_a_rollback_whose_identity_is_not_the_old_release_is_an_error(world: World, tmp_path: Path) -> None:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
 
     with pytest.raises(ops.ReleaseOpsError, match="回退后运行身份"):
@@ -255,7 +255,7 @@ def test_a_rollback_whose_identity_is_not_the_old_release_is_an_error(world: Wor
 
 def _switched(world: World, tmp_path: Path) -> tuple[str, Path]:
     new = _built(world)
-    backup = tmp_path / "backup"
+    backup = world.root / ".auto-pm" / "reports" / "backup"
     ops.switch(world.root, new, "1.3.2-aaaaaaa", backup, world.identity)
     return new, backup
 
@@ -387,3 +387,71 @@ def test_the_release_is_built_by_the_frozen_commits_own_builder_not_the_working_
     ops.build(world.root, world.root, world.commit)
 
     assert (world.container / "releases" / world.new_id / "payload.txt").read_text(encoding="utf-8") == "payload"
+
+
+# --- D-172: a rollback trusts only a backup a deploy left under .auto-pm/reports, and only names it can verify ---
+
+
+def _hand_made_backup(folder: Path, active: str, previous: str) -> Path:
+    """A perfectly self-consistent backup (right file names, right checksums) that no deploy ever wrote."""
+
+    import hashlib
+
+    folder.mkdir(parents=True)
+    names = ("active_release.json", "previous_release.json", "deployment_manifest.json")
+    for name, release in (("active_release.json", active), ("previous_release.json", previous)):
+        (folder / name).write_text(json.dumps({"schema_version": "release_pointer.v1", "slot": name, "release_id": release, "release_path": release}) + "\n", encoding="utf-8")
+    (folder / "deployment_manifest.json").write_text("{}", encoding="utf-8")
+    (folder / "SHA256SUMS").write_text("".join(f"{hashlib.sha256((folder / name).read_bytes()).hexdigest()}  {name}\n" for name in names), encoding="utf-8")
+    return folder
+
+
+def test_a_consistent_backup_outside_the_reports_folder_is_refused_and_no_pointer_moves(world: World, tmp_path: Path) -> None:
+    before = world.pointers()
+    stranger = _hand_made_backup(tmp_path / "elsewhere", "1.3.1-bbbbbbb", "1.3.2-aaaaaaa")
+
+    with pytest.raises(ops.ReleaseOpsError, match="必须在"):
+        ops.rollback(world.root, stranger, world.identity)
+
+    assert world.pointers() == before
+
+
+def test_a_backup_inside_reports_that_names_an_uninstalled_release_is_refused_before_any_write(world: World) -> None:
+    before = world.pointers()
+    doctored = _hand_made_backup(world.root / ".auto-pm" / "reports" / "doctored", "1.3.3-nonexist", "1.3.2-aaaaaaa")
+
+    with pytest.raises(ops.ReleaseOpsError, match="没装这个发布"):
+        ops.rollback(world.root, doctored, world.identity)
+
+    assert world.pointers() == before, "the active pointer must not be written before the check"
+
+
+def test_a_backup_whose_previous_pointer_names_a_broken_release_is_refused_before_any_write(world: World) -> None:
+    before = world.pointers()
+    (world.container / "releases" / "1.3.1-bbbbbbb" / "BROKEN").write_text("", encoding="utf-8")
+    backup = _hand_made_backup(world.root / ".auto-pm" / "reports" / "half", "1.3.2-aaaaaaa", "1.3.1-bbbbbbb")
+
+    with pytest.raises(ops.ReleaseOpsError, match="逐文件校验没过"):
+        ops.rollback(world.root, backup, world.identity)
+
+    assert world.pointers() == before
+
+
+def test_a_symlink_that_points_out_of_the_reports_folder_does_not_count_as_inside(world: World, tmp_path: Path) -> None:
+    outside = _hand_made_backup(tmp_path / "outside", "1.3.2-aaaaaaa", "1.3.1-bbbbbbb")
+    link = world.root / ".auto-pm" / "reports" / "link"
+    link.parent.mkdir(parents=True)
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available here")
+
+    with pytest.raises(ops.ReleaseOpsError, match="必须在"):
+        ops.rollback(world.root, link, world.identity)
+
+
+def test_the_reports_folder_itself_is_not_a_backup(world: World) -> None:
+    (world.root / ".auto-pm" / "reports").mkdir(parents=True)
+
+    with pytest.raises(ops.ReleaseOpsError, match="必须在"):
+        ops.rollback(world.root, world.root / ".auto-pm" / "reports", world.identity)

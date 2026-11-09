@@ -15,6 +15,7 @@ from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core import release_wiring
 from auto_pm.application.core.release_deploy import DeployError, DeployResult
 from auto_pm.application.core.release_ledger import LedgerError
+from auto_pm.contracts.interlock_matrix import COMMANDS, CommandKind
 from auto_pm.ui.cli import release as release_cli
 from auto_pm.ui.cli.release import release_group
 
@@ -193,3 +194,13 @@ def test_a_refused_rollback_is_an_error_with_the_reason(tmp_path: Path, real: Si
     result = _invoke(tmp_path, "rollback", str(backup))
 
     assert result.exit_code == 1 and "被改过" in result.output
+
+
+def test_the_interlock_matrix_pins_the_classification_of_the_real_deploy_and_the_rollback() -> None:
+    """Flipping ``release deploy`` back to read-only used to leave every test green; the hand-written guard in release.py is not the only line of defence."""
+
+    deploy, rollback, status = COMMANDS["release deploy"], COMMANDS["release rollback"], COMMANDS["release status"]
+
+    assert deploy.kind is CommandKind.NORMAL and "identity=clean" in deploy.needs and "G-IDENTITY-WRITE" in deploy.guards and "G-AGENT-APPROVAL" in deploy.guards
+    assert rollback.kind is CommandKind.NORMAL and "G-MUTATION-ROOT" in rollback.guards
+    assert status.kind is CommandKind.READ_ONLY

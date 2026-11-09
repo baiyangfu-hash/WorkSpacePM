@@ -190,6 +190,18 @@ def switch(root: Path, new: str, old: str, backup: Path, identity: Identity) -> 
     return {"active": new, "previous": old, "backup": str(backup), "identity": seen}
 
 
+def _check_backup_inside_reports(root: Path, backup: Path) -> None:
+    """A rollback only trusts a backup that a deploy left under ``<control root>/.auto-pm/reports/`` (symlinks resolved), never an arbitrary folder (D-172)."""
+
+    reports = (Path(root) / ".auto-pm" / "reports").resolve()
+    try:
+        inside = backup.resolve().relative_to(reports) != Path()
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ReleaseOpsError(f"备份目录必须在 {reports} 之下（解析符号链接后），拒绝回退：{backup}")
+
+
 def _check_backup_sums(backup: Path) -> None:
     """The backup's ``SHA256SUMS`` must list exactly the three backup files, once each, and every hash must match.
 
@@ -223,8 +235,18 @@ def rollback(root: Path, backup: Path, identity: Identity) -> dict[str, Any]:
 
     container = container_of(root)
     backup = Path(backup)
+    _check_backup_inside_reports(root, backup)
     _check_backup_sums(backup)
     target = pointer_release(backup, "active_release.json")
+    # The checksums only prove the backup agrees with itself (a hand-made folder can be perfectly consistent), so before a single pointer
+    # is written both releases it names must be installed and pass the same exact-tree check the launcher runs (D-172).
+    for slot in POINTERS:
+        named = pointer_release(backup, slot)
+        if not named:
+            raise ReleaseOpsError(f"备份里的 {slot} 没写发布号，拒绝回退")
+        if not (container / "releases" / named).is_dir():
+            raise ReleaseOpsError(f"备份里的 {slot} 指向 {named}，但容器里没装这个发布，拒绝回退")
+        verify(root, named)
     for slot in POINTERS:
         shutil.copyfile(backup / slot, container / (slot + ".tmp"))
         os.replace(container / (slot + ".tmp"), container / slot)
