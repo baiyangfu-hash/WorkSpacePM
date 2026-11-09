@@ -108,10 +108,6 @@ def _update_state(plan: DeployPlan, **values: str) -> None:
     plan.state_file.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def _mark_rolled_back(plan: DeployPlan) -> None:
-    _update_state(plan, rolled_back_with=plan.confirm_ref)
-
-
 def _first_backup(plan: DeployPlan, offered: Path) -> Path:
     """The backup of the **first** switch attempt: recorded before the pointers move, reused by every resume (a rollback must restore the
     pointers as they were before the deploy, not as they were before a later retry)."""
@@ -201,5 +197,5 @@ def _undo(plan: DeployPlan, ops: ReleaseOpsPort, backup: Path, steps: list[str],
         ops.rollback(backup)
     except Exception as error:  # noqa: BLE001
         raise DeployError(f"{reason}；回退也没成功：{error}。手工回退命令见回执或备份目录 {backup}", rolled_back=False, failed=failed) from error
-    _mark_rolled_back(plan)
+    _update_state(plan, rolled_back_with=plan.confirm_ref, backup="")  # the pointers are back: the next attempt takes a fresh backup
     raise DeployError(f"{reason}；已回退到 {plan.old_release}，账目保持打开。重试需要新的用户确认引用", rolled_back=True, failed=failed)

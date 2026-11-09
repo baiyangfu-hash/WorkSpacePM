@@ -1,6 +1,8 @@
 """Release CLI (D-146, card 1): ``release status`` and ``release deploy <commit> --check-only``.  Read-only; the real deploy comes in a later card.
 
-退出码：0 可以部署／状态已打印；1 用法错误或真部署尚未实现；2 预检没通过（有失败或没法核实的项）。
+退出码：0 可以部署／状态已打印／部署完成；1 用法错误；2 预检没通过（有失败或没法核实的项）；
+3 部署中途失败，指针已回退（账目保持打开，重试要新的用户确认引用）；4 部署失败且没能自动回退，或已切换但收口没完成（要人工，信息里有回退命令）。
+真部署（``--no-check-only``）每次都要 ``--confirm-ref user-confirmation:<用户那条消息的时间或编号>``；没有它永远拒绝，没有默认同意。
 """
 
 from __future__ import annotations
@@ -13,8 +15,16 @@ import click
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core import release_deploy_check as check
+from auto_pm.application.core import release_ops as ops
+from auto_pm.application.core import release_wiring as wiring
+from auto_pm.application.core.release_deploy import DeployError
+from auto_pm.application.core.release_ledger import LedgerError
 from auto_pm.application.core.release_trial_service import ReleaseTrialError, ReleaseTrialService
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.runtime_identity_guard import (
+    require_runtime_identity_for_workspace,
+    warn_runtime_identity,
+)
 
 
 def _root(ctx: click.Context) -> Path:
@@ -47,25 +57,64 @@ def release_status(ctx: click.Context, as_json: bool) -> None:
 
 @release_group.command(name="deploy")
 @click.argument("commit")
-@click.option("--check-only/--no-check-only", default=True, help="只做预检，什么都不写（现在只支持这个）")
+@click.option("--check-only/--no-check-only", default=True, help="只做预检，什么都不写（默认）；真部署写 --no-check-only")
 @click.option("--gate-verdict", type=CallerPath(path_type=Path, dir_okay=False), help="这个提交的全量门禁判决 JSON")
 @click.option("--audit-signoff", type=CallerPath(path_type=Path, dir_okay=False), help="独立审计的放行记录")
+@click.option("--confirm-ref", default="", help="真部署必填：user-confirmation:<用户那条消息的时间或编号>；没有它不批准、不部署")
+@click.option("--approver", default="", help="真部署必填：写进变更单和 Decision 的批准人")
+@click.option("--card-file", type=CallerPath(path_type=Path, dir_okay=False), help="真部署必填：切换后跑卡预检用的实施卡文件")
+@click.option("--drill-script", type=CallerPath(path_type=Path, dir_okay=False), help="真部署必填：事件链演练脚本（本机文件）")
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出")
 @click.pass_context
 def release_deploy(
-    ctx: click.Context, commit: str, check_only: bool, gate_verdict: Path | None, audit_signoff: Path | None, as_json: bool
+    ctx: click.Context, commit: str, check_only: bool, gate_verdict: Path | None, audit_signoff: Path | None,
+    confirm_ref: str, approver: str, card_file: Path | None, drill_script: Path | None, as_json: bool,
 ) -> None:
-    """部署前预检：这个提交现在能不能发布。真部署还没做（D-146 卡4），不带 --check-only 会被拒。"""
+    """部署前预检；加 --no-check-only 才真部署：预检全绿 → 建账 → 构建 → 切换 → 自检 → 失败自动回退，成功才收口并写回执。"""
 
     if not check_only:
-        raise click.ClickException("真部署还没实现（D-146 卡4）；现在只有 --check-only 预检")
+        require_runtime_identity_for_workspace(ctx)  # a real deploy writes the ledger and the pointers: the runtime identity must be clean first
+        missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--card-file", card_file), ("--drill-script", drill_script)) if not value]
+        if missing:
+            raise click.ClickException("真部署还缺：" + "、".join(missing))
     report = check.preflight(_root(ctx), commit, gate_verdict=gate_verdict, audit_signoff=audit_signoff)
-    if as_json:
+    if as_json and check_only:
         click.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
     else:
         for line in report.render():
             click.echo(line)
-    ctx.exit(0 if report.ok else 2)
+    if not report.ok:
+        ctx.exit(2)
+    if check_only:
+        ctx.exit(0)
+    assert card_file is not None and drill_script is not None  # narrowed by the missing-options check above
+    try:
+        result = wiring.real_deploy(_root(ctx), report, approver=approver, confirm_ref=confirm_ref, card_file=card_file, drill_script=drill_script)
+    except LedgerError as error:  # a malformed confirmation reference stops before the books are touched
+        raise click.ClickException(str(error)) from error
+    except DeployError as error:
+        click.echo(f"部署没有完成：{error}")
+        ctx.exit(3 if error.rolled_back else 4)
+    click.echo(f"已部署 {result.release_id}，变更单 {result.change_id} 已完成，回执 {result.receipt}")
+    click.echo(f"回退命令：main.py release rollback {result.backup}")
+
+
+@release_group.command(name="rollback")
+@click.argument("backup_dir", type=CallerPath(path_type=Path, exists=True, file_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="机器可读输出")
+@click.pass_context
+def release_rollback(ctx: click.Context, backup_dir: Path, as_json: bool) -> None:
+    """用切换前的指针备份把有效版本退回去：先核对备份校验和，只还原指针，不动数据库、不回滚已装发布。"""
+
+    warn_runtime_identity(ctx, wiring.IDENTITY_PROJECT)  # the runtime may be exactly what is broken: warn, never refuse
+    try:
+        result = ops.rollback(_root(ctx), backup_dir, wiring.cockpit_identity)
+    except ops.ReleaseOpsError as error:
+        raise click.ClickException(str(error)) from error
+    if as_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(f"已回退，有效版本 {result['active']}")
 
 
 @release_group.command(name="trial")
