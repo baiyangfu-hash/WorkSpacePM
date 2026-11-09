@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 
 class IgnoreScanError(RuntimeError):
@@ -30,7 +30,7 @@ def ignored_among(repo: Path, paths: Sequence[str]) -> list[IgnoredFile]:
 
     if not paths:
         return []
-    result = run_git_bounded_text(
+    result = run_git_bounded_strict_text(
         ["git", "check-ignore", "--no-index", "-v", "-n", "-z", "--stdin"],
         default_timeout=120.0,
         error_cls=IgnoreScanError,

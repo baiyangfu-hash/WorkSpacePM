@@ -48,7 +48,7 @@ from auto_pm.application.core.pr_body_builder import (
 from auto_pm.domain.change.path_resolver import LEGACY_MONITORING_DIR
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 from auto_pm.infrastructure.executable_lookup import find_on_path
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
 # Whitelist: the only accepted form is CHG-<PROJECT>-YYYY-NNN in ASCII.  Any other mention of "CHG"
@@ -538,7 +538,7 @@ class PrOpenService:
 
     @staticmethod
     def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return run_git_bounded_text(
+        return run_git_bounded_strict_text(
             ["git", "-C", str(cwd), *args],
             default_timeout=300.0,
             error_cls=PrOpenRefusedError,

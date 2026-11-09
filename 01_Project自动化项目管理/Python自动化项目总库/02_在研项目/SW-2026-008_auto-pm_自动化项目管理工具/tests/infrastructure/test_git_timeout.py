@@ -117,7 +117,7 @@ def test_every_call_site_keeps_its_documented_default_timeout(
         return record
 
     def probe(module: object, label: str, call) -> None:  # type: ignore[no-untyped-def]
-        for name in ("run_git_bounded", "run_git_bounded_text"):
+        for name in ("run_git_bounded", "run_git_bounded_text", "run_git_bounded_strict_text"):
             if hasattr(module, name):
                 monkeypatch.setattr(module, name, recorder(label))
         with pytest.raises(_Stop):
