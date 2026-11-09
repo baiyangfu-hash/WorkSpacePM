@@ -13,6 +13,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -127,7 +128,12 @@ def test_plan_fills_branch_title_card_line_and_chg(lab: Lab) -> None:
 
 def test_plan_without_evidence_says_so_instead_of_claiming_it(lab: Lab) -> None:
     work(lab)
-    assert "未提供" in plan(lab).body
+    body = plan(
+        lab, sweep="根因…；同类排查…"
+    ).body  # a sweep text, so the only "未提供" left can come from the evidence list
+    evidence = body.split("## 证据", 1)[1].split("## ", 1)[0]
+    assert "- 未提供（由审计者自行核验）" in evidence.splitlines()
+    assert "已验证" not in evidence
 
 
 def write_chg(lab: Lab, text: str) -> None:
@@ -140,9 +146,13 @@ def related_td_section(body: str) -> str:
     return body.split("## 关联 TD", 1)[1].split("## ", 1)[0].strip()
 
 
-def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for_them(lab: Lab) -> None:
+def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for_them(
+    lab: Lab,
+) -> None:
     work(lab)
-    write_chg(lab, "变更单\n台账 TD-SW008-321 的一部分，同时碰到 TD-SW008-322\n")  # untracked, as in the control root
+    write_chg(
+        lab, "变更单\n台账 TD-SW008-321 的一部分，同时碰到 TD-SW008-322\n"
+    )  # untracked, as in the control root
 
     result = plan(lab)
 
@@ -150,7 +160,9 @@ def test_plan_lists_the_tds_named_by_the_change_order_but_proposes_no_payoff_for
     assert "TD-SW008-321 已偿还" not in result.body
 
 
-def test_plan_lists_the_tds_when_the_project_keeps_its_change_orders_under_11_monitoring(lab: Lab) -> None:
+def test_plan_lists_the_tds_when_the_project_keeps_its_change_orders_under_11_monitoring(
+    lab: Lab,
+) -> None:
     work(lab)
     folder = lab.root / "11_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
     folder.mkdir(parents=True)
@@ -173,7 +185,9 @@ def test_plan_with_the_change_order_folder_but_not_that_file_plans_and_says_so(l
     work(lab)
     folder = lab.root / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
     folder.mkdir(parents=True)
-    (folder / "CHG-SCPT-2026-001.md").write_text("TD-SW008-999\n", encoding="utf-8")  # another order, not ours
+    (folder / "CHG-SCPT-2026-001.md").write_text(
+        "TD-SW008-999\n", encoding="utf-8"
+    )  # another order, not ours
 
     result = plan(lab)
 
@@ -424,7 +438,9 @@ def test_a_failed_pr_list_stops_before_pushing(lab: Lab) -> None:
     work(lab)
 
     class BrokenList(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        def __call__(
+            self, args: Sequence[str], stdin: str | None
+        ) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "list"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 500")
             return super().__call__(args, stdin)
@@ -442,7 +458,9 @@ def test_pr_create_failing_is_not_success_even_if_the_output_shows_a_url(lab: La
     work(lab)
 
     class FailsWithUrl(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        def __call__(
+            self, args: Sequence[str], stdin: str | None
+        ) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(
                     args, 1, "https://github.com/o/r/pull/55\n", "a pull request already exists"
@@ -458,7 +476,9 @@ def test_a_failed_pr_create_after_the_push_says_how_to_continue(lab: Lab) -> Non
     work(lab)
 
     class BrokenCreate(FakeGh):
-        def __call__(self, args: Sequence[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        def __call__(
+            self, args: Sequence[str], stdin: str | None
+        ) -> subprocess.CompletedProcess[str]:
             if tuple(args[:2]) == ("pr", "create"):
                 return subprocess.CompletedProcess(args, 1, "", "HTTP 502")
             return super().__call__(args, stdin)
@@ -561,7 +581,9 @@ def test_a_card_safety_value_that_is_not_plain_yes_or_no_is_refused(lab: Lab, wr
 
 
 @pytest.mark.parametrize("answer", ["是", "否"])
-def test_the_card_declaration_goes_into_the_body_verbatim_as_its_own_line(lab: Lab, answer: str) -> None:
+def test_the_card_declaration_goes_into_the_body_verbatim_as_its_own_line(
+    lab: Lab, answer: str
+) -> None:
     set_card_safety(lab, f"> 安全回路：{answer}")
     commit_plc_file(work(lab))
     body = plan(lab).body
@@ -588,6 +610,25 @@ def test_a_flag_other_than_yes_or_no_is_refused(lab: Lab) -> None:
     work(lab)
     with pytest.raises(PrOpenRefusedError, match="只能是 是 或 否"):
         plan(lab, safety_circuit="也许")
+
+
+def test_the_declaration_check_itself_refuses_a_plc_change_without_an_answer_and_a_bad_value(
+    lab: Lab,
+) -> None:
+    """``plan`` hands this method an already validated card answer, so its own two refusals are only reachable directly:
+    they are the second line of defence if the card reader ever changes (mutation D-85)."""
+    from auto_pm.application.core.agent_worktree_service import MAIN_REF
+
+    station = work(lab)
+    commit_plc_file(station)
+    svc = service(lab)
+    base = svc._rev(station, MAIN_REF)
+
+    with pytest.raises(PrOpenRefusedError, match="必须声明是否涉及安全回路"):
+        svc._safety_declaration(station, base, None)
+    with pytest.raises(PrOpenRefusedError, match="只能是 是 或 否"):
+        svc._safety_declaration(station, base, "也许")
+    assert svc._safety_declaration(station, base, "否") == "否"
 
 
 def test_scope_comes_from_the_card_not_from_the_diff(lab: Lab) -> None:
@@ -688,7 +729,10 @@ def test_a_borrowed_station_can_hand_in_its_pr_for_the_borrower(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AUTO_PM_AGENT", "claude")
-    for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):  # no session id: the loan is recorded under the base name
+    for key in (
+        "AUTO_PM_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+    ):  # no session id: the loan is recorded under the base name
         monkeypatch.delenv(key, raising=False)
     lab.service().open("vscode", "CARD-1")  # claude borrows the free vscode station
     station = lab.station("vscode")
@@ -772,3 +816,97 @@ def test_closing_the_station_clears_the_loan(lab: Lab, monkeypatch: pytest.Monke
     svc.open("vscode", "CARD-1")
     svc.close("vscode", fetch=False)
     assert svc.borrower("vscode") == ""
+
+
+def _mutants_module() -> Any:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).with_name("pr_open_mutants.py")
+    spec = importlib.util.spec_from_file_location("pr_open_mutants_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    ("returncode", "output", "expected"),
+    [
+        (0, "86 passed", "survived"),
+        (1, "1 failed, 3 passed", "caught"),
+        (1, "ERROR collecting", "invalid"),
+        (2, "interrupted: 1 error", "invalid"),
+        (3, "INTERNALERROR failed", "invalid"),
+        (4, "usage error", "invalid"),
+        (5, "no tests ran", "invalid"),
+        (-9, "failed", "invalid"),
+        (None, "", "invalid"),
+    ],
+)
+def test_mutant_judge_counts_only_a_real_test_failure_as_caught(
+    returncode: int | None, output: str, expected: str
+) -> None:
+    """D-85 audit: a pytest crash or timeout must never be read as "the tests caught the mutant"."""
+
+    assert _mutants_module().judge(returncode, output) == expected
+
+
+# ── D-106: a second card of one agent is found by its branch ─────────
+
+SECOND_ALIAS = "claude-aaaaaa"
+
+
+def test_the_second_card_is_found_in_the_alias_station_while_the_plain_one_holds_another_card(
+    lab: Lab,
+) -> None:
+    work(lab, "claude", "OTHER-9")
+    second = work(lab, SECOND_ALIAS, "CARD-1")
+
+    plan = service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+    assert plan.branch == "claude/CARD-1"
+    assert plan.station == SECOND_ALIAS
+    assert plan.head_sha == git(second, "rev-parse", "HEAD").strip()
+
+
+def test_open_pushes_from_the_station_that_holds_the_card(lab: Lab) -> None:
+    work(lab, "claude", "OTHER-9")
+    second = work(lab, SECOND_ALIAS, "CARD-1")
+    svc = service(lab, FakeGh())
+
+    opened = svc.open(svc.plan("claude", "CARD-1", CARD_PATH, fetch=False))
+
+    assert opened.number == 101
+    refs = lab.remote_refs()
+    assert "refs/heads/claude/CARD-1" in refs
+    assert "refs/heads/claude/OTHER-9" not in refs
+    assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/claude/CARD-1"
+
+
+def test_the_named_station_still_wins_when_it_is_on_the_card(lab: Lab) -> None:
+    work(lab, "claude", "CARD-1")
+
+    plan = service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+    assert plan.station == ""
+
+
+def test_no_station_on_the_card_is_still_a_refusal_that_names_the_branch(lab: Lab) -> None:
+    work(lab, "claude", "OTHER-9")
+    work(lab, SECOND_ALIAS, "OTHER-8")
+
+    with pytest.raises(PrOpenRefusedError, match="分支名不符"):
+        service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)
+
+
+def test_another_conversations_alias_station_is_not_taken_over(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work(lab, "claude", "OTHER-9")
+    work(lab, SECOND_ALIAS, "CARD-1")
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "bbbbbb")
+
+    with pytest.raises(PrOpenRefusedError, match="不能替"):
+        service(lab).plan("claude", "CARD-1", CARD_PATH, fetch=False)

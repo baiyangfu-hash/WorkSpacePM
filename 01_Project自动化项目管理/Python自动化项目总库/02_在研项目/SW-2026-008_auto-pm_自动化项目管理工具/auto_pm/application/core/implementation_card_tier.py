@@ -46,7 +46,7 @@ def card_is_new(card_file: Path) -> bool:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: only the exit code is used; the output is never read
             stdin=subprocess.DEVNULL,
             timeout=60,
             check=False,

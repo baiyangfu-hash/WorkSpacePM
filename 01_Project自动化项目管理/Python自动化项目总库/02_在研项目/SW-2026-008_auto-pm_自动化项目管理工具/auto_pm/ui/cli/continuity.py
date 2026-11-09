@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -17,8 +17,9 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent
+from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent, caller_alias
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
+from auto_pm.application.core.claim_service import ClaimService
 from auto_pm.application.core.continuity_execution_service import (
     CONTROL_ROOT_RUN_REFUSAL,
     ContinuityExecutionError,
@@ -259,16 +260,28 @@ def _git(root: Path, *args: str) -> bytes:
         env=clean_git_environment(),
     )
     if result.returncode != 0:
-        message = result.stderr.decode("utf-8", errors="replace").strip()
+        message = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own error text, shown to the user and never parsed
         raise click.ClickException(f"Git 事实采集失败: {message or 'unknown error'}")
-    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own diagnostic text, shown to the user and never parsed
     if diagnostic:
         raise click.ClickException(f"Git 事实采集包含诊断: {diagnostic}")
     return result.stdout
 
 
+def _strict(raw: bytes, encoding: str, what: str) -> str:
+    """Decode git output that feeds an authority decision; bytes that do not decode stop the command instead of turning into ``?``."""
+
+    try:
+        return raw.decode(encoding)
+    except UnicodeDecodeError as error:
+        raise GuardClickRefusal(
+            "G-DECISION-GIT-BINDING",
+            f"Git 事实采集无法按 {encoding} 解码（{what}）：{error}；路径含非法字节，请先改名再继续",
+        ) from error
+
+
 def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
-    head = _git(root, "rev-parse", "HEAD").decode("ascii", errors="replace").strip()
+    head = _strict(_git(root, "rev-parse", "HEAD"), "ascii", "git rev-parse HEAD").strip()
     dirty: set[str] = set()
     commands = (
         ("diff", "--name-only", "-z"),
@@ -276,7 +289,7 @@ def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
         ("ls-files", "--others", "--exclude-standard", "-z"),
     )
     for command in commands:
-        output = _git(root, *command).decode("utf-8", errors="replace")
+        output = _strict(_git(root, *command), "utf-8", f"git {' '.join(command)}")
         dirty.update(path.replace("\\", "/") for path in output.split("\0") if path)
     return head, tuple(sorted(dirty))
 
@@ -1509,6 +1522,25 @@ def record_holder(
     click.echo(json.dumps(receipt, ensure_ascii=False))
 
 
+def _keep_claims_alive(ctx: click.Context, owned_paths: Sequence[str]) -> None:
+    """Checkpointing is proof the agent is still working on *this Run's* paths: stretch the claims covering them (D-39 follow-up).
+
+    Quiet and never fatal; a keep-alive that could not run says so on stderr (one line) and the checkpoint still succeeds.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        root = app_ctx.control_root or app_ctx.workspace_root
+        if not root:
+            return
+        service = ClaimService(root)
+        service.renew_held(caller_alias() or caller_agent().strip("?") or "user", paths=owned_paths)
+        for warning in service.keepalive_warnings:
+            click.echo(f"⚠️ {warning}", err=True)
+    except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+        return
+
+
 @continuity_group.group(name="checkpoint")
 def checkpoint_group() -> None:
     """Create immutable Run recovery checkpoints."""
@@ -1558,6 +1590,7 @@ def create_checkpoint(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
+    _keep_claims_alive(ctx, run.owned_paths)
     _emit(item)
 
 

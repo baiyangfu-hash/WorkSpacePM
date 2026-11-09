@@ -15,7 +15,11 @@ from pathlib import Path
 from auto_pm.change.parser import ChgParser
 from auto_pm.domain.secret_patterns import SecretFinding, scan_unified_diff
 from auto_pm.infrastructure import change_status_guard
-from auto_pm.infrastructure.git_timeout import run_git_bounded, run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import (
+    run_git_bounded,
+    run_git_bounded_strict_text,
+    run_git_bounded_text,
+)
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +122,7 @@ def _parse_raw_index_entries(raw_output: str) -> tuple[StagedIndexEntry, ...]:
 def _resolve_git_common_dir(repo_path: Path) -> Path:
     """解析 Git 仓库的 common-dir 绝对路径。"""
     try:
-        res = run_git_bounded_text(
+        res = run_git_bounded_strict_text(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
             default_timeout=120.0,
             error_cls=StagedSnapshotError,
@@ -128,7 +132,7 @@ def _resolve_git_common_dir(repo_path: Path) -> Path:
         )
         if res.returncode == 0 and res.stdout.strip():
             return Path(res.stdout.strip()).resolve()
-        res2 = run_git_bounded_text(
+        res2 = run_git_bounded_strict_text(
             ["git", "rev-parse", "--git-common-dir"],
             default_timeout=120.0,
             error_cls=StagedSnapshotError,
@@ -170,7 +174,7 @@ def validate_repository_roots(
             if not ctrl.is_dir():
                 raise StagedSnapshotError(f"控制根目录不存在或不是目录: {control_root}")
 
-        res_cand = run_git_bounded_text(
+        res_cand = run_git_bounded_strict_text(
             ["git", "rev-parse", "--show-toplevel"],
             default_timeout=120.0,
             error_cls=StagedSnapshotError,
@@ -187,7 +191,7 @@ def validate_repository_roots(
         if not ctrl_git.is_dir():
             raise StagedSnapshotError(f"控制根不是有效主仓库根目录 (.git 不是目录): {ctrl}")
 
-        res_ctrl = run_git_bounded_text(
+        res_ctrl = run_git_bounded_strict_text(
             ["git", "rev-parse", "--show-toplevel"],
             default_timeout=120.0,
             error_cls=StagedSnapshotError,
@@ -235,7 +239,7 @@ def _resolve_governance_roots(
 def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
     """冻结当前 index 相对 HEAD 的全部改动（含删除）及 blob 标识，不读取工作区文件内容。"""
     try:
-        result = run_git_bounded_text(
+        result = run_git_bounded_strict_text(
             [
                 "git",
                 "diff",
@@ -262,7 +266,7 @@ def get_staged_snapshot(workspace_root: Path) -> StagedSnapshot:
 
 def _git_z_lines(workspace_root: Path, args: list[str]) -> list[str]:
     """运行只读 git 命令并按 NUL 切分输出；命令失败即抛错（fail-closed）。"""
-    result = run_git_bounded_text(
+    result = run_git_bounded_strict_text(
         ["git", *args],
         default_timeout=120.0,
         error_cls=StagedSnapshotError,
@@ -361,7 +365,7 @@ def _get_staged_snapshot_or_reject(
 def get_staged_files(workspace_root: Path) -> list[str]:
     """获取 Git 当前暂存区的改动路径列表（含删除；重命名的旧路径也在内）"""
     try:
-        result = run_git_bounded_text(
+        result = run_git_bounded_strict_text(
             # -z: names come back as they are.  Without it Git prints a Chinese or space-bearing path as a quoted, octal-escaped
             # string ("\344\270\255…"), which no scope or protected-path comparison can match (CHG-SCPT-2026-472).
             ["git", "-c", "core.quotePath=false", "diff", "--cached", "--name-only", "--no-renames", "-z"],
@@ -853,7 +857,7 @@ def _enforce_ignored_additions(workspace_root: Path) -> int:
     from auto_pm.infrastructure.ignored_file_scan import IgnoreScanError, ignored_among
 
     try:
-        result = run_git_bounded_text(
+        result = run_git_bounded_strict_text(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=A", "--no-renames", "-z"],
             default_timeout=120.0,
             error_cls=IgnoreScanError,
@@ -1082,7 +1086,7 @@ def enforce_commit_msg(
             return 1
 
         # 提交说明的编码归用户的编辑器/终端管：这里只认其中的 ASCII 变更单号，严格解码会把合法的 GBK 说明整条拒掉。
-        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()
+        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: only the ASCII change id is read; a strict decode would reject a valid GBK message
 
         # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
         chg_matches = tuple(

@@ -1257,7 +1257,7 @@ class AiHandoffService:
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
-        ).encode("utf-8", errors="replace")
+        ).encode("utf-8", errors="surrogatepass")  # a lone surrogate keeps its own bytes instead of collapsing into '?'
         return hashlib.sha256(encoded).hexdigest()
 
     @contextmanager

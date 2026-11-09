@@ -17,7 +17,7 @@ class BridgeAstExtractor:
         for file_path in sorted(bridges_dir.glob("*_bridge.py")):
             bridge_name = file_path.stem
             try:
-                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                content = file_path.read_text(encoding="utf-8")
                 tree = ast.parse(content, filename=str(file_path))
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):

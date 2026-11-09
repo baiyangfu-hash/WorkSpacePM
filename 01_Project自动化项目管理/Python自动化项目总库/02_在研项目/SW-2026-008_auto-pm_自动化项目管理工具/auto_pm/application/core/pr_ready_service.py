@@ -9,7 +9,8 @@ Conditions (the user's merge rule, plus the two the project added for audit and 
 1. the PR is open, not a draft, and merges into main without conflict;
 2. an audit report for this PR exists under ``reviews/`` or a ``--reports-dir`` and its last
    ``放行判定: <head first 8> 过|有条件过|不过`` line for the current head says exactly ``过``;
-3. every check run and status on the current head is successful, and ``safety-zone`` is among them;
+3. every check run and status on the current head is successful, and ``safety-zone`` is among them (of the check runs of one
+   workflow, event and job name only the newest counts, see ``newest_check_runs``);
 4. a PR that touches the safety zone carries a comment ``安全签字 <current head>`` from the named signer
    (judged by ``reviews/tools/safety_zone_check.find_signature``, the same function safety-gate uses).
 """
@@ -102,7 +103,7 @@ def find_audit_report(number: int, head: str, report_dirs: Sequence[Path]) -> tu
             continue
         except UnicodeDecodeError:
             # An unreadable report must never be quoted as a verdict; it only matters when it is this PR's own report.
-            guessed = path.read_text(encoding="utf-8", errors="replace")
+            guessed = path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: fallback after the strict read failed; the file is refused whenever it names this PR
             if pattern.search(path.name) or pattern.search("\n".join(guessed.splitlines()[:HEADER_LINES])):
                 return False, f"{path.name} 不是合法 UTF-8，拒绝采信其中的放行判定"
             continue
@@ -134,12 +135,51 @@ def find_audit_report(number: int, head: str, report_dirs: Sequence[Path]) -> tu
     return False, f"没有找到 PR #{number} 的审计报告（找过：{searched}；文件名或开头要写 PR #{number}）"
 
 
-def judge_checks(runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
-    """(problems, passed names) over the check runs and commit statuses of the head commit."""
+ACTIONS_RUN_IN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def newest_check_runs(workflow_runs: list[dict[str, Any]], check_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the newest check run per (workflow, event, app, job name, head commit) (D-117).
+
+    A check run belongs to a workflow run through the Actions run id in its ``details_url``; that run names the workflow and
+    the event (``push``, ``pull_request``, ...).  The event is part of the key: a ``push`` run and a ``pull_request`` run of
+    the same workflow on the same commit are two different checks (this repository runs both every day), so a newer green
+    ``pull_request`` job must not hide an older red ``push`` one.  A re-run, or a run cancelled by a newer one, is the same
+    workflow and event again, which is what this merges.  Same-named jobs of different workflows or apps stay apart; a check
+    run with no ``id``, or whose Actions run is unknown or lacks ``workflow_id`` or ``event``, is never merged (fail closed:
+    it still counts).  Known and wanted behaviour: a newer ``skipped``/``neutral`` run covers an older failure of the same
+    key (both pass in ``PASSING_CONCLUSIONS``), a newer ``cancelled`` or unfinished one still blocks.
+    """
+
+    owner_of = {r["id"]: (r.get("workflow_id"), r.get("event")) for r in workflow_runs if "id" in r}
+    newest: dict[tuple[Any, ...], tuple[int, dict[str, Any]]] = {}
+    kept: list[tuple[int, dict[str, Any]]] = []
+    for index, check in enumerate(check_runs):
+        check_id = check.get("id")
+        found = ACTIONS_RUN_IN_URL.search(str(check.get("details_url") or check.get("html_url") or ""))
+        workflow, event = owner_of.get(int(found.group(1)), (None, None)) if found else (None, None)
+        if not isinstance(check_id, int) or workflow is None or not event:
+            kept.append((index, check))
+            continue
+        key = (workflow, event, (check.get("app") or {}).get("id"), check.get("name"), check.get("head_sha"))
+        if key not in newest or check_id > newest[key][1]["id"]:
+            newest[key] = (index, check)
+    kept.extend(newest.values())
+    return [check for _, check in sorted(kept, key=lambda item: item[0])]
+
+
+def judge_checks(
+    runs: list[dict[str, Any]], statuses: list[dict[str, Any]], workflow_runs: list[dict[str, Any]] | None = None
+) -> tuple[list[str], list[str]]:
+    """(problems, passed names) over the check runs and commit statuses of the head commit.
+
+    ``workflow_runs`` (the Actions runs of that commit) lets re-runs of the same job count once, the newest only; without it
+    every check run counts, which is the stricter reading.
+    """
 
     problems: list[str] = []
     passed: list[str] = []
-    for run in runs:
+    for run in newest_check_runs(workflow_runs or [], runs):
         name = str(run.get("name") or "?")
         if run.get("status") != "completed":
             problems.append(f"{name}：还没跑完（{run.get('status')}）")
@@ -241,7 +281,11 @@ class PrReadyService:
         runs = self._paged(f"repos/{repo}/commits/{head}/check-runs", "check_runs")
         combined = self._read(["api", f"repos/{repo}/commits/{head}/status"]) or {}
         statuses = [s for s in combined.get("statuses") or [] if isinstance(s, dict)]
-        problems, passed = judge_checks(runs, statuses)
+        try:
+            workflow_runs = self._paged(f"repos/{repo}/actions/runs?head_sha={head}", "workflow_runs")
+        except AgentWorktreeError:
+            workflow_runs = []  # cannot tell re-runs apart: every check run counts, the stricter reading
+        problems, passed = judge_checks(runs, statuses, workflow_runs)
         if SAFETY_CONTEXT not in passed and not any(SAFETY_CONTEXT in p for p in problems):
             problems.append(f"{SAFETY_CONTEXT}：没有出现（safety-gate 还没跑，或这个提交没触发）")
         report.add(
@@ -299,5 +343,6 @@ __all__ = [
     "ReadyReport",
     "find_audit_report",
     "judge_checks",
+    "newest_check_runs",
     "render",
 ]

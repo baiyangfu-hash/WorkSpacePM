@@ -15,7 +15,7 @@ class GateAstExtractor:
             return rules
 
         try:
-            content = checker_file.read_text(encoding="utf-8", errors="ignore")
+            content = checker_file.read_text(encoding="utf-8")
             tree = ast.parse(content, filename=str(checker_file))
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name.startswith("check_"):

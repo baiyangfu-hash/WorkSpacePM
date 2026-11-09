@@ -7,21 +7,70 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
+from pathlib import Path
 
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import caller_agent
+from auto_pm.application.core.agent_worktree_service import caller_agent, caller_alias
 from auto_pm.application.core.claim_service import ClaimError, ClaimService
 
 
-def _service(ctx: click.Context) -> ClaimService:
+def _root(ctx: click.Context) -> str:
     app_ctx: AppContext = ctx.obj
-    return ClaimService(app_ctx.control_root or app_ctx.workspace_root or os.getcwd())
+    return app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
+
+
+def _service(ctx: click.Context) -> ClaimService:
+    return ClaimService(_root(ctx))
+
+
+def normalise_paths(root: Path, cwd: Path, paths: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Claim paths are repository-root paths (D-115); a path written relative to the folder the agent stands in is lifted to one.
+
+    ``pr_overlap_check`` compares a PR's changed files, which are repository-root paths, against the claim: ``auto_pm/x.py`` typed
+    from inside the project folder would never cover ``<project folder>/auto_pm/x.py``.  Returns (paths, notes about what was
+    rewritten); an absolute path inside the repository becomes relative to it, one outside it is refused by the caller.
+    """
+
+    root = root.resolve()
+    cwd = cwd.resolve()
+    result: list[str] = []
+    notes: list[str] = []
+    for raw in paths:
+        text = raw.strip().replace("\\", "/")
+        path = Path(text)
+        if path.is_absolute():
+            try:
+                fixed = path.resolve().relative_to(root).as_posix()
+            except ValueError:
+                raise click.UsageError(f"路径 {raw} 在仓库 {root} 之外；领卡只认仓库内的路径") from None
+            notes.append(f"{raw} → {fixed}")
+            result.append(fixed)
+            continue
+        text = text.removeprefix("./")
+        first = text.split("/", 1)[0]
+        lifted = ""
+        if first and not (root / first).exists() and cwd != root and (cwd / first).exists():
+            try:
+                lifted = (cwd / text).relative_to(root).as_posix()
+            except ValueError:
+                lifted = ""
+        if lifted:
+            notes.append(f"{raw} → {lifted}")
+        result.append(lifted or text)
+    return result, notes
 
 
 def _owner(explicit: str) -> str:
-    return explicit.strip() or caller_agent().strip("?") or "user"
+    """Default owner is this conversation's alias (``claude-a119dc``), so two conversations of one agent never share a claim (D-112).
+
+    No session id (or the user's own terminal) falls back to the bare agent name, as before.  A claim made before D-112 carries the
+    bare name; only an explicit ``--as claude`` can release or renew it.
+    """
+
+    return explicit.strip() or caller_alias() or caller_agent().strip("?") or "user"
 
 
 def _fail(error: ClaimError) -> None:
@@ -42,12 +91,31 @@ def claim_group() -> None:
 @click.pass_context
 def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str, owner: str) -> None:
     """领卡。CARD 写卡号，或写 auto 取下一个空号。"""
+    fixed, notes = normalise_paths(Path(_root(ctx)), Path.cwd(), paths)
+    for note in notes:
+        click.echo(f"路径已按仓库根补全：{note}", err=True)
     try:
-        claim = _service(ctx).open(card, paths=paths, goal=goal, owner=_owner(owner))
+        claim = _service(ctx).open(card, paths=fixed, goal=goal, owner=_owner(owner))
     except ClaimError as error:
         _fail(error)
         return
     click.echo(f"已领 {claim.label()}；路径：{'、'.join(claim.paths)}")
+
+
+@claim_group.command(name="number")
+@click.option("--goal", required=True, help="一句话说明这个号用来做什么卡（必填：别人看占位表靠它认出这个号是谁拿去做什么的）")
+@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（agent 名或 user）")
+@click.pass_context
+def number_claim(ctx: click.Context, goal: str, owner: str) -> None:
+    """只领号：取下一个不会撞的卡号，不占任何路径（落卡文件时用；开工时再 `claim add-paths` 补路径）。"""
+    try:
+        claim = _service(ctx).reserve_number(goal=goal, owner=_owner(owner))
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"已领号 {claim.card}（{claim.label()}）")
+    click.echo(f"卡文件名：…/02_规划/{claim.card}_<名称>_PM.md")
+    click.echo(f"开工时补路径：main.py claim add-paths {claim.card} --paths <要改的文件> --as {claim.owner}")
 
 
 @claim_group.command(name="list")
@@ -60,7 +128,11 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
         claims = _service(ctx).all_claims(fetch=not no_fetch)
     except ClaimError as error:
         click.echo(f"错误 {error}", err=True)
+        if not no_fetch:
+            click.echo("离线或连不上 GitHub 时，可加 --no-fetch 看本机上次抓到的占位（可能不是最新，不能当作没人占着）", err=True)
         raise SystemExit(2) from error
+    if no_fetch:
+        click.echo("（离线视图：只含本机上次抓取时的占位，可能不是最新；开卡、开 PR 前以联网结果为准）", err=True)
     if as_json:
         click.echo(json.dumps([claim.as_json() for claim in claims], ensure_ascii=False, indent=2))
         return
@@ -68,7 +140,8 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
         click.echo("没有占位。")
     for claim in claims:
         mark = "（已放下或租约到期，视为空闲）" if claim.free else ""
-        click.echo(f"{claim.label()} {claim.claimed_at} 路径：{'、'.join(claim.paths)}{mark}")
+        paths = "、".join(claim.paths) if claim.paths else "（只占号，未补路径）"
+        click.echo(f"{claim.label()} {claim.claimed_at} 路径：{paths}{mark}")
 
 
 @claim_group.command(name="release")
@@ -97,6 +170,24 @@ def renew_claim(ctx: click.Context, card: str, owner: str) -> None:
         _fail(error)
         return
     click.echo(f"已续租 {renewed.label()}，到期 {renewed.expires_at}")
+
+
+@claim_group.command(name="add-paths")
+@click.argument("card")
+@click.option("--paths", "paths", multiple=True, required=True, help="要追加的路径，可重复；目录覆盖其下全部文件")
+@click.option("--as", "owner", default="", help="谁在追加；必须与领卡时一致")
+@click.pass_context
+def add_paths_claim(ctx: click.Context, card: str, paths: tuple[str, ...], owner: str) -> None:
+    """给自己的占位追加路径：领卡后发现还要改别的文件时用，不必放下重领（重领会重置领卡时间，已有提交就排到领卡之前）。"""
+    fixed, notes = normalise_paths(Path(_root(ctx)), Path.cwd(), paths)
+    for note in notes:
+        click.echo(f"路径已按仓库根补全：{note}", err=True)
+    try:
+        claim = _service(ctx).add_paths(card, owner=_owner(owner), paths=fixed)
+    except ClaimError as error:
+        _fail(error)
+        return
+    click.echo(f"已追加路径 {claim.label()}；现在的路径：{'、'.join(claim.paths)}（领卡时间和到期时间不变）")
 
 
 @claim_group.command(name="reclaim")

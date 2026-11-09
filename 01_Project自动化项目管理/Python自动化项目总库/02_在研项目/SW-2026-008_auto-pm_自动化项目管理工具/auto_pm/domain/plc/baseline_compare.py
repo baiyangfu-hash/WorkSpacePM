@@ -111,7 +111,7 @@ def code_context(source: Sequence[str], line_number: int) -> str:
 
 def _context_in_file(path: Path | str, line_number: int, fallback: str = "") -> str:
     try:
-        source = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()
+        source = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()  # lenient-decode: one-line display context for a finding that is already decided; falls back when unreadable
     except OSError:
         return fallback
     return code_context(source, line_number) or fallback
@@ -229,6 +229,8 @@ class RecordingLanguageService:
     diagnostics: dict[str, list[str]] = field(default_factory=dict)
     # 插件命令行没跑完（超时、起不来）：这一次检查不算数，验收门按出错处理，不拿去和基线比
     incomplete: bool = False
+    # 插件测试进程 panic 退出：失败清单不完整，不能拿去算“修好／新增”（D-137）
+    panic_note: str = ""
 
     @property
     def available(self) -> bool:
@@ -247,6 +249,8 @@ class RecordingLanguageService:
             tag = root.name
         if result.available and result.exit_code in (-1, None):
             self.incomplete = True
+        if result.available and result.panicked and not self.panic_note:
+            self.panic_note = result.summary
         lines = result.diagnostics or result.messages
         bucket = self.diagnostics.setdefault(result.command, [])
         bucket.extend(f"[{tag}] {line}" for line in lines if result.available and not result.passed)

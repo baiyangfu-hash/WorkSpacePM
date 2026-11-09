@@ -13,6 +13,7 @@ Commands:
     show <ID> [--json]            查看项目详情
     edit <ID> [--phase] [--desc]  编辑项目元数据
     delete <ID> --confirm         删除项目
+    recycle-list [--older-than N] 只读列出回收区
     retrofit <ID>                 补全 .copier-answers.yml 元数据文件
     import <PATH> [--move]        导入外部项目目录到工作空间
     register <ID> [--path]        把已有项目登记到工作区登记表
@@ -665,6 +666,47 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evid
     )
     console.print(f"[green]项目已删除: {proj.path}[/green]")
     console.print(f"  已搬进回收区，需要时可原样搬回: {recycled}")
+    console.print("  回收区不会自动清理；想看里面有什么、多久了：project recycle-list")
+
+
+@project_group.command(name="recycle-list")
+@click.option("--older-than", type=click.IntRange(min=0), default=None, help="只列搬进回收区已满这么多天的（天数）")
+@click.option("--json", "output_json", is_flag=True, help="以JSON格式输出结果")
+@click.pass_context
+def cmd_recycle_list(ctx: click.Context, older_than: int | None, output_json: bool) -> None:
+    """只读：列出回收区里被删掉的项目目录和搬进来多久了；不删、不搬、不改任何文件（TD-208）。"""
+    from datetime import UTC, datetime
+
+    from auto_pm.application.core.project_delete_guard import list_recycled
+
+    app_ctx: AppContext = ctx.obj
+    now = datetime.now(UTC)
+    items = list_recycled(app_ctx.workspace_root)
+    if older_than is not None:
+        items = [item for item in items if (item.age_days(now) or 0) >= older_than and item.recycled_at is not None]
+    if output_json:
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "project_id": item.project_id,
+                        "stamp": item.stamp,
+                        "path": str(item.path),
+                        "age_days": item.age_days(now),
+                    }
+                    for item in items
+                ],
+                ensure_ascii=False,
+            )
+        )
+        return
+    if not items:
+        console.print("回收区里没有符合条件的项目目录。")
+        return
+    for item in items:
+        age = item.age_days(now)
+        console.print(f"{item.project_id}  {'时间未知' if age is None else f'{age} 天前'}  {item.path}")
+    console.print("只读列表：这里不会删除任何东西；要清理请由用户本人手工处理，要找回就把目录原样搬回项目目录。")
 
 
 @project_group.command(name="retrofit")

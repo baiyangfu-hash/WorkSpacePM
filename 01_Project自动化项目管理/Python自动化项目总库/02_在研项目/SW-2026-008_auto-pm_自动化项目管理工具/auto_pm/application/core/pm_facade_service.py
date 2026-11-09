@@ -59,7 +59,7 @@ from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.contracts.declared_dirty import declared_dirty_mismatch
 from auto_pm.contracts.execution_adapter import ForegroundExecutionReceipt
 from auto_pm.contracts.intake import IntakeClassification, IntakeKind
-from auto_pm.contracts.mission import Mission, MissionState
+from auto_pm.contracts.mission import InternalRoutingPolicy, Mission, MissionState
 from auto_pm.contracts.plan_checklist import (
     AcceptanceCheck,
     PlanChecklist,
@@ -71,12 +71,14 @@ from auto_pm.contracts.pm_facade import (
     PlanningDraft,
     PlanningDraftOverview,
     PlanningExecutionGrant,
+    PlanningRequestCheck,
     PlanningScopeCard,
     PmConfirmationCard,
     PmConfirmationKind,
     PmIntent,
     PmRunOutcome,
     SubmittedPlanningScopeCard,
+    canonical_plan_paths,
 )
 from auto_pm.contracts.protected_files import (
     enforcement_for_run,
@@ -376,6 +378,7 @@ class PmFacadeService:
         intake_item_id: str = "",
     ) -> PlanningScopeCard:
         """Rebuild an existing plan for approval validation without any durable write."""
+        scope_paths, execution_grant = canonical_plan_paths(scope_paths, execution_grant)
         filing, item_id = self._planning_classification(
             intent.request_id, intent.subject_project_id, classification, intake_item_id
         )
@@ -461,7 +464,40 @@ class PmFacadeService:
         except (ContinuityStoreError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
-    def _prepare_planning_scope_card(
+    def check_planning_request(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None,
+        classification: IntakeClassification | None,
+        intake_item_id: str = "",
+    ) -> PlanningRequestCheck:
+        """Everything ``plan`` checks before it writes, and nothing else (D-05 ``pm plan --dry-run``).
+
+        Reads the ledger and the inbox, writes nothing: no draft, no CHG number, no change file.  A request ``plan`` would refuse
+        raises here with the same message.
+        """
+
+        scope_paths, execution_grant, filing, item_id = self._validate_planning_request(
+            intent,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+            classification=classification,
+            intake_item_id=intake_item_id,
+        )
+        return PlanningRequestCheck(
+            scope_paths=scope_paths,
+            declared_dirty_paths=execution_grant.declared_dirty_paths if execution_grant is not None else (),
+            classification=filing,
+            intake_item_id=item_id,
+        )
+
+    def _validate_planning_request(
         self,
         intent: PmIntent,
         *,
@@ -471,8 +507,10 @@ class PmFacadeService:
         execution_grant: PlanningExecutionGrant | None,
         classification: IntakeClassification | None,
         intake_item_id: str,
-    ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
-        """Run the real contract's pure validation before reserving files or durable identities."""
+    ) -> tuple[tuple[str, ...], PlanningExecutionGrant | None, IntakeClassification | None, str]:
+        """The pure and read-only part of preparing a card: contract validation, classification, the seven-field checklist."""
+
+        scope_paths, execution_grant = canonical_plan_paths(scope_paths, execution_grant)
         try:
             draft = PlanningDraft.from_intent(intent)
             if execution_grant is not None:
@@ -499,6 +537,29 @@ class PmFacadeService:
             scope_paths=scope_paths,
             risks=risks,
             acceptance_criteria=intent.acceptance_criteria,
+            intake_item_id=intake_item_id,
+        )
+        return scope_paths, execution_grant, filing, intake_item_id
+
+    def _prepare_planning_scope_card(
+        self,
+        intent: PmIntent,
+        *,
+        scope_paths: tuple[str, ...],
+        risks: tuple[str, ...],
+        non_goals: tuple[str, ...],
+        execution_grant: PlanningExecutionGrant | None,
+        classification: IntakeClassification | None,
+        intake_item_id: str,
+    ) -> tuple[PlanningScopeCard, IntakeClassification | None, str]:
+        """Run the real contract's pure validation before reserving files or durable identities."""
+        scope_paths, execution_grant, filing, intake_item_id = self._validate_planning_request(
+            intent,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=execution_grant,
+            classification=classification,
             intake_item_id=intake_item_id,
         )
 
@@ -578,7 +639,25 @@ class PmFacadeService:
             )
         return ("safety-circuit: 否",)
 
+    @staticmethod
+    def _require_materializable(card: PlanningScopeCard) -> None:
+        """Refuse before any write what the Mission authority would refuse after the CHG and Decision are written.
+
+        Approval writes the CHG, then the Decision, and only then builds the Mission authority, whose routing policy
+        demands canonical declared paths (D-103). A card the authority would reject must stop here, not leave a Decision
+        without a Mission behind.
+        """
+
+        try:
+            InternalRoutingPolicy(declared_dirty_paths=card.execution_grant.declared_dirty_paths)
+        except ValueError as error:
+            raise PmFacadeError(
+                "范围卡的 declared_dirty_paths 不是规范写法，批准会留下只有 Decision 的残留；"
+                f"请重新 plan（plan 会自动规范化路径）：{error}"
+            ) from error
+
     def _require_card_checklist(self, card: PlanningScopeCard) -> None:
+        self._require_materializable(card)
         self._require_plan_checklist(
             card.execution_grant,
             scope_paths=card.scope_paths,
@@ -1341,19 +1420,18 @@ class PmFacadeService:
                 done = subprocess.run(
                     ["git", "-C", worktree, *args],
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
                     check=False,
                     timeout=60,
                 )
                 if done.returncode != 0:
                     return None
-                found = {item for item in done.stdout.split("\0") if item}
+                # Strict on purpose: a path that does not decode would otherwise become a different string and could slip past the
+                # protected-path comparison; "Git cannot say" (None) is the fail-closed answer.
+                found = {item for item in done.stdout.decode("utf-8").split("\0") if item}
                 names.update(found)
                 if is_added:
                     added.update(found)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
             return None
         return unauthorised_protected_changes(names, getattr(run, "owned_paths", ()) or (), added)
 
