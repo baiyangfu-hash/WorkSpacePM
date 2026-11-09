@@ -64,11 +64,16 @@ def test_a_passing_preflight_exits_zero(tmp_path: Path, monkeypatch) -> None:  #
 def real(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """A green preflight, a passing identity guard and a recording ``real_deploy``; each test overrides what it needs."""
 
-    calls = SimpleNamespace(guard=0, deploy=[], warn=0)
+    calls = SimpleNamespace(guard=0, deploy=[], warn=0, order=[])
     report = rdc.Preflight(commit="a" * 40, release_id="1.3.3-aaaaaaa")
     report.add("提交存在", rdc.PASS, "ok")
     calls.report = report
-    monkeypatch.setattr(rdc, "preflight", lambda *_a, **_k: calls.report)
+    def preflight(*_a: object, **_k: object) -> rdc.Preflight:
+        calls.order.append("preflight")
+        return calls.report  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(rdc, "preflight", preflight)
+    monkeypatch.setattr(release_cli, "arm_for_heavy_job", lambda label: calls.order.append(f"arm:{label}"))
 
     def guard(_ctx: click.Context) -> None:
         calls.guard += 1
@@ -96,13 +101,14 @@ def test_check_only_never_touches_the_guard_or_the_real_deploy(tmp_path: Path, r
     result = _invoke(tmp_path, "deploy", "HEAD")
 
     assert result.exit_code == 0 and real.guard == 0 and real.deploy == []
+    assert not any(step.startswith("arm:") for step in real.order), "a read-only preflight is not a heavy job"
 
 
 def test_a_real_deploy_without_its_required_options_is_refused_before_any_work(tmp_path: Path, real: SimpleNamespace) -> None:
     result = _invoke(tmp_path, "deploy", "HEAD", "--no-check-only")
 
     assert result.exit_code == 1 and "--confirm-ref" in result.output and "--drill-script" in result.output
-    assert real.deploy == []
+    assert real.deploy == [] and real.order == [], "a refused command must not arm the memory gate"
 
 
 def test_a_dirty_runtime_identity_refuses_a_real_deploy_before_the_preflight(tmp_path: Path, real: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +137,7 @@ def test_a_green_real_deploy_passes_everything_on_and_prints_the_receipt_and_the
     assert result.exit_code == 0 and "已部署 1.3.3-aaaaaaa" in result.output and "release rollback" in result.output
     assert real.guard == 1 and len(real.deploy) == 1
     assert real.deploy[0]["confirm_ref"] == "user-confirmation:cmsg_001" and real.deploy[0]["approver"] == "fubai"
+    assert real.order == ["arm:deploy-gate", "preflight"], "the memory gate is armed (D-168) before the first heavy step"
 
 
 @pytest.mark.parametrize(("rolled_back", "code"), [(True, 3), (False, 4)])

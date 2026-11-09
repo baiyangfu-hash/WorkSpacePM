@@ -17,6 +17,7 @@ from auto_pm.app_context import AppContext
 from auto_pm.application.core import release_deploy_check as check
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core import release_wiring as wiring
+from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job
 from auto_pm.application.core.release_deploy import DeployError
 from auto_pm.application.core.release_ledger import LedgerError
 from auto_pm.application.core.release_trial_service import ReleaseTrialError, ReleaseTrialService
@@ -77,6 +78,7 @@ def release_deploy(
         missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--card-file", card_file), ("--drill-script", drill_script)) if not value]
         if missing:
             raise click.ClickException("真部署还缺：" + "、".join(missing))
+        arm_for_heavy_job("deploy-gate")  # D-168: build, switch, self-checks and the pre-commit dry run are a heavy job the memory gate must not freeze; never raises
     report = check.preflight(_root(ctx), commit, gate_verdict=gate_verdict, audit_signoff=audit_signoff)
     if as_json and check_only:
         click.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
