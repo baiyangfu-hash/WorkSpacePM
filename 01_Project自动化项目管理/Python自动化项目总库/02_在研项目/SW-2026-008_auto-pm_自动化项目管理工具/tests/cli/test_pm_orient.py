@@ -26,39 +26,22 @@ def _workspace(root: Path) -> Path:
     subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
     (root / "README.md").write_text("baseline\n", encoding="utf-8")
     (root / ".gitignore").write_text(".auto-pm/\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "README.md", ".gitignore"], check=True, capture_output=True)
     subprocess.run(
-        ["git", "-C", str(root), "add", "README.md", ".gitignore"], check=True, capture_output=True
-    )
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "user.name=Orient Test",
-            "-c",
-            "user.email=orient@example.invalid",
-            "commit",
-            "-m",
-            "baseline",
-        ],
+        ["git", "-C", str(root), "-c", "user.name=Orient Test", "-c", "user.email=orient@example.invalid", "commit", "-m", "baseline"],
         check=True,
         capture_output=True,
     )
     project = root / PROJECT
     project.mkdir()
-    (project / ".copier-answers.yml").write_text(
-        f"project_id: {PROJECT}\nproject_name: Orient Test\nstack: python\n", encoding="utf-8"
-    )
+    (project / ".copier-answers.yml").write_text(f"project_id: {PROJECT}\nproject_name: Orient Test\nstack: python\n", encoding="utf-8")
     registry = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
     registry.parent.mkdir()
     registry.write_text(
         json.dumps(
             {
                 "schema_version": "workspace-registry.v1",
-                "projects": [
-                    {"project_id": PROJECT, "project_root": PROJECT, "development_root": PROJECT}
-                ],
+                "projects": [{"project_id": PROJECT, "project_root": PROJECT, "development_root": PROJECT}],
             }
         ),
         encoding="utf-8",
@@ -99,46 +82,28 @@ def test_orient_and_resume_json_carry_the_same_query_block(tmp_path: Path) -> No
     resumed = _json(_run(tmp_path, "resume", PROJECT, "--json"))
     assert oriented == resumed
     query = oriented["query"]
-    assert (query["schema_version"], query["capabilities"]["contract_version"]) == (
-        "continuity-query.v1",
-        "runtime-capabilities.v2",
-    )
-    assert (
-        query["capabilities"]["parking_supported"] is True
-        and query["capabilities"]["preemption_supported"] is False
-    )
-    assert [(a["action"], a["status"]) for a in query["capabilities"]["actions"]] == list(
-        DECLARED.items()
-    )
+    assert (query["schema_version"], query["capabilities"]["contract_version"]) == ("continuity-query.v1", "runtime-capabilities.v2")
+    assert query["capabilities"]["parking_supported"] is True and query["capabilities"]["preemption_supported"] is False
+    assert [(a["action"], a["status"]) for a in query["capabilities"]["actions"]] == list(DECLARED.items())
     assert query["requested_action"] is None
-    assert oriented["schema_version"] == "continuity-resume.v2" and "lease_token" not in json.dumps(
-        oriented
-    )
+    assert oriented["schema_version"] == "continuity-resume.v2" and "lease_token" not in json.dumps(oriented)
 
 
 @pytest.mark.parametrize("action", UNSUPPORTED_ACTIONS)
-def test_an_asked_action_is_answered_as_declared_with_exit_zero(
-    tmp_path: Path, action: str
-) -> None:
+def test_an_asked_action_is_answered_as_declared_with_exit_zero(tmp_path: Path, action: str) -> None:
     _workspace(tmp_path)
     plain = _json(_run(tmp_path, "orient", PROJECT, "--json"))
     asked = _json(_run(tmp_path, "orient", PROJECT, "--requested-action", action, "--json"))
     answer = asked["query"]["requested_action"]
     assert answer is not None
     assert (answer["action"], answer["status"]) == (action, DECLARED[action]) and answer["reason"]
-    assert {k: v for k, v in asked.items() if k != "query"} == {
-        k: v for k, v in plain.items() if k != "query"
-    }
+    assert {k: v for k, v in asked.items() if k != "query"} == {k: v for k, v in plain.items() if k != "query"}
     text = _run(tmp_path, "orient", PROJECT, "--requested-action", action)
-    assert (
-        text.exit_code == 0 and action in text.output and f": {DECLARED[action]}（" in text.output
-    )
+    assert text.exit_code == 0 and action in text.output and f": {DECLARED[action]}（" in text.output
 
 
 @pytest.mark.parametrize("asked", ["park", "PAUSE", "NONE", "READY", "PARKED"])
-def test_an_unknown_asked_action_is_refused_by_the_command_and_writes_nothing(
-    tmp_path: Path, asked: str
-) -> None:
+def test_an_unknown_asked_action_is_refused_by_the_command_and_writes_nothing(tmp_path: Path, asked: str) -> None:
     _workspace(tmp_path)
     before = _snapshot(tmp_path)
     refused = _run(tmp_path, "orient", PROJECT, "--requested-action", asked)
@@ -153,24 +118,13 @@ def test_the_text_output_states_the_declared_capabilities_for_both_commands(tmp_
         shown = _run(tmp_path, command, PROJECT)
         assert shown.exit_code == 0, shown.output
         assert "continuity-query.v1" in shown.output
-        assert (
-            "挂起: 支持" in shown.output
-            and "插队: 不支持" in shown.output
-            and "pm park" in shown.output
-        )
+        assert "挂起: 支持" in shown.output and "插队: 不支持" in shown.output and "pm park" in shown.output
 
 
-def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_store(
-    tmp_path: Path,
-) -> None:
+def test_neither_command_creates_or_changes_anything_in_a_workspace_without_a_store(tmp_path: Path) -> None:
     _workspace(tmp_path)
     before = _snapshot(tmp_path)
-    for args in (
-        ("resume", PROJECT, "--json"),
-        ("orient", PROJECT, "--json"),
-        ("orient", PROJECT, "--requested-action", "PARK"),
-        ("orient", PROJECT),
-    ):
+    for args in (("resume", PROJECT, "--json"), ("orient", PROJECT, "--json"), ("orient", PROJECT, "--requested-action", "PARK"), ("orient", PROJECT)):
         assert _run(tmp_path, *args).exit_code == 0
     assert _snapshot(tmp_path) == before
     assert not (tmp_path / ".auto-pm").exists()
@@ -185,11 +139,7 @@ def _replaced_answer(root: Path, kind: str) -> ContinuityResume:
         return good
     if kind == "no-query-block":
         return good.model_copy(update={"query": None})
-    fields = {
-        name: getattr(good.query, name)
-        for name in ContinuityQuery.model_fields
-        if name != "schema_version"
-    }
+    fields = {name: getattr(good.query, name) for name in ContinuityQuery.model_fields if name != "schema_version"}
     return good.model_copy(update={"query": ContinuityQuery.model_construct(**fields)})
 
 
@@ -204,35 +154,23 @@ def test_both_commands_check_the_answer_again_and_print_nothing_when_it_is_broke
     before = _snapshot(tmp_path)
     monkeypatch.setattr(PmFacadeService, command, lambda self, **_kwargs: answer)
     shown = _run(tmp_path, command, PROJECT, *(["--json"] if as_json else []))
-    if (
-        kind == "legal"
-    ):  # the control: the replaced facade itself is not what makes the command fail
+    if kind == "legal":  # the control: the replaced facade itself is not what makes the command fail
         assert shown.exit_code == 0, shown.output
         assert answer.evidence_id in shown.output and "continuity-query.v1" in shown.output
     else:
-        assert shown.exit_code != 0 and (
-            "未通过校验" in shown.output or "缺少 query" in shown.output
-        )
-        assert (
-            answer.evidence_id not in shown.output and "continuity-resume.v2" not in shown.output
-        )  # no half of a success payload
+        assert shown.exit_code != 0 and ("未通过校验" in shown.output or "缺少 query" in shown.output)
+        assert answer.evidence_id not in shown.output and "continuity-resume.v2" not in shown.output  # no half of a success payload
     assert _snapshot(tmp_path) == before
 
 
-def test_orient_adds_one_read_only_memory_gate_line_without_touching_the_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_orient_adds_one_read_only_memory_gate_line_without_touching_the_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Memory gate merged into the cockpit: text mode prints the line on stdout, JSON mode on stderr so stdout stays pure JSON; resume does not print it."""
 
     from auto_pm.infrastructure import memory_gate_status
 
     _workspace(tmp_path)
     monkeypatch.setattr(
-        memory_gate_status,
-        "read_gate_status",
-        lambda **kwargs: memory_gate_status.GateStatus(
-            "running", installed_bundle="a" * 64, pinned_bundle="b" * 64
-        ),
+        memory_gate_status, "read_gate_status", lambda **kwargs: memory_gate_status.GateStatus("running", installed_bundle="a" * 64, pinned_bundle="b" * 64)
     )
     before = _snapshot(tmp_path)
 
@@ -241,17 +179,13 @@ def test_orient_adds_one_read_only_memory_gate_line_without_touching_the_json(
     resumed = _run(tmp_path, "resume", PROJECT)
 
     assert text.exit_code == 0 and "总闸: 运行中" in text.stdout and "有新版本" in text.stdout
-    assert (
-        as_json.exit_code == 0 and "总闸" not in as_json.stdout and "总闸: 运行中" in as_json.stderr
-    )
+    assert as_json.exit_code == 0 and "总闸" not in as_json.stdout and "总闸: 运行中" in as_json.stderr
     json.loads(as_json.stdout)  # stdout is still one JSON document
     assert "总闸" not in resumed.output
     assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()
 
 
-def test_orient_prints_nothing_about_the_gate_where_the_gate_does_not_apply(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_orient_prints_nothing_about_the_gate_where_the_gate_does_not_apply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from auto_pm.infrastructure import memory_gate_status
 
     _workspace(tmp_path)
@@ -260,9 +194,7 @@ def test_orient_prints_nothing_about_the_gate_where_the_gate_does_not_apply(
     assert "总闸" not in _run(tmp_path, "orient", PROJECT).output
 
 
-def test_a_failing_gate_reader_never_stops_orient(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failing_gate_reader_never_stops_orient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from auto_pm.infrastructure import memory_gate_status
 
     def broken(**kwargs: object) -> None:
@@ -275,9 +207,7 @@ def test_a_failing_gate_reader_never_stops_orient(
     assert result.exit_code == 0 and "未能读取总闸状态" in result.output
 
 
-def test_orient_adds_one_read_only_state_backup_line_from_the_local_marker_only(
-    tmp_path: Path,
-) -> None:
+def test_orient_adds_one_read_only_state_backup_line_from_the_local_marker_only(tmp_path: Path) -> None:
     """Ledger off-site backup: no marker -> a warning with the command; a fresh marker -> the age.  Text on stdout, JSON mode on stderr; resume prints nothing."""
 
     from datetime import UTC, datetime, timedelta
@@ -289,46 +219,23 @@ def test_orient_adds_one_read_only_state_backup_line_from_the_local_marker_only(
     none_json = _run(tmp_path, "orient", PROJECT, "--json")
     resumed = _run(tmp_path, "resume", PROJECT)
 
-    assert (
-        none.exit_code == 0
-        and "还没有做过异地备份" in none.stdout
-        and "pm state-backup push" in none.stdout
-    )
-    assert (
-        none_json.exit_code == 0
-        and "异地备份" not in none_json.stdout
-        and "还没有做过异地备份" in none_json.stderr
-    )
+    assert none.exit_code == 0 and "还没有做过异地备份" in none.stdout and "pm state-backup push" in none.stdout
+    assert none_json.exit_code == 0 and "异地备份" not in none_json.stdout and "还没有做过异地备份" in none_json.stderr
     json.loads(none_json.stdout)  # stdout is still one JSON document
     assert "异地备份" not in resumed.output
-    assert (
-        _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()
-    )  # looking writes nothing
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()  # looking writes nothing
 
     marker = tmp_path / ".auto-pm" / "cache" / "state-backup-last.json"
     marker.parent.mkdir(parents=True)
     pushed = datetime.now(UTC) - timedelta(hours=2)
     marker.write_text(
-        json.dumps(
-            {
-                "schema_version": "state-backup-marker.v1",
-                "pushed_at": pushed.isoformat(),
-                "events": 202,
-            }
-        ),
-        encoding="utf-8",
+        json.dumps({"schema_version": "state-backup-marker.v1", "pushed_at": pushed.isoformat(), "events": 202}), encoding="utf-8"
     )
     fresh = _run(tmp_path, "orient", PROJECT)
-    assert (
-        fresh.exit_code == 0
-        and "[账本异地备份] 最近一次 2 小时前" in fresh.stdout
-        and "202 条事件" in fresh.stdout
-    )
+    assert fresh.exit_code == 0 and "[账本异地备份] 最近一次 2 小时前" in fresh.stdout and "202 条事件" in fresh.stdout
 
 
-def test_a_failing_state_backup_reader_never_stops_orient(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failing_state_backup_reader_never_stops_orient(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import auto_pm.ui.cli.pm as pm_module
 
     def broken(_root: object) -> None:
@@ -341,9 +248,16 @@ def test_a_failing_state_backup_reader_never_stops_orient(
     assert result.exit_code == 0 and "未能读取备份记录" in result.output
 
 
-def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_one(
-    tmp_path: Path,
-) -> None:
+@pytest.mark.parametrize("command", ["orient", "resume"])
+def test_d60_the_read_only_locators_do_not_write_the_ai_context_file(tmp_path: Path, command: str) -> None:
+    """D-60 said ``pm orient`` rewrote ``.auto-pm/ai_context.json``; in the source it does not, and this keeps it so."""
+    _workspace(tmp_path)
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", command, PROJECT, "--json"])
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / ".auto-pm" / "ai_context.json").exists()
+
+
+def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_one(tmp_path: Path) -> None:
     """A cloud clone has no ledger: "work: -" must not read as "nothing open".  Text on stdout, JSON mode on stderr; resume prints nothing."""
 
     _workspace(tmp_path)
@@ -354,14 +268,10 @@ def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_o
     resumed = _run(tmp_path, "resume", PROJECT)
 
     assert text.exit_code == 0 and "[无账本]" in text.stdout and "claim list" in text.stdout
-    assert (
-        as_json.exit_code == 0 and "[无账本]" not in as_json.stdout and "[无账本]" in as_json.stderr
-    )
+    assert as_json.exit_code == 0 and "[无账本]" not in as_json.stdout and "[无账本]" in as_json.stderr
     json.loads(as_json.stdout)  # stdout is still one JSON document
     assert "[无账本]" not in resumed.output
-    assert (
-        _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()
-    )  # looking writes nothing
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()  # looking writes nothing
 
     from auto_pm.infrastructure.continuity_store import ContinuityStore
 
@@ -369,14 +279,3 @@ def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_o
     assert (tmp_path / ".auto-pm" / "continuity.db").is_file()
     with_ledger = _run(tmp_path, "orient", PROJECT)
     assert with_ledger.exit_code == 0 and "[无账本]" not in with_ledger.stdout
-
-
-@pytest.mark.parametrize("command", ["orient", "resume"])
-def test_d60_the_read_only_locators_do_not_write_the_ai_context_file(
-    tmp_path: Path, command: str
-) -> None:
-    """D-60 said ``pm orient`` rewrote ``.auto-pm/ai_context.json``; in the source it does not, and this keeps it so."""
-    _workspace(tmp_path)
-    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", command, PROJECT, "--json"])
-    assert result.exit_code == 0, result.output
-    assert not (tmp_path / ".auto-pm" / "ai_context.json").exists()
