@@ -128,9 +128,15 @@ COMMANDS: dict[str, CommandSpec] = {
     "pr settle-scan": CommandSpec(CommandKind.READ_ONLY, (), (), "lists merged-but-open Runs and the legal next commands; moves nothing"),
     "pm orient": CommandSpec(CommandKind.READ_ONLY, (), ()),
     "pm control-root-status": CommandSpec(CommandKind.READ_ONLY, (), (), "branch, uncommitted files and their holders of the control root; no fetch, no write"),
-    # D-146 card 1: ``release status`` and ``release deploy --check-only`` only read; the real deploy is not wired yet (it must get guards when it is).
+    # D-146: ``release status`` and ``release deploy`` without ``--no-check-only`` only read; a real deploy writes the ledger and the pointers.
     "release status": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the pointers, manifest and last receipt; writes nothing"),
-    "release deploy": CommandSpec(CommandKind.READ_ONLY, (), (), "pre-flight only for now; the real deploy is refused until card 4 is wired"),
+    "release deploy": CommandSpec(
+        CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL"),
+        "real deploy only with --no-check-only and a user-confirmation ref; the pre-flight alone writes nothing",
+    ),
+    "release rollback": CommandSpec(
+        CommandKind.NORMAL, ("workspace=control_root",), ("G-MUTATION-ROOT",), "puts the pointers back from a verified backup; warns about a broken identity, never refuses on it",
+    ),
     "release trial": CommandSpec(CommandKind.READ_ONLY, (), (), "copies the active release to a scratch folder outside the workspace; writes no ledger, pointer or workspace file (D-05)"),
     "project recycle-list": CommandSpec(CommandKind.READ_ONLY, (), (), "lists the recycle area by directory name only; deletes, moves and writes nothing (TD-208)"),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a

@@ -237,4 +237,14 @@ def test_a_rollback_after_a_resume_uses_the_backup_of_the_first_attempt(tmp_path
                   backup=tmp_path / "second_backup", rollback_command="x", background="发布", necessity="n")
 
     assert resumed_ops.rollback_backup == first, "the pointers must go back to how they were before the deploy, not before the retry"
-    assert json.loads((tmp_path / "evidence" / "state.json").read_text(encoding="utf-8"))["backup"] == str(first)
+    assert json.loads((tmp_path / "evidence" / "state.json").read_text(encoding="utf-8"))["backup"] == ""  # cleared once the rollback succeeded
+
+
+def test_after_a_successful_rollback_the_recorded_backup_is_cleared_so_the_next_attempt_takes_a_fresh_one(tmp_path: Path) -> None:
+    ops, ledger = FakeOps(), FakeLedger()
+
+    with pytest.raises(rd.DeployError, match="已回退"):
+        _run(tmp_path, ops, ledger, checks=_checks(bad={"identity"}))
+
+    state = json.loads((tmp_path / "evidence" / "state.json").read_text(encoding="utf-8"))
+    assert state["backup"] == "" and state["rolled_back_with"] == CONFIRM

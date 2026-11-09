@@ -15,6 +15,7 @@ line switch (that is card 6b), so nothing here is reachable from ``main.py`` yet
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -22,13 +23,15 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from auto_pm.application.core import release_deploy as rd
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core.release_deploy import REQUIRED_SELF_CHECKS, DeployError, SelfCheck
-from auto_pm.application.core.release_deploy_check import exact_tree_ok
-from auto_pm.application.core.release_ledger import PROJECT_ID, LedgerError, pick_change
+from auto_pm.application.core.release_deploy_check import CONTAINER, exact_tree_ok
+from auto_pm.application.core.release_ledger import PROJECT_ID, DeployPlan, LedgerError, pick_change
 
 COMMAND_TIMEOUT_SECONDS = 300
 LEDGER_PROJECTS = ("SW-2026-008", "SYS-2026-001", "SW-2026-009", "DJ-2026-005")
@@ -55,6 +58,26 @@ def run_process(argv: Sequence[str], cwd: Path, *, timeout: int = COMMAND_TIMEOU
     except (OSError, subprocess.SubprocessError) as error:
         return 255, str(error)
     return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+def first_json_object(output: str) -> dict[str, Any] | None:
+    """The first JSON object in a command's combined output.
+
+    The launcher prints its own lines and the control root may print a sync warning before or after the JSON, so the output as a whole is
+    not JSON; take the first ``{`` that starts a complete, non-empty object and ignore whatever surrounds it.
+    """
+
+    decoder = json.JSONDecoder()
+    start = output.find("{")
+    while start != -1:
+        try:
+            data, _end = decoder.raw_decode(output[start:])
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data:
+            return data
+        start = output.find("{", start + 1)
+    return None
 
 
 class WiringError(RuntimeError):
@@ -190,10 +213,11 @@ class ReleaseOpsAdapter:
     def manifest_entry_sha256(self, release_id: str) -> str:
         """The same digest ``build`` reports, read back from the manifest, so a resumed deploy still has it for the receipt."""
 
-        import hashlib
-
-        manifest = json.loads((ops.container_of(self._root) / "deployment_manifest.json").read_text(encoding="utf-8"))
-        entry = json.dumps(manifest["releases"][release_id], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        try:
+            manifest = json.loads((ops.container_of(self._root) / "deployment_manifest.json").read_text(encoding="utf-8"))
+            entry = json.dumps(manifest["releases"][release_id], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise DeployError(f"读不出清单里 {release_id} 的条目：{error}") from error
         return hashlib.sha256(entry.encode("utf-8")).hexdigest()
 
 
@@ -228,9 +252,8 @@ def build_self_checks(
             code, output = run(["pm", "orient", project, "--json"])
             if code != 0:
                 return False, f"exit={code} {output.strip()[-120:]}"
-            try:
-                data = json.loads(output[output.index("{"):])
-            except (ValueError, json.JSONDecodeError):
+            data = first_json_object(output)
+            if data is None:
                 return False, "orient 输出读不成 JSON"
             conflicts = data.get("conflicts") or []
             return not conflicts, f"conflicts={conflicts}"
@@ -244,7 +267,7 @@ def build_self_checks(
         return check
 
     def precheck() -> tuple[bool, str]:
-        code, output = run(["cli", "implementation-card", "precheck", "--card-file", str(card_file)])
+        code, output = run(["implementation-card", "precheck", "--card-file", str(card_file)])
         return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-120:]}"
 
     def hook_dry_run() -> tuple[bool, str]:
@@ -305,3 +328,74 @@ def build_self_checks(
     if absent:
         raise WiringError("自检集与必备清单对不上，缺：" + "；".join(absent))
     return checks
+
+
+IDENTITY_PROJECT = "SW-2026-008"
+
+
+def cockpit_identity(root: Path, *, python: str = sys.executable, run: Exec = run_process) -> dict[str, Any]:
+    """The runtime identity as a **fresh process** sees it (so a switch is judged by the new release, not by the one already loaded here).
+
+    Runs ``main.py pm resume SW-2026-008 --json`` in ``root`` and keeps the four identity fields plus the conflict codes, the same
+    reading the hand-written script made.  Anything unreadable is returned as an empty identity, which never matches a release.
+    """
+
+    code, output = run([python, "-B", str(Path(root) / "main.py"), "pm", "resume", IDENTITY_PROJECT, "--json"], Path(root))
+    data = first_json_object(output) if code == 0 else None
+    if data is None:
+        return {}
+    context = data.get("context") or {}
+    result = {key: context.get(key) for key in ("configured_release_id", "effective_release_id", "runtime_load_path", "runtime_fallback_reason")}
+    result["conflicts"] = [c.get("code") if isinstance(c, dict) else c for c in (data.get("conflicts") or [])]
+    return result
+
+
+def plan_for(root: Path, report: Any, *, approver: str, confirm_ref: str, now: datetime | None = None) -> tuple[DeployPlan, Path]:
+    """The ledger plan and the pointer-backup folder of a deploy of ``report.release_id`` from the control root ``root``.
+
+    The old release is the active pointer *now*; the evidence folder is per release, and the backup folder name carries the time of the
+    first attempt (``release_deploy`` reuses the first one on a resume).
+    """
+
+    base = Path(root)
+    container = ops.container_of(base)
+    old = ops.pointer_release(container, "active_release.json")
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    evidence = base / ".auto-pm" / "reports" / f"release-deploy-{report.release_id}"
+    prefix = CONTAINER.as_posix()
+    paths = (
+        f"{prefix}/deployment_manifest.json", f"{prefix}/active_release.json", f"{prefix}/previous_release.json", f"{prefix}/releases/{report.release_id}",
+    )
+    plan = DeployPlan(
+        release_id=report.release_id, old_release=old, commit=report.commit, confirm_ref=confirm_ref, approver=approver, paths=paths,
+        station=base / ".auto-pm" / "worktrees" / f"deploy-{report.release_id}", evidence_dir=evidence,
+    )
+    return plan, evidence / f"pointer_backup_{stamp}"
+
+
+def real_deploy(
+    root: Path, report: Any, *, approver: str, confirm_ref: str, card_file: Path, drill_script: Path,
+) -> rd.DeployResult:
+    """Assemble the real ports and run the whole deploy.  Reached only from ``release deploy --no-check-only`` after a green preflight."""
+
+    from auto_pm.domain.change.change_service import ChangeService
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    base = Path(root)
+    plan, backup = plan_for(base, report, approver=approver, confirm_ref=confirm_ref)
+    container = ops.container_of(base)
+    older = ops.pointer_release(container, "previous_release.json")
+    identity: ops.Identity = cockpit_identity
+    run = cockpit_runner(base)
+    ledger = CockpitLedgerPort(base, run=run, changes=ChangeService(str(base)), store=ContinuityStore(base))
+    adapter = ReleaseOpsAdapter(base, base, plan.commit, plan.release_id, identity)
+    checks = build_self_checks(
+        root=base, release_id=plan.release_id, old_release=plan.old_release, older_release=older, run=run, identity=identity,
+        card_file=card_file, drill_script=drill_script,
+    )
+    return rd.deploy(
+        plan, preflight=report, ops=adapter, ledger=ledger, checks=checks, backup=backup,
+        rollback_command=f"main.py release rollback {backup}",
+        background=f"一键发版：把有效版本从 {plan.old_release} 切到 {plan.release_id}（提交 {plan.commit[:12]}）",
+        necessity="新提交的修复只有切成有效版本才对所有对话生效；切换前预检、切换后自检，任一失败即回退指针",
+    )

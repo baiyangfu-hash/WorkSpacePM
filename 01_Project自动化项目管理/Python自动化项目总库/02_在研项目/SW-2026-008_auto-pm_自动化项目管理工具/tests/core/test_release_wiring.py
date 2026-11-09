@@ -245,6 +245,42 @@ def test_help_and_smoke_checks_pass_on_exit_zero_and_clean_orient(env: Env) -> N
     assert not checks["smoke pm orient SYS-2026-001"]()[0]
 
 
+def test_the_smoke_check_reads_the_json_between_launcher_lines_and_warnings(env: Env) -> None:
+    """Real output of ``main.py pm orient`` (2026-11-08 dry run): a launcher line before the JSON and a control-root sync warning after it."""
+
+    noisy = 'launcher: release verified\n{"conflicts": [], "context": {"x": 1}}\n⚠ 控制根同步提示：落后 main 2 个提交 {sync}\n'
+    env.run_reply["orient"] = (0, noisy)
+    assert env.checks()["smoke pm orient SW-2026-008"]()[0]
+    env.run_reply["orient"] = (0, noisy.replace('"conflicts": []', '"conflicts": ["DIVERGENCE"]'))
+    assert not env.checks()["smoke pm orient SW-2026-008"]()[0]
+    assert rw.first_json_object("{} {\"a\": 1}") == {"a": 1} and rw.first_json_object("no json {") is None
+
+
+def test_every_command_the_checks_run_exists_in_the_real_command_tree(env: Env) -> None:
+    """The fake runner cannot tell a wrong command name from a right one (the first real dry run found ``cli implementation-card``)."""
+
+    import click
+
+    from auto_pm.ui.cli.__main__ import cli
+
+    for name, check in env.checks().items():
+        if name.startswith(("help ", "smoke ", "ledger ")) or name == "card precheck":
+            check()
+    assert env.runs
+    for argv in env.runs:
+        command: click.Command = cli
+        for token in argv:
+            if token.startswith("-") or not isinstance(command, click.Group):
+                break
+            child = command.get_command(click.Context(command), token)
+            if child is None:
+                break
+            command = child
+        else:
+            continue
+        assert command is not cli and command.name in argv, f"main.py {' '.join(argv)}：命令树里找不到这条"
+
+
 def test_ledger_check_needs_the_clean_line_and_never_passes_fix(env: Env) -> None:
     checks = env.checks()
 
@@ -260,8 +296,8 @@ def test_card_precheck_runs_the_precheck_command_on_the_card_file(env: Env) -> N
     checks = env.checks()
 
     assert checks["card precheck"]()[0]
-    assert ["cli", "implementation-card", "precheck", "--card-file", str(env.card)] in env.runs
-    env.run_reply[f"cli implementation-card precheck --card-file {env.card}"] = (1, "bad card")
+    assert ["implementation-card", "precheck", "--card-file", str(env.card)] in env.runs
+    env.run_reply[f"implementation-card precheck --card-file {env.card}"] = (1, "bad card")
     assert not checks["card precheck"]()[0]
 
 
@@ -301,3 +337,52 @@ def test_event_chain_drill_fails_without_a_database(env: Env) -> None:
     (env.root / ".auto-pm" / "continuity.db").unlink()
 
     assert not checks["event chain drill"]()[0]
+
+
+def test_a_manifest_that_cannot_be_read_becomes_a_deploy_error(tmp_path: Path) -> None:
+    adapter = rw.ReleaseOpsAdapter(tmp_path, tmp_path, "a" * 40, NEW, lambda root: {})
+    with pytest.raises(rd.DeployError, match="读不出清单"):
+        adapter.manifest_entry_sha256(NEW)  # no manifest file at all
+    container = ops.container_of(tmp_path)
+    container.mkdir(parents=True)
+    (container / "deployment_manifest.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(rd.DeployError, match="读不出清单"):
+        adapter.manifest_entry_sha256(NEW)
+    (container / "deployment_manifest.json").write_text(json.dumps({"releases": {}}), encoding="utf-8")
+    with pytest.raises(rd.DeployError, match="读不出清单"):
+        adapter.manifest_entry_sha256(NEW)  # the release is not in it
+
+
+def test_cockpit_identity_reads_the_four_fields_and_the_conflict_codes_from_a_fresh_process(tmp_path: Path) -> None:
+    payload = {"context": {"configured_release_id": NEW, "effective_release_id": NEW, "runtime_load_path": "p", "runtime_fallback_reason": "", "other": 1},
+               "conflicts": [{"code": "DIVERGENCE"}, "PLAIN"]}
+
+    def fake(argv: Sequence[str], cwd: Path) -> tuple[int, str]:
+        assert list(argv)[1:3] == ["-B", str(tmp_path / "main.py")] and list(argv)[-4:-1] == ["pm", "resume", "SW-2026-008"] or list(argv)[-3:] == ["resume", "SW-2026-008", "--json"]
+        return 0, "log line\n" + json.dumps(payload)
+
+    seen = rw.cockpit_identity(tmp_path, run=fake)
+
+    assert seen["configured_release_id"] == NEW and seen["effective_release_id"] == NEW and "other" not in seen
+    assert seen["conflicts"] == ["DIVERGENCE", "PLAIN"]
+    assert rw.cockpit_identity(tmp_path, run=lambda a, c: (1, "boom")) == {}
+    assert rw.cockpit_identity(tmp_path, run=lambda a, c: (0, "no json")) == {}
+    assert rw.cockpit_identity(tmp_path, run=lambda a, c: (0, "{broken")) == {}
+
+
+def test_plan_for_binds_the_release_to_its_own_evidence_station_and_paths(tmp_path: Path) -> None:
+    container = ops.container_of(tmp_path)
+    container.mkdir(parents=True)
+    (container / "active_release.json").write_text(json.dumps({"release_id": OLD}), encoding="utf-8")
+    report = SimpleNamespace(release_id=NEW, commit="a" * 40)
+    from datetime import UTC, datetime
+
+    plan, backup = rw.plan_for(tmp_path, report, approver="fubai", confirm_ref="user-confirmation:cmsg_001", now=datetime(2026, 11, 9, 1, 2, 3, tzinfo=UTC))
+
+    assert plan.old_release == OLD and plan.release_id == NEW and plan.commit == "a" * 40
+    assert plan.evidence_dir == tmp_path / ".auto-pm" / "reports" / f"release-deploy-{NEW}"
+    assert backup == plan.evidence_dir / "pointer_backup_20261109T010203Z"
+    assert plan.station.parent == tmp_path / ".auto-pm" / "worktrees"
+    assert f"00_Infrastructure/auto_pm/releases/{NEW}" in plan.paths and "00_Infrastructure/auto_pm/active_release.json" in plan.paths
+    with pytest.raises(LedgerError, match="用户确认引用"):
+        rw.plan_for(tmp_path, report, approver="fubai", confirm_ref="yes")
