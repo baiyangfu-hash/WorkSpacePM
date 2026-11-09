@@ -213,8 +213,12 @@ def plc_pr(comments: list[dict[str, object]]) -> FakeGh:
     return gh
 
 
-def signed(sha: str, user: dict[str, object] | None = None) -> dict[str, object]:
-    return {"body": f"安全签字 {sha}", "user": user or SIGNER, "html_url": "u"}
+POSTED_AT = "2026-11-03T01:00:00Z"
+
+
+def signed(sha: str, user: dict[str, object] | None = None, updated_at: str = POSTED_AT) -> dict[str, object]:
+    return {"body": f"安全签字 {sha}", "user": user or SIGNER, "html_url": "u",
+            "created_at": POSTED_AT, "updated_at": updated_at}
 
 
 def test_r11_a_plc_change_without_a_signature_blocks(tmp_path: Path) -> None:
@@ -240,6 +244,13 @@ def test_r13b_a_signature_of_10_digits_no_longer_counts(tmp_path: Path) -> None:
 def test_r14_a_signature_by_someone_else_blocks(tmp_path: Path) -> None:
     other = {"login": "someone", "id": 1}
     assert failed(check(tmp_path, plc_pr([signed(HEAD[:12], other)]))) == {"安全签字"}
+
+
+def test_r14b_a_signature_comment_edited_after_posting_blocks(tmp_path: Path) -> None:
+    """有写权限的账号能把用户的旧评论改成“安全签字 <当前头>”，作者不变：编辑过的评论不算（与 safety-gate 同一个口径）。"""
+    report = check(tmp_path, plc_pr([signed(HEAD[:12], updated_at="2026-11-03T02:30:00Z")]))
+    assert failed(report) == {"安全签字"}
+    assert "被编辑过" in "".join(item.detail for item in report.items)
 
 
 def test_r15_a_declared_yes_needs_the_signature_even_without_plc_files(tmp_path: Path) -> None:
