@@ -176,7 +176,7 @@ def deploy(
     checks_sha = hashlib.sha256(summary.encode("utf-8")).hexdigest()
     entry_sha = str(entry.get("entry_sha256", "")) or ops.manifest_entry_sha256(plan.release_id)  # a resumed or already-built deploy has no build result
     if not entry_sha:
-        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，修好清单后重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做")
+        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，但命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝）：请先修好清单、人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/")
     try:
         closed = close_books(
             plan, ledger, change_id=books.change_id,
@@ -184,7 +184,7 @@ def deploy(
             conclusion=f"验收通过：有效版本 active={plan.release_id}，previous={plan.old_release}；自检 {len(results)} 项全过；确认引用 {plan.confirm_ref}",
         )
     except LedgerError as error:
-        raise DeployError(f"已切换且自检通过，但收口没完成（重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做，不会再切换）：{error}") from error
+        raise DeployError(f"已切换且自检通过，但收口没完成；命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝），请人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/：{error}") from error
     steps.extend(closed.steps)
     receipt = write_receipt(plan, change_id=books.change_id, backup=str(backup), entry_sha256=entry_sha, checks_sha256=checks_sha, rollback_command=rollback_command)
     return DeployResult(plan.release_id, books.change_id, str(backup), str(receipt), {n: d for n, (_g, d) in results.items()}, steps)

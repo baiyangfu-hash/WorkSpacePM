@@ -10,8 +10,10 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from typing import Any
 
 import click
+import pytest
 
 from auto_pm.ui.cli.__main__ import cli
 
@@ -97,3 +99,32 @@ def test_the_deploy_messages_only_name_options_that_release_deploy_has() -> None
         if option not in _options(deploy)
     ]
     assert unknown == []
+
+
+def test_after_the_switch_the_deploy_messages_do_not_promise_a_re_run_the_preflight_would_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-189: a second ``release deploy`` stops at the preflight (the release slot already exists), so "re-run it" is no way back in once the pointers moved."""
+
+    from auto_pm.application.core import release_deploy as rd  # noqa: PLC0415
+    from auto_pm.application.core.release_ledger import LedgerError  # noqa: PLC0415
+    from tests.core.test_release_deploy import FakeOps, _run  # noqa: PLC0415
+    from tests.core.test_release_ledger import FakeLedger  # noqa: PLC0415
+
+    ops = FakeOps(built=True)
+    ops.entry_sha = ""
+    with pytest.raises(rd.DeployError) as unreadable:
+        _run(tmp_path / "first", ops, FakeLedger())
+
+    def refuse_close(*_args: Any, **_kwargs: Any) -> None:
+        raise LedgerError("books did not close")
+
+    monkeypatch.setattr(rd, "close_books", refuse_close)
+    with pytest.raises(rd.DeployError) as unclosed:
+        _run(tmp_path / "second", FakeOps(built=True), FakeLedger())
+
+    for caught in (unreadable, unclosed):
+        message = str(caught.value)
+        assert "重跑同一条" not in message and "接着做" not in message
+        assert "没有续做入口" in message and "release-deploy-" in message and "人工" in message
+    assert "books did not close" in str(unclosed.value)
