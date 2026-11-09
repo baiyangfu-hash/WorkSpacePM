@@ -32,7 +32,6 @@
  "tests/cli/test_constraint.py": 6,
  "tests/cli/test_git_hook.py": 10,
  "tests/cli/test_workflow.py": 3,
- "tests/conftest.py": 1,
  "tests/identity_support.py": 1,
  "tests/test_module_alias.py": 9
 }
