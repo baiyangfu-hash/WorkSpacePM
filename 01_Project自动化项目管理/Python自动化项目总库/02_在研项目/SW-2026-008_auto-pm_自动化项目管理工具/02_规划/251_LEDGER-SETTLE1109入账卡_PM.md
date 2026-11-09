@@ -6,7 +6,7 @@
 > 档次：文档档
 > 安全回路: 否
 
-V1.1：基线状态一列改为表头允许的取值（存在/计划新增），V1.0 的“存在，改”被预检拒绝；内容不变。
+V1.1：基线状态一列改为表头允许的取值（存在/计划新增），V1.0 的“存在，改”被预检拒绝；内容不变（本次修订仅为触发 CI 重跑，修正基线状态取值，内容未变）。
 
 本卡只给 `main.py pr open` 提供“可改范围”，不改任何代码和 PLC 源码。背景：用户 2026-11-09T15:44:48Z 批准结算孤儿 Run RUN-DJ000-OUTREAD-001 并把 13 个本机变更单入库（消息 cmsg_013MFzja8RTUptLcFWxTQMox67isyDs64EoEK3NStsbQrS）；协调者确认顺序为先入库、再同步控制根。结算已经做完：目标 Run、Work、Mission 均 CANCELLED，恢复变更单 CHG-PLC-2026-007（DJ-2026-000）已 completed，恢复 Decision `DEC-20261109-SETL000P` 在控制根分支 `claude/settle1109-decisions` 的提交 5fec815a 里。入账范围：本机已 completed 而 main 仍 implementing 的 CHG-SCPT-2026-459、471；涉及文件栏补全（及 492 状态）的 490～500；恢复变更单 CHG-PLC-2026-007 及 DJ-2026-000 版本变更台账；本入账单 CHG-DOCU-2026-100（已批准）；恢复 Decision 文件。变更单文件由驾驶舱生成，按字节复制进工位，不手改；版本变更台账只补对应行，不动其他行。
 
