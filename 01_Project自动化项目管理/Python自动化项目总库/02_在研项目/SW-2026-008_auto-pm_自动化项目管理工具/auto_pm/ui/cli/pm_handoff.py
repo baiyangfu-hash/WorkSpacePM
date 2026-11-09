@@ -6,7 +6,6 @@ An agent never handles a lease token: ``pm handoff`` reads the holder's token fr
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 import sys
@@ -26,6 +25,7 @@ from auto_pm.application.core.worktree_policy_service import (
 from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.user_name import current_user_name
 from auto_pm.ui.cli.approval_pin import require_approval_pin
 from auto_pm.ui.cli.runtime_identity_guard import project_of_run, require_runtime_identity
 
@@ -225,7 +225,7 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
         signature = service.sign_risk(
             run_id=run_id,
             claimant_id=claimant_id,
-            signer=proof.approver if proof is not None else getpass.getuser(),
+            signer=proof.approver if proof is not None else current_user_name(),
             environ=os.environ,
             stdin_is_tty=_stdin_is_tty(),
             stdout_is_tty=_stdout_is_tty(),

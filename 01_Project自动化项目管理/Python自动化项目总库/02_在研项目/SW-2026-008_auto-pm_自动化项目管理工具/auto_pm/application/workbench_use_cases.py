@@ -17,6 +17,7 @@ from auto_pm.application.core.protocols import (
 from auto_pm.contracts.gate_dtos import ProcessGroupStage
 from auto_pm.domain.models.project import InvalidBusinessLineError, resolve_business_line
 from auto_pm.domain.project.state_machine import build_change_state_machine
+from auto_pm.infrastructure.user_name import current_user_name
 from auto_pm.ui.contracts.dto.workbench_dto import (
     ClearCacheResultDTO,
     DashboardSnapshotDTO,
@@ -519,7 +520,7 @@ class WorkbenchUseCases:
                 stack_type=stack_str,
             )
             if self.change_service:
-                applicant = os.getenv("AUTO_PM_AUTHOR", os.getlogin())
+                applicant = os.getenv("AUTO_PM_AUTHOR") or current_user_name()
                 domain = "PLC" if stack_str == "plc" else "SCPT"
                 self.change_service.create_change_request(
                     project_id=project_id,

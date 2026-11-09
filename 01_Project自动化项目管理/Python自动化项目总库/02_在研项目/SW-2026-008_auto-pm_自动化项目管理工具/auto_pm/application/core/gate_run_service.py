@@ -37,7 +37,7 @@ MAX_SKIPPED = 40  # the deployment run had at most 15 skipped in one group
 # Variables a test child may inherit.  Everything else is dropped, so a new cockpit variable can never leak in by default.
 ENV_ALLOW = frozenset(
     {
-        "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP", "TZ",
+        "PATH", "HOME", "USER", "LOGNAME", "LNAME", "USERNAME", "HOMEDRIVE", "HOMEPATH", "USERDOMAIN", "COMPUTERNAME", "SYSTEMDRIVE", "ALLUSERSPROFILE", "PUBLIC", "OS", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP", "TZ",
         "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
         "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
         "VIRTUAL_ENV", "QT_QPA_PLATFORM", "XDG_RUNTIME_DIR", "DISPLAY", "SSL_CERT_FILE",
