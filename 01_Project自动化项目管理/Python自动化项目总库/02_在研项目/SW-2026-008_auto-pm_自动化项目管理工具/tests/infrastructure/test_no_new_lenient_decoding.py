@@ -7,10 +7,10 @@ decode strictly (and report what cannot be read), or keep the lenient decode and
     text = path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: display only, never written back
 
 What counts: a call with ``errors="replace"`` / ``errors="ignore"``, and ``.decode(encoding, "replace")`` / ``.decode(encoding, "ignore")``.
-Counts are baselined per file at today's numbers (the 67 uses already in ``auto_pm/``, not yet reviewed one by one); a file may not use more
+Counts are baselined per file at today's numbers (67 uses when this ratchet started; all reviewed by TD-SW008-237 batches A-C, so the baseline is now empty); a file may not use more
 than its baseline, a file not in the baseline may use none, and a reviewed use (marker with a reason) is not counted.  When you convert or
-mark one, lower the numbers with ``python tests/infrastructure/test_no_new_lenient_decoding.py --write``.  This ratchet does not close
-TD-SW008-237: it only stops the debt from growing while the existing uses are reviewed.
+mark one, lower the numbers with ``python tests/infrastructure/test_no_new_lenient_decoding.py --write``.  This ratchet only stops the debt from coming back: every existing use has been reviewed,
+strict or carrying a written reason.
 """
 
 from __future__ import annotations
@@ -143,11 +143,15 @@ def test_a_reviewed_use_with_a_written_reason_is_not_counted_but_an_empty_marker
 
 
 def test_the_scan_covers_the_package_and_finds_the_known_uses() -> None:
-    counts = current_counts()
-    assert PACKAGE.is_dir() and counts, (
-        "the scan found nothing: the walker or the detector is broken"
+    # Every use has been reviewed (batches A, B, C), so the unmarked count is 0; the detector is still alive when it sees the reviewed ones.
+    reviewed = sum(
+        len(_lenient_calls(ast.parse(path.read_bytes(), filename=str(path))))
+        for path in PACKAGE.rglob("*.py")
+        if "__pycache__" not in path.parts
     )
-    assert sum(counts.values()) >= 20
+    assert PACKAGE.is_dir() and reviewed >= 20, (
+        "the scan found (almost) nothing: the walker or the detector is broken"
+    )
 
 
 def test_a_file_with_a_bom_is_parsed_and_counted(tmp_path: Path) -> None:

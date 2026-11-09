@@ -80,7 +80,7 @@ def find_spec(start: str) -> str | None:
 
 
 def read_spec(path: str) -> CycleSpec:
-    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    text = Path(path).read_text(encoding="utf-8", errors="replace")  # lenient-decode: a damaged stage name or number cell raises CycleSpecError below (fail closed), it never reads as a different valid value
     lines = text.splitlines()
     match = _VERSION.search(text)
     weeks: dict[str, dict[str, float]] = {}

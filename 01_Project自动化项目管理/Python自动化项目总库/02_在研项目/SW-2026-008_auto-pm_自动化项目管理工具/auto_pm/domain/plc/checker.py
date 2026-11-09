@@ -596,7 +596,7 @@ class _LegacyPlcCheckerCore:
         """统计文件行数（高效方式，不加载全部内容到内存）"""
         count = 0
         try:
-            with open(file_path, encoding="utf-8", errors="ignore") as f:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:  # lenient-decode: only counts lines; a dropped byte cannot change the line count
                 for _ in f:
                     count += 1
         except OSError:
@@ -757,7 +757,7 @@ class _LegacyPlcCheckerCore:
                     continue
                 file_path = os.path.join(root, f)
                 try:
-                    with open(file_path, encoding="utf-8", errors="ignore") as fp:
+                    with open(file_path, encoding="utf-8", errors="ignore") as fp:  # lenient-decode: reads the 关联源码 path for an existence check; a damaged path fails that check, which is reported
                         content = fp.read()
                 except OSError:
                     continue
