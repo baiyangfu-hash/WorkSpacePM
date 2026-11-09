@@ -7,7 +7,9 @@
 #       没有 .venv 时系统 python 3.13 缺 pytest-cov、xdist，Qt 缺 libEGL，测试会以难懂的方式失败。
 here="$(dirname "$0")"
 for py in python3 python; do
-    if command -v "$py" >/dev/null 2>&1; then
+    # D-198：只认“真能跑”的 Python。Windows 的 python3.exe 常是应用商店别名占位桩，command -v 找得到，
+    # 一运行就退出 49，不先试跑就 exec 会把它当成真 Python。
+    if command -v "$py" >/dev/null 2>&1 && "$py" -c "" >/dev/null 2>&1; then
         exec "$py" "$here/env_check.py"
     fi
 done
