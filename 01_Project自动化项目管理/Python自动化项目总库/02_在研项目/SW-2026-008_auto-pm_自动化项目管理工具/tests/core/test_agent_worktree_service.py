@@ -1548,3 +1548,157 @@ def test_cli_release_self_logs_the_session_end_trigger(lab: Lab, monkeypatch: py
     (entry,) = _reclaim_log(lab)
     assert entry["via"] == "release-self" and entry["agent"] == "claude-abcdef"
     assert not lab.station("claude-abcdef").exists()
+
+
+# ── D-166 step B: holder records, auto make-room, audit gaps ─────────────────
+
+DEAD_PID = 2_000_000_000
+HOLDERS = ".auto-pm/station-holders"
+
+
+def _holder(lab: Lab, name: str) -> Path:
+    return lab.root / HOLDERS / f"{name}.json"
+
+
+def _make_dead(lab: Lab, name: str, *, hours: float = 10.0) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    path = _holder(lab, name)
+    note = json.loads(path.read_text(encoding="utf-8"))
+    note.update(pid=DEAD_PID, heartbeat_at=(datetime.now(UTC) - timedelta(hours=hours)).isoformat())
+    path.write_text(json.dumps(note), encoding="utf-8")
+
+
+def _alias_done(lab: Lab, alias: str, *, merged: bool = True) -> Path:
+    """An alias station whose work is pushed (and merged into main on GitHub), holder dead and silent."""
+
+    card = f"C-{alias[-6:]}"
+    lab.service().open(alias, card)
+    station = lab.station(alias)
+    commit(station, f"{card}.txt")
+    branch = f"claude/{card}"  # alias stations use the base name's branch prefix
+    git(station, "push", "-q", "-u", "origin", branch)
+    if merged:
+        lab.merge_on_github(branch)
+    _make_dead(lab, alias)
+    return station
+
+
+def _full_floor_with(lab: Lab, *aliases: str) -> None:
+    _leftover_dirs(lab, MAX_STATIONS - len(aliases))
+
+
+def test_close_removes_the_holder_record_and_logs_it(lab: Lab) -> None:
+    _alias_done(lab, "claude-aaaaaa")
+    assert _holder(lab, "claude-aaaaaa").exists()
+    lab.service().close("claude-aaaaaa")
+    assert not _holder(lab, "claude-aaaaaa").exists()
+    (entry,) = [e for e in _reclaim_log(lab) if e["via"] == "close"]
+    assert entry["outcome"] == "removed" and entry["agent"] == "claude-aaaaaa"
+
+
+def test_a_refused_close_keeps_the_holder_record_and_removes_nothing(lab: Lab) -> None:
+    station = _alias_done(lab, "claude-bbbbbb", merged=False)
+    (station / "dirty.txt").write_text("x\n", encoding="utf-8")
+    with pytest.raises(StationRefusedError):
+        lab.service().close("claude-bbbbbb")
+    assert _holder(lab, "claude-bbbbbb").exists() and station.exists()
+    assert not [e for e in _reclaim_log(lab) if e["outcome"] == "removed"]
+
+
+def test_sweep_apply_removes_the_holder_record_and_logs_it(lab: Lab) -> None:
+    _alias_done(lab, "claude-cccccc")
+    report = lab.service().sweep(apply=True, fetch=True)
+    assert any("claude-cccccc" in done for done in report.done)
+    assert not _holder(lab, "claude-cccccc").exists()
+    assert [e["via"] for e in _reclaim_log(lab)] == ["sweep"]
+
+
+def test_open_on_a_full_floor_frees_dead_merged_clean_alias_stations(lab: Lab) -> None:
+    _alias_done(lab, "claude-dddddd")
+    _alias_done(lab, "claude-eeeeee")
+    _full_floor_with(lab, "claude-dddddd", "claude-eeeeee")
+    # 2 alias stations + 6 plain directories = 8
+    assert lab.service().count() == MAX_STATIONS
+
+    lab.service().open("trae", "CARD-NEW")
+
+    assert lab.station("trae").exists()
+    assert not lab.station("claude-dddddd").exists() or not lab.station("claude-eeeeee").exists()
+    log = [e for e in _reclaim_log(lab) if e["via"] == "auto-make-room"]
+    assert log and all(e["outcome"] == "removed" for e in log)
+    for entry in log:
+        assert not _holder(lab, str(entry["agent"])).exists()
+
+
+@pytest.mark.parametrize("why", ["unmerged", "dirty", "unpushed", "alive", "fresh-heartbeat", "no-holder"])
+def test_auto_make_room_never_touches_a_station_that_is_not_provably_dead_and_done(lab: Lab, why: str) -> None:
+    alias = "claude-ffffff"
+    station = _alias_done(lab, alias, merged=why != "unmerged")
+    if why == "dirty":
+        (station / "wip.txt").write_text("x\n", encoding="utf-8")
+    if why == "unpushed":
+        commit(station, "local-only.txt")
+    if why == "alive":
+        note = json.loads(_holder(lab, alias).read_text(encoding="utf-8"))
+        note["pid"] = os.getpid()
+        _holder(lab, alias).write_text(json.dumps(note), encoding="utf-8")
+    if why == "fresh-heartbeat":
+        _make_dead(lab, alias, hours=0.01)
+    if why == "no-holder":
+        _holder(lab, alias).unlink()
+    _full_floor_with(lab, alias)
+
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service().open("trae", "CARD-NEW")
+
+    assert station.exists()
+    assert not [e for e in _reclaim_log(lab) if e["via"] == "auto-make-room"]
+
+
+def test_auto_make_room_never_frees_roster_stations(lab: Lab) -> None:
+    finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    _leftover_dirs(lab, MAX_STATIONS - 1)
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service().open("trae", "CARD-2")
+    assert lab.station("claude").exists()
+
+
+def test_a_failing_log_write_does_not_stop_the_reclaim(lab: Lab) -> None:
+    _alias_station(lab)
+    (lab.root / ".auto-pm" / "logs").write_text("a file, so the folder cannot be made\n", encoding="utf-8")
+    result = lab.service().release("claude-abcdef")
+    assert result.path == lab.station("claude-abcdef") and not result.path.exists()
+
+
+def test_an_unexpected_error_during_release_is_logged_as_failed_and_reraised(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    station = _alias_station(lab)
+
+    def boom(self: AgentWorktreeService, path: Path, agent: str) -> str:
+        raise OSError("disk exploded")
+
+    monkeypatch.setattr(AgentWorktreeService, "_save_rescue_ref", boom)
+    with pytest.raises(OSError, match="disk exploded"):
+        lab.service().release("claude-abcdef")
+    (entry,) = _reclaim_log(lab)
+    assert entry["outcome"] == "failed" and "disk exploded" in str(entry["reason"])
+    assert station.exists()
+
+
+def test_a_failed_worktree_remove_is_logged_as_failed(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    station = _alias_station(lab)
+    real = AgentWorktreeService._git
+
+    def failing(self: AgentWorktreeService, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(args, 1, "", "cannot remove")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", failing)
+    with pytest.raises(AgentWorktreeError, match="回收失败"):
+        lab.service().release("claude-abcdef")
+    (entry,) = _reclaim_log(lab)
+    assert entry["outcome"] == "failed" and station.exists()

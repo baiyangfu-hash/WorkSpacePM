@@ -442,6 +442,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"{agent} 已有没收工的工位 {path}；先 `worktree close {agent}`，或回到那个工位继续做"
             )
+        self._make_room(fetch=fetch)
         self._require_room_for_a_station()
         if fetch:
             fetched = self._git("fetch", "origin", "main")
@@ -567,7 +568,7 @@ class AgentWorktreeService:
         record: dict[str, object] = {"agent": agent, "via": via, "caller": caller_alias() or caller_agent() or "user"}
         try:
             result = self._release_checked(agent, record)
-        except AgentWorktreeError as error:
+        except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
             record.update(outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error))
             self._log_reclaim(record)
             raise
@@ -717,6 +718,34 @@ class AgentWorktreeService:
         if self._stations_dir.is_dir():
             names |= {child.name for child in self._stations_dir.iterdir() if child.is_dir()}
         return len(names)
+
+    def _make_room(self, *, fetch: bool = True) -> None:
+        """The floor is full: free session-alias stations that are provably dead, then let ``open`` count again (D-166).
+
+        Only a station that satisfies every sweep condition goes (merged into main, clean, nothing unpushed, branch
+        prefix right) AND whose holder process is gone with a silent heartbeat (``stale_aliases``).  Roster names,
+        ``other`` directories and run-plans are never touched.  Anything uncertain is skipped, never forced; each
+        removal is logged with ``via=auto-make-room``.
+        """
+
+        if self.count() < MAX_STATIONS:
+            return
+        try:
+            candidates = self.stale_aliases()
+            if candidates and fetch:
+                self._fetch_prune()  # "merged into main" must be judged on what GitHub has now
+        except OSError:
+            return
+        for name, _reason in candidates:
+            if self.count() < MAX_STATIONS:
+                return
+            try:
+                listed = self.stations(only=name)
+                if len(listed) != 1 or not self._sweep_verdict(listed[0], None).remove:
+                    continue
+                self._remove_station(listed[0], require_merged=True, via="auto-make-room")
+            except (AgentWorktreeError, OSError):
+                continue
 
     def _require_room_for_a_station(self) -> None:
         count = self.count()
@@ -920,7 +949,9 @@ class AgentWorktreeService:
                     continue
                 try:
                     if station is not None:
-                        self._remove_station(station, require_merged=station.kind in ("agent", "other"))
+                        self._remove_station(
+                            station, require_merged=station.kind in ("agent", "other"), via="sweep"
+                        )
                     else:
                         self._delete_local_branch(item.target, require_merged=True)
                     report.done.append(item.target)
@@ -1074,7 +1105,36 @@ class AgentWorktreeService:
         if refusal:
             raise StationRefusedError(f"不收工位 {station.path}：{refusal}")
 
-    def _remove_station(self, station: Station, *, require_merged: bool = False) -> CloseResult:
+    def _remove_station(
+        self, station: Station, *, require_merged: bool = False, via: str = "close"
+    ) -> CloseResult:
+        """Remove one station (close / sweep / auto-make-room); every outcome is logged like a release (D-166)."""
+
+        record: dict[str, object] = {
+            "agent": station.name,
+            "via": via,
+            "caller": caller_alias() or caller_agent() or "user",
+            "branch": station.branch,
+            "head": station.head,
+            "path": str(station.path),
+            "rescue_ref": "",
+        }
+        try:
+            result = self._remove_station_checked(station, require_merged=require_merged)
+        except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
+            record.update(
+                outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error)
+            )
+            self._log_reclaim(record)
+            raise
+        # The holder record belongs to the directory that is gone: leaving it behind misleads the next investigation.
+        with contextlib.suppress(OSError):
+            (self._notes_dir / f"{station.name}.json").unlink()
+        record["outcome"] = "removed"
+        self._log_reclaim(record)
+        return result
+
+    def _remove_station_checked(self, station: Station, *, require_merged: bool = False) -> CloseResult:
         # Re-read everything just before removing: the agent may have kept working since the station was listed.
         self._require_inside(station.path)
         info = self._worktrees().get(station.path.resolve())
