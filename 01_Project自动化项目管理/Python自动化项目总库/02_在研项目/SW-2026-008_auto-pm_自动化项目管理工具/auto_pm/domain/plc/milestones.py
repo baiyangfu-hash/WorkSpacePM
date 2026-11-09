@@ -108,7 +108,7 @@ def _valid_date(text: str) -> bool:
 def read_milestones(path: str) -> MilestoneTable:
     """Parse one milestone file; findings carry the severity its 项目来源 calls for."""
 
-    lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()  # lenient-decode: a damaged stage or date cell becomes a finding below (severity from 项目来源), it never reads as a valid one
     table = MilestoneTable(path=path, origin=_front_matter_origin(lines))
     severity = "fail" if table.strict else "warn"
 

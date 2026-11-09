@@ -176,7 +176,7 @@ def _start(args: list[str], cwd: Path, env: Mapping[str, str]) -> subprocess.Pop
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
-        errors="replace",
+        errors="replace",  # lenient-decode: language-service diagnostics are counted by error lines and exit code; a replaced byte cannot hide an error line, while a strict text-mode decode would drop the output on Windows
         creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if _WINDOWS else 0,
         start_new_session=not _WINDOWS,
     )

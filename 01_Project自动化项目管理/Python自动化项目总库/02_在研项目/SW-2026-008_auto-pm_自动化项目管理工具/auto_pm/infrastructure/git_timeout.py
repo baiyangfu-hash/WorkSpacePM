@@ -107,7 +107,7 @@ def run_git_bounded_text(
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Bounded Git run returning UTF-8 text output (``errors="replace"``, DEV-ENC-001)."""
-    kwargs.update(text=True, encoding="utf-8", errors="replace")
+    kwargs.update(text=True, encoding="utf-8", errors="replace")  # lenient-decode: D-162 — callers are judged on exit codes and ASCII ids; a strict text-mode decode would lose the whole output on Windows (reader thread swallows the error), so any caller that compares text needs its own bytes path
     return cast(
         "subprocess.CompletedProcess[str]",
         _run_bounded(command, default_timeout=default_timeout, error_cls=error_cls, where=where, **kwargs),

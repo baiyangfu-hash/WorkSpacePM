@@ -68,7 +68,7 @@ def check_venv_base(
     recorded = ""
     cfg = Path(prefix) / "pyvenv.cfg"
     try:
-        for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in cfg.read_text(encoding="utf-8").splitlines():
             key, _, value = line.partition("=")
             key, value = key.strip().lower(), value.strip()
             if key == "home":
@@ -77,6 +77,8 @@ def check_venv_base(
                 recorded = value
     except OSError:
         reasons.append(f"读不到 {cfg}，无法核对底层 Python")
+    except UnicodeDecodeError:
+        reasons.append(f"{cfg} 不是合法 UTF-8，无法核对底层 Python")
     if home:
         if not Path(home).is_dir():
             reasons.append(f"底层 Python 目录已不存在：{home}；.venv 马上就不能用了，需要重建")

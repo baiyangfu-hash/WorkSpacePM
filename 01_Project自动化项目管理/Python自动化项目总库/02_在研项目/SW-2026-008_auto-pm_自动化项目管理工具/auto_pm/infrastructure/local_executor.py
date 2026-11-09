@@ -179,7 +179,7 @@ class _BoundedCapture:
         """Decode captured bytes without letting malformed child output abort evidence collection."""
 
         with self._lock:
-            value = bytes(self._data).decode("utf-8", errors="replace")
+            value = bytes(self._data).decode("utf-8", errors="replace")  # lenient-decode: display copy of captured child output; the raw bytes stay in the capture buffer
             return f"{value}\n[output truncated]" if self._truncated else value
 
     @property
@@ -677,8 +677,8 @@ class LocalCodexExecutor:
                 while line := stream.readline():
                     capture.append(line)
                     try:
-                        parsed = json.loads(line.decode("utf-8", errors="replace"))
-                    except json.JSONDecodeError:
+                        parsed = json.loads(line.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):  # not an event line; the raw bytes stay in the capture buffer
                         continue
                     if isinstance(parsed, dict):
                         events.put(parsed)
