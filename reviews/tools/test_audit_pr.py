@@ -217,6 +217,38 @@ def _run(rid: int = 1, conclusion: str | None = "success", status_: str = "compl
     return {"id": rid, "event": "pull_request", "head_sha": "a" * 40, "workflow_id": 1, "conclusion": conclusion, "status": status_}
 
 
+def _check(name: str, rid: int, conclusion: str = "success") -> dict:
+    return {"name": name, "status": "completed", "conclusion": conclusion, "details_url": f"https://github.com/o/r/actions/runs/{rid}/job/{rid}0"}
+
+
+_SAFETY_OK = [{"context": "safety-zone", "state": "success"}]
+
+
+def test_d71_a_cancelled_check_of_a_superseded_run_does_not_fail_the_head_commit():
+    runs = [_run(1, "cancelled"), _run(2)]
+    verdict, detail = audit_pr.judge_ci(runs, [_check("replay", 1, "cancelled"), _check("replay", 2)], _SAFETY_OK, True)
+    assert verdict == "PASS", detail
+
+
+def test_d71_a_failed_check_of_the_newest_run_still_fails_even_when_an_older_run_was_cancelled():
+    runs = [_run(1, "cancelled"), _run(2, "failure")]
+    verdict, _ = audit_pr.judge_ci(runs, [_check("replay", 1, "cancelled"), _check("replay", 2, "failure")], _SAFETY_OK, True)
+    assert verdict == "FAIL"
+
+
+def test_d71_the_same_job_name_from_another_workflow_is_a_different_check_and_is_not_hidden():
+    other = {**_run(3), "workflow_id": 2}
+    runs = [_run(2), other]
+    verdict, detail = audit_pr.judge_ci(runs, [_check("guard", 2, "failure"), _check("guard", 3)], _SAFETY_OK, True)
+    assert verdict == "FAIL" and "guard" in detail
+
+
+def test_d71_a_cancelled_check_of_the_only_run_or_of_an_unknown_run_still_fails():
+    assert audit_pr.judge_ci([_run(1, "cancelled")], [_check("replay", 1, "cancelled")], _SAFETY_OK, True)[0] == "FAIL"
+    foreign = {"name": "ext", "status": "completed", "conclusion": "cancelled", "details_url": "https://example.com/x"}
+    assert audit_pr.judge_ci([_run(2)], [foreign], _SAFETY_OK, True)[0] == "FAIL"
+
+
 def test_green_actions_with_failed_safety_zone_status_does_not_pass():
     verdict, detail = audit_pr.judge_ci([_run()], [], [{"context": "safety-zone", "state": "failure"}], True)
     assert verdict == "FAIL"

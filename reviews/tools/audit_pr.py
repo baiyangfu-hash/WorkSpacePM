@@ -276,6 +276,13 @@ BAD_STATES = {"failure", "error"}
 PASSING_CONCLUSIONS = {"success", "skipped", "neutral"}
 
 
+def _run_id_of(check_run: dict) -> int | None:
+    """The Actions run id in a check run's ``details_url`` (``.../actions/runs/<run>/job/<job>``); None for checks not made by Actions."""
+
+    match = re.search(r"/actions/runs/(\d+)", str(check_run.get("details_url") or ""))
+    return int(match.group(1)) if match else None
+
+
 def judge_ci(
     runs: list[dict], check_runs: list[dict], statuses: list[dict], expected_ci: bool
 ) -> tuple[str, str]:
@@ -286,6 +293,10 @@ def judge_ci(
         key = (r.get("workflow_id"), r["event"], r["head_sha"])
         if key not in newest or r["id"] > newest[key]["id"]:
             newest[key] = r
+    # D-71: a check run that belongs to a superseded run (its details_url names the run) is dropped with that run; the same job name from
+    # a different workflow is a different check and stays, so this is not a de-duplication by name.
+    superseded = {r["id"] for r in runs} - {r["id"] for r in newest.values()}
+    check_runs = [c for c in check_runs if _run_id_of(c) not in superseded]
     runs = sorted(newest.values(), key=lambda r: r["id"])
     parts: list[str] = []
     bad: list[str] = []
