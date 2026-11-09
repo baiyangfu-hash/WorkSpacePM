@@ -65,6 +65,7 @@ class ReleaseOpsPort(Protocol):
     def build(self) -> dict[str, Any]: ...
     def switch(self, backup: Path) -> dict[str, Any]: ...
     def rollback(self, backup: Path) -> dict[str, Any]: ...
+    def manifest_entry_sha256(self, release_id: str) -> str: ...
 
 
 @dataclass
@@ -92,14 +93,34 @@ def _refuse_reused_confirmation(plan: DeployPlan) -> None:
         raise DeployError("上一次部署已经回退过；重试需要用户给一个新的确认引用（不能沿用回退那次的）")
 
 
-def _mark_rolled_back(plan: DeployPlan) -> None:
+def _read_state(plan: DeployPlan) -> dict[str, Any]:
     try:
-        state = json.loads(plan.state_file.read_text(encoding="utf-8"))
+        data = json.loads(plan.state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        state = {}
-    state["rolled_back_with"] = plan.confirm_ref
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _update_state(plan: DeployPlan, **values: str) -> None:
+    state = _read_state(plan)
+    state.update(values)
     plan.evidence_dir.mkdir(parents=True, exist_ok=True)
     plan.state_file.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _mark_rolled_back(plan: DeployPlan) -> None:
+    _update_state(plan, rolled_back_with=plan.confirm_ref)
+
+
+def _first_backup(plan: DeployPlan, offered: Path) -> Path:
+    """The backup of the **first** switch attempt: recorded before the pointers move, reused by every resume (a rollback must restore the
+    pointers as they were before the deploy, not as they were before a later retry)."""
+
+    recorded = str(_read_state(plan).get("backup", ""))
+    if recorded:
+        return Path(recorded)
+    _update_state(plan, backup=str(offered))
+    return offered
 
 
 def run_self_checks(checks: Mapping[str, SelfCheck]) -> dict[str, tuple[bool, str]]:
@@ -132,6 +153,7 @@ def deploy(
         raise DeployError("预检没通过，什么都没写：" + "；".join(f"{c.name}={c.status}" for c in preflight.checks if c.status != "PASS"))
     _ensure_complete(checks)
     _refuse_reused_confirmation(plan)
+    backup = _first_backup(plan, backup)
     steps: list[str] = []
     try:
         books: Books = open_books(plan, ledger, background=background, necessity=necessity)
@@ -156,7 +178,9 @@ def deploy(
         return _undo(plan, ops, backup, steps, f"切换后自检 {len(failed)} 项没过：" + "；".join(f"{n}（{results[n][1]}）" for n in failed[:5]), failed)
     summary = json.dumps({name: detail for name, (_good, detail) in results.items()}, ensure_ascii=False, sort_keys=True)
     checks_sha = hashlib.sha256(summary.encode("utf-8")).hexdigest()
-    entry_sha = str(entry.get("entry_sha256", ""))
+    entry_sha = str(entry.get("entry_sha256", "")) or ops.manifest_entry_sha256(plan.release_id)  # a resumed or already-built deploy has no build result
+    if not entry_sha:
+        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，修好清单后可 --resume")
     try:
         closed = close_books(
             plan, ledger, change_id=books.change_id,

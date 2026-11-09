@@ -23,6 +23,8 @@ class FakeOps:
         self.active = NEW if switched else OLD
         self.fail_switch = False
         self.fail_rollback = False
+        self.rollback_backup: Path | None = None
+        self.entry_sha = "f" * 64
 
     def active_release(self) -> str:
         return self.active
@@ -42,8 +44,12 @@ class FakeOps:
         self.active = NEW
         return {}
 
+    def manifest_entry_sha256(self, release_id: str) -> str:
+        return self.entry_sha
+
     def rollback(self, backup: Path) -> dict[str, Any]:
         self.calls.append("rollback")
+        self.rollback_backup = backup
         if self.fail_rollback:
             raise RuntimeError("backup corrupted")
         self.active = OLD
@@ -191,3 +197,44 @@ def test_resuming_when_built_but_not_switched_does_not_build_twice(tmp_path: Pat
     _run(tmp_path, ops, ledger)
 
     assert ops.calls == ["switch"]
+
+
+def test_an_already_built_release_still_puts_the_manifest_entry_hash_in_the_receipt(tmp_path: Path) -> None:
+    ops, ledger = FakeOps(built=True), FakeLedger()
+
+    result = _run(tmp_path, ops, ledger)
+
+    assert "build" not in ops.calls
+    assert json.loads(Path(result.receipt).read_text(encoding="utf-8"))["manifest_entry_sha256"] == "f" * 64
+
+
+def test_an_unreadable_manifest_entry_hash_is_an_error_not_an_empty_receipt_field(tmp_path: Path) -> None:
+    ops, ledger = FakeOps(built=True), FakeLedger()
+    ops.entry_sha = ""
+
+    with pytest.raises(rd.DeployError, match="哈希"):
+        _run(tmp_path, ops, ledger)
+
+    assert not (tmp_path / "evidence" / "receipt.json").exists()
+
+
+def test_a_rollback_after_a_resume_uses_the_backup_of_the_first_attempt(tmp_path: Path) -> None:
+    ledger = FakeLedger()
+    first = tmp_path / "first_backup"
+    killed = _checks()
+
+    def die() -> tuple[bool, str]:
+        raise KeyboardInterrupt  # the process is killed after the switch, before the checks finish
+
+    killed["identity"] = die
+    with pytest.raises(KeyboardInterrupt):
+        rd.deploy(_plan(tmp_path), preflight=_green(), ops=FakeOps(), ledger=ledger, checks=killed, backup=first,
+                  rollback_command="x", background="发布", necessity="n")
+    resumed_ops = FakeOps(switched=True, built=True)
+
+    with pytest.raises(rd.DeployError, match="已回退"):
+        rd.deploy(_plan(tmp_path), preflight=_green(), ops=resumed_ops, ledger=ledger, checks=_checks(bad={"identity"}),
+                  backup=tmp_path / "second_backup", rollback_command="x", background="发布", necessity="n")
+
+    assert resumed_ops.rollback_backup == first, "the pointers must go back to how they were before the deploy, not before the retry"
+    assert json.loads((tmp_path / "evidence" / "state.json").read_text(encoding="utf-8"))["backup"] == str(first)
