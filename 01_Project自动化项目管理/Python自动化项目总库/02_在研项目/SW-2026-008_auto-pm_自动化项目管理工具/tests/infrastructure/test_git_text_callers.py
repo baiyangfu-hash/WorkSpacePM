@@ -27,6 +27,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("auto_pm/application/core/agent_worktree_service.py", "AgentWorktreeService._git"): "id/exit: fetch, worktree add/remove/prune, show-ref, branch -D, reflog ids; status only tested for emptiness",
     ("auto_pm/application/core/evidence_collection_service.py", "EvidenceCollectionService._git_output"): "shown: coordinator ruling — evidence keeps going with replacement characters rather than losing the record",
     ("auto_pm/application/core/pm_intake_service.py", "PmIntakeService._require_commit"): "id/exit: cat-file -e",
+    ("auto_pm/application/core/pr_open_service.py", "PrOpenService._git_text"): "content: push/fetch/branch only need the exit code and are echoed on failure; rev-parse/rev-list are ids; the task card and commit messages are CONTENT (D-171: a push that succeeded must not fail on the remote's encoding); the one call that compares PATHS stays strict in PrOpenService._git",
     ("auto_pm/application/core/pr_settle_service.py", "PrSettleService._git"): "id/exit: rev-parse, merge-base --is-ancestor",
     ("auto_pm/application/core/workspace_context_service.py", "WorkspaceContextService._candidate_commit"): "id/exit: rev-parse --verify HEAD",
     ("auto_pm/application/core/worktree_policy_service.py", "WorktreePolicyService._run_git"): "id/exit: check-ref-format, show-ref",

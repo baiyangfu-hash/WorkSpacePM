@@ -48,7 +48,7 @@ from auto_pm.application.core.pr_body_builder import (
 from auto_pm.domain.change.path_resolver import LEGACY_MONITORING_DIR
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 from auto_pm.infrastructure.executable_lookup import find_on_path
-from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text, run_git_bounded_text
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
 # Whitelist: the only accepted form is CHG-<PROJECT>-YYYY-NNN in ASCII.  Any other mention of "CHG"
@@ -184,7 +184,7 @@ class PrOpenService:
         branch = f"{prefix}{card}"
         task_card = self._normalize_card_path(task_card)
         if fetch:
-            fetched = self._git(self._root, "fetch", "origin", "main")
+            fetched = self._git_text(self._root, "fetch", "origin", "main")
             if fetched.returncode != 0:
                 raise AgentWorktreeError(
                     f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch"
@@ -394,7 +394,7 @@ class PrOpenService:
         return declared
 
     def _card_at_base(self, task_card: str, base_sha: str) -> str:
-        shown = self._git(self._root, "show", f"{base_sha}:{task_card}")
+        shown = self._git_text(self._root, "show", f"{base_sha}:{task_card}")
         if shown.returncode != 0:
             raise PrOpenRefusedError(
                 f"任务卡 `{task_card}` 在 origin/main（{base_sha[:8]}）上不存在：卡要先合入 main，范围才算数"
@@ -402,12 +402,12 @@ class PrOpenService:
         return shown.stdout
 
     def _commits(self, station: Path, base_sha: str) -> list[tuple[str, str]]:
-        revs = self._git(station, "rev-list", "--no-merges", "--reverse", f"{base_sha}..HEAD")
+        revs = self._git_text(station, "rev-list", "--no-merges", "--reverse", f"{base_sha}..HEAD")
         if revs.returncode != 0:
             raise AgentWorktreeError(f"读提交失败：{_detail(revs)}")
         commits: list[tuple[str, str]] = []
         for sha in revs.stdout.split():
-            message = self._git(station, "show", "-s", "--format=%B", sha)
+            message = self._git_text(station, "show", "-s", "--format=%B", sha)
             commits.append((sha, message.stdout.strip()))
         return commits
 
@@ -519,9 +519,9 @@ class PrOpenService:
         # Explicit refspec: push exactly the commit that was checked, whatever remote.origin.push or push.default say.
         attempts = len(PUSH_BACKOFF_SECONDS) + 1
         for attempt in range(attempts):
-            pushed = self._git(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")
+            pushed = self._git_text(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")
             if pushed.returncode == 0:
-                self._git(station, "branch", f"--set-upstream-to=origin/{branch}", branch)
+                self._git_text(station, "branch", f"--set-upstream-to=origin/{branch}", branch)
                 return
             detail = _detail(pushed)
             if not NETWORK_FAILURE.search(detail):
@@ -531,13 +531,32 @@ class PrOpenService:
         raise AgentWorktreeError(f"推送失败，网络重试 {attempts} 次都不通：{detail}")
 
     def _rev(self, cwd: Path, ref: str) -> str:
-        result = self._git(cwd, "rev-parse", ref)
+        result = self._git_text(cwd, "rev-parse", ref)
         if result.returncode != 0:
             raise AgentWorktreeError(f"git rev-parse {ref} 失败：{_detail(result)}")
         return result.stdout.strip()
 
     @staticmethod
+    def _git_text(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        """Lenient Git run (D-171): for output that is only an exit code, an object id, file/commit CONTENT or text shown back.
+
+        A push that succeeded must not fail afterwards because the remote's message is not UTF-8, and a task card or commit
+        message in another encoding is content, not a path.  Output that carries PATHS compared with a scope uses :meth:`_git`.
+        """
+        return run_git_bounded_text(
+            ["git", "-C", str(cwd), *args],
+            default_timeout=300.0,
+            error_cls=PrOpenRefusedError,
+            where=cwd,
+            capture_output=True,
+            check=False,
+            env=clean_git_environment(),
+            stdin=subprocess.DEVNULL,
+        )
+
+    @staticmethod
     def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        """Strict Git run: a path that is not UTF-8 is refused (``diff --name-only -z`` is compared with the claimed scope)."""
         return run_git_bounded_strict_text(
             ["git", "-C", str(cwd), *args],
             default_timeout=300.0,
