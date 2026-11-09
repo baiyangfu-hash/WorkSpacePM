@@ -8,6 +8,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Generator
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import pytest
@@ -302,20 +303,48 @@ def tmp_workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
+IDENTITY_GUARD_NAMES = (
+    "require_runtime_identity",
+    "warn_runtime_identity",
+    "require_runtime_identity_for_change",
+    "require_runtime_identity_for_card",
+    "require_runtime_identity_for_workspace",
+)
+
+
+def _no_identity_check(*_a: object, **_k: object) -> None:
+    return None
+
+
+def _command_modules() -> list[ModuleType]:
+    """Every loaded command-line module, whatever its name (a fixed name list went stale: 24 names against 68 files, D-155)."""
+
+    return [module for name, module in list(sys.modules.items()) if module is not None and name.startswith("auto_pm.ui.cli.")]
+
+
 @pytest.fixture
 def identity_guard_off() -> Generator[None, None, None]:
     """For tests about something other than the runtime identity, whose fixtures have no registered project anchor.
 
     The guard itself is covered in ``test_runtime_identity_guard.py``, which does not use this fixture.  It keeps its own
     ``MonkeyPatch`` so a test that calls the shared ``monkeypatch.undo()`` midway does not switch the guard back on.
+
+    D-155: the scan covers ``runtime_identity_guard`` itself, which switches the checks off at their source, so a command module first
+    imported *after* this fixture starts binds the no-op as well; modules already loaded are found by scanning, not by a name list.  On the way out, any module
+    that bound the no-op while the fixture was on gets the original back, or it would carry "guard off" into the next test.
     """
+    from auto_pm.ui.cli import runtime_identity_guard as source
+
+    originals = {name: getattr(source, name) for name in IDENTITY_GUARD_NAMES}
     with pytest.MonkeyPatch.context() as patcher:
-        # The command line is importable under two names (``auto_pm.cli`` and ``auto_pm.ui.cli``); patch whichever is loaded.
-        for package in ("auto_pm.ui.cli", "auto_pm.cli"):
-            for module in ("pm", "pm_closure", "pm_handoff", "pm_recover", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project", "handoff", "pr", "worktree", "spec", "delivery", "clean", "constraint", "vartable", "session", "dogfood", "git_hook", "workflow", "long_run"):
-                target = sys.modules.get(f"{package}.{module}")
-                if target is not None:
-                    for name in ("require_runtime_identity", "warn_runtime_identity", "require_runtime_identity_for_change", "require_runtime_identity_for_card", "require_runtime_identity_for_workspace"):
-                        if hasattr(target, name):
-                            patcher.setattr(target, name, lambda *_a, **_k: None)
-        yield
+        for module in _command_modules():
+            for name, original in originals.items():
+                if getattr(module, name, None) is original:
+                    patcher.setattr(module, name, _no_identity_check)
+        try:
+            yield
+        finally:
+            for module in _command_modules():
+                for name, original in originals.items():
+                    if getattr(module, name, None) is _no_identity_check:
+                        setattr(module, name, original)
