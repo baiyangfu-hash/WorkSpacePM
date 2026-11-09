@@ -18,7 +18,7 @@ from auto_pm.infrastructure import git_hook_enforcer as hook
 from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text, run_git_bounded_text
 
 needs_raw_names = pytest.mark.skipif(sys.platform == "win32", reason="Windows file names are UTF-16: no undecodable name can exist")
-BAD_NAME = os.fsdecode(b"bad\xff.txt")
+BAD_NAME = os.fsdecode(b"bad\xff.txt") if sys.platform != "win32" else "bad.txt"  # win32: names are UTF-16, fsdecode of \xff would fail at import
 
 
 class _RefusedError(RuntimeError):
