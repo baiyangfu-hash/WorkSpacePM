@@ -32,7 +32,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 
 class ImplementationCardError(RuntimeError):
@@ -218,7 +218,7 @@ class ImplementationCardService:
 
     @staticmethod
     def _git(worktree: Path, *args: str) -> str:
-        result = run_git_bounded_text(
+        result = run_git_bounded_strict_text(
             ["git", "-C", str(worktree), *args],
             default_timeout=60.0,
             error_cls=ImplementationCardError,

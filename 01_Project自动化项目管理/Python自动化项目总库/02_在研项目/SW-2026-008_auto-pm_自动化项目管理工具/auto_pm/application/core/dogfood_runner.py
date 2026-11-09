@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 _VENV_TIMEOUT_SECONDS = 600.0
 
@@ -310,7 +310,7 @@ class DogfoodRunner:
         return path.replace("\\", "/")
 
     def _run_git(self, path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return run_git_bounded_text(
+        return run_git_bounded_strict_text(
             ["git", "-C", str(path), *args],
             default_timeout=300.0,
             error_cls=DogfoodIsolationError,
