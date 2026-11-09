@@ -551,7 +551,7 @@ class AgentWorktreeService:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
-    def release(self, agent: str) -> ReleaseResult:
+    def release(self, agent: str, *, via: str = "release") -> ReleaseResult:
         """对话结束时回收自己的别名工位：先把工位里的一切（含未提交、未跟踪的文件）存成救援引用，再收目录。
 
         分支一定保留；救援引用 ``refs/rescue/<别名>/<时间>`` 指向一个包含全部改动的快照提交，不动工位分支本身，
@@ -559,9 +559,35 @@ class AgentWorktreeService:
         """
 
         with self._stations_lock():
-            return self._release_locked(agent)
+            return self._release_locked(agent, via=via)
 
-    def _release_locked(self, agent: str) -> ReleaseResult:
+    def _release_locked(self, agent: str, *, via: str = "release") -> ReleaseResult:
+        """回收一个别名工位，并把每一次回收（成功、被拒、失败）追加记到 ``.auto-pm/logs/station-reclaim.jsonl``（D-166）。"""
+
+        record: dict[str, object] = {"agent": agent, "via": via, "caller": caller_alias() or caller_agent() or "user"}
+        try:
+            result = self._release_checked(agent, record)
+        except AgentWorktreeError as error:
+            record.update(outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error))
+            self._log_reclaim(record)
+            raise
+        record.update(outcome="removed", rescue_ref=result.rescue_ref, branch=result.branch)
+        self._log_reclaim(record)
+        return result
+
+    def _log_reclaim(self, record: dict[str, object]) -> None:
+        """追加一行回收记录；写不进去只丢记录，不能让回收本身失败或留下半截。"""
+
+        line = {"at": datetime.now(UTC).isoformat(), **record}
+        folder = self._root / ".auto-pm" / "logs"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with (folder / "station-reclaim.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        except OSError:
+            return
+
+    def _release_checked(self, agent: str, record: dict[str, object]) -> ReleaseResult:
         if not _ALIAS.match(agent):
             raise AgentWorktreeError(f"`{agent}` 不是会话别名（<基名>-<6位十六进制>）；基名工位用 `worktree close`")
         caller = caller_agent()
@@ -572,7 +598,9 @@ class AgentWorktreeService:
         if info is None:
             raise StationRefusedError(f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状")
         self._require_inside(path)
+        record.update(branch=info.branch, head=info.head, path=str(path))
         rescue = self._save_rescue_ref(path, agent)
+        record["rescue_ref"] = rescue
         removed = self._git("worktree", "remove", "--force", str(path))
         if removed.returncode != 0:
             raise AgentWorktreeError(f"回收失败：{_detail(removed)}；救援引用 {rescue or '(无改动，没建)'} 已保留")
@@ -679,7 +707,7 @@ class AgentWorktreeService:
                 if caller_agent():
                     raise StationRefusedError("回收别的对话的陈旧工位只由用户在自己的终端执行")
                 for name, _reason in stale:
-                    self._release_locked(name)
+                    self._release_locked(name, via="reclaim-stale")
             return stale
 
     def count(self) -> int:
