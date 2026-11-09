@@ -480,6 +480,8 @@ def test_a_signature_comment_edited_after_posting_does_not_count_on_the_board_ei
     for missing in ("created_at", "updated_at"):
         incomplete = {key: value for key, value in base.items() if key != missing}
         assert gh.find_signature([incomplete], head)[0] is None, missing
+    both_missing = {key: value for key, value in base.items() if key not in ("created_at", "updated_at")}
+    assert gh.find_signature([both_missing], head)[0] is None  # 两个都缺：不能因 None == None 当成没编辑过
     assert gh.find_signature([edited, base], head) == (head[:8], "")
 
 

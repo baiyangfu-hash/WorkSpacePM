@@ -354,6 +354,9 @@ def test_s05c_a_comment_without_timestamps_does_not_count(repo: Path) -> None:
     no_created = sign(head)
     del no_created["created_at"]
     assert not gate.check(repo, base, head, [no_created]).passed
+    no_both = sign(head)
+    del no_both["created_at"], no_both["updated_at"]  # 两个都缺：None == None 也不能当成“没编辑过”
+    assert not gate.check(repo, base, head, [no_both]).passed
 
 
 def test_s05d_an_unedited_signature_still_counts_next_to_an_edited_one(repo: Path) -> None:
