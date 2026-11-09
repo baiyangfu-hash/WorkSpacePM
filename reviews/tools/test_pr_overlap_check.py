@@ -290,6 +290,17 @@ def test_a_missing_card_among_several_is_named(github: FakeGitHub) -> None:
     assert any("远程没有 `claims/ghost`" in error for error in run(github, 11).errors)
 
 
+def test_an_illegal_card_name_gets_its_own_message_and_is_never_looked_up_on_the_remote(github: FakeGitHub) -> None:
+    """`领卡占位: c1 备注` 这类带说明的写法：`备注` 不是卡号，要单独点名，而不是当成“远程没有 claims/备注”。"""
+    github.claim("c1", ["pkg/a"])
+    github.add_pr(11, multi_body("pkg/a/x.py", cards=("c1", "备注")), ["pkg/a/x.py"])
+
+    errors = run(github, 11).errors
+
+    assert any("`备注` 不是合法卡号" in error for error in errors)
+    assert not any("claims/备注" in error for error in errors)
+
+
 def test_each_named_card_cannot_back_an_earlier_open_pr(github: FakeGitHub) -> None:
     github.claim("c1", ["pkg/a"])
     github.claim("c2", ["pkg/b"])
