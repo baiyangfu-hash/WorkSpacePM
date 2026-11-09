@@ -18,7 +18,6 @@ M3-Iter1 重构：扫描/识别逻辑提取到 ProjectScanner，本类通过组�
 
 from __future__ import annotations
 
-import getpass
 import json
 import logging
 import os
@@ -35,6 +34,7 @@ from auto_pm.domain.models import ProjectInfo, ProjectListItem, ProjectRecord
 from auto_pm.domain.models.project import VALID_BUSINESS_LINES, extract_business_line
 from auto_pm.infrastructure.db.connection import DatabaseManager
 from auto_pm.infrastructure.db.repository import ChangeRequestRepository, ProjectRepository
+from auto_pm.infrastructure.user_name import current_user_name
 from auto_pm.infrastructure.utils.file_utils import StaleFileError, get_mtime, write_file
 
 log = logging.getLogger(__name__)
@@ -734,15 +734,7 @@ class ProjectService:
         """
         if author is None:
             candidates = [os.getenv("AUTO_PM_AUTHOR")]
-            try:
-                candidates.append(getpass.getuser())
-            except (KeyError, OSError):
-                pass
-            if hasattr(os, "getlogin"):
-                try:
-                    candidates.append(os.getlogin())
-                except OSError:
-                    pass
+            candidates.append(current_user_name(""))
             author = next((value.strip() for value in candidates if value and value.strip()), "unknown")
 
         if not os.path.isdir(project_path):
