@@ -23,6 +23,7 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeService,
     Station,
     StationRefusedError,
+    SweepItem,
 )
 from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_out
@@ -1702,3 +1703,75 @@ def test_a_failed_worktree_remove_is_logged_as_failed(lab: Lab, monkeypatch: pyt
         lab.service().release("claude-abcdef")
     (entry,) = _reclaim_log(lab)
     assert entry["outcome"] == "failed" and station.exists()
+
+
+# ── D-170: gaps the PR #706 audit found in the D-166 tests ───────────────────
+
+
+def test_make_room_judges_merged_on_what_github_has_now(lab: Lab) -> None:
+    """The merge happened on GitHub after the last local fetch: only ``fetch --prune`` can see it."""
+
+    station = _alias_done(lab, "claude-a1a1a1")  # merged on GitHub; this clone has not fetched since
+    _full_floor_with(lab, "claude-a1a1a1")
+    assert not lab.service()._is_ancestor("origin/claude/C-a1a1a1", "origin/main"), "前提：本机还不知道已并 main"
+
+    lab.service().open("trae", "CARD-NEW")
+
+    assert lab.station("trae").exists() and not station.exists()
+
+
+def test_make_room_keeps_the_inner_merged_check_when_the_station_changed_after_the_verdict(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defence in depth: whatever the verdict said, ``_remove_station`` re-reads and refuses an unmerged branch."""
+
+    station = _alias_done(lab, "claude-b2b2b2", merged=False)
+    _full_floor_with(lab, "claude-b2b2b2")
+    monkeypatch.setattr(
+        AgentWorktreeService,
+        "_sweep_verdict",
+        lambda self, st, agent: SweepItem(str(st.path), "station", True, "forced by the test"),
+    )
+
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service().open("trae", "CARD-NEW")
+
+    assert station.exists() and _holder(lab, "claude-b2b2b2").exists()
+    (entry,) = [e for e in _reclaim_log(lab) if e["via"] == "auto-make-room"]
+    assert entry["outcome"] == "refused" and "没并进 main" in str(entry["reason"])
+
+
+def test_make_room_stops_as_soon_as_one_place_is_free(lab: Lab) -> None:
+    _alias_done(lab, "claude-c3c3c3")
+    _alias_done(lab, "claude-d4d4d4")
+    _full_floor_with(lab, "claude-c3c3c3", "claude-d4d4d4")
+    assert lab.service().count() == MAX_STATIONS
+
+    lab.service().open("trae", "CARD-NEW")
+
+    kept = [name for name in ("claude-c3c3c3", "claude-d4d4d4") if lab.station(name).exists()]
+    assert len(kept) == 1, "清出一个空位就够了，另一个死工位要留着"
+    assert _holder(lab, kept[0]).exists()
+    assert len([e for e in _reclaim_log(lab) if e["via"] == "auto-make-room"]) == 1
+
+
+def test_an_unexpected_error_while_removing_is_logged_as_failed_for_close_and_sweep(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _alias_done(lab, "claude-e5e5e5")
+    _alias_done(lab, "claude-f6f6f6")
+
+    def boom(self: AgentWorktreeService, station: Station, *, require_merged: bool = False) -> None:
+        raise OSError("disk exploded")
+
+    monkeypatch.setattr(AgentWorktreeService, "_remove_station_checked", boom)
+
+    with pytest.raises(OSError, match="disk exploded"):
+        lab.service().close("claude-e5e5e5")
+    with pytest.raises(OSError, match="disk exploded"):
+        lab.service().sweep(apply=True, only="claude-f6f6f6")
+
+    by_via = {str(e["via"]): e for e in _reclaim_log(lab)}
+    assert by_via["close"]["outcome"] == "failed" and "disk exploded" in str(by_via["close"]["reason"])
+    assert by_via["sweep"]["outcome"] == "failed"
+    assert lab.station("claude-e5e5e5").exists() and _holder(lab, "claude-e5e5e5").exists()
