@@ -1,7 +1,7 @@
 """Deploy bookkeeping for the one-command release: change order, Decision, Work, Run, Checkpoint, closure and the receipt (D-146 card 3).
 
 This is the ledger half of the hand-written D07M script, as a resumable sequence.  Every step first asks the ledger where things stand and does
-only what is missing, so a run killed half way can be started again (``--resume``) without creating a second change order, Work or Run.
+only what is missing, so a run killed half way can be started again (re-run the same ``release deploy`` command) without creating a second change order, Work or Run.
 It runs the **same cockpit commands** the script ran, through an injected port (the real port shells out to ``main.py``; the tests use a fake
 that behaves like the ledger).  The ``approved`` step needs the user's confirmation reference and is refused without one: this module never
 invents an approval.

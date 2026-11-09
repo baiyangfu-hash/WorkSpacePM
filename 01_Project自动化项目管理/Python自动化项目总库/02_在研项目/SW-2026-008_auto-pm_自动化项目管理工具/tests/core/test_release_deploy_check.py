@@ -258,7 +258,7 @@ def test_the_report_always_lists_what_it_does_not_cover(repo: Repo, tmp_path: Pa
 
 
 def test_status_reports_pointers_installed_releases_and_the_last_receipt(repo: Repo) -> None:
-    receipt = repo.root / ".auto-pm" / "reports" / "deploy-1.3.2-aaaaaaa" / "receipt.json"
+    receipt = repo.root / ".auto-pm" / "reports" / f"{rdc.EVIDENCE_PREFIX}1.3.2-aaaaaaa" / "receipt.json"
     receipt.parent.mkdir(parents=True)
     receipt.write_text("{}", encoding="utf-8")
 
@@ -328,3 +328,17 @@ def test_a_shell_wrapper_that_merely_mentions_python_and_pytest_is_not_a_busy_pr
 )
 def test_a_python_interpreter_running_tests_or_the_cockpit_is_still_busy(command_line: str) -> None:
     assert rdc._busy_processes([(1, 0, "init"), (77, 1, command_line)]) == ["77"]
+
+
+def test_status_finds_the_receipt_the_real_deploy_writes(repo: Repo) -> None:
+    """D-188: ``release status`` once globbed ``deploy-*`` while the deploy wrote ``release-deploy-<id>/``; write the receipt through the deploy's own path code."""
+
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from auto_pm.application.core import release_ledger, release_wiring  # noqa: PLC0415
+
+    report = SimpleNamespace(release_id="1.3.3-ccccccc", commit="c" * 40)
+    plan, _backup = release_wiring.plan_for(repo.root, report, approver="fubai", confirm_ref="user-confirmation:2026-11-09T10:00Z")
+    written = release_ledger.write_receipt(plan, change_id="CHG-SCPT-2026-1", backup="b", entry_sha256="e", checks_sha256="c", rollback_command="r")
+
+    assert rdc.status(repo.root)["last_receipt"] == str(written)

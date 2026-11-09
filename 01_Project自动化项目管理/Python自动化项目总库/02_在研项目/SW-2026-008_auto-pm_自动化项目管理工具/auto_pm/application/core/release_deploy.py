@@ -154,7 +154,7 @@ def deploy(
     try:
         books: Books = open_books(plan, ledger, background=background, necessity=necessity)
     except LedgerError as error:
-        raise DeployError(f"建账没完成（可用 --resume 续）：{error}") from error
+        raise DeployError(f"建账没完成（重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做）：{error}") from error
     steps.extend(books.steps)
 
     already_switched = ops.active_release() == plan.release_id
@@ -176,7 +176,7 @@ def deploy(
     checks_sha = hashlib.sha256(summary.encode("utf-8")).hexdigest()
     entry_sha = str(entry.get("entry_sha256", "")) or ops.manifest_entry_sha256(plan.release_id)  # a resumed or already-built deploy has no build result
     if not entry_sha:
-        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，修好清单后可 --resume")
+        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，修好清单后重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做")
     try:
         closed = close_books(
             plan, ledger, change_id=books.change_id,
@@ -184,7 +184,7 @@ def deploy(
             conclusion=f"验收通过：有效版本 active={plan.release_id}，previous={plan.old_release}；自检 {len(results)} 项全过；确认引用 {plan.confirm_ref}",
         )
     except LedgerError as error:
-        raise DeployError(f"已切换且自检通过，但收口没完成（可用 --resume 续，不会再切换）：{error}") from error
+        raise DeployError(f"已切换且自检通过，但收口没完成（重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做，不会再切换）：{error}") from error
     steps.extend(closed.steps)
     receipt = write_receipt(plan, change_id=books.change_id, backup=str(backup), entry_sha256=entry_sha, checks_sha256=checks_sha, rollback_command=rollback_command)
     return DeployResult(plan.release_id, books.change_id, str(backup), str(receipt), {n: d for n, (_g, d) in results.items()}, steps)
