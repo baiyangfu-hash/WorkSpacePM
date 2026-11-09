@@ -386,3 +386,74 @@ def test_plan_for_binds_the_release_to_its_own_evidence_station_and_paths(tmp_pa
     assert f"00_Infrastructure/auto_pm/releases/{NEW}" in plan.paths and "00_Infrastructure/auto_pm/active_release.json" in plan.paths
     with pytest.raises(LedgerError, match="用户确认引用"):
         rw.plan_for(tmp_path, report, approver="fubai", confirm_ref="yes")
+
+
+# --- D-173: real_deploy puts the right things into the right slots (the audit swapped the pointers and 50 tests stayed green) ---
+
+
+def _container_with(tmp_path: Path, active: str, previous: str) -> None:
+    container = ops.container_of(tmp_path)
+    container.mkdir(parents=True)
+    (container / "active_release.json").write_text(json.dumps({"release_id": active}), encoding="utf-8")
+    (container / "previous_release.json").write_text(json.dumps({"release_id": previous}), encoding="utf-8")
+
+
+def _capture_real_deploy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr("auto_pm.domain.change.change_service.ChangeService", lambda root: SimpleNamespace(root=root))
+    monkeypatch.setattr("auto_pm.infrastructure.continuity_store.ContinuityStore", lambda root: SimpleNamespace(root=root))
+
+    def fake_checks(**kwargs: Any) -> dict[str, Any]:
+        seen["checks"] = kwargs
+        return {"marker": object()}
+
+    def fake_deploy(plan: Any, **kwargs: Any) -> rd.DeployResult:
+        seen["plan"], seen["deploy"] = plan, kwargs
+        return rd.DeployResult(plan.release_id, "CHG-SCPT-2026-1", str(kwargs["backup"]), str(tmp_path / "receipt.json"))
+
+    monkeypatch.setattr(rw, "build_self_checks", fake_checks)
+    monkeypatch.setattr(rd, "deploy", fake_deploy)
+    return seen
+
+
+def test_real_deploy_hands_each_pointer_to_the_right_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _container_with(tmp_path, active=OLD, previous=OLDER)
+    seen = _capture_real_deploy(tmp_path, monkeypatch)
+    card, drill = tmp_path / "card.md", tmp_path / "drill.py"
+    card.write_text("c", encoding="utf-8")
+    drill.write_text("d", encoding="utf-8")
+    report = SimpleNamespace(release_id=NEW, commit="b" * 40)
+
+    result = rw.real_deploy(tmp_path, report, approver="fubai", confirm_ref="user-confirmation:cmsg_001", card_file=card, drill_script=drill)
+
+    plan, deploy_args, check_args = seen["plan"], seen["deploy"], seen["checks"]
+    assert plan.old_release == OLD and plan.release_id == NEW and plan.commit == "b" * 40
+    assert check_args["release_id"] == NEW and check_args["old_release"] == OLD and check_args["older_release"] == OLDER, "new / old / older must not be shuffled"
+    assert check_args["card_file"] == card and check_args["drill_script"] == drill and check_args["root"] == tmp_path
+    adapter = deploy_args["ops"]
+    assert adapter.active_release() == OLD, "the adapter reads the live active pointer"
+    assert deploy_args["backup"].parent == plan.evidence_dir and deploy_args["backup"].name.startswith("pointer_backup_")
+    assert deploy_args["rollback_command"] == f"main.py release rollback {deploy_args['backup']}"
+    assert OLD in deploy_args["background"] and NEW in deploy_args["background"]
+    assert deploy_args["checks"] is not None and deploy_args["preflight"] is report
+    assert result.backup == str(deploy_args["backup"])
+
+
+def test_the_backup_a_real_deploy_makes_is_one_a_rollback_will_accept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-172 and D-173 meet here: the folder the deploy prints in its rollback command must be inside the folder rollback trusts."""
+
+    _container_with(tmp_path, active=OLD, previous=OLDER)
+    seen = _capture_real_deploy(tmp_path, monkeypatch)
+    card, drill = tmp_path / "card.md", tmp_path / "drill.py"
+    card.write_text("c", encoding="utf-8")
+    drill.write_text("d", encoding="utf-8")
+
+    rw.real_deploy(tmp_path, SimpleNamespace(release_id=NEW, commit="c" * 40), approver="fubai", confirm_ref="user-confirmation:cmsg_001", card_file=card, drill_script=drill)
+
+    ops._check_backup_inside_reports(tmp_path, seen["deploy"]["backup"])  # noqa: SLF001 - the contract between the two modules
+
+
+def test_the_cockpit_identity_ignores_the_output_of_a_failed_process(tmp_path: Path) -> None:
+    good_looking = json.dumps({"context": {"configured_release_id": NEW, "effective_release_id": NEW}, "conflicts": []})
+
+    assert rw.cockpit_identity(tmp_path, run=lambda argv, cwd: (3, good_looking)) == {}
