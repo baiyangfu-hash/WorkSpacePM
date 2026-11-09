@@ -21,8 +21,13 @@ Every reading function can be replaced by the caller (tests); nothing is read wh
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import ctypes
+import json
+import os
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -359,10 +364,154 @@ def refusal_text(result: Preflight) -> str:
     return "\n".join(lines)
 
 
-def require_headroom(*, run: Callable[[], Preflight] | None = None) -> str:
-    """Raise ``MemoryPreflightRefusedError`` with the refusal text when the preflight fails; return the "unverified" note (possibly empty) otherwise."""
+def require_headroom(*, run: Callable[[], Preflight] | None = None, label: str | None = None, timeout_seconds: float | None = None) -> str:
+    """Raise ``MemoryPreflightRefusedError`` with the refusal text when the preflight fails; return the "unverified" note (possibly empty) otherwise.
+
+    With ``label`` the caller is also armed for the memory gate (D-168, see ``arm``) once the preflight has passed: the gate only freezes
+    inside the trees of processes that armed themselves for a heavy job.  Arming never raises and never changes the preflight's verdict.
+    """
 
     result = (run or run_preflight)()
     if not result.ok:
         raise MemoryPreflightRefusedError(refusal_text(result))
+    if label is not None:
+        arm(label, timeout_seconds=timeout_seconds)
     return result.unverified
+
+
+# ---------------------------------------------------------------- arming the memory gate (D-168)
+#: The gate (``scripts/memory_gate.py``, SYSTEM) freezes only inside the process trees listed here: one small JSON file per armed process.
+ARM_DIR_NAME = "memory-gate-arm"
+ARM_SCHEMA = "memory-gate-arm.v1"
+#: label -> (default seconds when no command timeout is known, hard cap in seconds).  The gate holds the same table and rejects a longer record.
+ARM_LABEL_LIMITS: dict[str, tuple[float, float]] = {
+    "full-tests": (5400.0, 5400.0),
+    "pm-verify": (5400.0, 5400.0),
+    "deploy-gate": (5400.0, 5400.0),
+    "long-run": (15000.0, 43800.0),
+    "long-gate": (36600.0, 36600.0),
+}
+ARM_MARGIN_SECONDS = 600.0
+ARM_SEARCH_LEVELS = 12
+
+
+def arm_dir(start: Path | None = None) -> Path | None:
+    """``<control root>/.auto-pm/memory-gate-arm`` found by walking up from ``start`` (default: this file); None when no ``.auto-pm`` is on the way.
+
+    An ancestor that is itself named ``.auto-pm`` wins (a managed worktree sits below ``<root>/.auto-pm/worktrees`` and may hold an ``.auto-pm`` of its own);
+    otherwise the nearest ancestor that contains an ``.auto-pm`` folder.
+    """
+
+    here = (start if start is not None else Path(__file__)).resolve()
+    chain = [here, *here.parents][: ARM_SEARCH_LEVELS + 1]
+    for folder in chain:
+        if folder.name == ".auto-pm":
+            return folder / ARM_DIR_NAME
+    for folder in chain:
+        if (folder / ".auto-pm").is_dir():
+            return folder / ".auto-pm" / ARM_DIR_NAME
+    return None
+
+
+if sys.platform == "win32":
+
+    def process_created(pid: int) -> int:
+        """Creation time of ``pid`` as the gate reads it (Windows: FILETIME ticks); 0 when unreadable."""
+
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE, *([ctypes.POINTER(wintypes.FILETIME)] * 4)]
+        kernel.GetProcessTimes.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return 0
+        try:
+            times = [wintypes.FILETIME() for _ in range(4)]
+            if not kernel.GetProcessTimes(handle, *(ctypes.byref(item) for item in times)):
+                return 0
+            return (int(times[0].dwHighDateTime) << 32) | int(times[0].dwLowDateTime)
+        finally:
+            kernel.CloseHandle(handle)
+
+else:
+
+    def process_created(pid: int) -> int:
+        """Creation time of ``pid`` as the gate reads it (Linux: start time in clock ticks since boot); 0 when unreadable."""
+
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            return int(stat.rsplit(")", 1)[1].split()[19])
+        except (OSError, ValueError, IndexError):
+            return 0
+
+
+def arm(
+    label: str,
+    *,
+    timeout_seconds: float | None = None,
+    start: Path | None = None,
+    pid: int | None = None,
+    now: Callable[[], float] = time.time,
+) -> Path | None:
+    """Arm this process for the memory gate until it exits (or the label's cap passes).  Returns the record path, or None when it could not be written.
+
+    Deliberately silent on failure: a missing arm folder only means the gate stays out of this job's way, never that the job refuses to run.
+    The record is removed again at normal interpreter exit; a crash leaves a record that the gate rejects (process gone or creation time different).
+    """
+
+    limits = ARM_LABEL_LIMITS.get(label)
+    folder = arm_dir(start)
+    if limits is None or folder is None:
+        return None
+    default_seconds, hard_cap = limits
+    seconds = timeout_seconds + ARM_MARGIN_SECONDS if timeout_seconds is not None and timeout_seconds > 0 else default_seconds
+    seconds = min(seconds, hard_cap)
+    owner = pid if pid is not None else os.getpid()
+    armed_at = now()
+    record = {
+        "schema": ARM_SCHEMA,
+        "pid": owner,
+        "created": process_created(owner),
+        "label": label,
+        "armed_at": armed_at,
+        "expires_at": armed_at + seconds,
+    }
+    target = folder / f"{owner}.json"
+    temporary = folder / f"{owner}.json.tmp"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        _sweep_dead(folder, owner)
+        temporary.write_text(json.dumps(record), encoding="ascii")
+        os.replace(temporary, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        return None
+    atexit.register(disarm, target)
+    return target
+
+
+def _sweep_dead(folder: Path, keep: int) -> None:
+    """Remove the records of processes that no longer exist (a killed job cannot clean up after itself).  Best effort; the gate ignores them anyway."""
+
+    with contextlib.suppress(OSError):
+        for item in folder.glob("*.json"):
+            if not item.stem.isdigit() or int(item.stem) == keep:
+                continue
+            try:
+                created = json.loads(item.read_text(encoding="ascii")).get("created")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if process_created(int(item.stem)) != created:
+                item.unlink()
+
+
+def disarm(path: Path) -> None:
+    """Remove an arm record; already gone is fine."""
+
+    with contextlib.suppress(OSError):
+        path.unlink()

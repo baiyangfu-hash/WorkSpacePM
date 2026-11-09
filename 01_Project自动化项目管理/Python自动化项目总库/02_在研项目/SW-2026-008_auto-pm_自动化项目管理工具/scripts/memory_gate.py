@@ -26,6 +26,11 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
   可由 ``scripts/memory_gate.json`` 覆盖（只认 limit_ratio / resume_ratio / limit_gib / resume_gib 四个数值字段，文件大小上限 4 KiB，按纯数据严格解析，
   不是普通文件或是符号链接就不读）。写死的上下限：冻结线在提交上限的 40%~90% 之间、不低于 8 GiB，解冻线至少比冻结线低 3 GiB；
   越界、坏 JSON、未知字段一律整份忽略并用默认值，原因写进日志和 status。每 60 秒重读一次，改配置不用重装。提交上限读不到时退回 40/36 GiB。
+- 武装（D-168，设计 V0.2）：只在“已武装的进程树”里动手。要跑重任务的进程（pm verify、long-run 的 worker、long_gate 的 runner）自己在
+  ``<控制根>/.auto-pm/memory-gate-arm/<pid>.json`` 写一条记录（schema、pid、创建时间、标签、武装时间、到期时间，严格 JSON、不超过 1 KiB）；
+  记录有效 = 普通文件且不是符号链接、进程还活着且创建时间对得上、根进程是 python/pytest/mypy/ruff 一类、未到期、窗口不超过该标签的上限、
+  武装时间晚于本次开机、最多 8 条。过冻结线时候选只来自有效武装根的子树，梯子最高到武装根为止，不再往上冻终端和 shell；没有有效武装记录
+  就只写日志快照（整机总量 + 前 15 个进程），不冻、不通知。进程退出、到期、重启、看门狗重启（启动时清空武装目录）都让记录失效。
 - STOP 文件（只认受保护状态目录里的）：看门狗先解冻全部已冻进程再退出。
 - PID 复用：冻结与解冻都核对进程创建时间。
 
@@ -49,6 +54,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -120,6 +126,17 @@ BUNDLE_FILES = (
     "scripts/install_memory_gate.ps1",
     "scripts/memory_gate.py",
 )
+# D-168: the gate acts only inside process trees whose owner armed itself (``memory_preflight.arm``): one JSON file per armed process.
+ARM_DIR_NAME = "memory-gate-arm"
+ARM_SCHEMA = "memory-gate-arm.v1"
+ARM_RECORD_MAX_BYTES = 1024
+ARM_MAX_RECORDS = 8
+ARM_SEARCH_LEVELS = 8
+#: Same table as ``memory_preflight.ARM_LABEL_LIMITS`` (a test keeps them equal): label -> hard cap in seconds.  An unknown label is invalid.
+ARM_LABEL_CAPS = {"full-tests": 5400.0, "pm-verify": 5400.0, "deploy-gate": 5400.0, "long-run": 43800.0, "long-gate": 36600.0}
+ARM_ROOT_PREFIXES = ("python", "pytest", "mypy", "ruff", "py.exe", "pythonw")
+SNAPSHOT_TOP = 15
+SNAPSHOT_SECONDS = 60.0
 SHELL_NAMES = frozenset({"powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe", "wsl.exe", "bash", "sh", "zsh", "fish", "dash"})
 
 
@@ -504,6 +521,125 @@ def resolve_thresholds(commit_limit_gib: float | None, path: Path | None = None)
     return compute_thresholds(commit_limit_gib, values, note)
 
 
+# ---------------------------------------------------------------- arming (D-168)
+def boot_time() -> float | None:
+    """Wall-clock time of the last boot (epoch seconds); None when unreadable."""
+
+    try:
+        if sys.platform == "win32":
+            kernel = ctypes.WinDLL("kernel32")
+            kernel.GetTickCount64.restype = ctypes.c_uint64
+            return time.time() - float(kernel.GetTickCount64()) / 1000.0
+        for line in _read_text_retrying(Path("/proc/stat")).splitlines():
+            if line.startswith("btime "):
+                return float(line.split()[1])
+    except (OSError, ValueError, StateUnreadableError, AttributeError):
+        return None
+    return None
+
+
+def find_arm_dir(config: Path | None) -> Path | None:
+    """The arm folder ``<control root>/.auto-pm/memory-gate-arm``, found by walking up from the recorded config file (at most 8 levels); None = never armed."""
+
+    if config is None:
+        return None
+    chain = [config.parent, *config.parent.parents][:ARM_SEARCH_LEVELS]
+    for folder in chain:
+        if folder.name == ".auto-pm":
+            return folder / ARM_DIR_NAME
+    for folder in chain:
+        if (folder / ".auto-pm").is_dir():
+            return folder / ".auto-pm" / ARM_DIR_NAME
+    return None
+
+
+def _arm_problem(path: Path, procs: dict[int, Proc], created_of_pid: Callable[[int], int], now: float, boot: float | None) -> tuple[int | None, str]:
+    """(the armed root pid, "") for a valid record, else (None, why not)."""
+
+    try:
+        status = path.lstat()
+    except OSError as error:
+        return None, f"{path.name}: 读不了（{type(error).__name__}）"
+    if not stat_module.S_ISREG(status.st_mode):
+        return None, f"{path.name}: 不是普通文件（符号链接或目录）"
+    if status.st_size > ARM_RECORD_MAX_BYTES:
+        return None, f"{path.name}: 超过 {ARM_RECORD_MAX_BYTES} 字节"
+    try:
+        data = json.loads(_read_bytes_retrying(path).decode("utf-8"))
+    except (OSError, ValueError, StateUnreadableError):
+        return None, f"{path.name}: 不是合法 JSON"
+    if not isinstance(data, dict) or data.get("schema") != ARM_SCHEMA:
+        return None, f"{path.name}: schema 不对"
+    pid, created, label = data.get("pid"), data.get("created"), data.get("label")
+    armed_at, expires_at = data.get("armed_at"), data.get("expires_at")
+    numbers = (armed_at, expires_at)
+    if (
+        isinstance(pid, bool) or not isinstance(pid, int) or isinstance(created, bool) or not isinstance(created, int)
+        or not isinstance(label, str) or any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in numbers)
+    ):  # fmt: skip
+        return None, f"{path.name}: 字段类型不对"
+    assert isinstance(armed_at, (int, float)) and isinstance(expires_at, (int, float))
+    if path.name != f"{pid}.json":
+        return None, f"{path.name}: 文件名与 pid 不符"
+    cap = ARM_LABEL_CAPS.get(label)
+    if cap is None:
+        return None, f"{path.name}: 未知标签 {label!r}"
+    if expires_at <= now:
+        return None, f"{path.name}: 已过期"
+    if expires_at - armed_at > cap or armed_at > now + 60.0:
+        return None, f"{path.name}: 时间窗口越界"
+    if boot is not None and armed_at <= boot:
+        return None, f"{path.name}: 武装时间早于本次开机"
+    proc = procs.get(pid)
+    if proc is None:
+        return None, f"{path.name}: 进程已不在"
+    if created == 0 or created_of_pid(pid) != created:
+        return None, f"{path.name}: 创建时间对不上（pid 被复用或读不到）"
+    if not proc.name.lower().startswith(ARM_ROOT_PREFIXES):
+        return None, f"{path.name}: 根进程 {proc.name} 不是 python/pytest/mypy/ruff 一类"
+    return pid, ""
+
+
+def read_armed_roots(folder: Path | None, procs: dict[int, Proc], created_of_pid: Callable[[int], int], now: float, boot: float | None) -> tuple[list[int], list[str]]:
+    """(the valid armed root pids, the reasons the other records were rejected).  A missing folder means nothing is armed."""
+
+    if folder is None:
+        return [], []
+    try:
+        names = sorted(item for item in os.listdir(folder) if item.endswith(".json"))
+    except OSError:
+        return [], []
+    roots: list[int] = []
+    rejected: list[str] = []
+    for index, name in enumerate(names):
+        if index >= ARM_MAX_RECORDS:
+            rejected.append(f"{name}: 超过 {ARM_MAX_RECORDS} 条上限")
+            continue
+        pid, why = _arm_problem(folder / name, procs, created_of_pid, now, boot)
+        if pid is None:
+            rejected.append(why)
+        else:
+            roots.append(pid)
+    return roots, rejected
+
+
+def clear_arm_dir(folder: Path | None) -> int:
+    """Delete every record in the arm folder (the gate just started: whatever was armed before is stale).  Returns how many files went."""
+
+    if folder is None:
+        return 0
+    removed = 0
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0
+    for name in names:
+        with contextlib.suppress(OSError):
+            (folder / name).unlink()
+            removed += 1
+    return removed
+
+
 # ---------------------------------------------------------------- the gate
 class Gate:
     """One decision step per ``step()``; all machine access is injected so every rule can be tested with a fake machine."""
@@ -525,6 +661,7 @@ class Gate:
         limit_gib: float = LIMIT_GIB,
         resume_gib: float = RESUME_GIB,
         thresholds: Callable[[], Thresholds] | None = None,
+        armed_roots: Callable[[dict[int, Proc], float], tuple[list[int], list[str]]] | None = None,
     ) -> None:
         self.dir = state_dir
         self.committed_gib = committed_gib
@@ -542,6 +679,9 @@ class Gate:
         self.resume_limit = resume_gib
         self.thresholds = thresholds  # re-read every CONFIG_RELOAD_SECONDS: a changed config file takes effect without a reinstall
         self._thresholds_at: float | None = None
+        self.armed_roots = armed_roots  # None = the old behaviour (every user process may be frozen); set = only inside armed trees (D-168)
+        self._armed: list[int] | None = None  # the valid armed roots of the step in progress (set only while hot)
+        self._snapshot_at = float("-inf")
         self.threshold_source = "构造参数"
         self.history: list[tuple[float, float, dict[int, int]]] = []
         self.first_seen: dict[int, float] = {}
@@ -712,6 +852,8 @@ class Gate:
     def ladder(self, proc: Proc, procs: dict[int, Proc], blocked: set[int]) -> list[int]:
         """The roots to freeze for ``proc``, gentlest first: its shell level, then the terminal owner; never the application's main process."""
 
+        if self._armed is not None:
+            return self._armed_ladder(proc, procs, blocked)
         chain = self._chain(proc, procs, blocked)
         if not chain:
             return []
@@ -729,6 +871,32 @@ class Gate:
         else:
             first = terminal_owner
         return list(dict.fromkeys([first.pid, terminal_owner.pid]))
+
+    def _armed_ladder(self, proc: Proc, procs: dict[int, Proc], blocked: set[int]) -> list[int]:
+        """Armed mode: the armed roots on the way up from ``proc`` (itself included), innermost first; never anything above the outermost one."""
+
+        armed = set(self._armed or ())
+        rungs: list[int] = []
+        seen: set[int] = set()
+        current: Proc | None = proc
+        while current is not None and len(seen) < 64 and current.pid not in seen:
+            seen.add(current.pid)
+            if current.pid in armed and current.pid not in blocked and not self._excluded(current):
+                rungs.append(current.pid)
+            current = procs.get(current.ppid)
+        return rungs
+
+    def snapshot_text(self, now: float, committed: float, procs: dict[int, Proc]) -> str:
+        """One log line: machine total and the top processes by private commit (pid, name, GiB, protected, in an armed tree, 60 s growth)."""
+
+        armed_pids: set[int] = set()
+        for root in self._armed or ():
+            armed_pids.update(self._subtree(root, procs))
+        rows = []
+        for proc in sorted(procs.values(), key=lambda item: item.committed, reverse=True)[:SNAPSHOT_TOP]:
+            growth = self._growth_gib(proc.pid, procs, now)[0] if self.history else 0.0
+            rows.append(f"{proc.pid}:{proc.name}:{proc.committed / GIB:.2f}G:{'P' if self._protected(proc) else '-'}:{'A' if proc.pid in armed_pids else '-'}:+{growth:.2f}")
+        return f"整机已提交 {committed:.1f} GiB；前 {SNAPSHOT_TOP} 进程（pid:名:私有提交:保护:武装树:60秒增长）：" + " ".join(rows)
 
     def _subtree(self, root: int, procs: dict[int, Proc]) -> list[int]:
         children: dict[int, list[int]] = {}
@@ -803,6 +971,8 @@ class Gate:
             "reason": reason,
         }
         state["next_id"] += 1
+        self._snapshot_at = now
+        self.log(f"冻结时快照：{self.snapshot_text(now, committed, procs)}")
         state["frozen"].append(entry)
         state["watch"] = {"id": entry["id"], "at": now, "committed": committed}
         headline = f"已冻结 {procs[root].name}（PID {root}）的进程树，共 {len(pids)} 个进程（梯子第 {level} 层）；整机已提交 {committed:.1f} GiB"
@@ -813,6 +983,17 @@ class Gate:
         self.alert(headline, f"原因：{reason}\n恢复：确认原因后运行 resume-all；锁定的树不会自动解冻。", loud=relocked)
 
     def _hot(self, state: dict[str, Any], now: float, committed: float, procs: dict[int, Proc]) -> None:
+        self._armed = None
+        if self.armed_roots is not None:
+            roots, rejected = self.armed_roots(procs, now)
+            self._armed = roots
+            if now - self._snapshot_at >= SNAPSHOT_SECONDS:
+                self._snapshot_at = now
+                note = f"；被拒的武装记录：{'；'.join(rejected)}" if rejected else ""
+                state_text = f"武装根 {roots}" if roots else "没有任何有效的武装记录"
+                self.log(f"已提交 {committed:.1f} GiB 超限，{state_text}{note}。{self.snapshot_text(now, committed, procs)}")
+            if not roots:
+                return  # nobody armed: the gate only reports, it does not touch an unarmed process
         frozen_pids = {int(member["pid"]) for entry in state["frozen"] for member in entry["members"]}
         watch = state.get("watch")
         if watch is None:
@@ -1074,6 +1255,10 @@ def verify_install(root: Path) -> str:
 
 def real_gate(state_dir: Path) -> Gate:
     host = Host()
+
+    def armed(procs: dict[int, Proc], now: float) -> tuple[list[int], list[str]]:
+        return read_armed_roots(find_arm_dir(config_path()), procs, created_of, now, boot_time())
+
     return Gate(
         state_dir,
         committed_gib=host.committed_gib,
@@ -1084,6 +1269,7 @@ def real_gate(state_dir: Path) -> Gate:
         alive=host.alive,
         eligible=host.eligible,
         thresholds=lambda: resolve_thresholds(host.commit_limit_gib()),
+        armed_roots=armed,
     )
 
 
@@ -1240,6 +1426,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 3
         gate = real_gate(state_dir)
+        cleared = clear_arm_dir(find_arm_dir(config_path()))  # D-168: records from before this start are stale
+        if cleared:
+            gate.log(f"启动时清掉 {cleared} 个旧武装记录")
         gate.refresh_thresholds(gate.now())
         gate.log(f"看门狗启动，冻结线 {gate.limit:.2f} GiB，解冻线 {gate.resume_limit:.2f} GiB（{gate.threshold_source}）")
         run_forever(gate)

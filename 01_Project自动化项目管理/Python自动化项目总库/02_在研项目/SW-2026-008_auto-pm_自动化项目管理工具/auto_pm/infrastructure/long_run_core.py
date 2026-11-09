@@ -439,6 +439,8 @@ def worker_main(run_dir: Path) -> int:
 
     spec = _read_json(run_dir / "spec.json")
     (run_dir / "worker.pid").write_text(str(os.getpid()), encoding="ascii")
+    with contextlib.suppress(Exception):  # D-168: arm for the memory gate until this worker exits; a failure here must never stop the job
+        _preflight_module().arm("long-run", timeout_seconds=float(spec["timeout_seconds"]))
     log = run_dir / "run.log"
     argv = [str(item) for item in spec["argv"]]
     flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
