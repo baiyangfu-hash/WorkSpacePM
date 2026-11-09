@@ -694,7 +694,17 @@ def cmd_lint(
             full_path = (ws / cp).resolve()
             if not full_path.exists():
                 continue
-            text = full_path.read_text(encoding="utf-8", errors="ignore")
+            try:
+                text = full_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                issues.append({
+                    "rule": "LINT-004/schema_mismatch",
+                    "severity": "WARNING",
+                    "message": f"[{spec_id}] 不是合法 UTF-8，无法检查 YAML frontmatter",
+                    "detail": str(cp),
+                    "suggestion": "用 UTF-8 重新保存该文件",
+                })
+                continue
             if not text.startswith("---"):
                 issues.append({
                     "rule": "LINT-004/schema_mismatch",

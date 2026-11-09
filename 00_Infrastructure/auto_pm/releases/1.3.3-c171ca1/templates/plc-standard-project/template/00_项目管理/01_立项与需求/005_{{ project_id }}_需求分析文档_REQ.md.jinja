@@ -1,0 +1,20 @@
+---
+spec_id: REQ-005
+title: "{{ project_name }} 需求分析文档 (REQ)"
+project_id: "{{ project_id }}"
+version: "{{ version | default('V1.0.0') }}"
+status: "正式"
+created: "2026-08-23"
+author: "PM_Workflow"
+domain: "plc"
+---
+
+# 需求分析文档 (REQ) - {{ project_id }} {{ project_name }}
+
+## 1. 业务定位与核心控制目标
+本项目为 {{ project_name }} 自动化控制系统，设计满足高生产节拍与汽车制造级可靠性规范。
+
+### 1.1 核心控制指标
+- 自动化连续运行节拍：标准单周期 ≤ 30s；
+- 故障自诊断：汽车级毫秒级首出报警锁定 (STD-860) 与步序缺失传感器在线提取；
+- 状态机控制：遵循 STD-830 OMAC 8 模式控制。

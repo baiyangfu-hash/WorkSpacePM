@@ -29,7 +29,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from auto_pm.domain.change.change_service import ChangeService
 from auto_pm.ui.cli.__main__ import cli
@@ -527,3 +527,177 @@ def test_change_edit_no_fields_specified(cli_runner: CliRunner, tmp_path: Path) 
     )
     assert result.exit_code == 1
     assert "未指定要更新的字段" in result.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_fills_the_section_5_file_cells(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-97: `change edit --file` writes the §5 涉及文件/交付物 cells that the approved scope is read from."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+
+    result = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a/b.py", "--file", "tests/test_b.py"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    written = next(tmp_path.rglob(f"{change_number}.md")).read_text(encoding="utf-8")
+    assert written.count("| 涉及文件/交付物 | a/b.py<br>tests/test_b.py |") == 2
+
+
+@pytest.mark.cli
+def test_change_edit_file_rejects_a_path_that_would_break_the_table(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a|b.py"])
+
+    assert result.exit_code == 1
+    assert "非法字符" in result.output
+
+
+def _edit_files(cli_runner: CliRunner, tmp_path: Path, change_number: str, *extra: str) -> Result:
+    return cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a/b.py", *extra], catch_exceptions=False
+    )
+
+
+def _change_text(tmp_path: Path, change_number: str) -> str:
+    return next(tmp_path.rglob(f"{change_number}.md")).read_text(encoding="utf-8")
+
+
+@pytest.mark.cli
+def test_change_edit_file_fails_loudly_when_section_5_has_no_file_row(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-97 audit 1: no “涉及文件/交付物” row -> exit 1, the file stays byte-for-byte the same, no green “已更新”."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    path = next(tmp_path.rglob(f"{change_number}.md"))
+    path.write_text(path.read_text(encoding="utf-8").replace("涉及文件/交付物", "涉及文档"), encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+
+    result = _edit_files(cli_runner, tmp_path, change_number)
+
+    assert result.exit_code == 1
+    assert "没有“涉及文件/交付物”行" in result.output
+    assert "变更单已更新" not in result.output
+    assert path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.cli
+def test_change_edit_file_says_so_when_the_list_is_already_the_same(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+
+    again = _edit_files(cli_runner, tmp_path, change_number)
+
+    assert again.exit_code == 0
+    assert "没有变化" in again.output
+    assert "变更单已更新" not in again.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_prints_the_list_before_and_after(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+
+    result = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "c.py", "--file", "d.py"],
+        catch_exceptions=False,
+    )  # fmt: skip
+
+    assert result.exit_code == 0
+    assert "改前: a/b.py" in result.output
+    assert "改后: c.py, d.py" in result.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_after_leaving_draft_needs_the_explicit_switch(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-97 audit 2 (option 1): once the record is not a draft, editing §5 is a scope change and must be asked for."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+    moved = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "change", "transition", change_number, "--to", "submitted", "--approver", "t", "--comment", "x"],
+        catch_exceptions=False,
+    )  # fmt: skip
+    assert moved.exit_code == 0, moved.output
+    before = _change_text(tmp_path, change_number)
+
+    refused = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "wider/**"], catch_exceptions=False
+    )
+
+    assert refused.exit_code == 1
+    assert "--after-approval" in refused.output and "a/b.py" in refused.output
+    assert _change_text(tmp_path, change_number) == before
+
+    allowed = cli_runner.invoke(
+        cli,
+        ["-w", str(tmp_path), "change", "edit", change_number, "--file", "wider/x.py", "--after-approval"],
+        catch_exceptions=False,
+    )  # fmt: skip
+    assert allowed.exit_code == 0, allowed.output
+    assert "改前: a/b.py" in allowed.output and "改后: wider/x.py" in allowed.output
+
+
+@pytest.mark.cli
+def test_change_edit_file_same_number_in_two_projects_asks_for_pid_without_a_traceback(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """D-97 audit 2 (1): the pre-read must not escape the try; the ambiguity hint (TD-SW008-176) must reach the operator."""
+    first = _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    source = next(first.rglob(f"{change_number}.md"))
+    second = _make_plc_project_for_change(tmp_path, "DJ-2026-OTH", "另一个项目")
+    twin = second / source.relative_to(first)
+    twin.parent.mkdir(parents=True, exist_ok=True)
+    twin.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    before = (source.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8"))
+
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "a.py"])
+
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert result.exit_code == 1
+    assert "--pid" in result.output
+    assert (source.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8")) == before
+
+
+@pytest.mark.cli
+def test_change_edit_same_file_list_plus_another_field_still_writes_the_other_field(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """D-97 audit 2 (2): the “没有变化” shortcut only applies when --file is the only field."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+
+    result = _edit_files(cli_runner, tmp_path, change_number, "--background", "新的背景说明")
+
+    assert result.exit_code == 0, result.output
+    assert "变更单已更新" in result.output
+    assert "没有变化" not in result.output
+    assert "新的背景说明" in _change_text(tmp_path, change_number)
+
+
+@pytest.mark.cli
+def test_d154_change_edit_file_is_refused_with_exit_one_once_work_has_started(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """D-154 ruling: after ``implementing`` the file list may not change at all, even with --after-approval."""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    change_number = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert _edit_files(cli_runner, tmp_path, change_number).exit_code == 0
+    path = next(tmp_path.rglob(f"{change_number}.md"))
+    path.write_text(path.read_text(encoding="utf-8").replace("| 变更状态 | draft |", "| 变更状态 | implementing |"), encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+
+    refused = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", change_number, "--file", "wider/x.py", "--after-approval"],
+        catch_exceptions=False,
+    )  # fmt: skip
+
+    assert refused.exit_code == 1
+    assert "实施中不能改文件清单" in refused.output and "另开变更单" in refused.output
+    assert path.read_text(encoding="utf-8") == before

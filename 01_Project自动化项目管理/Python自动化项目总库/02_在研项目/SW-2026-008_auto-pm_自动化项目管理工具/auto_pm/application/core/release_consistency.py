@@ -66,7 +66,7 @@ def _git(root: str, *args: str) -> str | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: only hex object ids are compared; undecodable bytes can never equal one
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
         )

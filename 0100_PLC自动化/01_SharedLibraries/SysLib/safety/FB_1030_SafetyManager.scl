@@ -290,18 +290,18 @@ BEGIN
     t_dwBit := 16#00000001;
     FOR t_iIdx := 0 TO 7 DO
         IF NOT i_arrEStopOk[t_iIdx] THEN
-            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, t_iIdx);
+            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, INT_TO_UINT(t_iIdx));
         END_IF;
         IF NOT i_arrDoorClosed[t_iIdx] THEN
-            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, t_iIdx + 8);
+            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, INT_TO_UINT(t_iIdx + 8));
         END_IF;
         IF NOT i_arrCurtainOk[t_iIdx] THEN
-            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, t_iIdx + 16);
+            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, INT_TO_UINT(t_iIdx + 16));
         END_IF;
     END_FOR;
     FOR t_iIdx := 0 TO 3 DO
         IF i_arrSafetyFault[t_iIdx] THEN
-            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, t_iIdx + 24);
+            t_dwAlarm := t_dwAlarm OR SHL(t_dwBit, INT_TO_UINT(t_iIdx + 24));
         END_IF;
     END_FOR;
     IF NOT i_bFieldbusOk THEN

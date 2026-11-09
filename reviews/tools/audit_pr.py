@@ -276,10 +276,41 @@ BAD_STATES = {"failure", "error"}
 PASSING_CONCLUSIONS = {"success", "skipped", "neutral"}
 
 
+ACTIONS_RUN_IN_URL = re.compile(r"/actions/runs/(\d+)")
+
+
+def newest_check_runs(runs: list[dict], check_runs: list[dict]) -> list[dict]:
+    """Keep only the newest check run per (workflow, app, job name, head commit) (D-71).
+
+    A check run belongs to a workflow through the Actions run id in its ``details_url``.  Same-named jobs of *different*
+    workflows are different checks and all stay; a check run with no ``id`` or an unknown run is never merged with another.
+    """
+
+    workflow_of = {r["id"]: r.get("workflow_id") for r in runs if "id" in r}
+    newest: dict[tuple, tuple[int, dict]] = {}
+    kept: list[tuple[int, dict]] = []
+    for index, c in enumerate(check_runs):
+        cid = c.get("id")
+        found = ACTIONS_RUN_IN_URL.search(str(c.get("details_url") or c.get("html_url") or ""))
+        workflow = workflow_of.get(int(found.group(1))) if found else None
+        if not isinstance(cid, int) or workflow is None:
+            kept.append((index, c))
+            continue
+        # The head commit is part of the key: this script fetches check runs of both the head and the merge commit, and a
+        # re-run on another commit must not cover the result on this one.
+        key = (workflow, (c.get("app") or {}).get("id"), c.get("name"), c.get("head_sha"))
+        if key not in newest or cid > newest[key][1]["id"]:
+            newest[key] = (index, c)
+    kept.extend(newest.values())
+    return [c for _, c in sorted(kept, key=lambda item: item[0])]
+
+
 def judge_ci(
     runs: list[dict], check_runs: list[dict], statuses: list[dict], expected_ci: bool
 ) -> tuple[str, str]:
     """Verdict over Actions runs, check runs and commit statuses. Any failing or unfinished required context is not a PASS."""
+    # Check runs of the same job in the same workflow are re-runs or were cancelled by a newer one: only the newest counts.
+    check_runs = newest_check_runs(runs, check_runs)
     # Only the newest run per (workflow, event, commit) counts: older ones are re-runs or were cancelled by a newer push.
     newest: dict[tuple, dict] = {}
     for r in runs:
@@ -562,7 +593,7 @@ def _audit(
         check_runs: list[dict] | None = []
         statuses: list[dict] | None = []
         for sha in shas:
-            data = github_json(f"{repo}/actions/runs?head_sha={sha}&per_page=20")
+            data = github_json(f"{repo}/actions/runs?head_sha={sha}&per_page=100")
             runs = None if data is None or runs is None else runs + data.get("workflow_runs", [])
             data = github_json(f"{repo}/commits/{sha}/check-runs?per_page=100")
             check_runs = None if data is None or check_runs is None else check_runs + data.get("check_runs", [])

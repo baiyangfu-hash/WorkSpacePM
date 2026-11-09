@@ -17,6 +17,7 @@
 | 跨技能公共契约 | `roles/shared/refs/skill_coordination.md` |
 | 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
 | 当前计划与状态投影 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md`（以其“当前投影”为准；上一行的 26 号总计划是治理基线与历史依据） |
+| 持续演进路线（M3 验收后下一期选什么、遗留问题；后续接手迭代的基准） | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/M3后持续演进规划_20261008/V1.0_20261104/01_现行路线_V1.0_PM.md`（遗留问题见同目录 `02_M3遗留问题_V1.0_PM.md`；这是“选什么”的菜单，状态仍以上一行 39 号计划“当前投影”为准） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
@@ -31,7 +32,7 @@
 - **PM 治理角色**：负责事实核验、CHG、Decision、Work 授权与验收；不得使用 `pm-workflow`，不得把 PM_SESSION、handoff.v1 或聊天文字视为执行真源。
 - **plc-electrical-engineer**：PLC 工程执行主力，全面遵循 Siemens LSP 扩展生态及 LSP-905~908 规范（语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、.plc.json 依赖）与汽车制造级标准（STD-830 OMAC 状态机、STD-840 典型设备块、STD-850 步进链、STD-860 首出诊断）
 - **fullstack-engineer**：Python/高级语言全栈执行主力，全面遵循 DEV-300（Google SRE 零崩溃/白盒日志/黄金信号）与 DEV-210/DEV-216/DEV-218（PySide6+QML 5 层整洁架构、Bridge/DTO、QRunnable 线程模型、Ruff+Mypy）
-- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改
+- **基础设施**：`.trae/` 由 Trae 生态维护；其他 AI 只读，除非用户明确要求修改。Trae 里的 AI 想改 `.trae/` 也要先有用户原话，不得自改自合
 
 ## 强制协同铁律（澄清-报批-执行-验收 四阶段）
 
@@ -41,9 +42,9 @@
    - **严禁代码盲问 (Zero-Stupid-Questions Redline)**：严禁在未检索代码库的情况下直接向用户提问。任何可在项目源码、配置文件（`.plc.json` / `pyproject.toml`）、接口文档（`INT.md` / `VAR.md`）、数据结构（DTO / UDT）或规范库中读取到的参数、变量名、调用关系与目录路径，**绝对禁止向用户发问**；
    - **二分法处理原则 (Greenfield vs Brownfield)**：
      - **全新建仓 (Greenfield)**：审查 CAD/轴系/动作时序 3 要素。若缺失，先检索 Obsidian 规范库与模板库；仍缺失物理硬件事实时方可向用户提问；
-     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的发布版本 1.3.3-d8f7c8b 还没有 `pm orient`，新克隆的工作区在发布指针更新前改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
+     - **在研迭代/缺陷变更 (Brownfield)**：先按 `cockpit-entry` 从工作区根执行只读定位 `main.py pm orient <PID> --json`（需要恢复细节时再用 `main.py pm resume <PID> --json`；仓库记录的现行发布版本 1.3.3-d563293 已有 `pm orient`；若本机报 `No such command 'orient'`，说明本机生效的发布版本更旧，改用 `pm resume`），再由 PM 角色只读勘测或派发 Grooming；没有匹配的 Work/Run/Decision 时不得修改；
    - **有效提问门槛**：只有当代码库探路完毕，且发现涉及无法推导的真实业务决策抉择（Trade-off）、新增未接线硬件定义或客户冲突诉求时，方可发起《高质量澄清提问清单》；
-2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）；
+2. **阶段 1【报批】**：PM 角色输出《需求分析与技术实施计划》（注明依据规范 PM-042/PM-033、受影响文件及 HTML 原型方案），**必须显式停下来等待用户确认**（“请确认是否批准开工？”）。一档小卡（只改测试、文档或单个文件的小修，且不碰受保护路径、安全区、PLC 项目、发布载荷）可不报批直接做，做完告知；其余仍先报批；
 3. **阶段 2【执行】**：仅在用户明确回复“同意/批准”后，方可派发给对应执行技能（PLC / 全栈）编写代码与自动化测试。严禁在对话框要求或输出长篇说明书草稿，文档骨架由 Copier 脚手架生成并填空；
 4. **阶段 3【验收】**：执行端创建 Checkpoint 并回执后，主 Agent 核验 Git/门禁证据，报用户验收；IDE 里的 agent 用 `main.py pm verify --mission-id <ID> --lease-wallet` 做质量验证（不写临时脚本）；用户验收后由用户在驾驶舱界面点“确认验收”（已启用批准口令时改为用户本人在终端运行 `main.py pm accept --mission-id <ID>` 并输入口令；批准范围同样由用户在 `pm approve` 的提示里输入口令，agent 绝不索要、代填或绕过口令），它记下验收并走 `close_accepted` 一步收口（隔离工作树里验收过的文件按字节并回控制根、不替用户提交，推进 Run、Work 和 Mission，把证据写进变更单；已验收未收口的用 `main.py pm close --mission-id <ID>` 重试（终端里 `main.py pm accept` 只记下验收、停在 ACCEPTED，之后要再跑 `main.py pm close` 才收口；一步收口只发生在驾驶舱界面的“确认验收”按钮）；变更单再用 `change transition … --pid <PID>` 推到 completed），**不得单独用 `continuity run/work/mission transition` 推 Run、Work 或 Mission 的状态**，收口后执行 `main.py ledger reconcile <PID>`。PM_SESSION 已退役（用户 2026-10-10 裁决），不再刷新，仅作历史证据。闭环未完成前不得宣布结项。
 
@@ -79,6 +80,15 @@
 
 表外的 AI 先由用户登记名字和前缀，再开工位。已合并的历史分支（如主执行用过的 `codex/pr-…`）不改名，新卡按本表。
 
+**agent 名字规则（对所有 agent 一视同仁，写给 Claude 以外的 AI 看；CHG-SCPT-2026-483 落地后生效）：**
+
+1. **基名**就是上表第一列（claude、trae、cursor、vscode、codex），决定分支前缀；**别名**是 `<基名>-<会话ID前6位十六进制>`（如 `claude-b89bc8`），决定工位目录名，让同一台电脑上同时开的多个对话各占一个工位、互不踩。分支仍用 `<基名前缀><卡号>`，PR 脚本和审计脚本不受影响。
+2. **身份靠环境变量 `AUTO_PM_AGENT` 声明，不靠哪家 AI**：值写基名（冒号后的备注随意，如 `trae:cn`）。Claude Code 和 Codex 因自带环境变量（`CLAUDECODE`、`CODEX_*`）可被自动认出；**Cursor、VS Code 里的 AI、Trae 等没有自带标记，必须自己带上 `AUTO_PM_AGENT=<基名>` 再跑 `main.py`，否则驾驶舱会把它当成用户本人，口令类命令（`pm approve`、`pm accept`、`pm sign-risk`）和收别人工位的护栏都拦不住**。只在这一条命令期间设置，命令结束即还原，不在终端长期设置（否则用户自己在同一终端敲口令会被当成 agent 拒绝）。
+3. **会话 ID 的取值顺序**：`AUTO_PM_SESSION_ID`（任何 agent 都能设，优先）→ `CLAUDE_CODE_SESSION_ID` → 首次调用自动生成并记在工位元数据里。拿不到会话 ID 就退回只用基名。别名只能由会话 ID 派生，agent 不得在命令行手写别名冒用别的对话；手写别名只允许用户终端。
+4. **回收**：有 `SessionEnd` 类钩子的 agent（目前只有 Claude Code）可在对话结束时即时回收；其他 agent 靠兜底：持有对话的进程已不在、心跳超时且没有未过期的 Run 租约，才算过期，默认只列出，用户或 `worktree reclaim --stale --apply` 才真正回收。所有 agent 收工时都应主动执行 `worktree close <别名>`。回收前未提交改动先存成补丁，分支永远保留。
+5. **新 agent 登记**：表外的 AI 由用户登记基名和前缀（加一行到上表）后即可使用，其余规则不用改。
+6. **各家入口文件只做薄引用**：`CLAUDE.md`、`.cursor/rules/`、`.agent/rules/`、`.trae/rules/` 只写“读 `AGENTS.md` 与 `cockpit-entry`”和各自的身份声明方式，不复制规则。通用规则只写在本文件。
+
 **铁律：**
 
 1. **一台电脑只克隆一次。** 工位一律用 `git worktree add` 从控制根派生，放在 `R/.auto-pm/worktrees/<agent>`。放到别处会出问题：
@@ -95,7 +105,7 @@
 
 **开工位 / 收工位（在控制根里）：**
 
-> 生效时间：`main.py worktree …` 已合进 `main`（PR #87），但当前部署的发布版还没有，要等下一次发版切换后才能在控制根使用；在那之前，下面“手工命令”照旧。
+> 生效时间：`main.py worktree …` 已合进 `main`（PR #87），仓库记录的现行发布版本 1.3.3-d563293 已有（`worktree open/list/close/sweep` 实测都在）；若本机报 `No such command 'worktree'`，说明本机生效的发布版本更旧，在那之前用下面的“手工命令”。
 
 ```
 main.py worktree open <agent> <卡号>    # 开工：从最新 origin/main 建工位和 <前缀><卡号> 分支
@@ -104,7 +114,7 @@ main.py worktree close <agent>          # 收工：无未提交改动、提交�
 main.py worktree sweep                  # 只列可清理的；加 --apply 才删（已并进 main 的工位、远程已删的本地分支、已结束 Run 的 run-plan-*）
 ```
 
-命令的护栏：不删有未提交改动或没推送提交的工位；不删远程分支（合并后由 GitHub 自动删）；不动别的 agent 的工位；认不出调用方（带了 agent 标记但不在名册里）一律拒绝，只有用户自己的终端（没有任何 agent 标记）才能收别人的工位和清 run-plan。调用方靠环境变量 `AUTO_PM_AGENT`（冒号前一段，如 `trae:cn`）、`CLAUDECODE`、`CODEX_*` 识别。
+命令的护栏：不删有未提交改动或没推送提交的工位；不删远程分支（合并后由 GitHub 自动删）；不动别的 agent 的工位；认不出调用方（带了 agent 标记但不在名册里）一律拒绝，只有用户自己的终端（没有任何 agent 标记）才能收别人的工位和清 run-plan。调用方靠环境变量 `AUTO_PM_AGENT`（冒号前一段，如 `trae:cn`）识别；Claude Code 的 `CLAUDECODE` 和 Codex 的 `CODEX_*` 是额外的自动标记，其他 agent 没有，必须自己声明（见上面“agent 名字规则”第 2 条）。
 
 发版切换前的手工命令（等价于上面四条）：
 
@@ -133,6 +143,14 @@ git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、�
 5. **开新卡撞车要放行**：新卡要改的文件和开着的卡重叠，或者项目已开满 8 张，`pm approve` 会拒并说明撞了谁；用户同意后加 `--admission-release-ref <用户原话位置>` 再批。驾驶舱上没有放行按钮。
 6. **不插队抢钥匙**：正在干的卡不能被别人直接抢走（插队 PREEMPT 不支持）；要切换只能先 park。`pm missions --pid <项目>` 随时只读查看四栏。
 7. 搁着超过 7 天的卡在看板上标黄：提醒用户决定拿回还是作废，不要自己作废。
+
+## 开工先订卡 (D-101)
+
+多个 agent、多个云端会话同时干活，靠“占位表”避免改同一批文件。云端会话用 GitHub 工具直接开 PR，不走 `pm pr open`，所以这一步由 GitHub 检查强制。
+
+1. **开工顺序**：先 `main.py claim list` 看占位表；要改的路径和别人的占位重叠就停下、告诉用户；不重叠就 `main.py claim open <卡号> --paths … --goal …` 订卡；**订上了才改代码**。订卡租期 4 小时，还在干就 `main.py claim renew <卡号>`；没动静的占位只有用户一句话能 `claim reclaim` 收回。
+2. **PR 描述写一行** `领卡占位: <卡号>`，并有 `可改范围` 清单，清单里每条路径都要落在占位登记的路径里。
+3. **机器判定**（GitHub 的 `gate` 检查，脚本 `reviews/tools/pr_overlap_check.py`）：远程有 `claims/<卡号>`、领卡时间不晚于本 PR 最早的提交、占位没被收回、范围在占位路径内；并且**编号更小的、开着的 PR（含草稿）和本 PR 改同一批文件就报红并点名**，先来的先合，后来的等。确需并行写 `重叠放行: #<编号> <理由>`，审计要核对理由。2026-11-08 之后创建的 PR 强制，之前已开着的只提示。
 
 ## 独立审计 (AUD-001)
 

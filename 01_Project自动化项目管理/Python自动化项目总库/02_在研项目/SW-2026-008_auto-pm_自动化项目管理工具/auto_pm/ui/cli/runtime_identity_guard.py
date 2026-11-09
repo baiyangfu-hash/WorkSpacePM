@@ -18,23 +18,28 @@ from auto_pm.application.core.workspace_context_service import (
     WorkspaceContextService,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.ui.cli.guard_refusal import GuardClickRefusal
 
 
-def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Path | None = None) -> None:
+def require_runtime_identity(
+    ctx: click.Context, project_id: str, start_path: Path | None = None, candidate_release: str = ""
+) -> None:
     """Refuse the write (``ClickException``) when the runtime identity for ``project_id`` has any conflict.
 
     With an empty ``project_id`` the project is derived from the directory ``start_path`` (a change order's own folder).
+    ``candidate_release`` (D-157) is only ever passed by a command that writes nothing but its own output folder; it lifts the
+    pointer-versus-loaded-release divergence for that one installed, verified, not-yet-switched release and nothing else.
     """
 
     app_ctx: AppContext = ctx.find_root().obj
     try:
         context = WorkspaceContextService(
-            str(app_ctx.control_root), execution_root=app_ctx.workspace_root
+            str(app_ctx.control_root), execution_root=app_ctx.workspace_root, candidate_release_id=candidate_release
         ).resolve(project_id=project_id, start_path=start_path or app_ctx.control_root)
     except WorkspaceContextError as error:
         raise click.ClickException(str(error)) from error
     if context.conflicts:
-        raise click.ClickException("运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
+        raise GuardClickRefusal("G-IDENTITY-WRITE", "运行身份未通过校验，已拒绝写入：" + "；".join(context.conflicts))
 
 
 # The runtime (release pointer and loaded package) is one folder shared by every registered project, so a command that
@@ -42,10 +47,13 @@ def require_runtime_identity(ctx: click.Context, project_id: str, start_path: Pa
 COCKPIT_PROJECT_ID = "SW-2026-008"
 
 
-def require_runtime_identity_for_workspace(ctx: click.Context) -> None:
+def require_runtime_identity_for_workspace(ctx: click.Context, candidate_release: str = "") -> None:
     """Guard a write command that belongs to the whole workspace, not to one project (TD-SW008-214)."""
 
-    require_runtime_identity(ctx, COCKPIT_PROJECT_ID)
+    if candidate_release:  # the plain call stays exactly as it was, so only the one command that names a candidate ever differs
+        require_runtime_identity(ctx, COCKPIT_PROJECT_ID, candidate_release=candidate_release)
+    else:
+        require_runtime_identity(ctx, COCKPIT_PROJECT_ID)
 
 
 WARNINGS_META_KEY = "runtime_identity_warnings"

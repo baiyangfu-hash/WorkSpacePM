@@ -21,7 +21,8 @@ alwaysApply: true
 | **全栈高级语言** | `roles/fullstack-engineer/SKILL.md` |
 | **Obsidian 规范注册表** | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
 | **全局协作入口** | `AGENTS.md` |
-| **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个 agent 一个工位 `.auto-pm/worktrees/<agent>` |
+| **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个对话一个工位 `.auto-pm/worktrees/<基名>-<会话ID前6位>`（名字规则见该节） |
+| **运行驾驶舱命令的身份声明** | 没有自带身份标记的 agent 一律用 `00_Infrastructure/bin/pm-as-agent.ps1 <基名> <命令参数>`（只在单条命令内设置 `AUTO_PM_AGENT`），否则会被当成用户本人；口令类命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用它运行 |
 | **独立审计（审 PR 时）** | `AGENTS.md`“独立审计 (AUD-001)” |
 
 ## 规则优先级

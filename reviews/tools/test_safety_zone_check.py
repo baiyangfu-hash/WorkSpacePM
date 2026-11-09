@@ -802,6 +802,24 @@ def test_w05_a_rerun_on_a_merged_or_closed_pr_fails_loudly_and_writes_no_status(
             assert "steps.pr.outputs.state == 'open'" in step.get("if", ""), step.get("name")
 
 
+def test_d124_comments_unrelated_to_the_signature_neither_run_the_job_nor_cancel_a_running_judgement() -> None:
+    """D-124：agent 与用户共用一个账号。无关评论的运行单独成组（不取消在跑的判定），任务也不跑；含“安全签字”（或把它改掉）的评论照旧。"""
+    yaml = pytest.importorskip("yaml")
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "safety-gate.yml"
+    data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    group = data["concurrency"]["group"]
+    assert data["concurrency"]["cancel-in-progress"] is True
+    # unrelated comment run: unique group named after the run id, so it can cancel nothing
+    assert "format('noise-{0}', github.run_id)" in group
+    for expression in ("github.event.comment.body", "github.event.changes.body.from"):
+        assert f"!contains({expression}, '安全签字')" in group  # both must lack the word to count as noise
+    # PR events and signature comments keep sharing the per-PR group (serial, newest wins)
+    assert "github.event.pull_request.number || github.event.issue.number" in group
+    condition = data["jobs"]["safety"]["if"]
+    assert "contains(github.event.comment.body, '安全签字') || contains(github.event.changes.body.from, '安全签字')" in condition
+    assert "github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open'" in condition  # PR events unchanged
+
+
 def test_w06_a_fresh_event_on_a_closed_pr_skips_the_job_instead_of_running_it_green() -> None:
     condition = " ".join(str(_safety_job()["if"]).split())
     assert "github.event.pull_request.state == 'open'" in condition

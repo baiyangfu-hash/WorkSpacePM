@@ -1,0 +1,57 @@
+# Implementation Card {{ card.card_id }}
+
+> 隔离基线：`{{ card.base_commit }}`
+> 路径根：`.`
+> 档次：TODO（填 文档档/测试档/产品档/核心档 之一；不能低于分档器按真实路径算出的档次）
+
+Schema: `{{ card.schema_version }}`
+Project: `{{ card.project_id }}`
+Intent: `{{ card.intent_type }}`
+WBS item: `{{ card.wbs_item_id }}`
+Milestone: `{{ card.milestone_id }}`
+{% for source in card.source_refs %}- Source: `{{ source }}`
+{% endfor %}
+State: `{{ card.state }}`
+
+## Intent and acceptance
+
+{% if card.intent_type == 'FEATURE' %}
+- TODO: Add at least one user story (作为…我希望…以便… / As …, I want … so that …).
+{% else %}
+- Problem: {{ card.problem_statement }}
+{% endif %}
+- TODO: Fill explicit acceptance criteria in the JSON card.
+
+## Execution boundary
+
+- Immutable base: `{{ card.base_commit }}`
+- Candidate policy: `{{ card.candidate_policy }}`
+- Worktree: `{{ card.worktree_path }}`
+### Product paths
+
+{% for path in card.owned_paths %}- Product: `{{ path }}`
+{% endfor %}
+
+### Path table (machine precheck)
+
+| # | 路径 | 基线状态 |
+|---|---|---|
+{% for path in card.owned_paths %}| {{ loop.index }} | `{{ path }}` | {{ '计划新增' if path in card.planned_new_paths else '存在' }} |
+{% endfor %}
+
+### Commit evidence paths
+
+{% for path in card.commit_evidence_paths %}- Commit evidence: `{{ path }}`
+{% endfor %}
+- TODO: Fill non-goals, gate cwd/argv/exit/coverage, and four outcome definitions.
+- Stop lines: max {{ card.stop_lines.max_runs }} runs; max {{ card.stop_lines.max_healing_attempts }} healing attempts; deadline {{ card.stop_lines.deadline_utc }}; quota stop at {{ card.stop_lines.quota_stop_remaining_percent }}% remaining.
+
+## Canonical evidence
+
+- Decision: `{{ card.evidence.decision_id }}`
+- Work: `{{ card.evidence.work_id }}`
+- Run: `{{ card.evidence.run_id }}`
+- Checkpoint: `{{ card.evidence.checkpoint_id }}`
+- Final commit: `{{ card.evidence.final_commit }}`
+
+Merge, push, deploy, and release each require separate approval. This Markdown is a review aid; the JSON card and canonical governance records are authoritative.

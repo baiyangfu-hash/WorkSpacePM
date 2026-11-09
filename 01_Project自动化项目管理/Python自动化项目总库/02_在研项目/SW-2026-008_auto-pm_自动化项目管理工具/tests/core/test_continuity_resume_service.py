@@ -666,7 +666,11 @@ def test_explicit_accepted_work_is_admin_only_even_with_a_live_run(tmp_path: Pat
     )
     assert resume.work and resume.work.state is WorkState.ACCEPTED
     assert resume.run is None and resume.lease is None and resume.run_candidates == ()
-    assert resume.next_legal_action == "ADMIN_REVIEW_OR_CLOSE"
+    # CHG-SCPT-2026-476: the tree walk still never exposes the live Run, but the ledger-wide scan now reports it, so no
+    # "admin review" next step is offered while it is there and the way out is named.
+    assert resume.conflicts == ("LIVE_RUN_UNDER_FINISHED_WORK",)
+    assert resume.next_legal_action == ""
+    assert len(resume.exit_hints) == 1 and "RUN-ACCEPTED" in resume.exit_hints[0]
     with pytest.raises(ContinuityResumeError, match="不可恢复非终态 Run"):
         ContinuityResumeService(tmp_path).collect(
             project_id="SW-2026-008", work_id="WORK-ACCEPTED", run_id="RUN-ACCEPTED"
@@ -735,7 +739,7 @@ def test_multiple_nonterminal_runs_for_selected_work_fail_closed_without_guessin
     monkeypatch.setattr(
         service._store,
         "list_runs",
-        lambda work_id: (original_run, synthetic_run),
+        lambda work_id, include_terminal=False: (original_run, synthetic_run),
     )
     monkeypatch.setattr(
         service._store,

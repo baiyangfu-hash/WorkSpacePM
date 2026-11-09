@@ -44,6 +44,7 @@ VAR
     s_bInfeedLock       : BOOL := FALSE;   // 自动作业中进料被中止, 需人工复位才能重新握手
     s_bOutfeedLock      : BOOL := FALSE;   // 自动作业中出料被中止, 需人工复位才能重新握手
     s_bResetPrev        : BOOL := FALSE;   // 上一周期复位指令 (清锁只认上升沿)
+    s_wErrorCode        : WORD := 16#0000; // 故障诊断字 (内部累加, 块内判断用, 块末尾赋给输出 q_wErrorCode)
 END_VAR
 
 VAR CONSTANT
@@ -159,16 +160,18 @@ BEGIN
         s_wAbortLatch := s_wAbortLatch OR ERR_OUTFEED_ABORT;
         s_iOutfeedStep := 0;
     END_IF;
-    q_wErrorCode := s_wAbortLatch;
+    s_wErrorCode := s_wAbortLatch;
     IF s_bInfeedLock OR s_bOutfeedLock THEN
-        q_wErrorCode := q_wErrorCode OR ERR_WAIT_RESET;
+        s_wErrorCode := s_wErrorCode OR ERR_WAIT_RESET;
     END_IF;
     IF io_stExternal.stUpstream.bUpstreamComFault THEN
-        q_wErrorCode := q_wErrorCode OR ERR_UP_COM;
+        s_wErrorCode := s_wErrorCode OR ERR_UP_COM;
     END_IF;
     IF io_stExternal.stDownstream.bDownstreamComFault THEN
-        q_wErrorCode := q_wErrorCode OR ERR_DOWN_COM;
+        s_wErrorCode := s_wErrorCode OR ERR_DOWN_COM;
     END_IF;
+    // 输出只在此处赋值, 块内不再读取输出参数 (TIA 对读输出参数报警)。
+    q_wErrorCode := s_wErrorCode;
 
     (* 2. 上游进料 8 步闭环状态机 (STD-820) *)
     CASE s_iInfeedStep OF

@@ -536,6 +536,7 @@ def test_cx11_resume_shows_the_inbox_without_changing_the_focus(cli_runner: CliR
     empty = _json(_run(cli_runner, root, "resume", ANCHORED, "--json"))
     assert empty["intake"] == {"schema_version": "intake-summary.v1", "awaiting_confirmation": 0, "confirmed_waiting": 0, "queue": []}
     assert "收件箱" not in _run(cli_runner, root, "resume", ANCHORED).output
+    assert "pm triage" not in _run(cli_runner, root, "resume", ANCHORED).output
     first = _item(_add(cli_runner, root, project_id=ANCHORED, domain=None, title="普通 bug"))
     urgent = _item(_add(cli_runner, root, project_id=ANCHORED, domain=None, request_id="REQ-URGENT", **_urgent_options()))
     _decide(cli_runner, root, "confirm", first)
@@ -551,6 +552,7 @@ def test_cx11_resume_shows_the_inbox_without_changing_the_focus(cli_runner: CliR
     }
     text = _run(cli_runner, root, "resume", ANCHORED).output
     assert "收件箱: 待确认 1 条 | 已确认待排 1 条" in text
+    assert "python main.py pm triage <项目编号>" in text  # the full-version desk (TD-SW008-066) is one line away
     assert f"{first['item_id']} [BUG] 普通 bug（CONFIRMED，建议 AFTER_CURRENT）" in text
     assert f"{urgent['item_id']} [URGENT] 紧急：输出了错误数据（PROPOSED，建议 INTERRUPT_NOW）" in text
 

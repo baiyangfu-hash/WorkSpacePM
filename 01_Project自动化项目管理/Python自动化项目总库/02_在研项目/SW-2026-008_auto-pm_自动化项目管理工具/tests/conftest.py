@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.ledger_isolation import INHERITED_COCKPIT_ENV, install_tripwire, real_ledger_paths
 from tests.quality_tools_gate import missing_quality_modules, skip_reason
 
 # 测试环境禁用审计日志文件写入：默认路径 ~/.auto-pm/audit/ 在 Trae Sandbox 等
@@ -49,6 +50,22 @@ def pytest_configure(config: pytest.Config) -> None:
     if not isinstance(app, QApplication):
         raise pytest.UsageError("测试进程已创建非 Widgets 的 Qt 应用实例")
     _TEST_QAPPLICATION = app
+
+
+def identity_guard_use_is_refused(item: object) -> bool:
+    """A test marked ``production_guards`` (exit drills, CHG-SCPT-2026-476) must not switch the runtime-identity guard off.
+
+    The drills exist to show that the way out works with every guard the cockpit ships with; the old recovery tests switched
+    the identity guard off while building the scene, which is why they could never see two guards block each other.
+    """
+
+    marker = getattr(item, "get_closest_marker")("production_guards")  # noqa: B009 - ``item`` is a pytest Item or a test double
+    return marker is not None and "identity_guard_off" in getattr(item, "fixturenames", ())
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if identity_guard_use_is_refused(item):
+        pytest.fail("production_guards 演练不许用 identity_guard_off：演练要在全部生产护栏打开时走出口", pytrace=False)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -98,6 +115,58 @@ def _no_ambient_agent_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_cockpit_roots() -> Generator[None, None, None]:
+    """A test never inherits the cockpit's workspace / control-root variables from the process that started pytest (D-108).
+
+    ``long-run --worktree`` exports them for acceptance commands; a pytest run under it would otherwise let the e2e drills'
+    child processes treat the real control root as the fixture's root.  A test that needs one sets it with ``monkeypatch.setenv``.
+    It keeps its own ``MonkeyPatch`` (as ``identity_guard_off`` does): a test that calls the shared ``monkeypatch.undo()`` midway
+    would otherwise put the inherited values back (19 such calls in the suite, audit 1 of #617).
+    """
+
+    with pytest.MonkeyPatch.context() as patcher:
+        for name in INHERITED_COCKPIT_ENV:
+            patcher.delenv(name, raising=False)
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_ledger_is_off_limits() -> Generator[None, None, None]:
+    """Opening a ``ContinuityStore`` on the real ledger from inside the test run raises, instead of writing to it (D-110)."""
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    paths = real_ledger_paths(os.environ, Path(__file__).resolve().parent)
+    remove = install_tripwire(ContinuityStore, paths)
+    try:
+        yield
+    finally:
+        remove()
+
+
+@pytest.fixture(autouse=True)
+def _memory_headroom_is_fine(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pm verify`` and ``long_gate launch`` refuse to start on a machine near its commit limit (11-03 laptop memory P1).
+
+    A developer's laptop under load must not turn every test that calls them red, so the reading is a healthy one for every test.
+    The rule and the readers have their own tests (``test_memory_preflight.py``), which pass their own readings.  A test marked
+    ``real_machine`` compares the real reader with the operating system's own counter (11-03 real-machine check of ``long-run``);
+    it gets the real function, or the comparison would be a fake number against a real one.
+    """
+
+    if request.node.get_closest_marker("real_machine") is not None:
+        return
+    from auto_pm.infrastructure import memory_preflight
+
+    monkeypatch.setattr(
+        memory_preflight, "read_commit", lambda: memory_preflight.CommitSnapshot(committed=4 * 2**30, limit=64 * 2**30, physical=32 * 2**30)
+    )
+    # D-168: ``require_headroom(label=...)`` arms the caller for the memory gate by writing a record into the real control root's
+    # ``.auto-pm/memory-gate-arm``; no test may do that (the arming itself is tested with an explicit ``start`` in test_memory_gate.py).
+    monkeypatch.setattr(memory_preflight, "arm_dir", lambda start=None: None)
 
 
 @pytest.fixture(autouse=True)
@@ -243,7 +312,7 @@ def identity_guard_off() -> Generator[None, None, None]:
     with pytest.MonkeyPatch.context() as patcher:
         # The command line is importable under two names (``auto_pm.cli`` and ``auto_pm.ui.cli``); patch whichever is loaded.
         for package in ("auto_pm.ui.cli", "auto_pm.cli"):
-            for module in ("pm", "pm_closure", "pm_handoff", "pm_recover", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project", "handoff", "pr", "worktree", "spec", "delivery", "clean", "constraint", "vartable", "session", "dogfood", "git_hook", "workflow"):
+            for module in ("pm", "pm_closure", "pm_handoff", "pm_recover", "pm_switch", "continuity", "change", "decision", "implementation_card", "ledger", "project", "handoff", "pr", "worktree", "spec", "delivery", "clean", "constraint", "vartable", "session", "dogfood", "git_hook", "workflow", "long_run"):
                 target = sys.modules.get(f"{package}.{module}")
                 if target is not None:
                     for name in ("require_runtime_identity", "warn_runtime_identity", "require_runtime_identity_for_change", "require_runtime_identity_for_card", "require_runtime_identity_for_workspace"):

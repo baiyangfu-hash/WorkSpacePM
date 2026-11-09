@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime
 from types import TracebackType
 
+from auto_pm.application.core.agent_worktree_service import touch_session_heartbeat
 from auto_pm.application.core.continuity_execution_service import (
     ContinuityExecutionError,
     ContinuityExecutionService,
@@ -61,8 +62,24 @@ class LeaseKeepAlive:
         self.error: str = ""
         self.renewals = 0
 
+    def _seconds_left(self, expires_at: str) -> float | None:
+        """Seconds until ``expires_at``; ``None`` when it cannot be told (no time zone, unreadable) -- then the lease is renewed as before D-31."""
+
+        try:
+            value = datetime.fromisoformat(expires_at)
+        except ValueError:
+            return None
+        if value.tzinfo is None:
+            return None
+        return (value - self._execution.now_utc()).total_seconds()
+
     def _renew_once(self) -> None:
         lease = self._execution.current_lease(self._run_id)
+        left = self._seconds_left(lease.expires_at)
+        if left is not None and left > self._lease_seconds:
+            # D-31: a lease that already runs longer than this wrapper's length is left alone. Renewing would set it to
+            # now + lease_seconds and quietly shorten it (a 30-minute Run lease became 15 minutes during ``pm verify``).
+            return
         self._execution.renew_lease(
             self._run_id,
             self._owner_id,
@@ -90,6 +107,8 @@ class LeaseKeepAlive:
         while not self._stop.wait(wait):
             try:
                 self._renew_once()
+                # 长任务（门禁一跑几小时、对话里没有消息）期间顺手刷新本对话工位的心跳，别被当成已关闭
+                touch_session_heartbeat(getattr(self._execution, "_root", "."))
                 wait = self._interval
             except ContinuityExecutionError as error:
                 # One failed attempt (a busy ledger, a lost race on the lease version) must not end the keep-alive: retry

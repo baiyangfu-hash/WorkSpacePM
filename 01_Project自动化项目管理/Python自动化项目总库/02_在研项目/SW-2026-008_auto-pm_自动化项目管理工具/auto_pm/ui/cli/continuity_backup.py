@@ -132,9 +132,9 @@ def list_backups_command(ctx: click.Context) -> None:
         manifest = manifest_path(path)
         if manifest.is_file():
             try:
-                recorded = json.loads(manifest.read_text(encoding="utf-8", errors="replace"))
+                recorded = json.loads(manifest.read_text(encoding="utf-8"))
                 detail = f"  {recorded.get('events')} 条事件，链头 {recorded.get('head_event_id') or '（无）'}"
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 detail = "  （清单无法读取）"
         click.echo(f"{_shown(service, path)}{detail}")
 

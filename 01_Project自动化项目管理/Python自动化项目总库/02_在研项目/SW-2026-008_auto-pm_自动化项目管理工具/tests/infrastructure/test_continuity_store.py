@@ -15,7 +15,11 @@ import pytest
 from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkState
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
-from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
+from auto_pm.infrastructure.continuity_store import (
+    ContinuityStore,
+    ContinuityStoreError,
+    LedgerIntegrityError,
+)
 from tests.core.test_work_registry_service import (
     ADJ_DECISION,
     ADJ_RECOVERY_TOKEN,
@@ -320,3 +324,46 @@ def test_store_legacy_fence_succeeds_with_exact_git_binding(tmp_path: Path) -> N
         )
     assert payload["authority"]["git_head"] == store.get_run("RUN-RECOVERY").git_head
     assert "original_decision_id" not in payload["request"]
+
+
+# ── D-02: a damaged ledger is refused at the first write ─────────────
+
+
+def _draft(request_id: str) -> PlanningDraft:
+    return PlanningDraft.from_intent(
+        PmIntent(
+            request_id=request_id,
+            subject_project_id="SW-2026-008",
+            objective="Integrity check before the first write.",
+            acceptance_criteria=("The write is refused on a damaged ledger.",),
+        )
+    )
+
+
+def test_a_damaged_ledger_refuses_the_first_write(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    db = tmp_path / ".auto-pm" / "continuity.db"
+    store = ContinuityStore(tmp_path, db)
+    store.initialize("2026-09-28T00:00:00+00:00", "test")
+    store.create_planning_draft(_draft("REQ-D02-001"))
+    size = db.stat().st_size
+    assert size >= 3 * 4096
+
+    data = bytearray(db.read_bytes())
+    data[4096 * 2 : 4096 * 2 + 512] = b"\xff" * 512  # ruin a B-tree page behind the header
+    db.write_bytes(bytes(data))
+    for sidecar in (db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
+        sidecar.unlink(missing_ok=True)
+
+    fresh = ContinuityStore(tmp_path, db)  # a new process: the check runs once per store object
+    with pytest.raises(LedgerIntegrityError, match="完整性检查失败"):
+        fresh.create_planning_draft(_draft("REQ-D02-002"))
+
+
+def test_an_intact_ledger_still_writes_and_checks_only_once(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    store = ContinuityStore(tmp_path, tmp_path / ".auto-pm" / "continuity.db")
+    store.initialize("2026-09-28T00:00:00+00:00", "test")
+    store.create_planning_draft(_draft("REQ-D02-003"))
+    assert store._write_integrity_checked is True
+    store.create_planning_draft(_draft("REQ-D02-004"))

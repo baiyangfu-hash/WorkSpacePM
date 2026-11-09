@@ -30,9 +30,7 @@ TOKEN = "ghp_test_token_do_not_store"
 SHA1 = "1111111aaaaaaa1111111aaaaaaa1111111aaaaa"
 SHA2 = "2222222bbbbbbb2222222bbbbbbb2222222bbbbb"
 PLC_FILE = "0100_PLC自动化/DJ-2026-009_某线/03_执行/OB1.scl"
-SW8_FILE = (
-    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/a.py"
-)
+SW8_FILE = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/a.py"
 SW8_CI = """name: sw008-ci
 on:
   push:
@@ -84,8 +82,12 @@ def _repo(tmp_path: Path) -> Path:
 
 def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict[str, Any]:
     return {
-        "name": name, "head_sha": sha, "status": "completed" if conclusion else "in_progress",
-        "conclusion": conclusion, "run_number": number, "created_at": f"2026-10-22T10:0{number}:00Z",
+        "name": name,
+        "head_sha": sha,
+        "status": "completed" if conclusion else "in_progress",
+        "conclusion": conclusion,
+        "run_number": number,
+        "created_at": f"2026-10-22T10:0{number}:00Z",
         "html_url": f"https://github.com/{REPO}/actions/runs/{number}",
     }
 
@@ -93,32 +95,64 @@ def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict[s
 POSTED_AT = "2026-11-03T01:00:00Z"
 
 
-def _signature(sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False) -> dict[str, Any]:
-    return {"body": f"仿真过了\n安全签字 {sha[:12]}", "user": {"login": login, "id": uid},
-            "performed_via_github_app": {"slug": "bot"} if app else None, "html_url": "c",
-            "created_at": POSTED_AT, "updated_at": POSTED_AT}
+def _signature(
+    sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False
+) -> dict[str, Any]:
+    return {
+        "body": f"仿真过了\n安全签字 {sha[:12]}",
+        "user": {"login": login, "id": uid},
+        "performed_via_github_app": {"slug": "bot"} if app else None,
+        "html_url": "c",
+        "created_at": POSTED_AT,
+        "updated_at": POSTED_AT,
+    }
 
 
 def routes(**override: object) -> dict[str, object]:
     """两个开着的 PR：#1 改 PLC（DJ-2026-009），描述“安全回路: 是”、没签；#2 改 SW-008，sw008-ci 红。"""
     table: dict[str, object] = {
         f"{API}/pulls?state=open&per_page=100": [
-            {"number": 1, "title": "OB1 加急停复位", "html_url": "u1", "user": {"login": "baiyangfu-hash"},
-             "head": {"sha": SHA1, "ref": "claude/plc-safety"}, "draft": False, "updated_at": "2026-10-22T09:00:00Z",
-             "body": "说明\n\n安全回路: 是\n"},
-            {"number": 2, "title": "看板改字", "html_url": "u2", "user": {"login": "baiyangfu-hash"},
-             "head": {"sha": SHA2, "ref": "claude/x"}, "draft": False, "updated_at": "2026-10-22T08:00:00Z",
-             "body": "```\n安全回路: 是\n```\n只是示例"},
+            {
+                "number": 1,
+                "title": "OB1 加急停复位",
+                "html_url": "u1",
+                "user": {"login": "baiyangfu-hash"},
+                "head": {"sha": SHA1, "ref": "claude/plc-safety"},
+                "draft": False,
+                "updated_at": "2026-10-22T09:00:00Z",
+                "body": "说明\n\n安全回路: 是\n",
+            },
+            {
+                "number": 2,
+                "title": "看板改字",
+                "html_url": "u2",
+                "user": {"login": "baiyangfu-hash"},
+                "head": {"sha": SHA2, "ref": "claude/x"},
+                "draft": False,
+                "updated_at": "2026-10-22T08:00:00Z",
+                "body": "```\n安全回路: 是\n```\n只是示例",
+            },
         ],
         f"{API}/actions/runs?branch=main&event=push&per_page=50": {
-            "workflow_runs": [_run("sw008-ci", "m", "success", 3), _run("sw008-ci", "m", "failure", 2),
-                              _run("plc-ci", "m", "success", 1)]},
+            "workflow_runs": [
+                _run("sw008-ci", "m", "success", 3),
+                _run("sw008-ci", "m", "failure", 2),
+                _run("plc-ci", "m", "success", 1),
+            ]
+        },
         f"{API}/pulls/1/files?per_page=100": [{"filename": PLC_FILE}],
-        f"{API}/actions/runs?head_sha={SHA1}&per_page=50": {"workflow_runs": [_run("plc-ci", SHA1, "success")]},
-        f"{API}/issues/1/comments?per_page=100": [_signature(SHA2), _signature(SHA1, login="someone", uid=1),
-                                                  _signature(SHA1, app=True)],
+        f"{API}/actions/runs?head_sha={SHA1}&per_page=50": {
+            "workflow_runs": [_run("plc-ci", SHA1, "success")]
+        },
+        f"{API}/issues/1/comments?per_page=100": [
+            _signature(SHA2),
+            _signature(SHA1, login="someone", uid=1),
+            _signature(SHA1, app=True),
+        ],
         f"{API}/pulls/2/files?per_page=100": [{"filename": SW8_FILE}],
-        f"{API}/actions/runs?head_sha={SHA2}&per_page=50": {"workflow_runs": [_run("sw008-ci", SHA2, "failure")]},
+        f"{API}/actions/runs?head_sha={SHA2}&per_page=50": {
+            "workflow_runs": [_run("sw008-ci", SHA2, "failure")]
+        },
         f"{API}/issues/2/comments?per_page=100": [],
     }
     table.update(override)
@@ -145,11 +179,21 @@ class FakeGitHub:
         return 200, {"ETag": etag}, json.dumps(value).encode("utf-8")
 
 
-def _collect(tmp_path: Path, fake: FakeGitHub | None, when: datetime = NOW, token: bool = True, **kw: Any) -> Any:
+def _collect(
+    tmp_path: Path, fake: FakeGitHub | None, when: datetime = NOW, token: bool = True, **kw: Any
+) -> Any:
     root = tmp_path / "repo" if (tmp_path / "repo").is_dir() else _repo(tmp_path)
     env = {"GITHUB_TOKEN": TOKEN} if token else {}
-    return gh.collect(REPO, root, [root / "reviews"], tmp_path / "cache" / "github.json", when,
-                      fetch=fake, env=env, **kw)
+    return gh.collect(
+        REPO,
+        root,
+        [root / "reviews"],
+        tmp_path / "cache" / "github.json",
+        when,
+        fetch=fake,
+        env=env,
+        **kw,
+    )
 
 
 def _home(tmp_path: Path, snapshot: gh.Snapshot | None, online: bool | None = True) -> vm.HomeVM:
@@ -159,10 +203,17 @@ def _home(tmp_path: Path, snapshot: gh.Snapshot | None, online: bool | None = Tr
 
 
 def _no_green(github: vm.GithubVM) -> None:
-    cells = [cell for row in github.rows for cell in (row.gate, row.safety, row.audit, *(c for _n, c in row.ci))]
+    cells = [
+        cell
+        for row in github.rows
+        for cell in (row.gate, row.safety, row.audit, *(c for _n, c in row.ci))
+    ]
     cells += [c for _n, c in github.main_ci]
     assert all(cell.sev == "na" for cell in cells), [c for c in cells if c.sev != "na"]
-    assert all(cell.text in ("未知", "没审计记录") or "通过" in cell.text or "看不出" in cell.text for cell in cells)
+    assert all(
+        cell.text in ("未知", "没审计记录") or "通过" in cell.text or "看不出" in cell.text
+        for cell in cells
+    )
 
 
 # ---------------------------------------------------------------- 全读到
@@ -174,22 +225,35 @@ def test_full_read_pulls_ci_safety_audit(tmp_path: Path) -> None:
     assert snap.state == "ok" and snap.fresh and snap.fetched_at == NOW and snap.authenticated
     one, two = snap.pulls
     assert one.projects == ["DJ-2026-009"] and one.plc
-    assert {c.workflow: c.state for c in one.ci} == {"plc-ci": "pass", "sw008-ci": "na"}  # nightly 不是 PR 触发
+    assert {c.workflow: c.state for c in one.ci} == {
+        "plc-ci": "pass",
+        "sw008-ci": "na",
+    }  # nightly 不是 PR 触发
     assert one.gate == "pass"
     # 签了旧头、不是指定签字人、经由 App 的都不算
     assert one.safety.state == "waiting" and "要重签" in one.safety.detail
     assert two.projects == ["SW-2026-008"] and two.gate == "fail"
     assert two.safety.state == "na"  # 代码块里的“安全回路: 是”是示例，不算声明
     # 审计：复核结论盖过首审；按 PR 号对上；80 正文里顺带提到 PR #2 不算
-    assert two.audit is not None and two.audit.number == 79 and two.audit.verdict == "pass" and not two.audit_stale
+    assert (
+        two.audit is not None
+        and two.audit.number == 79
+        and two.audit.verdict == "pass"
+        and not two.audit_stale
+    )
     assert one.audit is not None and one.audit.number == 80 and one.audit_stale  # 审的是旧头
-    assert {c.workflow: c.state for c in snap.main_ci} == {"plc-ci": "pass", "sw008-ci": "pass"}  # 取最新一次
+    assert {c.workflow: c.state for c in snap.main_ci} == {
+        "plc-ci": "pass",
+        "sw008-ci": "pass",
+    }  # 取最新一次
 
     home = _home(tmp_path, snap)
     checks = {c.key: c for c in home.checks}
     assert checks["gate_red"].state == "number" and checks["gate_red"].value == 1
     assert checks["safety_unsigned"].state == "number" and checks["safety_unsigned"].value == 1
-    assert any(d.ask == "PR #1 等你安全签字" and d.reply.endswith(SHA1[:8]) for d in home.decisions)
+    assert any(
+        d.ask == "PR #1 等你安全签字" and d.reply == f"安全签字 {SHA1[:12]}" for d in home.decisions
+    )
     assert home.github is not None and home.github.as_of.startswith("数据截至 ")
     gates = {r.number: r.gate for r in home.github.rows}
     assert gates[2].text == "红" and gates[2].sev == "block" and gates[1].sev == "ok"
@@ -211,7 +275,11 @@ def test_cache_has_timestamp_and_no_token_and_etag_is_reused(tmp_path: Path) -> 
     fake2 = FakeGitHub(routes())
     snap = _collect(tmp_path, fake2, when=later)
     assert all("If-None-Match" in h for _u, h in fake2.calls)
-    assert snap.state == "ok" and snap.fetched_at == later and [p.gate for p in snap.pulls] == ["pass", "fail"]
+    assert (
+        snap.state == "ok"
+        and snap.fetched_at == later
+        and [p.gate for p in snap.pulls] == ["pass", "fail"]
+    )
 
 
 def test_only_get_requests_in_source() -> None:
@@ -226,14 +294,22 @@ def test_only_get_requests_in_source() -> None:
 
 
 def test_offline_without_cache_shows_unknown_never_zero(tmp_path: Path) -> None:
-    fake = FakeGitHub({f"{API}/pulls?state=open&per_page=100": gh.OfflineError("Name or service not known")})
+    fake = FakeGitHub(
+        {f"{API}/pulls?state=open&per_page=100": gh.OfflineError("Name or service not known")}
+    )
     snap = _collect(tmp_path, fake)
-    assert snap.state == "offline" and not snap.fresh and snap.fetched_at is None and snap.pulls == []
+    assert (
+        snap.state == "offline" and not snap.fresh and snap.fetched_at is None and snap.pulls == []
+    )
     assert snap.audits  # 审计是本机文件，断网照读
     home = _home(tmp_path, snap, online=False)
     checks = {c.key: c for c in home.checks}
     for key in ("gate_red", "safety_unsigned"):
-        assert checks[key].state == "offline" and checks[key].text == "断网未知" and checks[key].sev == "na"
+        assert (
+            checks[key].state == "offline"
+            and checks[key].text == "断网未知"
+            and checks[key].sev == "na"
+        )
     assert home.github is not None and home.github.as_of == "数据截至：从没读到过"
     assert "断网" in home.github.headline
     assert not any("PR #" in d.ask for d in home.decisions)
@@ -242,8 +318,17 @@ def test_offline_without_cache_shows_unknown_never_zero(tmp_path: Path) -> None:
 def test_offline_with_cache_keeps_old_rows_but_all_unknown(tmp_path: Path) -> None:
     _collect(tmp_path, FakeGitHub(routes()))
     later = NOW + timedelta(hours=2)
-    snap = _collect(tmp_path, FakeGitHub({f"{API}/pulls?state=open&per_page=100": gh.OfflineError("timed out")}), when=later)
-    assert snap.state == "offline" and snap.from_cache and snap.fetched_at == NOW and snap.checked_at == later
+    snap = _collect(
+        tmp_path,
+        FakeGitHub({f"{API}/pulls?state=open&per_page=100": gh.OfflineError("timed out")}),
+        when=later,
+    )
+    assert (
+        snap.state == "offline"
+        and snap.from_cache
+        and snap.fetched_at == NOW
+        and snap.checked_at == later
+    )
     assert [p.number for p in snap.pulls] == [1, 2]
     home = _home(tmp_path, snap, online=None)
     github = home.github
@@ -270,7 +355,9 @@ def test_corrupt_cache_is_ignored(tmp_path: Path) -> None:
     cache = tmp_path / "cache" / "github.json"
     cache.parent.mkdir(parents=True)
     cache.write_text("{不是 JSON", encoding="utf-8")
-    snap = _collect(tmp_path, FakeGitHub({f"{API}/pulls?state=open&per_page=100": gh.OfflineError("x")}))
+    snap = _collect(
+        tmp_path, FakeGitHub({f"{API}/pulls?state=open&per_page=100": gh.OfflineError("x")})
+    )
     assert snap.state == "offline" and not snap.from_cache and snap.pulls == []
 
 
@@ -279,7 +366,11 @@ def test_corrupt_cache_is_ignored(tmp_path: Path) -> None:
 
 def test_rate_limited_on_first_call(tmp_path: Path) -> None:
     reset = int((NOW + timedelta(minutes=30)).timestamp())
-    limited = (403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(reset)}, b'{"message":"API rate limit exceeded"}')
+    limited = (
+        403,
+        {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(reset)},
+        b'{"message":"API rate limit exceeded"}',
+    )
     fake = FakeGitHub({f"{API}/pulls?state=open&per_page=100": limited})
     snap = _collect(tmp_path, fake, token=False)
     assert snap.state == "rate_limited" and snap.reset_at == datetime.fromtimestamp(reset, UTC)
@@ -288,7 +379,9 @@ def test_rate_limited_on_first_call(tmp_path: Path) -> None:
     assert home.github is not None and "恢复" in home.github.headline
     assert any("没给令牌" in n for n in home.github.notes)
     checks = {c.key: c for c in home.checks}
-    assert checks["gate_red"].state == "unchecked" and checks["safety_unsigned"].state == "unchecked"
+    assert (
+        checks["gate_red"].state == "unchecked" and checks["safety_unsigned"].state == "unchecked"
+    )
 
 
 def test_rate_limited_half_way_stops_calling_and_marks_rest_unknown(tmp_path: Path) -> None:
@@ -315,10 +408,14 @@ def test_rate_limited_half_way_stops_calling_and_marks_rest_unknown(tmp_path: Pa
 
 
 def test_partial_failure_only_marks_the_failed_piece(tmp_path: Path) -> None:
-    fake = FakeGitHub(routes(**{
-        f"{API}/actions/runs?head_sha={SHA1}&per_page=50": (500, {}, b"oops"),
-        f"{API}/actions/runs?branch=main&event=push&per_page=50": gh.OfflineError("reset"),
-    }))
+    fake = FakeGitHub(
+        routes(
+            **{
+                f"{API}/actions/runs?head_sha={SHA1}&per_page=50": (500, {}, b"oops"),
+                f"{API}/actions/runs?branch=main&event=push&per_page=50": gh.OfflineError("reset"),
+            }
+        )
+    )
     snap = _collect(tmp_path, fake)
     assert snap.state == "partial" and snap.fresh
     one, two = snap.pulls
@@ -353,7 +450,9 @@ def test_zero_red_with_not_run_is_not_green(tmp_path: Path) -> None:
 
 
 def test_unauthorized_token(tmp_path: Path) -> None:
-    fake = FakeGitHub({f"{API}/pulls?state=open&per_page=100": (401, {}, b'{"message":"Bad credentials"}')})
+    fake = FakeGitHub(
+        {f"{API}/pulls?state=open&per_page=100": (401, {}, b'{"message":"Bad credentials"}')}
+    )
     snap = _collect(tmp_path, fake)
     assert snap.state == "auth" and not snap.fresh
     assert "令牌" in vm.github_vm(snap, NOW, OFFSET).headline
@@ -376,7 +475,11 @@ def test_workflow_paths_and_project_mapping(tmp_path: Path) -> None:
     assert gh.expected_workflows([PLC_FILE], flows) == {"plc-ci"}
     assert gh.expected_workflows([".github/workflows/sw008-ci.yml"], flows) == {"sw008-ci"}
     assert gh.expected_workflows(["README.md"], flows) == set()
-    assert gh.projects_of([PLC_FILE, SW8_FILE, "reviews/x.md"]) == ["DJ-2026-009", "SW-2026-008", gh.SHARED]
+    assert gh.projects_of([PLC_FILE, SW8_FILE, "reviews/x.md"]) == [
+        "DJ-2026-009",
+        "SW-2026-008",
+        gh.SHARED,
+    ]
     assert gh.read_workflows(tmp_path / "nowhere") == gh.DEFAULT_WORKFLOWS
 
 
@@ -384,9 +487,13 @@ def test_repo_from_git_config(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text(
         '[core]\n\tbare = false\n[remote "origin"]\n\turl = http://proxy@127.0.0.1:1/git/acme/Line-01\n'
-        '[remote "upstream"]\n\turl = git@github.com:x/y.git\n', encoding="utf-8")
+        '[remote "upstream"]\n\turl = git@github.com:x/y.git\n',
+        encoding="utf-8",
+    )
     assert gh.repo_from_git_config(tmp_path) == gh.DEFAULT_REPO  # origin 不是 github.com：用默认
-    (tmp_path / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:acme/Line-01.git\n', encoding="utf-8")
+    (tmp_path / ".git" / "config").write_text(
+        '[remote "origin"]\n\turl = git@github.com:acme/Line-01.git\n', encoding="utf-8"
+    )
     assert gh.repo_from_git_config(tmp_path) == "acme/Line-01"
 
 
@@ -416,7 +523,8 @@ def test_project_page_keeps_pr_rows_next_to_card_columns(tmp_path: Path) -> None
     """项目页按栏排卡时不能把 PR 行冲掉（Codex 评审 #52）：有在干和刚关的卡，PR #2 仍要出现在证据和 PR 列表里。"""
     snap = _collect(tmp_path, FakeGitHub(routes()))
     root, db = base._workspace(
-        tmp_path / "ws", [("SW-2026-008", "ACTIVE", "工具卡", 0.1), ("SW-2026-008", "CLOSED", "刚关的", 1)]
+        tmp_path / "ws",
+        [("SW-2026-008", "ACTIVE", "工具卡", 0.1), ("SW-2026-008", "CLOSED", "刚关的", 1)],
     )
     board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
     home = vm.home_vm(board, OFFSET, True, False, snap)
@@ -426,7 +534,9 @@ def test_project_page_keeps_pr_rows_next_to_card_columns(tmp_path: Path) -> None
     gate = next(e for e in page.evidence if e.title == "门禁")
     assert gate.detail.startswith("#2 ") and gate.state == "block"
     columns = {c.name: c.cards for c in page.columns}
-    assert [r[1] for r in columns["在干"]] == ["工具卡"] and [r[1] for r in columns["已关"]] == ["刚关的"]
+    assert [r[1] for r in columns["在干"]] == ["工具卡"] and [r[1] for r in columns["已关"]] == [
+        "刚关的"
+    ]
 
 
 def test_signature_line_rule_matches_the_safety_gate_for_punctuation_after_the_hash() -> None:
@@ -459,13 +569,23 @@ def test_a_signature_shorter_than_12_digits_does_not_count_on_the_board_either()
     head = "0123456789abcdef0123456789abcdef01234567"
     signer = {"login": "baiyangfu-hash", "id": 246858089}
     for length in (7, 8, 11):
-        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None,
-                   "created_at": POSTED_AT, "updated_at": POSTED_AT}
+        comment = {
+            "body": f"安全签字 {head[:length]}",
+            "user": signer,
+            "performed_via_github_app": None,
+            "created_at": POSTED_AT,
+            "updated_at": POSTED_AT,
+        }
         signed, why = gh.find_signature([comment], head)
         assert signed is None and "12 位" in why, length
     for length in (12, 20, 40):
-        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None,
-                   "created_at": POSTED_AT, "updated_at": POSTED_AT}
+        comment = {
+            "body": f"安全签字 {head[:length]}",
+            "user": signer,
+            "performed_via_github_app": None,
+            "created_at": POSTED_AT,
+            "updated_at": POSTED_AT,
+        }
         assert gh.find_signature([comment], head) == (head[:8], ""), length
 
 
@@ -481,3 +601,33 @@ def test_a_signature_comment_edited_after_posting_does_not_count_on_the_board_ei
         incomplete = {key: value for key, value in base.items() if key != missing}
         assert gh.find_signature([incomplete], head)[0] is None, missing
     assert gh.find_signature([edited, base], head) == (head[:8], "")
+
+
+def test_the_safety_signature_line_is_exactly_what_the_judge_accepts(tmp_path: Path) -> None:
+    """卡片上“复制”的那一行当成用户评论，交给真的判卷函数：当前头通过；少一位、换头都不过。
+
+    原来给的是“仿真过了再在 PR #1 上评论：安全签字 <前 8 位>”：整句复制过去不是单独一行，而且 8 位不够 12 位，safety-zone 不认。
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[6] / "reviews" / "tools"))
+    import safety_zone_check as judge  # noqa: PLC0415
+
+    snap = _collect(tmp_path, FakeGitHub(routes()))
+    decision = next(d for d in vm.github_decisions(snap) if d.ask == "PR #1 等你安全签字")
+    comment = {
+        "body": decision.reply,
+        "user": {"login": "baiyangfu-hash", "id": 246858089},
+        "html_url": "c",
+        "created_at": "2026-10-22T10:00:00Z",
+        "updated_at": "2026-10-22T10:00:00Z",
+    }
+    assert (
+        decision.reply.split() == ["安全签字", SHA1[: gh.MIN_SIGN_LEN]]
+        and gh.MIN_SIGN_LEN == judge.MIN_SIGN_LEN == 12
+    )
+    assert judge.find_signature([comment], SHA1, judge.Result()) is not None
+    assert gh.find_signature([comment], SHA1)[0] is not None  # 总控屏自己的同口径判断也认
+    assert (
+        judge.find_signature([{**comment, "body": decision.reply[:-1]}], SHA1, judge.Result())
+        is None
+    )  # 少一位不认
+    assert judge.find_signature([comment], SHA2, judge.Result()) is None  # 换头（又推了提交）作废

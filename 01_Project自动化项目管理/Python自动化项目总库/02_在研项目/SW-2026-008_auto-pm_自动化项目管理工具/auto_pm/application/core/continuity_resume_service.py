@@ -21,9 +21,11 @@ from auto_pm.contracts.continuity import (
 from auto_pm.contracts.continuity_resume import (
     ContinuityResume,
     LeaseView,
+    ResumeResidue,
     ResumeRunCandidate,
 )
 from auto_pm.contracts.intake import IntakeSummary
+from auto_pm.contracts.interlock_matrix import exit_hint
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import (
     LEASE_RENEWAL_RED_COUNT,
@@ -32,6 +34,7 @@ from auto_pm.infrastructure.continuity_store import (
 )
 from auto_pm.infrastructure.intake_store import IntakeStore
 
+from .stale_residue import classify_residue
 from .workspace_context_service import WorkspaceContextError, WorkspaceContextService
 
 
@@ -73,6 +76,8 @@ class ContinuityResumeService:
 
         conflicts = list(context.conflicts)
         hold_warnings: list[str] = []
+        residue: list[ResumeResidue] = []
+        orphan_run_ids: tuple[str, ...] = ()
         mission: Mission | None = None
         work = None
         run = None
@@ -101,6 +106,10 @@ class ContinuityResumeService:
                 if any(candidate.state not in EXECUTION_ACTIVE_WORK_STATES for candidate in works):
                     raise ContinuityResumeError("Store 返回了非执行活动态 Work")
                 work_candidates = works
+                residue = self._stale_residue(works)
+                residue_ids = {item.work_id for item in residue}
+                # A leftover is listed as a warning, not counted: otherwise one old card makes "several active Works".
+                live_works = tuple(item for item in works if item.work_id not in residue_ids)
                 if mission is not None and mission.root_work_id:
                     if work_id and work_id != mission.root_work_id:
                         raise ContinuityResumeError("指定 Work 与活动 Mission 的 root Work 不一致")
@@ -116,9 +125,9 @@ class ContinuityResumeService:
                     work = self._store.get_work(work_id)
                     if work.subject_project_id != context.subject_project_id:
                         raise ContinuityResumeError("Work 不属于当前 subject project")
-                elif len(works) == 1:
-                    work = works[0]
-                elif len(works) > 1:
+                elif len(live_works) == 1:
+                    work = live_works[0]
+                elif len(live_works) > 1:
                     conflicts.append("MULTIPLE_ACTIVE_WORKS")
 
                 if run_id and work is None:
@@ -185,6 +194,12 @@ class ContinuityResumeService:
                             f"续租 {renewals} 次（≥{LEASE_RENEWAL_RED_COUNT}）：这个 Run 卡住了或开得太久，"
                             f"持有上限 {hold['hold_end']}；请先查原因，别无限续"
                         )
+                # Interlock matrix state LIVE_RUN_UNDER_FINISHED_WORK: the walk above never reaches a live Run whose Work is
+                # already accepted, closed or cancelled, so look at the whole ledger once, not through the Mission tree.
+                orphans = self._store.list_live_runs_under_finished_work(context.subject_project_id)
+                if orphans:
+                    conflicts.append("LIVE_RUN_UNDER_FINISHED_WORK")
+                    orphan_run_ids = tuple(item.run_id for item in orphans)
             except (ContinuityStoreError, sqlite3.Error) as error:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
@@ -230,6 +245,8 @@ class ContinuityResumeService:
         }
         if not intake.is_empty:
             seed["intake"] = intake.model_dump(mode="json")
+        if residue:
+            seed["residue"] = [item.model_dump(mode="json") for item in residue]
         if mission_candidates:
             seed["mission_candidates"] = [
                 candidate.model_dump(mode="json") for candidate in mission_candidates
@@ -249,11 +266,36 @@ class ContinuityResumeService:
             lease=lease_view,
             conflicts=tuple(conflicts),
             hold_warnings=tuple(hold_warnings),
+            residue=tuple(residue),
+            exit_hints=tuple(
+                exit_hint(code, detail=", ".join(orphan_run_ids) if code == "LIVE_RUN_UNDER_FINISHED_WORK" else "")
+                for code in conflicts
+            ),
             next_legal_action=next_action,
             read_set=read_set,
             intake=intake,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
+
+    def _stale_residue(self, works: tuple[WorkItem, ...]) -> list[ResumeResidue]:
+        now = self._now().astimezone(UTC)
+        found: list[ResumeResidue] = []
+        for candidate in works:
+            runs = self._store.list_runs(candidate.work_id, include_terminal=True)
+            expiries: dict[str, datetime | None] = {}
+            for run in runs:
+                try:
+                    expiries[run.run_id] = datetime.fromisoformat(
+                        self._store.get_lease(run.run_id).expires_at
+                    )
+                except ContinuityStoreError:  # no lease row for this Run
+                    expiries[run.run_id] = None
+                except ValueError:  # lease time is not a time: cannot prove it expired, so it counts as "not expired"
+                    expiries[run.run_id] = datetime.max.replace(tzinfo=UTC)
+            item = classify_residue(candidate, runs, expiries, now)
+            if item is not None:
+                found.append(item)
+        return found
 
     @staticmethod
     def _select_mission(

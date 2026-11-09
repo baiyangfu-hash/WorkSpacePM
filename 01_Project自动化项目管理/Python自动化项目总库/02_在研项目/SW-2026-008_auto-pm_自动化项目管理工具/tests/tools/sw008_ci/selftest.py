@@ -111,11 +111,29 @@ def main() -> int:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", "clean")
         check("clean addition -> scan passes", run(str(SCAN), "main", cwd=repo), 0)
+        # D-70 audit: the one rule only this scan has (credentials inside a URL) must stay.  Own branch from main, so the
+        # commits above do not make the scan fail for another reason.  Built at run time, no literal in this file.
+        git(repo, "checkout", "-q", "-b", "url-credentials", "main")
+        (repo / "url.txt").write_text("remote = " + "https://" + "deploy" + ":" + "hunter2hunter2" + "@" + "example.invalid/repo.git\n", encoding="utf-8")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "url with credentials")
+        check("credentials inside a URL -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        git(repo, "checkout", "-q", "feature")
         # Built at run time so that this file itself never contains a token-shaped literal.
         (repo / "leak.txt").write_text("k = " + "ghp_" + "Z" * 36 + "\n", encoding="utf-8")
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", "leak")
         check("token-shaped addition -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        # D-70: the CI scan uses the commit hook's rule list, so a shape only the hook knew is now caught here too.
+        (repo / "leak.txt").write_text("k = " + "sk-" + "Z" * 25 + "\n", encoding="utf-8")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "other shape")
+        check("hook-only shape (sk-) -> scan fails", run(str(SCAN), "main", cwd=repo), 1)
+        # A scan that cannot load its rules must say so with exit 2, not look like "secrets found" (exit 1).
+        lonely = d / "lonely" / "tests" / "tools" / "sw008_ci"
+        lonely.mkdir(parents=True)
+        (lonely / "secret_scan.py").write_text(SCAN.read_text(encoding="utf-8"), encoding="utf-8")
+        check("rules missing -> scan could not run (exit 2)", run(str(lonely / "secret_scan.py"), "main", cwd=repo), 2)
         (repo / "leak.txt").unlink()
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "remove the leak again")

@@ -116,7 +116,7 @@ def split_front_matter(text: str) -> tuple[dict[str, str], str]:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    return path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: parsed or shown only; the copy-equality check compares bytes
 
 
 def _is_utf8(path: Path) -> bool:
@@ -333,7 +333,8 @@ class RolePackService:
             new = pack / "refs" / relative
             if not new.is_file():
                 self._add(result, "RP-008", pack.name, f"refs/{relative.as_posix()} 缺失（旧技能里有）")
-            elif _read(new).replace("\r\n", "\n") != _read(old).replace("\r\n", "\n"):
+            elif new.read_bytes().replace(b"\r\n", b"\n") != old.read_bytes().replace(b"\r\n", b"\n"):
+                # Compared as bytes: two copies that differ only in undecodable bytes must not read as equal through '?'.
                 name = f"refs/{relative.as_posix()}"
                 if name in known_diffs and not _is_utf8(old):
                     continue  # the old file is itself broken (RP-009 would fail it); the repaired copy may differ

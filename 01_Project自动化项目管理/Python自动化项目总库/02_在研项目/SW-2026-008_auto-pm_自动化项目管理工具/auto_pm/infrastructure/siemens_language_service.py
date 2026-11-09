@@ -31,6 +31,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CHECK_ERROR = re.compile(r": ERROR: ")
 _TEST_ERROR = re.compile(r"\bSCLTEST_[A-Z0-9_]+\b")
 _TEST_FAIL = re.compile(r"^\s*--- FAIL: |^FAIL\b|ASSERT failed")
+# Go 测试进程崩溃的标志：panic 行、goroutine 栈头、致命错误。崩了以后没轮到的用例没跑，失败清单不完整（D-137）
+_PANIC = re.compile(r"^\s*panic: |^\s*goroutine \d+ \[|^fatal error: ")
 _CASES = re.compile(r"running (\d+)/(\d+) cases")
 _VERSION = re.compile(r"-(\d+(?:\.\d+)*)$")
 
@@ -134,6 +136,14 @@ class SiemensLanguageService:
             hits = [ln for ln in lines if _CHECK_ERROR.search(ln)]
         else:
             hits = [ln for ln in lines if _TEST_ERROR.search(ln) or _TEST_FAIL.search(ln)]
+        if command == "test" and any(_PANIC.search(ln) for ln in lines):
+            first = next(ln.strip() for ln in lines if _PANIC.search(ln))
+            note = f"插件测试进程 panic 退出（{first[:160]}）：没跑完的用例没有结果，这次测试不算数"
+            return LanguageServiceResult(
+                command=command, available=True, exit_code=-1, error_count=max(1, len(hits)),
+                messages=(note, *hits[: MAX_MESSAGES - 1]), summary=note, binary=self._binary,
+                diagnostics=(note, *hits), panicked=True,
+            )
         error_count = len(hits)
         if done.returncode != 0 and error_count == 0:
             error_count = 1  # 退出码非零而没有解析到诊断行：按一个未归类错误算，不能当作通过

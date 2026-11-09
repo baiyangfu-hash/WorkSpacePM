@@ -24,7 +24,7 @@ from typing import IO, Any
 
 from auto_pm.contracts.execution_adapter import ExecutionStartEvidence
 from auto_pm.infrastructure.executable_lookup import find_on_path, windows_path_extensions
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 ISOLATION_MARKER = ".codex-microtask.json"
 ISOLATION_SCHEMA_VERSION = "codex-microtask.v1"
@@ -179,7 +179,7 @@ class _BoundedCapture:
         """Decode captured bytes without letting malformed child output abort evidence collection."""
 
         with self._lock:
-            value = bytes(self._data).decode("utf-8", errors="replace")
+            value = bytes(self._data).decode("utf-8", errors="replace")  # lenient-decode: display copy of captured child output; the raw bytes stay in the capture buffer
             return f"{value}\n[output truncated]" if self._truncated else value
 
     @property
@@ -580,7 +580,7 @@ class LocalCodexExecutor:
 
     def _git_output(self, repository: Path, *arguments: str) -> str:
         try:
-            result = run_git_bounded_text(
+            result = run_git_bounded_strict_text(
                 ["git", "-C", str(repository), *arguments],
                 default_timeout=_GIT_TIMEOUT_SECONDS,
                 error_cls=LocalExecutionError,
@@ -677,8 +677,8 @@ class LocalCodexExecutor:
                 while line := stream.readline():
                     capture.append(line)
                     try:
-                        parsed = json.loads(line.decode("utf-8", errors="replace"))
-                    except json.JSONDecodeError:
+                        parsed = json.loads(line.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):  # not an event line; the raw bytes stay in the capture buffer
                         continue
                     if isinstance(parsed, dict):
                         events.put(parsed)

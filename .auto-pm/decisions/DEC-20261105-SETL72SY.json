@@ -1,0 +1,28 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261105-SETL72SY",
+  "project_id": "SYS-2026-001",
+  "change_id": "CHG-DOCU-2026-054",
+  "approved_scope": "MODULE",
+  "approved_files": [
+    ".auto-pm/continuity.db"
+  ],
+  "approver": "fubai",
+  "approved_at": "2026-11-05T14:32:59.512544+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {
+    "runtime_capability": {
+      "allowed_runtime_actions": [
+        "settle_expired_run"
+      ],
+      "target_run_ids": [
+        "RUN-SYS001-PMF-WBS24-001",
+        "RUN-SYS001-PMF-WBS25-001"
+      ],
+      "allowed_outcomes": [
+        "CANCELLED"
+      ]
+    }
+  }
+}

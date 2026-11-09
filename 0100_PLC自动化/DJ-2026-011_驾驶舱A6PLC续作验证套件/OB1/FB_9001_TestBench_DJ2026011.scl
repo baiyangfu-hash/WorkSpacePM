@@ -1,0 +1,41 @@
+﻿// ============================================================================
+// FB_9001_TestBench_DJ2026011: DJ-2026-011 测试台功能块 (仅用于仿真/实机冒烟测试)
+// 描述: 持有三个被测功能块的多重实例 (TIA 全局 DB 里不能放 FB 实例, 只能放在 FB 里),
+//       每个扫描周期把全局 DB 里的测试激励送进被测块, 再把结果写回全局 DB。
+//       激励与结果变量见 DB1/DB_*Test.scl, 测试步骤见 Test/*.scltest。
+// 调用: 由 OB 通过背景 DB "DB_TestBench" 单实例调用一次, 见 OB1/OB123.scl。
+// ============================================================================
+
+FUNCTION_BLOCK FB_9001_TestBench_DJ2026011
+VAR
+    fb_TwoHandStart : FB_1091_TwoHandStart_DJ2026011; // 被测: 双手启动 (多重实例)
+    fb_AlarmSummary : FB_2001_AlarmSummary_DJ2026011; // 被测: 报警汇总 (多重实例)
+    fb_BatchCounter : FB_2002_BatchCounter_DJ2026011; // 被测: 批量计数 (多重实例)
+END_VAR
+
+BEGIN
+    // 双手启动: 两个启动按钮须在 0.5 秒同步窗口内先后按下并一直按住才输出启动;
+    // 任一松开立即停止; 两个都松开后才允许下一次启动。测试步骤见 Test/two_hand_start_test.scltest
+    #fb_TwoHandStart(i_bStartLeft := "DB_TwoHandStartTest".s_bStartLeft,
+                     i_bStartRight := "DB_TwoHandStartTest".s_bStartRight,
+                     i_dSyncWindowMs := "DB_TwoHandStartTest".s_dSyncWindowMs,
+                     o_bStartOutput => "DB_TwoHandStartTest".s_bStartOutput,
+                     o_bSyncFault => "DB_TwoHandStartTest".s_bSyncFault);
+
+    // 报警汇总: 第 1 路接双手启动同步故障, 第 2..16 路保留给测试注入;
+    // 任意报警点亮报警灯并锁存, 报警消失后按复位熄灭, 报警仍在时复位无效。
+    // 测试步骤见 Test/alarm_summary_test.scltest
+    "DB_AlarmSummaryTest".s_arrAlarms[1] := "DB_TwoHandStartTest".s_bSyncFault;
+    #fb_AlarmSummary(i_arrAlarms := "DB_AlarmSummaryTest".s_arrAlarms,
+                     i_bReset := "DB_AlarmSummaryTest".s_bReset,
+                     o_bAlarmLamp => "DB_AlarmSummaryTest".s_bAlarmLamp,
+                     o_bAnyAlarm => "DB_AlarmSummaryTest".s_bAnyAlarm);
+
+    // 批量计数: 光电每检测到一个工件计一件, 达到设定数量输出批次完成并保持;
+    // 按复位按钮上升沿清零并重新计数。测试步骤见 Test/batch_counter_test.scltest
+    #fb_BatchCounter(i_bPhotoSensor := "DB_BatchCounterTest".s_bPhotoSensor,
+                     i_dBatchTarget := "DB_BatchCounterTest".s_dBatchTarget,
+                     i_bReset := "DB_BatchCounterTest".s_bReset,
+                     o_dBatchCount => "DB_BatchCounterTest".s_dBatchCount,
+                     o_bBatchComplete => "DB_BatchCounterTest".s_bBatchComplete);
+END_FUNCTION_BLOCK

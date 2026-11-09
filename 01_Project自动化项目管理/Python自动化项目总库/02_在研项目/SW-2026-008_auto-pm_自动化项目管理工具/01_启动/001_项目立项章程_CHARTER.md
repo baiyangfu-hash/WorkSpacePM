@@ -10,6 +10,8 @@ author: "Product PM"
 
 # auto-pm 自动化项目管理工具 - 项目立项章程 (CHARTER)
 
+> **2026-11-04 提示**：本文主体写于 2026 年 8 月，不描述后来的 Continuity v2 账本、工位、租约、发布快照等架构；现状以 `ARCHITECTURE.md`（V3.0.0）为准。
+
 > **所属过程组**：`01_启动 (Initiating)`  
 > **项目编号**：`SW-2026-008`  
 > **治理来源索引**：项目控制状态按工作区治理规则核对 canonical Continuity v2 记录、有效 WBS、已验收 Git/Checkpoint 与有效运行身份。`PM_SESSION_SW-2026-008.md` 已退役（用户 2026-10-10 裁决），仅作历史摘要，不是控制真源。

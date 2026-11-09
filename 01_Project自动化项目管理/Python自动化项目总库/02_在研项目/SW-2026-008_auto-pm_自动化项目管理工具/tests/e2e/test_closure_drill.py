@@ -560,6 +560,7 @@ def test_d12_an_isolated_run_on_uncommitted_merged_bytes_is_refused_at_start_not
     assert_never_stuck(drill, second)
     assert second.stage == "refused:run", f"{second.stage}: {second.refusal}"
     assert "控制根里范围内的文件与本 Run 起点不一致" in second.refusal
+    assert "没有 Run 认领" in second.refusal, "D-46：拒绝要说明挡路的文件归谁（上一单已结束，所以没有 Run 认领）"
     # Nothing of the second Mission reached the control root.
     for relative, text in files.items():
         assert (drill.root / relative).read_text(encoding="utf-8") == text

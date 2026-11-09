@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -213,3 +213,160 @@ def test_a_procfs_file_that_is_not_valid_utf8_is_not_trusted(tmp_path: Path) -> 
     proc = _fake_proc(tmp_path)
     (proc / "self" / "mountinfo").write_bytes(b"\xff\xfe not text\n")
     assert "hidepid" in process_probe.procfs_view_problem(proc, own_pid=4242)
+
+def _ancestry(*chain: tuple[int, str]) -> Callable[[int], tuple[int, str] | None]:
+    """A fake process table: ``chain`` lists (pid, image) from the CLI process upwards; the first entry is the CLI itself."""
+
+    parents = {pid: chain[index + 1] for index, (pid, _image) in enumerate(chain[:-1])}
+    return lambda pid: parents.get(pid)
+
+
+# M3 drill 2026-10-19: Trae CN runs each command in a fresh PowerShell that exits with it; recording that shell made every reclaim PROVEN_DEAD
+TRAE_CN = _ancestry(
+    (900, "python.exe"), (800, "python.exe"), (700, "powershell.exe"), (600, "trae cn.exe"), (500, "explorer.exe")
+)
+
+
+def test_an_agent_host_that_runs_each_command_in_a_fresh_shell_is_the_holder_not_the_shell() -> None:
+    assert process_probe.holder_process_pid(900, TRAE_CN) == 600
+
+
+# Trae CN on the user's laptop, 2026-10-23 (PR #53 audit 98 §5, probe A): the pids and images as observed; trae-sandbox.exe (42116) was
+# gone as soon as A finished, so recording it made reclaim PROVEN_DEAD again; agent-tool-host.exe hangs off the resident utility process
+TRAE_CN_SANDBOXED = _ancestry(
+    (43680, "python.exe"),
+    (16152, "powershell.exe"),
+    (42116, "trae-sandbox.exe"),
+    (17968, "agent-tool-host.exe"),
+    (31476, "trae cn.exe"),
+    (17036, "trae cn.exe"),
+    (4000, "explorer.exe"),
+)
+
+
+def test_a_per_command_sandbox_is_skipped_and_the_resident_tool_host_is_the_holder() -> None:
+    assert process_probe.holder_process_pid(43680, TRAE_CN_SANDBOXED) == 17968
+
+
+def test_a_sandbox_is_never_the_fallback_holder_even_when_the_walk_stops_above_it() -> None:
+    # the walk cannot read past the sandbox: neither the sandbox nor the per-command shell below it is recorded, both die with the command
+    cut_off = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (6, ""))
+    assert process_probe.holder_process_pid(9, cut_off) is None
+    reaches_root = _ancestry((9, "python.exe"), (8, "powershell.exe"), (7, "trae-sandbox.exe"), (5, "explorer.exe"))
+    assert process_probe.holder_process_pid(9, reaches_root) == 8
+
+
+def test_nested_shells_and_versioned_interpreters_are_all_skipped() -> None:
+    claude_code = _ancestry(
+        (90, "python3.12"), (80, "python3"), (70, "bash"), (60, "timeout"), (50, "bash"), (40, "claude"), (1, "systemd")
+    )
+    assert process_probe.holder_process_pid(90, claude_code) == 40
+    codex = _ancestry((9, "python.exe"), (8, "cmd.exe"), (7, "pwsh.exe"), (6, "codex.exe"))
+    assert process_probe.holder_process_pid(9, codex) == 6
+
+
+def test_a_person_typing_in_a_terminal_keeps_the_shell_they_keep_open() -> None:
+    windows = _ancestry((9, "python.exe"), (8, "python.exe"), (7, "powershell.exe"), (6, "windowsterminal.exe"), (5, "explorer.exe"))
+    assert process_probe.holder_process_pid(9, windows) == 7
+    linux = _ancestry((9, "python3"), (8, "bash"), (7, "zsh"), (6, "sshd"))
+    assert process_probe.holder_process_pid(9, linux) == 7  # the login shell nearest the session root, not the subshell
+
+
+def test_an_unreadable_or_interpreter_only_ancestry_records_nothing_rather_than_a_dying_process() -> None:
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (1, "systemd"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, ""))) is None
+    # started without any shell (double-click in Explorer, a scheduled task under svchost): the session root is never recorded, because
+    # explorer.exe or svchost.exe outlive every agent and a lease held by them could never be reclaimed (cloud audit of ee0268fa)
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (8, "python.exe"), (5, "explorer.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "pythonw.exe"), (4, "svchost.exe"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python.exe"), (7, "trae-sandbox.exe"), (4, "services.exe"))) is None
+    # a shell below an unreadable parent is not recorded (Codex on #80/#81): it may be the per-command shell of a host out of sight
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (7, ""))) is None
+
+
+def test_a_shell_whose_parent_shows_as_pid_1_outside_a_session_root_records_nothing() -> None:
+    # Codex on #80/#81: in a container or sandbox the agent host is outside the visible PID space and the per-command shell shows PPID 1;
+    # recording that shell made the lease PROVEN_DEAD as soon as the command exited, so a second agent could reclaim a live card
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "tini"))) is None
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "node"))) is None
+    # positive control: a known session root as PID 1 still keeps the person's own shell
+    assert process_probe.holder_process_pid(9, _ancestry((9, "python3"), (8, "bash"), (1, "systemd"))) == 8
+
+
+@pytest.mark.skipif(not (sys.platform.startswith("linux") and Path("/bin/bash").exists()), reason="drives a real shell chain on Linux")
+def test_on_a_real_process_chain_auto_records_the_agent_host_and_not_its_per_command_shell(tmp_path: Path) -> None:
+    # a stand-in agent host: a copy of bash under another name, so its image is neither a shell nor an interpreter
+    host = tmp_path / "agent-host"
+    host.write_bytes(Path("/bin/bash").read_bytes())
+    host.chmod(0o755)
+    root = Path(__file__).resolve().parents[2]
+    probe = "from auto_pm.infrastructure import process_probe; print(process_probe.holder_process_pid())"
+    # the host prints its own pid, then runs the command in a throwaway shell, as Trae CN does (each "; true" keeps bash from exec'ing the last command in its own place)
+    command = f"echo host=$$; bash -c '{sys.executable} -c \"{probe}\"; echo shell=$$; true'; true"
+    result = subprocess.run(
+        [str(host), "-c", command],
+        capture_output=True, text=True, encoding="utf-8", cwd=root, env={**os.environ, "PYTHONPATH": str(root)}, timeout=60, check=True,
+    )
+    lines = {(line.split("=", 1)[0] if "=" in line else "holder"): line.split("=", 1)[-1] for line in result.stdout.split()}
+    assert lines["holder"] == lines["host"] != lines["shell"]
+
+
+@pytest.mark.skipif(not (sys.platform.startswith("linux") and Path("/bin/bash").exists()), reason="drives a real shell chain on Linux")
+def test_the_recorded_holder_is_still_alive_after_the_command_that_recorded_it_has_ended(tmp_path: Path) -> None:
+    """The failure of 2026-10-19 / 2026-10-23: a single run looked right, but the recorded process died with its command.
+
+    A resident stand-in host runs two commands, each in its own throwaway shell, like Trae CN.  The fingerprint taken in command 1 must
+    still judge ALIVE after command 1's shell is gone, and command 2 must find the same host again: that is what a later reclaim sees.
+    """
+
+    host_image = tmp_path / "agent-host"  # a copy of bash under another name, so its image is neither a shell nor an interpreter
+    host_image.write_bytes(Path("/bin/bash").read_bytes())
+    host_image.chmod(0o755)
+    root = Path(__file__).resolve().parents[2]
+    probe = "from auto_pm.infrastructure import process_probe; print(process_probe.holder_process_pid())"
+    # per command: a throwaway shell prints its own pid, then the holder the probe finds ("; true" keeps bash from exec'ing the last command)
+    per_command = f"bash -c 'echo shell=$$; {sys.executable} -c \"{probe}\"; true'; echo done"
+    host = subprocess.Popen(
+        [str(host_image), "-c", f"echo host=$$; while read -r go; do {per_command}; done"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", cwd=root, env={**os.environ, "PYTHONPATH": str(root)},
+    )
+    stdin, stdout = host.stdin, host.stdout
+    assert stdin is not None and stdout is not None
+
+    def run_command() -> list[str]:
+        stdin.write("go\n")
+        stdin.flush()
+        lines: list[str] = []
+        while (line := stdout.readline().strip()) != "done":
+            if not line:
+                raise AssertionError(f"the stand-in host ended early; output so far: {lines}")
+            lines.append(line)
+        return lines
+
+    try:
+        first_pid_line = stdout.readline().strip()
+        host_pid = int(first_pid_line.split("=", 1)[1])
+        assert host_pid == host.pid
+
+        first = run_command()
+        shell_1, holder_1 = int(first[0].split("=", 1)[1]), int(first[1])
+        assert holder_1 == host_pid != shell_1
+        fingerprint = process_probe.fingerprint(holder_1)
+        local_host = process_probe.local_host_id()
+        if fingerprint is None or not local_host:
+            pytest.skip("the process table of this host cannot be read")
+        gone = process_probe.observe(shell_1)  # command 1's shell is gone
+        assert gone is not None and gone.pid_exists is False
+
+        # between the two commands: what a reclaim would judge right now
+        assert judge_process(fingerprint, process_probe.observe(holder_1), local_host_id=local_host) is ProcessVerdict.ALIVE
+
+        second = run_command()
+        shell_2, holder_2 = int(second[0].split("=", 1)[1]), int(second[1])
+        assert holder_2 == holder_1 and shell_2 != shell_1
+        assert judge_process(fingerprint, process_probe.observe(holder_2), local_host_id=local_host) is ProcessVerdict.ALIVE
+    finally:
+        host.kill()
+        host.wait(30)

@@ -34,6 +34,8 @@ State: `{{ card.state }}`
 
 ### Path table (machine precheck)
 
+基线状态只能填：存在 / 计划新增 / 运行态（写别的词，这一行不算可改范围）。
+
 | # | 路径 | 基线状态 |
 |---|---|---|
 {% for path in card.owned_paths %}| {{ loop.index }} | `{{ path }}` | {{ '计划新增' if path in card.planned_new_paths else '存在' }} |

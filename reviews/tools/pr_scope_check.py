@@ -67,9 +67,11 @@ SCOPE_ITEM = re.compile(r"^\s*[-*]\s+(?:`([^`]+)`.*|(\S.*?))\s*$")
 _SW008 = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 JUDGE_PATTERNS = (
     "reviews/tools/pr_scope_check.py",
+    "reviews/tools/pr_overlap_check.py",
     "reviews/tools/audit_pr.py",
     "reviews/tools/ci_aggregate.py",
     "reviews/tools/safety_zone_check.py",
+    "reviews/tools/rules_approval_check.py",
     "requirements.txt",
     f"{_SW008}/pyproject.toml",
     f"{_SW008}/auto_pm/**",

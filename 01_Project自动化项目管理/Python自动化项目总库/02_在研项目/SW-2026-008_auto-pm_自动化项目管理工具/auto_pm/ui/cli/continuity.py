@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -17,11 +17,17 @@ from pydantic import BaseModel, ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.agent_worktree_service import AGENT_ROSTER, caller_agent, caller_alias
 from auto_pm.application.core.bounded_command import run_until_done_or_stopped
+from auto_pm.application.core.claim_service import ClaimService
 from auto_pm.application.core.continuity_execution_service import (
     CONTROL_ROOT_RUN_REFUSAL,
     ContinuityExecutionError,
     ContinuityExecutionService,
+)
+from auto_pm.application.core.continuity_resume_service import (
+    ContinuityResumeError,
+    ContinuityResumeService,
 )
 from auto_pm.application.core.execution_adapter_service import (
     ExecutionDispatchError,
@@ -38,6 +44,7 @@ from auto_pm.application.core.mission_orchestrator import (
     MissionOrchestratorError,
 )
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
+from auto_pm.application.core.recovery_plan_service import RecoveryPlanError, RecoveryPlanService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
 from auto_pm.application.core.worktree_policy_service import (
     WorktreePolicyError,
@@ -59,6 +66,7 @@ from auto_pm.infrastructure.control_root_guard import (
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 from auto_pm.ui.cli.approval_pin import approval_pin_enforced
 from auto_pm.ui.cli.caller_path import CallerPath
+from auto_pm.ui.cli.guard_refusal import GuardClickRefusal
 from auto_pm.ui.cli.implementation_card import command_tree_from_click
 from auto_pm.ui.cli.runtime_identity_guard import (
     WARNINGS_FIELD,
@@ -202,6 +210,33 @@ def _lease_token(
     return argv_value
 
 
+def _starts_for_other_executor(executor_id: str) -> bool:
+    """True when a roster agent's Run is started by somebody else (another agent, the user's terminal, or an unrecognised caller)."""
+
+    target = executor_id.split(":", 1)[0].strip().lower()
+    return target in AGENT_ROSTER and caller_agent() != target
+
+
+def _require_wallet_for_other_executor(executor_id: str, *, use_wallet: bool) -> None:
+    """A Run started for another agent must land its token in the wallet, or only the starter can ever renew it (wallet isolation, 11-03).
+
+    ``--executor trae`` started by Codex with ``--lease-token`` leaves no wallet file, so Trae's ``--lease-wallet`` finds nothing.
+    Only roster agents are judged (WS-001); other executor ids (tests, legacy tools) keep the old freedom.
+    """
+
+    if use_wallet or not _starts_for_other_executor(executor_id):
+        return
+    caller = caller_agent()
+    who = {"": "用户终端", "?": "无法识别的调用方"}.get(caller, caller)
+    raise click.ClickException(
+        f"为别的执行者（{executor_id}）建 Run 必须带 --lease-wallet（当前调用方：{who}）："
+        f"口令会写进 {executor_id} 的本机钱包，接手方用 --lease-wallet 才读得到、才能自己续租；"
+        "用 --lease-token / --lease-token-env 只有建 Run 的人手里有口令，接手方续不了。"
+        "请去掉口令选项，改用 --lease-wallet，并同时加 --holder-pid none"
+        "（默认会把你这个 shell 记成持有进程，你的会话一结束，这个 Run 在回收判定里就像持有者已死）。"
+    )
+
+
 def _holder_pid(value: str) -> int | None:
     """``auto`` = the long-lived process behind this call (the agent's shell or IDE), ``none`` = record nothing, or an explicit pid."""
 
@@ -225,16 +260,28 @@ def _git(root: Path, *args: str) -> bytes:
         env=clean_git_environment(),
     )
     if result.returncode != 0:
-        message = result.stderr.decode("utf-8", errors="replace").strip()
+        message = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own error text, shown to the user and never parsed
         raise click.ClickException(f"Git 事实采集失败: {message or 'unknown error'}")
-    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+    diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git's own diagnostic text, shown to the user and never parsed
     if diagnostic:
         raise click.ClickException(f"Git 事实采集包含诊断: {diagnostic}")
     return result.stdout
 
 
+def _strict(raw: bytes, encoding: str, what: str) -> str:
+    """Decode git output that feeds an authority decision; bytes that do not decode stop the command instead of turning into ``?``."""
+
+    try:
+        return raw.decode(encoding)
+    except UnicodeDecodeError as error:
+        raise GuardClickRefusal(
+            "G-DECISION-GIT-BINDING",
+            f"Git 事实采集无法按 {encoding} 解码（{what}）：{error}；路径含非法字节，请先改名再继续",
+        ) from error
+
+
 def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
-    head = _git(root, "rev-parse", "HEAD").decode("ascii", errors="replace").strip()
+    head = _strict(_git(root, "rev-parse", "HEAD"), "ascii", "git rev-parse HEAD").strip()
     dirty: set[str] = set()
     commands = (
         ("diff", "--name-only", "-z"),
@@ -242,7 +289,7 @@ def _git_snapshot(root: Path) -> tuple[str, tuple[str, ...]]:
         ("ls-files", "--others", "--exclude-standard", "-z"),
     )
     for command in commands:
-        output = _git(root, *command).decode("utf-8", errors="replace")
+        output = _strict(_git(root, *command), "utf-8", f"git {' '.join(command)}")
         dirty.update(path.replace("\\", "/") for path in output.split("\0") if path)
     return head, tuple(sorted(dirty))
 
@@ -704,7 +751,8 @@ def run_group() -> None:
     "--holder-pid",
     default="auto",
     show_default=True,
-    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=调用本命令的 shell 或 IDE；none=不记录；或给出 pid），供日后回收判定",
+    help="与 --lease-wallet 一起：记录持有者的长驻进程（auto=agent 宿主进程（IDE 或 agent 本身，跳过每条命令新开的 shell），人在终端里手敲时是那个终端的 shell；none=不记录；或给出 pid），供日后回收判定。"
+    "为别的执行者建 Run 时 auto 按 none 处理，不会把你的 shell 记成对方的持有进程",
 )
 @click.option("--lease-seconds", type=click.IntRange(60, 3_600), default=DEFAULT_LEASE_SECONDS, show_default=True)
 @click.option(
@@ -737,6 +785,11 @@ def start_run(
     """Start a Run after independently observing Git HEAD and owned-path dirtiness."""
     require_runtime_identity(ctx, project_of_work(ctx, work_id))
     _require_mutation_root(ctx)
+    _require_wallet_for_other_executor(executor_id, use_wallet=lease_wallet)
+    if lease_wallet and holder_pid == "auto" and _starts_for_other_executor(executor_id):
+        # "auto" means the shell that runs this command; for somebody else's Run that would make the starter's session the
+        # holder process, so the Run looks orphaned to a reclaim as soon as the starter closes (audit 573 P2-1).
+        holder_pid = "none"
     if lease_wallet:
         if lease_token is not None or lease_token_env is not None:
             raise click.UsageError("--lease-wallet 不能与 --lease-token 或 --lease-token-env 同用")
@@ -777,7 +830,7 @@ def start_run(
     if root.resolve() == _workspace(ctx).resolve() and not recovery_change_id:
         # Only a recovery Run under a recovery Decision may use the control root; the service checks every condition of that
         # exception (continuity_execution_service.CONTROL_ROOT_RUN_REFUSAL says which).
-        raise click.ClickException(CONTROL_ROOT_RUN_REFUSAL)
+        raise GuardClickRefusal("G-CONTROL-ROOT-RUN", CONTROL_ROOT_RUN_REFUSAL)
     git_head, all_dirty = _git_snapshot(root)
     observed = _within(all_dirty, owned)
     try:
@@ -836,6 +889,11 @@ def _token_options(function: _Command) -> _Command:
 @click.option("--owner", "owner_id", required=True)
 @_token_options
 @click.option("--idempotency-key", required=True)
+@click.option(
+    "--abandon",
+    is_flag=True,
+    help="放弃一个验证没过的 Run：只能配 --to CANCELLED，且 Run 必须处于 VERIFYING（干到一半的 Run 只能 --to FAILED）",
+)
 @click.pass_context
 def transition_run(
     ctx: click.Context,
@@ -846,16 +904,23 @@ def transition_run(
     lease_token_env: str | None,
     lease_wallet: bool,
     idempotency_key: str,
+    abandon: bool,
 ) -> None:
     """Apply one legal Run state transition under an active lease."""
+    if abandon and new_state != RunState.CANCELLED.value:
+        raise click.UsageError("--abandon 只能配 --to CANCELLED")
     require_runtime_identity(ctx, project_of_run(ctx, run_id))
     lease_token = _lease_token(
         ctx, argv_value=lease_token, env_name=lease_token_env, use_wallet=lease_wallet, run_id=run_id, owner_id=owner_id
     )
     try:
-        item = _execution_service(ctx).transition_run(
-            run_id, RunState(new_state), owner_id, lease_token, idempotency_key
-        )
+        service = _execution_service(ctx)
+        if abandon:
+            item = service.abandon_verifying_run(run_id, owner_id, lease_token, idempotency_key)
+        else:
+            item = service.transition_run(
+                run_id, RunState(new_state), owner_id, lease_token, idempotency_key
+            )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
@@ -1421,7 +1486,7 @@ def extend_lease_hold(
 @click.option("--run-id", required=True)
 @click.option("--owner", "owner_id", required=True)
 @_token_options
-@click.option("--holder-pid", default="auto", show_default=True, help="持有者的长驻进程：auto（调用本命令的 shell 或 IDE）或 pid")
+@click.option("--holder-pid", default="auto", show_default=True, help="持有者的长驻进程：auto（agent 宿主进程，跳过每条命令新开的 shell；人手敲时是终端的 shell）或 pid")
 @click.option("--idempotency-key", required=True)
 @click.pass_context
 def record_holder(
@@ -1455,6 +1520,25 @@ def record_holder(
     if recorded_warnings(ctx):
         receipt[WARNINGS_FIELD] = recorded_warnings(ctx)
     click.echo(json.dumps(receipt, ensure_ascii=False))
+
+
+def _keep_claims_alive(ctx: click.Context, owned_paths: Sequence[str]) -> None:
+    """Checkpointing is proof the agent is still working on *this Run's* paths: stretch the claims covering them (D-39 follow-up).
+
+    Quiet and never fatal; a keep-alive that could not run says so on stderr (one line) and the checkpoint still succeeds.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        root = app_ctx.control_root or app_ctx.workspace_root
+        if not root:
+            return
+        service = ClaimService(root)
+        service.renew_held(caller_alias() or caller_agent().strip("?") or "user", paths=owned_paths)
+        for warning in service.keepalive_warnings:
+            click.echo(f"⚠️ {warning}", err=True)
+    except Exception:  # noqa: BLE001 - keep-alive must never stop the command it rides on
+        return
 
 
 @continuity_group.group(name="checkpoint")
@@ -1506,6 +1590,7 @@ def create_checkpoint(
         )
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
+    _keep_claims_alive(ctx, run.owned_paths)
     _emit(item)
 
 
@@ -1589,3 +1674,35 @@ def accept_handoff(
     except ContinuityExecutionError as error:
         raise click.ClickException(str(error)) from error
     _emit(item)
+
+
+@continuity_group.group(name="recovery")
+def recovery_group() -> None:
+    """Exit chains for abnormal ledger states (read-only in this release)."""
+
+
+@recovery_group.command(name="plan")
+@click.option("--pid", "project_id", required=True, help="项目编号")
+@click.option("--state", "state_id", default="", help="interlock_matrix 里登记的异常状态编号，如 LEASE_EXPIRED")
+@click.option("--run-id", default="", help="要处理的 Run；不给 --state 时按这个 Run 在账本里的实际状态判断")
+@click.option("--work-id", default="", help="要处理的 Work（WORK_BLOCKED 用）")
+@click.option("--from-orient", is_flag=True, help="按 pm orient 当前报告的全部冲突，逐个打印出口")
+@click.pass_context
+def recovery_plan(
+    ctx: click.Context, project_id: str, state_id: str, run_id: str, work_id: str, from_orient: bool
+) -> None:
+    """Print the exit chain of an abnormal state as a full command list. It only prints: nothing is run, nothing is written."""
+    service = RecoveryPlanService(_workspace(ctx))
+    try:
+        if from_orient:
+            resume = ContinuityResumeService(_workspace(ctx)).collect(project_id=project_id)
+            if not resume.conflicts:
+                click.echo("pm orient 当前没有冲突，没有要打印的出口。")
+                return
+            lines = service.plan_for_conflicts(project_id=project_id, conflicts=resume.conflicts)
+        else:
+            lines = service.plan(project_id=project_id, state_id=state_id, run_id=run_id, work_id=work_id)
+    except (RecoveryPlanError, ContinuityResumeError) as error:
+        raise click.ClickException(str(error)) from error
+    for line in lines:
+        click.echo(line)

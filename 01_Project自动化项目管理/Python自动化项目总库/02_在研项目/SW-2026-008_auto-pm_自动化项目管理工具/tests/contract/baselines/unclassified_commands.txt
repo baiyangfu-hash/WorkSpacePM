@@ -1,0 +1,170 @@
+# Commands not yet in interlock_matrix.COMMANDS (frozen 2026-11-04, CHG-SCPT-2026-476). This list may only shrink.
+change edit
+change list
+change show
+change verify
+clean
+constraint check
+constraint guard
+constraint heal
+constraint list
+constraint verify
+context resolve
+continuity backup
+continuity checkpoint create
+continuity dispatch prepare
+continuity handoff accept
+continuity handoff create
+continuity lease extend-hold
+continuity lease record-holder
+continuity lease run-with-renewal
+continuity list-backups
+continuity mission create
+continuity mission show
+continuity mission transition
+continuity orchestration report-finding
+continuity orchestration report-repair
+continuity restore-backup
+continuity run fence-legacy-terminal
+continuity run legacy-terminal-evidence
+continuity verify-backup
+continuity work adjudication-evidence
+continuity work relate
+decision list
+decision show
+delivery archive clean
+delivery archive list
+delivery build
+delivery package
+delivery status
+doc check
+doc inject
+doc refresh
+doc sync
+doctor
+dogfood inspect
+dogfood prepare
+dogfood review
+git-hook commit-msg
+git-hook install
+git-hook pre-commit
+git-hook preflight
+git-hook release-gate
+gui
+handoff claim
+handoff close
+handoff create
+handoff fail
+handoff failures
+handoff heartbeat
+handoff list
+handoff preflight
+handoff queue
+handoff requeue
+handoff result-submit
+handoff saga compensate
+handoff saga resume
+handoff saga status
+handoff show
+handoff start
+handoff timeout
+implementation-card approve
+implementation-card by-change
+implementation-card create
+implementation-card dispatch
+implementation-card precheck
+implementation-card validate
+implementation-card verify
+long-run start
+long-run status
+long-run stop
+plc check
+plc docs check
+plc docs confirm
+plc docs plan
+plc docs sync
+plc ingest
+plc init
+plc promote
+plc repair
+plc standardize
+pm accept
+pm acceptance-scan
+pm approve
+pm approver-pin status
+pm confirm-start
+pm context
+pm drafts
+pm execute
+pm handoff
+pm inbox add
+pm inbox confirm
+pm inbox list
+pm inbox reject
+pm inbox show
+pm missions
+pm park
+pm pending
+pm plan
+pm recover-status
+pm sign-risk
+pm switch
+pm takeover
+pm verify
+pm workflow
+pm-session archive
+pm-session check
+pm-session view
+pr open
+pr ready
+project create
+project delete
+project edit
+project hooks install
+project hooks status
+project hooks uninstall
+project import
+project list
+project register
+project retrofit
+project show
+project snapshot
+prototype archive
+prototype bundle
+prototype check
+prototype init
+python check
+python init
+python repair
+role check
+role list
+spec check
+spec frontmatter
+spec index
+spec lint
+spec report
+spec sync
+template list
+template update
+vartable batch-parse
+vartable convert
+vartable detect-encoding
+vartable detect-format
+vartable list-encodings
+vartable list-formats
+vartable parse
+workflow accept
+workflow approve
+workflow confirm-start
+workflow context
+workflow execute
+workflow history
+workflow list
+workflow plan
+workflow resume
+workflow run
+workflow status
+worktree close
+worktree list
+worktree open
+worktree sweep

@@ -168,3 +168,39 @@ def test_the_machine_is_kept_awake_for_the_block_by_the_keepalive_thread(
         assert [kind for kind, _ in events] == ["on"]
     assert [kind for kind, _ in events] == ["on", "off"]
     assert events[0][1] == events[1][1] != threading.get_ident()
+
+
+def test_d31_a_longer_lease_is_never_shortened_by_the_keepalive(tmp_path: Path) -> None:
+    """``pm verify`` wraps the Run's 30-minute lease in a 15-minute keep-alive; the lease must not drop to 15 minutes."""
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    _start(service, lease_seconds=1800)
+    before = service.current_lease("RUN-001")
+    with _keepalive(service, lease_seconds=900):
+        time.sleep(0.2)  # several 0.02 s intervals
+    after = service.current_lease("RUN-001")
+    assert after.expires_at >= before.expires_at
+    assert after.version == before.version  # nothing was written at all
+
+
+def test_a_lease_stamp_without_a_time_zone_is_renewed_as_before_not_a_crash() -> None:
+    # Audit of #585 (comment 6702498372): a naive ``expires_at`` made the D-31 comparison raise TypeError.
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    renewals: list[int] = []
+
+    class Execution:
+        def current_lease(self, run_id: str) -> SimpleNamespace:
+            return SimpleNamespace(expires_at="2026-11-07T05:00:00", version=3)  # no zone
+
+        def now_utc(self) -> datetime:
+            return datetime(2026, 11, 7, 4, 0, tzinfo=UTC)
+
+        def renew_lease(self, *args: object, **kwargs: object) -> None:
+            renewals.append(1)
+
+    keepalive = _keepalive(Execution())
+    keepalive._renew_once()
+    assert renewals == [1]

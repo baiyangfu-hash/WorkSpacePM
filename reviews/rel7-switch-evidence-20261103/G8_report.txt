@@ -1,0 +1,5 @@
+# G8 - a tampered copy of the build (one byte added to auto_pm/__init__.py) is caught by the two-build comparison; two in-memory document controls (the report losing its proof sentence, the report losing the full frozen commit) are refused by the line contract
+D1-the-report-loses-its-proof-sentence: killed=True must_fail=['docs_contract'] failed=['secret_like', 'ok'] restored=True
+D2-the-report-loses-the-frozen-commit: killed=True must_fail=['docs_contract'] failed=['secret_like', 'ok'] restored=True
+B1-a-tampered-build-is-caught-by-the-two-build-comparison: killed=True must_fail=['payload_identical'] failed=['auto_pm/__init__.py'] restored=True
+G8 VERDICT: PASS

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InputFile,
     [string]$OutputFile,
     [ValidateSet("png","svg","pdf")][string]$Format = "png",
@@ -47,7 +47,12 @@ if (-not $OutputFile) {
 Write-Host "[INFO] Input:  $InputFile" -ForegroundColor Gray
 Write-Host "[INFO] Output: $OutputFile ($Format, ${Width}px, ${Scale}x)" -ForegroundColor Gray
 
+# D-142（同 D-132）：Windows PowerShell 5.1 在 Stop 下会把 mmdc 写到 stderr 的每一行升级成终止错误；这一行只为转发输出，
+# 成败由下面的输出文件是否存在判断，所以调用期间改回 Continue。
+$stopPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $MMDC -i $InputFile -o $OutputFile -w $Width -b white -s $Scale 2>&1 | ForEach-Object { Write-Host $_ }
+$ErrorActionPreference = $stopPreference
 
 if (Test-Path $OutputFile) {
     $size = [math]::Round((Get-Item $OutputFile).Length / 1KB, 1)

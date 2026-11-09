@@ -431,7 +431,11 @@ class _IdeLane:
             command += ["--owned", path]
         for path in declared:
             command += ["--declared-dirty", path]
-        return self._with_token("continuity run start", self._launcher(command))
+        # Trae starts its own Run, so it is the caller: pm-as-trae.ps1 sets this marker (a Run for another agent needs --lease-wallet).
+        environment = self.drill._env()
+        environment[TOKEN_ENV] = self.token
+        environment["AUTO_PM_AGENT"] = EXECUTOR
+        return self.drill._call("continuity run start", self._launcher(command), environment)
 
     def transition(self, state: str) -> None:
         moved = self._with_token(

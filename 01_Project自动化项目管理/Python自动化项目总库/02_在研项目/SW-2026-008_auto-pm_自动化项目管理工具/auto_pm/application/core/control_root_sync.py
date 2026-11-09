@@ -12,9 +12,11 @@ control root already has (the state of its last fetch); with no such reference (
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from auto_pm.application.core.candidate_merge_back_service import (
     CandidateMergeBackError,
@@ -22,16 +24,37 @@ from auto_pm.application.core.candidate_merge_back_service import (
 )
 from auto_pm.domain.change.file_locator import ChangeFileLocator
 from auto_pm.domain.change.parser import ChgParser
-from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.control_root_guard import authority_paths_covered, clean_git_environment
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 MAIN_REF = "refs/remotes/origin/main"
 GIT_TIMEOUT_SECONDS = 60.0
 SHOWN_PATHS = 8
+# An unclaimed uncommitted file older than this is called out as forgotten (D-13: files sat in the control root for two weeks).
+FORGOTTEN_DAYS = 3
 
 
 class ControlRootSyncError(Exception):
     """Git could not answer a question; the caller reports 'not verified'."""
+
+
+@dataclass(frozen=True)
+class UncommittedFile:
+    """One uncommitted path in the control root, with whoever the ledger says holds it (D-13)."""
+
+    path: str
+    status: str
+    age_days: int | None = None
+    # "Run <id>（<executor>）" when a live Run owns the path; empty when no Run claims it.
+    owner: str = ""
+
+    def as_json(self) -> dict[str, object]:
+        return {"path": self.path, "status": self.status, "age_days": self.age_days, "owner": self.owner}
+
+    def label(self) -> str:
+        who = self.owner or "没有 Run 认领"
+        age = "" if self.age_days is None else f"，{self.age_days} 天"
+        return f"{self.path}（{who}{age}）"
 
 
 @dataclass(frozen=True)
@@ -51,6 +74,28 @@ class SyncReport:
     # No remote called origin at all: there is nothing to be out of step with.  Reported as "not verified" by the data, but the
     # commands print nothing for it (a lone local repository would otherwise get a useless line on every command).
     no_origin: bool = False
+    # D-44: which branch the control root is on.  ``branch_known`` is False when Git could not say (the fields below mean nothing).
+    branch_known: bool = False
+    branch: str = ""
+    detached: bool = False
+    # D-13: every uncommitted path in the control root (not only the Run's scope), with its holder and age.
+    uncommitted: tuple[UncommittedFile, ...] = ()
+
+    @property
+    def on_main(self) -> bool:
+        return self.branch_known and not self.detached and self.branch == "main"
+
+    @property
+    def off_main(self) -> bool:
+        """True when Git positively says the control root sits on another branch or a detached HEAD."""
+
+        return self.branch_known and not self.on_main
+
+    @property
+    def forgotten(self) -> tuple[UncommittedFile, ...]:
+        return tuple(
+            item for item in self.uncommitted if not item.owner and (item.age_days or 0) >= FORGOTTEN_DAYS
+        )
 
     @property
     def blocks_run_start(self) -> bool:
@@ -62,7 +107,9 @@ class SyncReport:
     def needs_attention(self) -> bool:
         if self.no_origin:
             return False
-        return (not self.verified) or bool(self.behind or self.ahead or self.dirty_in_scope or self.drift_in_scope)
+        return (not self.verified) or bool(
+            self.behind or self.ahead or self.dirty_in_scope or self.drift_in_scope or self.off_main or self.uncommitted
+        )
 
     def lines(self) -> tuple[str, ...]:
         """Plain-words hints, empty when everything matches."""
@@ -70,7 +117,10 @@ class SyncReport:
         if self.no_origin:
             return ()
         if not self.verified:
-            return (f"控制根与 origin/main 是否一致：未核实（{self.note}）。离线或没有 origin 时不影响入箱与批准；开工前请联网后再看一次。",)
+            return (
+                f"控制根与 origin/main 是否一致：未核实（{self.note}）。离线或没有 origin 时不影响入箱与批准；开工前请联网后再看一次。",
+                *self._holder_lines(),
+            )
         out: list[str] = []
         if self.behind:
             out.append(
@@ -107,7 +157,42 @@ class SyncReport:
         if self.drift_in_scope and not (self.behind or self.dirty_in_scope):
             out.append(f"控制根里归属范围内有 {len(self.drift_in_scope)} 个文件和 origin/main 不一致：" + _shown(self.drift_in_scope) + "。")
         if self.blocks_run_start:
-            out.append("按现在的状态，之后 `run start` 一定会被拒（控制根范围内的文件与开工起点不一致）；先按上面处理，再批准或开工。")
+            # D-104: this report compares the whole project scope; `run start` compares only the Run's own owned paths.
+            out.append(
+                "之后 `run start` 会不会被拒，看开工要改的范围：范围里含上面这些文件就会被拒（与开工起点不一致）；"
+                "不在开工范围内的未提交文件（例如 `pm plan` 刚生成的变更单）不影响开工。含的话先按上面处理，再批准或开工。"
+            )
+        out.extend(self._holder_lines())
+        return tuple(out)
+
+    def _holder_lines(self) -> tuple[str, ...]:
+        """Lines about where the control root stands (D-44) and whose uncommitted files it holds (D-13)."""
+
+        out: list[str] = []
+        if self.off_main:
+            where = "游离 HEAD（不在任何分支上）" if self.detached else f"分支 {self.branch}"
+            out.append(
+                f"控制根现在在{where}，不在 main：别的线程和 agent 读到的“控制根”就是这个分支的内容，对不上 main。"
+                "用完请切回 main（`git switch main`；有未提交文件先按下一条弄清归属，不要带着走）。"
+            )
+        if self.uncommitted:
+            others = [item for item in self.uncommitted if not item.owner]
+            held = [item for item in self.uncommitted if item.owner]
+            parts: list[str] = []
+            if held:
+                parts.append("有 Run 认领的：" + _shown([item.label() for item in held]))
+            if others:
+                parts.append("没有 Run 认领的：" + _shown([item.label() for item in others]))
+            out.append(
+                f"控制根里有 {len(self.uncommitted)} 个未提交的文件。" + "；".join(parts)
+                + "。认领的文件是别的线程在做的活，不要动它，也不会挡你自己范围外的 Run。"
+            )
+            if self.forgotten:
+                out.append(
+                    f"其中 {len(self.forgotten)} 个没人认领、已放了 {FORGOTTEN_DAYS} 天以上，多半是被提交钩子拦下或收口后忘了提交的："
+                    + _shown([item.path for item in self.forgotten])
+                    + "。请用户决定提交还是还原（agent 不要自己删，也不要自己提交别人的文件）。"
+                )
         return tuple(out)
 
     def as_json(self) -> dict[str, object]:
@@ -124,6 +209,10 @@ class SyncReport:
             "blocks_run_start": self.blocks_run_start,
             "note": self.note,
             "no_origin": self.no_origin,
+            "branch": self.branch if self.branch_known else None,
+            "detached": self.detached if self.branch_known else None,
+            "on_main": self.on_main if self.branch_known else None,
+            "uncommitted": [item.as_json() for item in self.uncommitted],
             "hints": list(self.lines()),
         }
 
@@ -133,9 +222,31 @@ def _shown(items: Sequence[str]) -> str:
     return head + (f" 等共 {len(items)} 个" if len(items) > SHOWN_PATHS else "")
 
 
+OwnerLookup = Callable[[str], str]
+
+
+def live_run_owner_lookup(store: Any, project_id: str) -> OwnerLookup:
+    """Map a control-root path to ``Run <id>（<executor>）`` for the live Runs of one project; "" when no live Run owns it."""
+
+    claims: list[tuple[tuple[str, ...], str]] = []
+    if project_id:
+        for work in store.list_works(project_id):
+            for run in store.list_runs(work.work_id):
+                claims.append((tuple(run.owned_paths), f"Run {run.run_id}（{run.executor_id}）"))
+
+    def lookup(path: str) -> str:
+        for owned, label in claims:
+            if authority_paths_covered((path,), owned):
+                return label
+        return ""
+
+    return lookup
+
+
 class ControlRootSyncService:
-    def __init__(self, control_root: str | Path) -> None:
+    def __init__(self, control_root: str | Path, *, owner_of: OwnerLookup | None = None) -> None:
         self._root = Path(control_root).resolve()
+        self._owner_of = owner_of
 
     def project_scope(self, project_id: str) -> tuple[str, ...]:
         """The project's folder, relative to the control root; empty when it cannot be found."""
@@ -172,9 +283,40 @@ class ControlRootSyncService:
         """Compare the control root with ``origin/main`` for the given scope (paths relative to the control root)."""
 
         try:
-            return self._check(tuple(scope_paths))
+            report = self._check(tuple(scope_paths))
         except ControlRootSyncError as error:
-            return SyncReport(verified=False, note=str(error))
+            report = SyncReport(verified=False, note=str(error))
+        try:
+            return replace(report, **self._holder_state())
+        except ControlRootSyncError:
+            return report  # the branch and the holders are extra: a Git that cannot say them leaves the rest as it was
+
+    def _holder_state(self) -> dict[str, Any]:
+        """Which branch the control root is on, and every uncommitted path with its holder and age (D-44, D-13)."""
+
+        head = self._git(["symbolic-ref", "--short", "-q", "HEAD"], allow_failure=True)
+        branch = (head or b"").decode("utf-8", errors="replace").strip()  # lenient-decode: a branch name only labels a hint
+        state: dict[str, Any] = {"branch_known": True, "branch": branch, "detached": not branch}
+        now = time.time()
+        files: list[UncommittedFile] = []
+        listing = self._text(["status", "--porcelain", "-z", "--no-renames", "--untracked-files=normal"])
+        for item in listing.split("\0"):
+            if len(item) <= 3 or item[2] != " ":
+                continue
+            path = item[3:]
+            try:
+                age: int | None = max(0, int((now - (self._root / path).stat().st_mtime) // 86400))
+            except OSError:
+                age = None  # a deleted path has no age
+            owner = ""
+            if self._owner_of is not None:
+                try:
+                    owner = self._owner_of(path.rstrip("/"))
+                except Exception:  # noqa: BLE001 - a ledger that cannot answer leaves the file unclaimed, never fails the hint
+                    owner = ""
+            files.append(UncommittedFile(path=path, status=item[:2].strip() or "?", age_days=age, owner=owner))
+        state["uncommitted"] = tuple(sorted(files, key=lambda f: f.path))
+        return state
 
     def _check(self, scope: tuple[str, ...]) -> SyncReport:
         if self._git(["rev-parse", "--verify", "--quiet", MAIN_REF], allow_failure=True) is None:
