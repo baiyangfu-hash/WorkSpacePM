@@ -51,6 +51,19 @@ def test_disarm_is_silent_when_nothing_is_armed_or_there_is_no_arm_folder(tmp_pa
     door.disarm_this_process(tmp_path / "no" / "such" / "place")  # no .auto-pm on the way: nothing to do, nothing raised
 
 
+def test_disarm_does_not_raise_when_arm_dir_finds_no_arm_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Run from somewhere with no ``.auto-pm`` on the way, ``arm_dir`` answers None; the door must treat that as "nothing armed", not do ``None / name`` (a TypeError would block the deploy)."""
+
+    monkeypatch.setattr(mp, "arm_dir", lambda start=None: None)
+    removed: list[Path] = []
+    monkeypatch.setattr(mp, "disarm", lambda path: removed.append(path))
+
+    door.disarm_this_process(tmp_path)
+    door.disarm_this_process()
+
+    assert removed == [], "no arm folder: there is nothing to remove"
+
+
 def test_a_switch_disarms_before_it_touches_the_pointers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
     monkeypatch.setattr(rw, "disarm_this_process", lambda: order.append("disarm"))
