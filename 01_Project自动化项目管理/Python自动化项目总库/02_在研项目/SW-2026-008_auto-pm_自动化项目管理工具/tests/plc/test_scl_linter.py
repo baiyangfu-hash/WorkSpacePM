@@ -368,8 +368,8 @@ def test_905_long_region_example_passes_the_linter() -> None:
     assert report.violations == []
     example = blocks[0]
     assert example.count("REGION ") >= 6 and "ARRAY[1..4]" in example
-    # 定时器写法与 LSP-905 §2 / LSP-906 §1 一致：FB_TON、fb_ 前缀、调用集中在 FB 顶部第一个区段里
-    assert ": FB_TON;" in example and ": TON;" not in example
+    # 定时器写法与 905 规范示例一致：TIA 原生 TON_TIME 多重实例（不再写 FB_TON / TON）、fb_ 前缀、调用集中在 FB 顶部第一个区段里
+    assert ": TON_TIME;" in example and ": FB_TON;" not in example and ": TON;" not in example
     assert "s_fb" not in example
     first_region_end = example.index("END_REGION")
     assert example.index("fb_tStepTimer(") < first_region_end
