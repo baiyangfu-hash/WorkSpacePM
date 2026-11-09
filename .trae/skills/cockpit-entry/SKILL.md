@@ -9,7 +9,13 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 ## 身份标记
 
-Trae 里的 AI 执行 `main.py` 命令，一律改用 `.\.trae\bin\pm-as-trae.ps1 <命令参数>`，等价于 `& ".\.venv\Scripts\python.exe" ".\main.py" <命令参数>`，只是这一条命令期间带上 `AUTO_PM_AGENT=trae:cn`，结束即还原。驾驶舱靠这个标记认出调用方是 agent（冒号后面的 `cn` 只是备注，国际版同样适用）：不带标记会被当成用户本人。下面各步里写的 `main.py` 都按这个方式运行；需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用这个脚本运行（带标记会被拒绝），照原有说法在终端里原样运行或交给用户。
+驾驶舱靠环境变量 `AUTO_PM_AGENT`（值写基名，冒号后是备注）认出调用方是 agent：不带标记会被当成用户本人。Claude Code 和 Codex 自带环境变量可被自动认出，其他 agent（Trae、Cursor、VS Code 里的 AI 等）必须自己声明。下面各步里写的 `main.py` 都按这个方式运行：
+
+- 通用：`.\00_Infrastructure\bin\pm-as-agent.ps1 <基名> <命令参数>`，例如 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor pm orient <项目编号> --json`；基名取自 `AGENTS.md` WS-001 表（claude、trae、cursor、vscode、codex）。它只在这一条命令期间设置变量，结束即还原。
+- Trae 里的 AI：`.\.trae\bin\pm-as-trae.ps1 <命令参数>`，等价于 `& ".\.venv\Scripts\python.exe" ".\main.py" <命令参数>`，只是这一条命令期间带上 `AUTO_PM_AGENT=trae:cn`，结束即还原。命令只认冒号前面那段（trae），冒号后面的 `cn` 只是备注，国际版同样适用；效果和上面的通用脚本取 `trae:cn` 相同。
+- 非 Windows 的 shell：只对单条命令设置，如 `AUTO_PM_AGENT=cursor python main.py pm orient <项目编号> --json`。
+
+需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用这些脚本运行（带标记会被拒绝），照原有说法在终端里原样运行或交给用户。
 
 ## 进门四步
 

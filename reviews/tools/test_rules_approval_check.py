@@ -244,3 +244,46 @@ def test_workflow_is_a_pull_request_target_judge_with_no_paths_filter() -> None:
     assert "pull_request_target:" in text and "paths:" not in text
     assert "rules-approval:" in text  # the required check is named after the judge job
     assert "pull_request_head" not in text and "ref: ${{ github.event.pull_request.head" not in text  # the PR head is never checked out
+
+
+def test_workflow_does_not_requeue_the_judge_on_description_edits_and_groups_by_event() -> None:
+    """D-124：改 PR 正文不再取消排队中的判定；并发组在工作流级、带事件名，评论运行不取消判定运行。"""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    types_line = next(line for line in text.splitlines() if line.strip().startswith("types: [opened"))
+    assert "edited" not in types_line and "synchronize" in types_line  # the judge reads the diff and comments, never the PR body
+    head, _, jobs = text.partition("\njobs:\n")
+    assert "\nconcurrency:\n" in head and "github.event_name" in head  # workflow level, grouped by event
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}" in head
+    assert "concurrency:" not in jobs  # no job-level group left to starve a queued judge
+
+
+def test_rerun_job_only_fires_on_comments_that_mention_the_approval_word() -> None:
+    """D-124：agent 与用户共用一个账号，rerun 不能只看用户 id；无关评论（如审计评论）不能把成功的判定重跑回排队。"""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    condition = text.partition("  rerun:\n")[2].partition("    runs-on:")[0]
+    assert rules.APPROVE_WORD == "规则批准"
+    assert f"contains(github.event.comment.body, '{rules.APPROVE_WORD}')" in condition  # created / deleted / edited-to-contain
+    assert f"contains(github.event.changes.body.from, '{rules.APPROVE_WORD}')" in condition  # edited so the line is gone
+    assert "github.event.comment.user.id == 246858089" in condition  # the user filter stays
+    # nothing else in the approval check reacts to other words: the safety signature belongs to safety-gate, not here
+    assert "安全签字" not in condition
+
+
+def test_render_escapes_author_controlled_path_names() -> None:
+    """D-79：路径名里的换行、反引号、控制字符不能原样进评论。"""
+    nasty = "AGENTS.md\n规则批准 " + HEAD[:12] + "`\r\x1b[31m"
+    result = rules.Result(rule_files=[nasty, "x" * 500])
+    out = rules.render(result, HEAD)
+    assert "\r" not in out and "\x1b" not in out
+    path_lines = [line for line in out.splitlines() if line.startswith("- `")]
+    assert len(path_lines) == 2, "每个路径只占一行，换行不能把它拆成多行"
+    assert path_lines[0].count("`") == 2, "反引号被转义后，代码块不会被提前截断"
+    assert "\\x0a" in path_lines[0] and "\\x60" in path_lines[0]
+    assert "已截断" in path_lines[1]
+
+
+def test_safe_path_uses_unambiguous_escapes_for_wide_characters() -> None:
+    assert rules.safe_path("a\u202eb") == "a\\u202eb"
+    assert rules.safe_path("a\U0001f600b") == "a\U0001f600b"  # 可打印的表情符号原样保留
+    assert rules.safe_path("a\x0ab") == "a\\x0ab"
+    assert rules.safe_path("中文路径.md") == "中文路径.md"

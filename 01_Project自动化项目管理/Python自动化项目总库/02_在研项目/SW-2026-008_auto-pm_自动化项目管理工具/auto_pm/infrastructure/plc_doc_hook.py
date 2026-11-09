@@ -14,7 +14,7 @@ from collections.abc import Collection, Iterable
 from pathlib import Path, PurePosixPath
 
 from auto_pm.domain.plc import doc_consistency as dc
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 SOURCE_SUFFIXES = (".scl", ".db")
 EXPORT_SUFFIXES = (".scl", ".db", ".md", ".json")
@@ -23,7 +23,7 @@ ARCHIVE_PARTS = frozenset({"archive", "_archive"})
 
 
 def _git(root: Path, args: list[str], stdin: str | None = None) -> str:
-    result = run_git_bounded_text(
+    result = run_git_bounded_strict_text(
         ["git", "-c", "core.quotepath=false", *args],
         default_timeout=60.0,
         error_cls=RuntimeError,

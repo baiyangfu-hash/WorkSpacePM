@@ -102,7 +102,7 @@ class LedgerUpdater:
         seq = self._get_next_sequence(content)
 
         # 生成变更单链接
-        link = f"[→ {change_number}](./01_变更单/CHG-{domain}/{change_number}.md)"
+        link = f"[→ {change_number}](../01_变更单/CHG-{domain}/{change_number}.md)"
 
         # 构造新行（CHG-085：填入申请人/申请日期列，原 L47 留空导致台账字段缺失）
         # 列结构：| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |
@@ -180,7 +180,7 @@ class LedgerUpdater:
             # 生成序号
             seq = self._get_next_sequence(content)
             # 生成变更单链接
-            link = f"[→ {change_number}](./01_变更单/CHG-{domain}/{change_number}.md)"
+            link = f"[→ {change_number}](../01_变更单/CHG-{domain}/{change_number}.md)"
             # 完成日期（仅 closed/archived 状态写入）
             complete_date_str = (
                 complete_date if complete_date and status in ("✅已关闭", "✅已归档", "🚫已废弃") else ""

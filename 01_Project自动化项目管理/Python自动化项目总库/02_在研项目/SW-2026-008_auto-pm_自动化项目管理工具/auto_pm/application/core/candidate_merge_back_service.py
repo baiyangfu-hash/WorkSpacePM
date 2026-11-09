@@ -101,7 +101,7 @@ class CandidateMergeBackService:
             env=clean_git_environment(),
         )
         if result.returncode != 0:
-            message = result.stderr.decode("utf-8", errors="replace").strip()
+            message = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: git stderr only quoted in the refusal message
             raise CandidateMergeBackError(f"无法核对控制根: {message or 'git 失败'}")
         try:
             listing = result.stdout.decode("utf-8")

@@ -249,7 +249,8 @@ uv run pre-commit run --all-files
 | `AUTO_PM_GIT_TIMEOUT_SECONDS` | 驾驶舱 7 处 Git 子进程调用的统一时限，超时即终止并报“Git 命令超时回执”（微任务整体重做）；设了它，7 处都改用这个值，各处原来的默认值见最后一列 | 5～600 秒的数字；超出范围、不是数字、`nan`、`inf` 一律报错拒绝（失败关闭），不会悄悄改用默认值 | 未设或为空，各处用自己的默认值：批准 30 秒、变更追踪 60 秒、证据 600 秒、本地执行 15 秒、连续性 10 秒、PLC 标记 10 秒、微任务 120 秒 |
 | `AUTO_PM_START_WATCHDOG_SCALE` | 仅测试：`tests/qml/test_pm_cockpit_bridge.py` 真实启动用例的看门狗时限倍数（基线成功用例 600 秒），机器过载时设 2 或 3 重跑；只能放大不能缩短 | 不小于 1 的有限数；小于 1 按 1，无法解析或不是有限数（`abc`、`nan`、`inf`、`1e400`）按 1 | 1（即 600 秒） |
 | `AUTO_PM_ALLOW_SKIP_QUALITY_TOOLS` | 仅测试：解释器里缺 `ruff`/`mypy` 时，是否跳过依赖真实质量门的测试（标记 `needs_quality_tools`） | 只有取值 `1` 才跳过；其他任何值等同未设 | 未设：缺依赖时这些测试判失败。笔记本和 CI 不要设，只给没装 dev 依赖的云端会话用 |
-| `AUTO_PM_REQUIRE_CLAIM` | `pm pr open` 是否要求当前卡有自己的有效领卡占位（`main.py claim open` 领的远程分支 `claims/<卡号>`）：没领、被别人领、已放下、租约到期、离线未核实都拒 | `1`、`true`、`yes`、`on` 开启（不分大小写）；其他任何值等同未设 | 未设：不要求（发版稳定后改默认开，后续卡） |
+| `AUTO_PM_REQUIRE_CLAIM` | `pm pr open` 是否要求当前卡有自己的有效领卡占位（`main.py claim open` 领的远程分支 `claims/<卡号>`）：没领、被别人领、已放下、被收回、租约到期（默认 4 小时，持有者用 `claim renew` 续）、离线未核实都拒 | `0`、`false`、`no`、`off` 关闭（不分大小写）；其他任何值等同开启 | 未设：要求（用户 2026-11-07 定为默认开；没动静的占位用 `claim reclaim` 收回，需用户原话） |
+| `AUTO_PM_CLAIM_LEASE_SECONDS` | 领卡占位（`claim open` / `claim renew`）的租期秒数，用于真实“过期被抢”演练 | 1～14400 的整数；写错或超过 14400 直接报错，不截断、不静默回退 | 未设：4 小时（`claim_service.LEASE_HOURS`）；自动续租一次最多续到最近一次显式领卡/续租后的 12 小时 |
 | `AUTO_PM_SESSION_ID` | 本对话的会话 ID，用来给每个对话分到自己的别名工位（`claude-<ID前6位>`）；任何 agent 或包装脚本都可设，优先于 Claude Code 的 `CLAUDE_CODE_SESSION_ID`；agent 调用却没有任何会话 ID 时，驾驶舱按父进程号生成一个并记在 `.auto-pm/session-ids/` | 任意非空字符串（取前 6 位十六进制作别名） | 未设：读 `CLAUDE_CODE_SESSION_ID`，再没有就按父进程号生成 |
 | `AUTO_PM_SESSION_TITLE` | 本对话的标题，只用于工位列表里显示，不参与别名和身份判断 | 任意文字 | 未设：显示为空 |
 | `AUTO_PM_STATION_STALE_HOURS` | 会话别名工位多久没动静算陈旧、可自动回收（进程还活着就绝不算陈旧；回收前先保住未提交改动） | 大于 0 的数（小时）；填错或不大于 0 等同未设 | 2 |

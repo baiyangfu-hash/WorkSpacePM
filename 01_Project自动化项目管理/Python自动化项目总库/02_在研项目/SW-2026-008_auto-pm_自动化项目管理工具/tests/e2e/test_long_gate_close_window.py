@@ -174,9 +174,11 @@ def test_the_gate_runs_the_closing_itself_after_the_verdict(lab: dict[str, Path]
         lab,
         run_age_s=60,
         extra={"closing": closing},
-        lease_extra={"hold_until_marker": str(marker)},
+        # D-83/D-94: bound the wait. If the gate skipped ``_run_closing()`` nothing would ever write the marker and the
+        # keeper would hold the lease for the default two hours; with 60 s (the minimum) the regression is a red test.
+        lease_extra={"hold_until_marker": str(marker), "hold_timeout_s": 60},
     )
-    assert _run(cfg, "run").returncode == 0
+    assert _run(cfg, "run", timeout=90).returncode == 0
     assert marker.exists()
     state = _state(lab)
     assert (
@@ -223,6 +225,21 @@ def test_a_short_hold_at_the_end_is_flagged_close_window_low(lab: dict[str, Path
         json.loads((lab["out"] / "long_gate_status.json").read_text(encoding="utf-8"))["warning"]
         == "CLOSE_WINDOW_LOW"
     )
+
+
+def test_the_low_window_threshold_is_forty_minutes_and_flags_just_below_it(lab: dict[str, Path]) -> None:
+    """D-82/D-93: 39 min of hold left is flagged; changing the threshold to 20 min used to leave every test green."""
+
+    assert _module().CLOSE_WINDOW_LOW_S == 40 * 60
+    cfg = _gate(lab, run_age_s=3 * 3600 - 39 * 60)
+    assert _run(cfg, "run").returncode == 0
+    assert _state(lab)["warning"] == "CLOSE_WINDOW_LOW"
+
+
+def test_the_low_window_is_not_flagged_just_above_forty_minutes(lab: dict[str, Path]) -> None:
+    cfg = _gate(lab, run_age_s=3 * 3600 - 41 * 60)
+    assert _run(cfg, "run").returncode == 0
+    assert _state(lab).get("warning") is None
 
 
 def test_a_comfortable_hold_is_not_flagged(lab: dict[str, Path]) -> None:

@@ -15,6 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from auto_pm.contracts.project_id import PROJECT_ID_PATTERN, is_project_id
+
 
 class IntakeKind(StrEnum):
     """What a new item is, from the project manager's point of view."""
@@ -80,8 +82,7 @@ DISPOSITION_RANK = {
     Disposition.REJECT: 3,
 }
 
-_ITEM_ID = re.compile(r"INBOX-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+-\d{4}\Z")
-_PROJECT_ID = re.compile(r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\Z")
+_ITEM_ID = re.compile(rf"INBOX-{PROJECT_ID_PATTERN}-\d{{4}}\Z")
 _TICKET_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _DOMAIN = re.compile(r"[A-Z]{3,4}\Z")
 _SCOPE = re.compile(r"[A-Z]{3,6}\Z")
@@ -89,7 +90,7 @@ _LEDGER_ID = re.compile(r"TD-[A-Z0-9]+-\d{3,}\Z")
 _CHG_ID = re.compile(r"CHG-[A-Z]{3,4}-\d{4}-\d{3,}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{7,40}\Z")
 _DUPLICATE_REF = re.compile(
-    r"(?:INBOX-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+-\d{4}|TD-[A-Z0-9]+-\d{3,}|CHG-[A-Z]{3,4}-\d{4}-\d{3,})\Z"
+    rf"(?:INBOX-{PROJECT_ID_PATTERN}-\d{{4}}|TD-[A-Z0-9]+-\d{{3,}}|CHG-[A-Z]{{3,4}}-\d{{4}}-\d{{3,}})\Z"
 )
 _MAX_SHORT = 200
 _MAX_LONG = 2000
@@ -329,7 +330,7 @@ class IntakeItem(BaseModel):
     @field_validator("project_id")
     @classmethod
     def _validate_project_id(cls, value: str) -> str:
-        if _PROJECT_ID.fullmatch(value) is None:
+        if not is_project_id(value):
             raise ValueError("project_id must be a canonical project id")
         return value
 

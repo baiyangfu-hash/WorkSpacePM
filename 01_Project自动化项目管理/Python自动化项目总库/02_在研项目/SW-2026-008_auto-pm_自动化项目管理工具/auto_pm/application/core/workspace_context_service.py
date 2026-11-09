@@ -38,7 +38,12 @@ class WorkspaceContextService:
         registry_path: str | Path | None = None,
         package_file_provider: Callable[[], str | Path | None] | None = None,
         execution_root: str | Path | None = None,
+        candidate_release_id: str = "",
+        exact_tree_checker: Callable[[Path, str], tuple[bool, str]] | None = None,
     ) -> None:
+        # D-157: an explicit, read-only pre-check of a release that is installed but not switched to yet (see _candidate_precheck).
+        self._candidate_release_id = candidate_release_id.strip()
+        self._exact_tree_checker = exact_tree_checker
         self._workspace_root = Path(workspace_root).resolve()
         self._execution_root = Path(execution_root or workspace_root).resolve()
         if not self._execution_root.is_dir():
@@ -96,6 +101,14 @@ class WorkspaceContextService:
             runtime_fallback_reason,
             candidate_commit,
         )
+        precheck = ""
+        if self._candidate_release_id and conflicts == ("RUNTIME_IDENTITY_DIVERGENCE",):
+            refusals = self._candidate_precheck_refusals(runtime_root, configured_release_id, effective_release_id)
+            if refusals:
+                conflicts = (*conflicts, *refusals)
+            else:
+                conflicts = ()
+                precheck = self._candidate_release_id
         anchor = self._anchor_file(project_path)
         read_set = self._read_set(
             self._registry_path,
@@ -117,6 +130,7 @@ class WorkspaceContextService:
             str(self._workspace_root),
             str(self._execution_root),
             candidate_commit,
+            precheck,
         )
         return WorkspaceContext(
             workspace_root=str(self._workspace_root),
@@ -337,6 +351,47 @@ class WorkspaceContextService:
             return ("RUNTIME_IDENTITY_DIVERGENCE",)
         return ()
 
+    def _candidate_precheck_refusals(
+        self, runtime_root: Path | None, configured_release_id: str, effective_release_id: str
+    ) -> tuple[str, ...]:
+        """Why the explicit ``--candidate-release`` may NOT lift the divergence (empty = every condition holds).
+
+        D-157: a release that is installed but not switched to yet runs from ``releases/<id>`` while the pointer still names the
+        old one, so the loaded id and the configured id differ by design.  Only a command that writes nothing but its own output
+        folder (``gate run``) may ask for this, by name, and all four hold: the candidate is in the deployment manifest; its
+        files match the manifest exactly; the code actually loaded IS that candidate; and the live (pointer) release is itself
+        intact.  Anything else keeps the plain divergence refusal.
+        """
+
+        candidate = self._candidate_release_id
+        if runtime_root is None:
+            return ("RUNTIME_IDENTITY_CANDIDATE_NOT_ELIGIBLE: 没有 runtime_root",)
+        refusals: list[str] = []
+        try:
+            manifest = json.loads(self._read_text(runtime_root / "deployment_manifest.json"))
+            listed = isinstance(manifest.get("releases"), dict) and candidate in manifest["releases"]
+        except (WorkspaceContextError, json.JSONDecodeError, AttributeError):
+            listed = False
+        if not listed:
+            refusals.append(f"RUNTIME_IDENTITY_CANDIDATE_NOT_IN_MANIFEST: {candidate}")
+        if effective_release_id != candidate:
+            refusals.append(f"RUNTIME_IDENTITY_CANDIDATE_NOT_LOADED: 实际加载的是 {effective_release_id or '未知'}，不是 {candidate}")
+        checker = self._exact_tree_checker or self._default_exact_tree_checker
+        for label, release in (("CANDIDATE_TREE_MISMATCH", candidate), ("LIVE_RELEASE_NOT_INTACT", configured_release_id)):
+            try:
+                intact, detail = checker(runtime_root, release)
+            except Exception as error:  # a checker that cannot run is a refusal, never a pass
+                intact, detail = False, str(error)
+            if not intact:
+                refusals.append(f"RUNTIME_IDENTITY_{label}: {release}（{detail}）")
+        return tuple(refusals)
+
+    @staticmethod
+    def _default_exact_tree_checker(base: Path, release_id: str) -> tuple[bool, str]:
+        from auto_pm.application.core.release_deploy_check import exact_tree_ok
+
+        return exact_tree_ok(base, release_id)
+
     @staticmethod
     def _loaded_package_file() -> str | None:
         package = sys.modules.get("auto_pm")
@@ -412,6 +467,7 @@ class WorkspaceContextService:
         control_root: str = "",
         execution_root: str = "",
         candidate_commit: str = "",
+        candidate_release_precheck: str = "",
     ) -> str:
         payload = {
             "project_id": project_id,
@@ -427,6 +483,8 @@ class WorkspaceContextService:
             "candidate_commit": candidate_commit,
             "read_set": [entry.model_dump() for entry in read_set],
         }
+        if candidate_release_precheck:  # only added when used, so every existing evidence id stays the same
+            payload["candidate_release_precheck"] = candidate_release_precheck
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
         return f"CTX-{digest.upper()}"
 

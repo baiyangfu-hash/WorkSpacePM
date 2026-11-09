@@ -18,12 +18,47 @@ from auto_pm.infrastructure import long_run_core as core
 PY = sys.executable
 
 
+_REAL_PREFLIGHT_MODULE = core._preflight_module
+
+
+class _Arming:
+    """D-168: the worker arms itself for the memory gate; a test must never write a record into the real control root."""
+
+    def __init__(self) -> None:
+        self.armed: list[tuple[str, float | None]] = []
+        self.fail = False
+
+    def arm(self, label: str, *, timeout_seconds: float | None = None) -> None:
+        if self.fail:
+            raise RuntimeError("arm exploded")
+        self.armed.append((label, timeout_seconds))
+
+
+@pytest.fixture(autouse=True)
+def _arming(monkeypatch: pytest.MonkeyPatch) -> _Arming:
+    recorder = _Arming()
+    module = _REAL_PREFLIGHT_MODULE()  # the real module, with only ``arm`` replaced
+    monkeypatch.setattr(module, "arm", recorder.arm)
+    monkeypatch.setattr(core, "_preflight_module", lambda: module)
+    return recorder
+
+
 def _spec(run_dir: Path, argv: list[str], *, timeout: float = 60, cwd: Path | None = None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "spec.json").write_text(
         json.dumps({"argv": argv, "cwd": str(cwd or run_dir), "timeout_seconds": timeout, "guard_poll_seconds": 0.2}), encoding="utf-8"
     )
     (run_dir / "status.json").write_text(json.dumps({"schema_version": core.SCHEMA, "name": run_dir.name, "state": "STARTING"}), encoding="utf-8")
+
+
+# D-158: process start-up on a loaded Windows machine takes seconds to minutes.  The waits below are polls that return the moment the
+# condition holds, so a generous ceiling costs nothing on a healthy machine and only stops a slow one from failing a correct run.
+_STARTUP_CEILING = 300.0
+
+
+def _guard_diagnostics(run_dir: Path) -> str:
+    out = run_dir / "guard.out"
+    return out.read_text(encoding="utf-8", errors="replace") if out.exists() else "(no guard.out yet)"
 
 
 def _wait(predicate, seconds: float = 30.0) -> bool:  # type: ignore[no-untyped-def]
@@ -50,6 +85,18 @@ def test_the_worker_records_a_successful_command_with_the_log_hash_and_a_done_ma
     assert (run_dir / "DONE").exists() and not (run_dir / "FAILED").exists()
     assert status["child_pid"] and status["worker_pid"] == os.getpid() and status["ended_at"] >= status["running_at"]
     assert (run_dir / "worker.pid").read_text(encoding="ascii") == str(os.getpid())
+
+
+def test_d168_the_worker_arms_itself_for_the_memory_gate_with_the_spec_timeout_and_an_arming_failure_never_stops_the_job(tmp_path: Path, _arming: _Arming) -> None:
+    ok = tmp_path / "armed"
+    _spec(ok, [PY, "-c", "pass"], timeout=123)
+    assert core.worker_main(ok) == 0
+    assert _arming.armed == [("long-run", 123.0)]
+
+    _arming.fail = True
+    broken = tmp_path / "broken"
+    _spec(broken, [PY, "-c", "pass"])
+    assert core.worker_main(broken) == 0 and (broken / "DONE").exists()
 
 
 def test_the_worker_records_a_failing_command_as_failed_with_its_exit_code(tmp_path: Path) -> None:
@@ -376,15 +423,36 @@ def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_t
 
     assert started["state"] == "STARTING" and started["detached"] is True and started["cwd"] == str(repo.resolve())
     assert started["command_text"].startswith(PY) or "time.sleep" in started["command_text"]
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE"), core.read_status(run_dir)
-    assert _wait(lambda: core.read_status(run_dir)["worker_alive"] is False)  # DONE is written a moment before the worker exits
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING), core.read_status(run_dir)
+    assert _wait(lambda: core.read_status(run_dir)["worker_alive"] is False, _STARTUP_CEILING)  # DONE is written a moment before the worker exits
     final = core.read_status(run_dir)
     assert final["exit_code"] == 0 and final["detached"] is True and final["mem_guard"] is True and final["git_dirty"] in (False, None)
-    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, 90)  # a loaded Windows machine takes seconds to start the guard process
+    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, _STARTUP_CEILING), _guard_diagnostics(run_dir)
     guard_pid = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))["guard_pid"]
-    assert _wait(lambda: not core.pid_alive(guard_pid), 20)  # the guard ends after the job
+    assert _wait(lambda: not core.pid_alive(guard_pid), _STARTUP_CEILING)  # the guard ends after the job
     assert b"done" in (run_dir / "run.log").read_bytes()
     assert final["peak_committed_gib"] is None or final["peak_committed_gib"] >= 0
+
+
+@pytest.mark.parametrize("project_importable", [True, False], ids=["PYTHONPATH-at-project-root", "no-PYTHONPATH-fallback"])
+def test_the_guard_starts_whether_or_not_auto_pm_is_importable_for_the_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project_importable: bool
+) -> None:
+    """D-123: run as a plain script the guard must not put auto_pm/infrastructure/ on sys.path (its logging/ would shadow the stdlib)."""
+
+    project_root = Path(core.__file__).resolve().parents[2]
+    if project_importable:
+        monkeypatch.setenv("PYTHONPATH", str(project_root))
+    else:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    core.start(tmp_path, "shadow", [PY, "-c", "import time; time.sleep(2)"], cwd=repo, timeout_minutes=5, poll_seconds=0.3)
+    run_dir = core.run_directory(tmp_path, "shadow")
+
+    assert _wait(lambda: (run_dir / "guard.json").exists(), _STARTUP_CEILING), _guard_diagnostics(run_dir)
+    assert b"Traceback" not in (run_dir / "guard.out").read_bytes()
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
 
 
 def test_start_refuses_a_name_that_was_used_an_empty_command_a_bad_name_and_a_missing_directory(tmp_path: Path) -> None:
@@ -419,7 +487,7 @@ def test_start_is_refused_by_the_memory_preflight_before_anything_is_created(tmp
 def test_stop_kills_a_running_job_and_records_stopped(tmp_path: Path) -> None:
     core.start(tmp_path, "long", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.3)
     run_dir = core.run_directory(tmp_path, "long")
-    assert _wait(lambda: core.read_status(run_dir).get("child_pid"))
+    assert _wait(lambda: core.read_status(run_dir).get("child_pid"), _STARTUP_CEILING)
     child = int(core.read_status(run_dir)["child_pid"])
 
     stopped = core.stop(run_dir)
@@ -537,7 +605,7 @@ def test_the_preflight_falls_back_to_the_sibling_file_when_the_package_is_not_im
 
     monkeypatch.setattr(importlib, "import_module", refuse)
 
-    module = core._preflight_module()
+    module = _REAL_PREFLIGHT_MODULE()
 
     assert callable(module.require_headroom) and module.__name__ == "long_run_memory_preflight"
 
@@ -570,7 +638,7 @@ def test_the_job_gets_the_requested_environment_but_never_a_lease_credential(tmp
     core.start(tmp_path, "envjob", [PY, "-c", code], cwd=tmp_path, poll_seconds=0.2, env={"LR_X": "from-spec"})
     run_dir = core.run_directory(tmp_path, "envjob")
 
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
     log = (run_dir / "run.log").read_text(encoding="utf-8")
     assert "X=from-spec" in log and "L=-" in log and "very-secret-token" not in log
     assert "very-secret-token" not in (run_dir / "spec.json").read_text(encoding="utf-8")
@@ -609,7 +677,7 @@ def test_a_pid_that_does_not_exist_has_no_tree_and_is_not_alive() -> None:
 def test_stop_unfreezes_a_job_the_guard_has_paused_and_ends_it_at_once(tmp_path: Path) -> None:
     core.start(tmp_path, "frozen", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.2)
     run_dir = core.run_directory(tmp_path, "frozen")
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "RUNNING")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "RUNNING", _STARTUP_CEILING)
     worker = core._worker_pid(run_dir)
     core.suspend(core.process_tree(worker))  # what the guard does when the machine is full: freeze the worker with the job
     (run_dir / "PAUSED").write_text("x", encoding="utf-8")
@@ -625,7 +693,7 @@ def test_a_guard_that_cannot_start_means_no_job_and_a_failed_record(tmp_path: Pa
     launched: list[str] = []
 
     def launch(argv: list[str], log: Path, cwd: Path) -> int:
-        launched.append(argv[3])
+        launched.append(argv[-2])
         raise core.LongRunError("no process for you")
 
     monkeypatch.setattr(core, "launch_detached", launch)
@@ -643,7 +711,7 @@ def test_a_worker_that_cannot_start_takes_the_guard_down_with_it(tmp_path: Path,
     killed: list[int] = []
 
     def launch(argv: list[str], log: Path, cwd: Path) -> int:
-        if argv[3] == "worker":
+        if argv[-2] == "worker":
             raise core.LongRunError("no process for you")
         return 4242
 
@@ -662,7 +730,7 @@ def test_the_status_file_only_claims_what_was_started(tmp_path: Path) -> None:
     core.start(tmp_path, "claims", [PY, "-c", "pass"], cwd=tmp_path, poll_seconds=0.2)
     run_dir = core.run_directory(tmp_path, "claims")
 
-    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE")
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING)
     final = core.read_status(run_dir)
     assert final["mem_guard"] is True and final["detached"] is True  # both really started
 
@@ -695,6 +763,107 @@ def test_a_task_directory_that_cannot_be_created_is_reported_in_plain_words(tmp_
         core.start(tmp_path, "reserved", [PY, "-c", "pass"], cwd=tmp_path)
 
 
+# ------------------------------------------------------------------ D-165: a status file a reader holds open (Windows os.replace)
+def _sharing_error() -> PermissionError:
+    return PermissionError(13, "simulated sharing violation: the file is open in a reader")
+
+
+def test_a_status_file_replace_that_hits_a_reader_is_retried_and_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_replace = os.replace
+    calls = {"count": 0}
+
+    def flaky(source: object, target: object) -> None:
+        calls["count"] += 1
+        if calls["count"] <= 3:
+            raise _sharing_error()
+        real_replace(source, target)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr(core, "WRITE_RETRY_SECONDS", 0.0)
+
+    core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == 4 and json.loads((tmp_path / "status.json").read_text(encoding="utf-8")) == {"state": "DONE"}
+    assert [entry.name for entry in tmp_path.iterdir()] == ["status.json"]
+
+
+def test_a_status_file_replace_that_never_succeeds_raises_after_the_retries_and_cleans_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def always(source: object, target: object) -> None:
+        calls["count"] += 1
+        raise _sharing_error()
+
+    monkeypatch.setattr(os, "replace", always)
+    monkeypatch.setattr(core, "WRITE_RETRY_SECONDS", 0.0)
+
+    with pytest.raises(PermissionError):
+        core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == core.WRITE_RETRIES + 1 and list(tmp_path.iterdir()) == []
+
+
+def test_an_error_that_is_not_a_sharing_conflict_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def broken(source: object, target: object) -> None:
+        calls["count"] += 1
+        raise FileNotFoundError(2, "gone")
+
+    monkeypatch.setattr(os, "replace", broken)
+
+    with pytest.raises(FileNotFoundError):
+        core._write_json(tmp_path / "status.json", {"state": "DONE"})
+
+    assert calls["count"] == 1
+
+
+def _fail_nth_status_write(monkeypatch: pytest.MonkeyPatch, which: set[int]) -> None:
+    """Make the worker's n-th (1-based) status-file write fail for good, as a reader that never lets go would."""
+
+    real_write = core._write_json
+    seen = {"count": 0}
+
+    def write(path: Path, payload: dict[str, object]) -> None:
+        if path.name == "status.json":
+            seen["count"] += 1
+            if seen["count"] in which:
+                raise _sharing_error()
+        real_write(path, payload)
+
+    monkeypatch.setattr(core, "_write_json", write)
+
+
+def test_a_failed_running_update_does_not_turn_the_commands_exit_code_into_127(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "running-lost"
+    _spec(run_dir, [PY, "-c", "raise SystemExit(3)"])
+    _fail_nth_status_write(monkeypatch, {1})  # the RUNNING update
+
+    code = core.worker_main(run_dir)
+
+    status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+    assert code == 3 and status["state"] == "FAILED" and status["exit_code"] == 3
+    assert "cannot start" not in (run_dir / "run.log").read_text(encoding="utf-8")
+    assert status["detached"] is True and status["child_pid"] and status["worker_pid"] == os.getpid()  # the lost RUNNING fields are written at the end
+    assert status["status_write_errors"] and status["status_write_errors"][0].startswith("RUNNING:")
+    assert (run_dir / "FAILED").exists() and not (run_dir / "DONE").exists()
+
+
+def test_a_failed_final_update_still_writes_an_end_marker_and_never_a_done_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "final-lost"
+    _spec(run_dir, [PY, "-c", "print('fine')"])
+    _fail_nth_status_write(monkeypatch, {2})  # the final update (the first one, RUNNING, went through)
+
+    code = core.worker_main(run_dir)  # does not raise: a worker that dies here leaves the state RUNNING for ever
+
+    assert code == 0
+    assert json.loads((run_dir / "status.json").read_text(encoding="utf-8"))["state"] == "RUNNING"  # the record could not be completed
+    marker = run_dir / "FAILED"
+    assert marker.exists() and not (run_dir / "DONE").exists()
+    text = marker.read_text(encoding="utf-8")
+    assert "exit 0" in text and "status-write-errors: final: PermissionError" in text
+
+
 def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_and_records_what_it_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -714,7 +883,9 @@ def test_the_worker_removes_the_pytest_variables_that_select_or_change_a_suite_a
     status = core.read_status(core.run_directory(tmp_path, "stripped"))
     log = (core.run_directory(tmp_path, "stripped") / "run.log").read_text(encoding="utf-8")
 
-    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log
+    worker_out = core.run_directory(tmp_path, "stripped") / "worker.out"  # D-165: say what the worker printed when this fails
+    diagnostics = f"{status}\nworker.out: {worker_out.read_text(encoding='utf-8', errors='replace') if worker_out.exists() else '(none)'}"
+    assert status["state"] == "DONE" and "SEEN=|KEPT=yes" in log, diagnostics
     assert sorted(status["env_stripped"], key=str.upper) == ["PYTEST_ADDOPTS", "pytest_disable_plugin_autoload", "PYTEST_PLUGINS"]
 
 

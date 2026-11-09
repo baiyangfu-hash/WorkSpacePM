@@ -33,6 +33,8 @@ from auto_pm.domain.plc.scl_linter import SclLinter
 
 _DIGITS = re.compile(r"\d+")
 _LOCATION = re.compile(r":\d+(?::\d+)?")
+# 测试用例耗时（"(0.624s)"、"12ms"）每次运行都不一样，不是失败的内容；不抹平，重跑就会出现假的“新增／修好”（D-36）
+_DURATION = re.compile(r"\d+(?:\.\d+)?\s*(?:ms|µs|us|s)\b")
 _DIAGNOSTIC = re.compile(r"^(?:\[(?P<scope>[^\]]*)\]\s*)?(?:\./)?(?P<file>[^:\n]+?):(?P<line>\d+)(?::\d+)?:")
 MAX_CODE_TEXT = 300
 CONTEXT_LINES = 2
@@ -109,7 +111,7 @@ def code_context(source: Sequence[str], line_number: int) -> str:
 
 def _context_in_file(path: Path | str, line_number: int, fallback: str = "") -> str:
     try:
-        source = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        source = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()  # lenient-decode: one-line display context for a finding that is already decided; falls back when unreadable
     except OSError:
         return fallback
     return code_context(source, line_number) or fallback
@@ -201,7 +203,7 @@ def failure_keys(
             lines = (language or {}).get(command, ())
             if lines:
                 for line in lines:
-                    shown = _LOCATION.sub(":#", _plain(line, project_path))
+                    shown = _DURATION.sub("#s", _LOCATION.sub(":#", _plain(line, project_path)))
                     keys[f"Siemens 语言服务 {command} · {shown}{code_suffix(_source_line(project_path, line))}"] += 1
             else:
                 keys[plain_key] += 1
@@ -227,6 +229,8 @@ class RecordingLanguageService:
     diagnostics: dict[str, list[str]] = field(default_factory=dict)
     # 插件命令行没跑完（超时、起不来）：这一次检查不算数，验收门按出错处理，不拿去和基线比
     incomplete: bool = False
+    # 插件测试进程 panic 退出：失败清单不完整，不能拿去算“修好／新增”（D-137）
+    panic_note: str = ""
 
     @property
     def available(self) -> bool:
@@ -245,6 +249,8 @@ class RecordingLanguageService:
             tag = root.name
         if result.available and result.exit_code in (-1, None):
             self.incomplete = True
+        if result.available and result.panicked and not self.panic_note:
+            self.panic_note = result.summary
         lines = result.diagnostics or result.messages
         bucket = self.diagnostics.setdefault(result.command, [])
         bucket.extend(f"[{tag}] {line}" for line in lines if result.available and not result.passed)

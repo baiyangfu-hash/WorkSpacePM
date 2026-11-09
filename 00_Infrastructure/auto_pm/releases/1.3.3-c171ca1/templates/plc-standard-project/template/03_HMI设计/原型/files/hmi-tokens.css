@@ -1,0 +1,154 @@
+/* ==========================================================================
+   STD-910 工业人机界面 Design Tokens 基础样式库 (hmi-tokens.css)
+   ========================================================================== */
+
+:root {
+  --bg-dark: #0f131a;
+  --bg-panel: #171d27;
+  --bg-card: #1f2735;
+  --bg-card-hover: #263143;
+  --bg-input: #121620;
+  --border-color: #2e394d;
+  --border-light: #3e4d68;
+
+  --primary: #0088ff;
+  --primary-glow: rgba(0, 136, 255, 0.4);
+  --success: #00e676;
+  --success-glow: rgba(0, 230, 118, 0.4);
+  --warning: #ffb300;
+  --warning-glow: rgba(255, 179, 0, 0.4);
+  --danger: #ff3d00;
+  --danger-glow: rgba(255, 61, 0, 0.4);
+  --cyan: #00e5ff;
+
+  --text-main: #f0f4fc;
+  --text-muted: #8a99b5;
+  --text-dim: #5c6880;
+
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", "Fira Code", monospace;
+
+  --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-btn: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* 工业 LED 发光指示灯 */
+.led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #3a4454;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  transition: all 0.2s ease;
+  vertical-align: middle;
+}
+
+.led.green, .led.on {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success-glow);
+}
+
+.led.yellow, .led.warn {
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning-glow);
+}
+
+.led.red, .led.error {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger-glow);
+}
+
+.led.cyan {
+  background: var(--cyan);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+}
+
+/* 工业数显 DRO 徽章 */
+.dro-box {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--cyan);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dro-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-family);
+}
+
+.dro-value {
+  font-weight: 700;
+}
+
+/* 工业触感控制按钮 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-btn);
+}
+
+.btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--primary);
+}
+
+.btn:active {
+  transform: translateY(1px);
+  filter: brightness(0.9);
+}
+
+.btn.primary {
+  background: linear-gradient(180deg, #0099ff 0%, #0077dd 100%);
+  border-color: #0099ff;
+  color: #fff;
+}
+
+.btn.success {
+  background: linear-gradient(180deg, #00c853 0%, #009624 100%);
+  border-color: #00e676;
+  color: #fff;
+}
+
+.btn.warning {
+  background: linear-gradient(180deg, #ffb300 0%, #ff8f00 100%);
+  border-color: #ffca28;
+  color: #1a1500;
+}
+
+.btn.danger {
+  background: linear-gradient(180deg, #ff3d00 0%, #dd2c00 100%);
+  border-color: #ff5722;
+  color: #fff;
+}
+
+.btn.sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn.lg {
+  padding: 12px 24px;
+  font-size: 15px;
+}

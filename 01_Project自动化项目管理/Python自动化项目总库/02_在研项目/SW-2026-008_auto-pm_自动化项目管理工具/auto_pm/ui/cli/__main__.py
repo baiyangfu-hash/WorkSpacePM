@@ -50,6 +50,7 @@ from rich.console import Console  # noqa: E402
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
+from auto_pm.ui.cli.argv_guard import ARGV_EXIT_CODE, broken_argument_message  # noqa: E402
 from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
 from auto_pm.ui.cli.claim import claim_group  # noqa: E402
@@ -62,6 +63,7 @@ from auto_pm.ui.cli.delivery import delivery_group  # noqa: E402
 from auto_pm.ui.cli.doc import doc_group  # noqa: E402
 from auto_pm.ui.cli.doctor import doctor_command  # noqa: E402
 from auto_pm.ui.cli.dogfood import dogfood_group  # noqa: E402
+from auto_pm.ui.cli.gate import gate_group  # noqa: E402
 from auto_pm.ui.cli.git_hook import git_hook_group  # noqa: E402
 from auto_pm.ui.cli.gui import gui_command  # noqa: E402
 from auto_pm.ui.cli.handoff import handoff_group  # noqa: E402
@@ -74,6 +76,7 @@ from auto_pm.ui.cli.pr import pr_group  # noqa: E402
 from auto_pm.ui.cli.project import project_group  # noqa: E402
 from auto_pm.ui.cli.prototype import prototype_cmd  # noqa: E402
 from auto_pm.ui.cli.python import python_group  # noqa: E402
+from auto_pm.ui.cli.release import release_group  # noqa: E402
 from auto_pm.ui.cli.role import role_group  # noqa: E402
 from auto_pm.ui.cli.session import pm_session_group  # noqa: E402
 from auto_pm.ui.cli.spec import spec_group  # noqa: E402
@@ -107,6 +110,11 @@ class _CliGroup(click.Group):
         """
 
         kwargs.setdefault("windows_expand_args", False)
+        given = args[0] if args and args[0] is not None else kwargs.get("args")
+        problem = broken_argument_message(list(given) if given is not None else sys.argv[1:])
+        if problem is not None:  # D-133: refuse at the door, before any command touches a file
+            click.echo(f"错误：{problem}", err=True)
+            raise SystemExit(ARGV_EXIT_CODE)
         return super().main(*args, **kwargs)
 
     def invoke(self, ctx: click.Context) -> object:
@@ -177,7 +185,9 @@ cli.add_command(dogfood_group)
 cli.add_command(clean_cmd)
 cli.add_command(worktree_group)
 cli.add_command(claim_group)
+cli.add_command(release_group)
 cli.add_command(long_run_group)
+cli.add_command(gate_group)
 cli.add_command(pr_group)
 cli.add_command(role_group)
 

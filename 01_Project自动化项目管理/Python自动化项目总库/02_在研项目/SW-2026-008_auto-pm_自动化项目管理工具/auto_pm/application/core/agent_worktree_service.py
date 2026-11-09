@@ -22,8 +22,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,6 +67,7 @@ STALE_DAYS = 3
 RESERVED_STATIONS = frozenset({"m3-pr-chg470", "gui-trial", "trae"})
 # Ignored entries that are only regenerable tool caches do not hold a directory back (coordinator ruling 11-02);
 # any other ignored file still does.  ``__pycache__`` counts only for its ``*.pyc`` files.
+DEEP_SCAN_WORKERS = 4  # stations inspected at once by ``stations(deep=True)``
 CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
@@ -136,18 +139,75 @@ def ensure_session_id(control_root: str | Path) -> None:
     if not caller_agent() or caller_agent() == _UNKNOWN_CALLER or session_id():
         return
     folder = Path(control_root) / ".auto-pm" / "session-ids"
-    path = folder / f"{os.getppid()}.txt"
+    parent = os.getppid()
+    path = folder / f"{parent}.txt"
+    marker = _process_start_marker(parent)
     try:
         folder.mkdir(parents=True, exist_ok=True)
+        known = ""
         if path.is_file():
-            known = path.read_text(encoding="utf-8").strip()
-        else:
-            known = hashlib.sha256(f"{os.getppid()}:{time.time_ns()}:{os.getpid()}".encode()).hexdigest()[:32]
-            path.write_text(known, encoding="utf-8")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            known = lines[0].strip() if lines else ""
+            stored = lines[1].strip() if len(lines) > 1 else ""
+            # D-77: the same pid with a different start time is a new process that reused the number -- a new conversation.
+            if known and marker and stored and stored != marker:
+                known = ""
+        if not known:
+            known = hashlib.sha256(f"{parent}:{time.time_ns()}:{os.getpid()}".encode()).hexdigest()[:32]
+        path.write_text(f"{known}\n{marker}\n" if marker else known, encoding="utf-8")
+        _drop_dead_session_records(folder, keep=path)
     except OSError:
         return
     if known:
         os.environ["AUTO_PM_SESSION_ID"] = known
+
+
+def _drop_dead_session_records(folder: Path, *, keep: Path) -> None:
+    """删掉父进程已不在的 session-ids 记录（D-77）；进程还在或读不出来都留着。"""
+
+    for record in folder.glob("*.txt"):
+        if record == keep or not record.stem.isdigit():
+            continue
+        if not _process_alive(int(record.stem)):
+            with contextlib.suppress(OSError):
+                record.unlink()
+
+
+def _process_start_marker(pid: int) -> str:
+    """进程的启动时刻标记（同一个进程号被复用时会不同）；读不出来返回空串。"""
+
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009 - windll 只在 Windows 上有
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return ""
+            try:
+                created, ended, kernel, user = (wintypes.FILETIME() for _ in range(4))
+                if not kernel32.GetProcessTimes(handle, *(ctypes.byref(item) for item in (created, ended, kernel, user))):
+                    return ""
+                return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+            finally:
+                kernel32.CloseHandle(handle)
+        stat = Path(f"/proc/{pid}/stat")
+        if stat.is_file():
+            # field 22 (starttime); the command name in field 2 may contain spaces, so count from the last ")".
+            return stat.read_text(encoding="utf-8", errors="replace").rsplit(")", 1)[1].split()[19]  # lenient-decode: /proc 文本
+        done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",  # lenient-decode: ps 的时间文本只作指纹比较
+            timeout=5,
+            check=False,
+        )
+        return done.stdout.strip()
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError):
+        return ""
 
 
 def acts_for(caller: str, station: str) -> bool:
@@ -382,6 +442,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"{agent} 已有没收工的工位 {path}；先 `worktree close {agent}`，或回到那个工位继续做"
             )
+        self._make_room(fetch=fetch)
         self._require_room_for_a_station()
         if fetch:
             fetched = self._git("fetch", "origin", "main")
@@ -403,10 +464,57 @@ class AgentWorktreeService:
         added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), MAIN_REF)
         if added.returncode != 0:
             raise AgentWorktreeError(f"建工位失败：{_detail(added)}")
+        self._record_borrow(agent, branch)
         self._write_holder_note(agent)
         return self._inspect(
             path, registered=True, branch=branch, head=self._out("rev-parse", MAIN_REF)
         )
+
+    # ── borrowing (D-58) ─────────────────────────────────────────────
+
+    def _borrow_file(self, agent: str) -> Path:
+        # A file next to the stations, never inside one: a station stays clean, and `.auto-pm` is ignored by Git.
+        return self._stations_dir / f".borrowed-{agent}.json"
+
+    def _record_borrow(self, agent: str, branch: str) -> None:
+        """A station opened by another registered agent is on loan to that caller; remember who, so it can hand in the PR.
+
+        ``acts_for`` decides what is the caller's own: its base-name station and its own conversation's alias station are
+        not loans.  The borrower is stored as the caller's alias (base name only when no session id exists), so another
+        conversation of the same agent is not the borrower (D-86).
+        """
+
+        caller = caller_agent()
+        if not caller or caller == _UNKNOWN_CALLER or acts_for(caller, agent):
+            self._clear_borrow(agent)
+            return
+        payload = {"by": caller_alias() or caller, "branch": branch}
+        self._borrow_file(agent).write_text(json.dumps(payload), encoding="utf-8")
+
+    def _clear_borrow(self, agent: str) -> None:
+        try:
+            self._borrow_file(agent).unlink(missing_ok=True)
+        except OSError:
+            pass  # a leftover record only matters while the station exists; open/close rewrite or clear it
+
+    def borrower(self, agent: str) -> str:
+        """Who the station of ``agent`` is on loan to ("" when nobody); only a roster name on a readable record counts."""
+
+        try:
+            data = json.loads(self._borrow_file(agent).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        by = data.get("by") if isinstance(data, dict) else None
+        return by if isinstance(by, str) and base_agent(by) else ""
+
+    def lent_to_caller(self, agent: str) -> bool:
+        """Whether the station of ``agent`` is on loan to this very conversation (same alias, or same base name without a session id)."""
+
+        caller = caller_agent()
+        if not caller or caller == _UNKNOWN_CALLER:
+            return False
+        borrower = self.borrower(agent)
+        return bool(borrower) and borrower == (caller_alias() or caller)
 
     # ── 持有者记录、回收（设计稿：动态 agent 名与工位自动回收）──────────────
 
@@ -424,7 +532,9 @@ class AgentWorktreeService:
             note = {
                 "agent": agent,
                 "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
-                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0) or os.getppid(),
+                # D-76: only a pid the caller declared (CLAUDE_PID) identifies the conversation; ``os.getppid()`` is usually a
+                # short-lived shell, whose exit would make a live conversation look stale.  0 = unknown = never reclaimed.
+                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0),
                 "title": os.environ.get("AUTO_PM_SESSION_TITLE", ""),
                 "opened_at": datetime.now(UTC).isoformat(),
                 "heartbeat_at": datetime.now(UTC).isoformat(),
@@ -442,7 +552,7 @@ class AgentWorktreeService:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
-    def release(self, agent: str) -> ReleaseResult:
+    def release(self, agent: str, *, via: str = "release") -> ReleaseResult:
         """对话结束时回收自己的别名工位：先把工位里的一切（含未提交、未跟踪的文件）存成救援引用，再收目录。
 
         分支一定保留；救援引用 ``refs/rescue/<别名>/<时间>`` 指向一个包含全部改动的快照提交，不动工位分支本身，
@@ -450,9 +560,35 @@ class AgentWorktreeService:
         """
 
         with self._stations_lock():
-            return self._release_locked(agent)
+            return self._release_locked(agent, via=via)
 
-    def _release_locked(self, agent: str) -> ReleaseResult:
+    def _release_locked(self, agent: str, *, via: str = "release") -> ReleaseResult:
+        """回收一个别名工位，并把每一次回收（成功、被拒、失败）追加记到 ``.auto-pm/logs/station-reclaim.jsonl``（D-166）。"""
+
+        record: dict[str, object] = {"agent": agent, "via": via, "caller": caller_alias() or caller_agent() or "user"}
+        try:
+            result = self._release_checked(agent, record)
+        except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
+            record.update(outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error))
+            self._log_reclaim(record)
+            raise
+        record.update(outcome="removed", rescue_ref=result.rescue_ref, branch=result.branch)
+        self._log_reclaim(record)
+        return result
+
+    def _log_reclaim(self, record: dict[str, object]) -> None:
+        """追加一行回收记录；写不进去只丢记录，不能让回收本身失败或留下半截。"""
+
+        line = {"at": datetime.now(UTC).isoformat(), **record}
+        folder = self._root / ".auto-pm" / "logs"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with (folder / "station-reclaim.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        except OSError:
+            return
+
+    def _release_checked(self, agent: str, record: dict[str, object]) -> ReleaseResult:
         if not _ALIAS.match(agent):
             raise AgentWorktreeError(f"`{agent}` 不是会话别名（<基名>-<6位十六进制>）；基名工位用 `worktree close`")
         caller = caller_agent()
@@ -463,7 +599,9 @@ class AgentWorktreeService:
         if info is None:
             raise StationRefusedError(f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状")
         self._require_inside(path)
+        record.update(branch=info.branch, head=info.head, path=str(path))
         rescue = self._save_rescue_ref(path, agent)
+        record["rescue_ref"] = rescue
         removed = self._git("worktree", "remove", "--force", str(path))
         if removed.returncode != 0:
             raise AgentWorktreeError(f"回收失败：{_detail(removed)}；救援引用 {rescue or '(无改动，没建)'} 已保留")
@@ -570,7 +708,7 @@ class AgentWorktreeService:
                 if caller_agent():
                     raise StationRefusedError("回收别的对话的陈旧工位只由用户在自己的终端执行")
                 for name, _reason in stale:
-                    self._release_locked(name)
+                    self._release_locked(name, via="reclaim-stale")
             return stale
 
     def count(self) -> int:
@@ -580,6 +718,34 @@ class AgentWorktreeService:
         if self._stations_dir.is_dir():
             names |= {child.name for child in self._stations_dir.iterdir() if child.is_dir()}
         return len(names)
+
+    def _make_room(self, *, fetch: bool = True) -> None:
+        """The floor is full: free session-alias stations that are provably dead, then let ``open`` count again (D-166).
+
+        Only a station that satisfies every sweep condition goes (merged into main, clean, nothing unpushed, branch
+        prefix right) AND whose holder process is gone with a silent heartbeat (``stale_aliases``).  Roster names,
+        ``other`` directories and run-plans are never touched.  Anything uncertain is skipped, never forced; each
+        removal is logged with ``via=auto-make-room``.
+        """
+
+        if self.count() < MAX_STATIONS:
+            return
+        try:
+            candidates = self.stale_aliases()
+            if candidates and fetch:
+                self._fetch_prune()  # "merged into main" must be judged on what GitHub has now
+        except OSError:
+            return
+        for name, _reason in candidates:
+            if self.count() < MAX_STATIONS:
+                return
+            try:
+                listed = self.stations(only=name)
+                if len(listed) != 1 or not self._sweep_verdict(listed[0], None).remove:
+                    continue
+                self._remove_station(listed[0], require_merged=True, via="auto-make-room")
+            except (AgentWorktreeError, OSError):
+                continue
 
     def _require_room_for_a_station(self) -> None:
         count = self.count()
@@ -639,12 +805,13 @@ class AgentWorktreeService:
 
         self._require_main_ref()
         registered = self._worktrees()
-        stations: list[Station] = []
-        for path, info in registered.items():
-            if only is not None and path.name != only:
-                continue
+        targets = [(path, info) for path, info in registered.items() if only is None or path.name == only]
+        progress_lock = threading.Lock()
+
+        def inspect_one(path: Path, info: _Registered) -> Station:
             if progress is not None:
-                progress(path.name)
+                with progress_lock:
+                    progress(path.name)
             inspected = self._inspect(
                 path,
                 registered=True,
@@ -653,7 +820,24 @@ class AgentWorktreeService:
                 locked=info.locked,
                 deep=deep,
             )
-            stations.append(replace(inspected, idle_seconds=_idle_seconds(path)))
+            return replace(inspected, idle_seconds=_idle_seconds(path))
+
+        stations: list[Station]
+        if deep and len(targets) > 1:
+            # Each station's Git scan is a separate child process on its own work tree (I/O bound): run them side by
+            # side. Results keep the registration order; the first failure in that order is the one raised.
+            with ThreadPoolExecutor(max_workers=min(len(targets), DEEP_SCAN_WORKERS)) as pool:
+                futures = [pool.submit(inspect_one, path, info) for path, info in targets]
+                stations = []
+                try:
+                    for future in futures:
+                        stations.append(future.result())
+                except BaseException:
+                    for future in futures:
+                        future.cancel()
+                    raise
+        else:
+            stations = [inspect_one(path, info) for path, info in targets]
         if self._stations_dir.is_dir():
             for child in sorted(self._stations_dir.iterdir()):
                 if only is not None and child.name != only:
@@ -684,7 +868,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不收工位；请用户在自己的终端执行"
             )
-        if not acts_for(caller, agent):
+        if not (acts_for(caller, agent) or self.lent_to_caller(agent)):
             raise StationRefusedError(
                 f"你是 {caller_alias() or caller}，不能收 {agent} 的工位；请 {agent} 自己收，或由用户决定"
             )
@@ -757,18 +941,23 @@ class AgentWorktreeService:
         report = SweepReport(items=items, applied=apply, fetch_warning=warning)
         if not apply:
             return report
-        for item, station in plans:
-            if not item.remove:
-                continue
-            try:
-                if station is not None:
-                    self._remove_station(station, require_merged=station.kind in ("agent", "other"))
-                else:
-                    self._delete_local_branch(item.target, require_merged=True)
-                report.done.append(item.target)
-            except AgentWorktreeError as error:
-                report.failed.append(f"{item.target}: {error}")
-        self._git("worktree", "prune")
+        # D-74: removal must not interleave with a concurrent ``open``/``release``/``close``; ``_remove_station`` re-reads the
+        # station just before deleting, but only under the same lock that those commands take.
+        with self._stations_lock():
+            for item, station in plans:
+                if not item.remove:
+                    continue
+                try:
+                    if station is not None:
+                        self._remove_station(
+                            station, require_merged=station.kind in ("agent", "other"), via="sweep"
+                        )
+                    else:
+                        self._delete_local_branch(item.target, require_merged=True)
+                    report.done.append(item.target)
+                except AgentWorktreeError as error:
+                    report.failed.append(f"{item.target}: {error}")
+            self._git("worktree", "prune")
         return report
 
     def _sweep_station(self, station: Station, agent: str | None) -> SweepItem:
@@ -916,7 +1105,36 @@ class AgentWorktreeService:
         if refusal:
             raise StationRefusedError(f"不收工位 {station.path}：{refusal}")
 
-    def _remove_station(self, station: Station, *, require_merged: bool = False) -> CloseResult:
+    def _remove_station(
+        self, station: Station, *, require_merged: bool = False, via: str = "close"
+    ) -> CloseResult:
+        """Remove one station (close / sweep / auto-make-room); every outcome is logged like a release (D-166)."""
+
+        record: dict[str, object] = {
+            "agent": station.name,
+            "via": via,
+            "caller": caller_alias() or caller_agent() or "user",
+            "branch": station.branch,
+            "head": station.head,
+            "path": str(station.path),
+            "rescue_ref": "",
+        }
+        try:
+            result = self._remove_station_checked(station, require_merged=require_merged)
+        except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
+            record.update(
+                outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error)
+            )
+            self._log_reclaim(record)
+            raise
+        # The holder record belongs to the directory that is gone: leaving it behind misleads the next investigation.
+        with contextlib.suppress(OSError):
+            (self._notes_dir / f"{station.name}.json").unlink()
+        record["outcome"] = "removed"
+        self._log_reclaim(record)
+        return result
+
+    def _remove_station_checked(self, station: Station, *, require_merged: bool = False) -> CloseResult:
         # Re-read everything just before removing: the agent may have kept working since the station was listed.
         self._require_inside(station.path)
         info = self._worktrees().get(station.path.resolve())
@@ -945,6 +1163,7 @@ class AgentWorktreeService:
             leftover = _broken_reason(station.path)
             warning = f"。注意：{leftover}；用 `worktree list` 看现状，人工处理" if leftover else ""
             raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}{warning}")
+        self._clear_borrow(station.path.name)
         deleted = False
         note = "本地分支保留（已推送、还没并进 main）"
         if station.kind == "run-plan":
@@ -1036,23 +1255,21 @@ class AgentWorktreeService:
         merged = False
         untouched = False
         if head:
-            status = self._git("status", "--porcelain=v1", "-z", "--untracked-files=all", cwd=path)
+            # One scan answers both questions: ``--ignored=traditional`` with ``-uall`` lists every ignored file
+            # on its own ``!!`` line, exactly what ``ls-files --others --ignored --exclude-standard`` listed.
+            status = self._git(
+                "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", cwd=path
+            )
             if status.returncode != 0:
                 raise AgentWorktreeError(f"读不到工位状态 {path}：{_detail(status)}")
-            dirty = tuple(
-                sorted(entry[3:] for entry in status.stdout.split("\0") if len(entry) > 3)
-            )
-            hidden = self._git(
-                "ls-files", "--others", "--ignored", "--exclude-standard", "-z", cwd=path
-            )
-            if hidden.returncode != 0:
-                raise AgentWorktreeError(f"读不到工位里被忽略的文件 {path}：{_detail(hidden)}")
+            entries = [entry for entry in status.stdout.split("\0") if len(entry) > 3]
+            dirty = tuple(sorted(entry[3:] for entry in entries if not entry.startswith("!! ")))
             ignored = tuple(
                 sorted(
                     {
-                        entry.split("/", 1)[0] + ("/" if "/" in entry else "")
-                        for entry in hidden.stdout.split("\0")
-                        if entry and not _is_tool_cache(entry)
+                        name.split("/", 1)[0] + ("/" if "/" in name else "")
+                        for name in (entry[3:] for entry in entries if entry.startswith("!! "))
+                        if not _is_tool_cache(name)
                     }
                 )
             )

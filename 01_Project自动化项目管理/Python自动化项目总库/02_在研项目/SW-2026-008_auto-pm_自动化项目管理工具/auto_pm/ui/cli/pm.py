@@ -14,6 +14,7 @@ from click.core import ParameterSource
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
+from auto_pm.application.core.acceptance_runner import refusal_reason
 from auto_pm.application.core.claim_service import ClaimService, claim_overlap
 from auto_pm.application.core.control_root_sync import (
     ControlRootSyncService,
@@ -104,7 +105,7 @@ def _live_run_owners(root: str, project_id: str) -> OwnerLookup | None:
         return None
 
 
-def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, object]]:
+def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True) -> list[dict[str, object]]:
     """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
 
     Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
@@ -119,6 +120,8 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...]) -> list[dict[str, ob
     for claim in active:
         clash = claim_overlap(scope_paths, claim.paths) if scope_paths else ()
         result.append({**claim.as_json(), "overlaps_scope": list(clash)})
+        if not echo:
+            continue
         text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
         if clash:
             click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
@@ -206,7 +209,12 @@ def _checklist_options(function: _F) -> _F:
 
 
 def _plan_checklist(
-    original_request: str, safety_circuit: str, checks: tuple[str, ...], rollback: str
+    original_request: str,
+    safety_circuit: str,
+    checks: tuple[str, ...],
+    rollback: str,
+    *,
+    ctx: click.Context | None = None,
 ) -> PlanChecklist:
     try:
         parsed = tuple(parse_acceptance_check(raw) for raw in checks)
@@ -216,6 +224,14 @@ def _plan_checklist(
         # Advice only (the refusals are in ``plan_checklist_problems``): legal commands that are fragile on a Chinese console.
         for hint in command_hints(check.command):
             click.echo(f"⚠️ [验收命令] 第 {number} 条：{hint}", err=True)
+        if ctx is not None and check.command.strip():
+            # D-30: say now what ``pm verify`` would refuse later (the other platform's quoting, an executable that is not
+            # there).  A warning, not a refusal: the plan may be written on a machine other than the one that verifies.
+            control_root = getattr(ctx.find_root().obj, "control_root", None)
+            if control_root is not None:
+                reason = refusal_reason(check.command, cwd=control_root)
+                if reason:
+                    click.echo(f"⚠️ [验收命令] 第 {number} 条：批准后 `pm verify` 会拒绝执行它（{reason}）；已批准的计划改不了，现在就改", err=True)
     safety = safety_circuit.strip()
     return PlanChecklist(
         original_request=original_request,
@@ -240,6 +256,7 @@ def _resolve_filing(
     impact_scope: tuple[str, ...],
     inbox_id: str,
     from_draft: bool,
+    dry_run: bool = False,
 ) -> tuple[IntakeClassification, str]:
     """Decide how a plan request is filed; a request nothing classifies is refused."""
 
@@ -251,7 +268,8 @@ def _resolve_filing(
                 ContinuityStore(app_ctx.control_root).get_planning_draft(request_id).subject_project_id
             )
         require_runtime_identity(ctx, project_id)
-        _ensure_continuity_store(ctx)  # after the identity check: a refused caller must not create anything
+        if not dry_run:  # a dry run creates nothing, not even an empty ledger
+            _ensure_continuity_store(ctx)  # after the identity check: a refused caller must not create anything
         classification, item_id = PmIntakeService(app_ctx.control_root).plan_classification(
             project_id,
             request_id=request_id,
@@ -268,6 +286,73 @@ def _resolve_filing(
             "新需求必须分类：请给出 --kind（iteration|bug|change|urgent|debt）或 --inbox-id"
         )
     return classification, item_id
+
+
+def _dry_run_plan(
+    ctx: click.Context,
+    *,
+    project_id: str,
+    request_id: str,
+    objective: str,
+    acceptance: tuple[str, ...],
+    scope_paths: tuple[str, ...],
+    risks: tuple[str, ...],
+    non_goals: tuple[str, ...],
+    adapter: str | None,
+    approved_model: str,
+    declared_dirty_paths: tuple[str, ...],
+    plan_checklist: PlanChecklist,
+    classification: IntakeClassification,
+    intake_item_id: str,
+) -> None:
+    """``pm plan --dry-run``: every check ``plan`` makes before it writes, then a plain-words account of what a real run would do.
+
+    The plan hash is not shown: it contains the CHG number a real run reserves, which a dry run must not take.
+    """
+
+    try:
+        _require_control_root(ctx)
+        found = _facade(ctx).check_planning_request(
+            PmIntent(
+                subject_project_id=project_id,
+                request_id=request_id,
+                objective=objective,
+                acceptance_criteria=acceptance,
+            ),
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            execution_grant=PlanningExecutionGrant(
+                adapter=ExecutionAdapterKind(cast(str, adapter)),
+                approved_model=approved_model,
+                declared_dirty_paths=declared_dirty_paths,
+                plan_checklist=plan_checklist,
+            ),
+            classification=classification,
+            intake_item_id=intake_item_id,
+        )
+    except (PmFacadeError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(str(error)) from error
+    filing = found.classification
+    payload = {
+        "schema_version": "pm-plan-dry-run.v1",
+        "dry_run": True,
+        "ok": True,
+        "project_id": project_id,
+        "request_id": request_id,
+        "scope_paths": list(found.scope_paths),
+        "declared_dirty_paths": list(found.declared_dirty_paths),
+        "kind": filing.kind.value if filing is not None else "",
+        "domain": filing.domain if filing is not None else "",
+        "intake_item_id": found.intake_item_id,
+        "would_write": [
+            "planning draft in the ledger",
+            "a reserved CHG number and its change file under the project's change folder (uncommitted, in the control root)",
+            "the scope card, waiting for approval",
+        ],
+        "note": "dry run: nothing was written; run the same command without --dry-run to file it",
+    }
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
@@ -480,6 +565,11 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 @click.option("--approved-model", default="")
 @click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
 @click.option("--submitted-by", default="pm-cli", show_default=True, help="范围卡提交者标识，写入事件链")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="只做 plan 落盘前的全部检查并打印会怎样归档，什么都不写（不建草稿、不占 CHG 号、不写变更单）；只用于新需求",
+)
 @_checklist_options
 @_classification_options
 @click.pass_context
@@ -497,6 +587,7 @@ def plan_pm(
     approved_model: str,
     declared_dirty_paths: tuple[str, ...],
     submitted_by: str,
+    dry_run: bool,
     original_request: str,
     safety_circuit: str,
     checks: tuple[str, ...],
@@ -536,9 +627,13 @@ def plan_pm(
     if mission_id:
         if any(new_values):
             raise click.ClickException("--mission-id 不能与新需求参数混用")
+        if dry_run:
+            raise click.ClickException("--dry-run 只用于新需求，不用于已有 Mission")
         _emit_card(ctx, "plan", mission_id)
         return
     from_draft = bool(request_id) and not any((project_id, objective, acceptance))
+    if dry_run and from_draft:
+        raise click.ClickException("--dry-run 只用于新需求（要给 --project-id/--objective/--acceptance），不用于按已存草稿提交")
     required = [
         ("--scope", scope_paths),
         ("--risk", risks),
@@ -570,7 +665,26 @@ def plan_pm(
         impact_scope=impact_scope,
         inbox_id=inbox_id,
         from_draft=from_draft,
+        dry_run=dry_run,
     )
+    if dry_run:
+        _dry_run_plan(
+            ctx,
+            project_id=project_id,
+            request_id=request_id,
+            objective=objective,
+            acceptance=acceptance,
+            scope_paths=scope_paths,
+            risks=risks,
+            non_goals=non_goals,
+            adapter=adapter,
+            approved_model=approved_model,
+            declared_dirty_paths=declared_dirty_paths,
+            plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback, ctx=ctx),
+            classification=classification,
+            intake_item_id=intake_item_id,
+        )
+        return
     card = _submit_scope_card(
         ctx,
         request_id=request_id,
@@ -583,7 +697,7 @@ def plan_pm(
         adapter=adapter,
         approved_model=approved_model,
         declared_dirty_paths=declared_dirty_paths,
-        plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback),
+        plan_checklist=_plan_checklist(original_request, safety_circuit, checks, rollback, ctx=ctx),
         submitted_by=submitted_by,
         from_draft=from_draft,
         classification=classification,
@@ -1069,7 +1183,7 @@ def approve_pm(
         inbox_id=inbox_id,
         from_draft=False,
     )
-    checklist = _plan_checklist(original_request, safety_circuit, checks, rollback)
+    checklist = _plan_checklist(original_request, safety_circuit, checks, rollback, ctx=ctx)
     preview = _planning_scope_card(
         ctx,
         project_id=project_id,
@@ -1327,6 +1441,12 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
         click.echo(f"出口: {hint}")
     for warning in payload.hold_warnings:
         click.echo(f"🔴 {warning}")
+    for item in payload.residue:
+        click.echo(
+            f"⚠ 陈年残留（不算冲突，但没人收口）: {item.work_id} [{item.work_state}]，"
+            f"最后一个 Run {item.last_run_id} [{item.last_run_state}] 在 {item.last_run_ended_at} 结束，"
+            "之后没有动静；由用户决定取消（D-109）"
+        )
     if payload.run is not None and payload.run.state.value == "RUNNING":
         # TD-SW008-074: after a controller restart the ledger still says RUNNING even when the executor process is gone.
         click.echo(
@@ -1420,15 +1540,19 @@ def control_root_status(ctx: click.Context, project_id: str, as_json: bool) -> N
     """
     root = _control_root_path(ctx)
     service = ControlRootSyncService(root, owner_of=_live_run_owners(root, project_id))
-    report = service.check(service.project_scope(project_id))
+    scope = service.project_scope(project_id)
+    report = service.check(scope)
     if as_json:
-        click.echo(json.dumps(report.as_json(), ensure_ascii=False, indent=2))
+        # D-39: other parties' active claims (from the last fetch, no network) ride along so other threads and scripts see them too.
+        payload = {**report.as_json(), "claims": _claims_notice(root, scope, echo=False)}
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     lines = report.lines()
     if not lines:
         click.echo("控制根与 origin/main 一致，在 main 上，没有未提交文件。")
     for line in lines:
         click.echo(line)
+    _claims_notice(root, scope)
 
 
 def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
@@ -1563,3 +1687,8 @@ pm_group.add_command(recover_pm)
 from auto_pm.ui.cli.pm_triage import triage_pm  # noqa: E402
 
 pm_group.add_command(triage_pm)
+
+# Formal close of an old leftover Work (D-109 layer 2): dry run by default, --apply on the user's word.
+from auto_pm.ui.cli.pm_retire import retire_pm  # noqa: E402
+
+pm_group.add_command(retire_pm)

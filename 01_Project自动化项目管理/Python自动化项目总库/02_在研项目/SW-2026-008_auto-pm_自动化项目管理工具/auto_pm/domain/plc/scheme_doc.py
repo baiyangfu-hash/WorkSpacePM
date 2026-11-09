@@ -87,7 +87,7 @@ def _strip_comments(text: str) -> str:
 
 def _read(path: str) -> str:
     try:
-        return Path(path).read_text(encoding="utf-8", errors="replace")
+        return Path(path).read_text(encoding="utf-8", errors="replace")  # lenient-decode: only pass/warn keyword matching; a damaged character can turn a match into a miss (warn), never a miss into a match
     except OSError:
         return ""
 

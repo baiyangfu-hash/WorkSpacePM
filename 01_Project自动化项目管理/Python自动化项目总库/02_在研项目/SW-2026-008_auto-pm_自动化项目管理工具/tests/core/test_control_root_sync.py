@@ -92,7 +92,8 @@ def test_two_hundred_commits_behind_is_reported_with_what_to_do_and_blocks_run_s
     assert report.blocks_run_start
     text = "\n".join(report.lines())
     assert "落后 origin/main 200 个提交" in text and "git merge --ff-only origin/main" in text
-    assert "run start" in text and "一定会被拒" in text
+    assert "run start" in text and "一定会被拒" not in text  # D-104: not an absolute, it depends on the Run's own scope
+    assert "范围里含上面这些文件就会被拒" in text and "不在开工范围内" in text
 
 
 def test_being_behind_in_files_outside_the_scope_is_reported_but_does_not_block(world: World) -> None:

@@ -79,9 +79,9 @@ def _load_result_file(root: Path, result_file: str) -> dict[str, Any]:
     if not path.is_file():
         raise click.ClickException(f"结果文件不存在: {path}")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except json.JSONDecodeError as exc:
-        raise click.ClickException(f"结果文件不是有效 JSON: {path}") from exc
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"结果文件不是有效 JSON（或不是 UTF-8 编码）: {path}") from exc
     if not isinstance(payload, dict):
         raise click.ClickException("结果文件根节点必须是 JSON 对象")
     return payload

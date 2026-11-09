@@ -28,6 +28,7 @@ WRITE_COMMANDS = frozenset(
         "park",
         "plan",
         "recover",
+        "retire",
         "sign-risk",
         "switch",
         "takeover",
@@ -122,6 +123,7 @@ CASES = (
     _Case("plan", ("--request-id", "REQ-1", "--scope", "f.py", "--risk", "r", "--non-goal", "n", "--adapter", "manual", "--approved-model", "m", "--kind", "iteration"), "P-DRAFT", "draft"),
     _Case("recover", ("--run-id", "R-1", "--apply", "--lease-wallet"), "P-RUN", "run"),
     _Case("recover", ("--operation-id", "OP-1", "--apply", "--lease-wallet"), "P-RUN", "recover-by-operation"),
+    _Case("retire", ("--pid", "P-RETIRE", "--stale", "--apply", "--approval-evidence-ref", "user-confirmation:1"), "P-RETIRE", "retire"),
     _Case("sign-risk", ("--run-id", "R-1", "--claimant", "claude:local"), "P-RUN", "run"),
     _Case("switch", ("--pid", "P-SWITCH", "--to", "M-2"), "P-SWITCH", "switch"),
     _Case("takeover", ("--handoff-id", "HO-1", "--as", "claude:local"), "P-HANDOFF", "takeover"),
@@ -142,7 +144,7 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
 
     Source matching cannot tell a live guard call from dead code, a comment, or a call that names the wrong project.
     """
-    from auto_pm.ui.cli import pm, pm_closure, pm_handoff, pm_recover, pm_switch
+    from auto_pm.ui.cli import pm, pm_closure, pm_handoff, pm_recover, pm_retire, pm_switch
 
     touched: list[str] = []
     asked: list[str] = []
@@ -154,7 +156,7 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
     def untouchable(label: str) -> _Untouchable:
         return _Untouchable(touched, label)
 
-    for module in (pm, pm_closure, pm_handoff, pm_recover, pm_switch):
+    for module in (pm, pm_closure, pm_handoff, pm_recover, pm_retire, pm_switch):
         monkeypatch.setattr(module, "require_runtime_identity", refuse)
     for module in (pm, pm_switch):
         monkeypatch.setattr(module, "project_of_mission", lambda _ctx, _mission_id: "P-MISSION")
@@ -178,6 +180,7 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
 
     monkeypatch.setattr(pm, "read_approval_pin", pin)
     monkeypatch.setattr(pm_switch, "read_approval_pin", pin)
+    monkeypatch.setattr(pm_retire, "read_approval_pin", pin)
     monkeypatch.setattr(pm_switch, "_service", lambda *_a, **_k: untouchable("switch service"))
     monkeypatch.setattr(pm_handoff, "_service", lambda *_a, **_k: untouchable("handoff service"))
     monkeypatch.setattr(pm_handoff, "_store", lambda *_a, **_k: untouchable("handoff store"))
