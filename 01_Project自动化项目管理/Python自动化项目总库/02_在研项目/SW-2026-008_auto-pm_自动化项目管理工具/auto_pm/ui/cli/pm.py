@@ -1524,6 +1524,7 @@ def orient_pm(
         raise click.ClickException(str(error)) from error
     _control_root_sync_notice(ctx, project_id=project_id)
     _emit_query(payload, as_json)
+    _no_ledger_line(ctx, as_json)
     _memory_gate_line(ctx, as_json)
     _state_backup_line(ctx, as_json)
 
@@ -1568,6 +1569,27 @@ def _memory_gate_line(ctx: click.Context, as_json: bool) -> None:
         return
     if status is not None:
         click.echo(status.line(), err=as_json)
+
+
+def _no_ledger_line(ctx: click.Context, as_json: bool) -> None:
+    """One read-only line when this clone has no ledger file (a cloud session or a computer that is not the ledger host).
+
+    Without it the answer above reads "work: -, run: -" as if nothing was open, when really nothing could be looked up.  Same placement rule
+    as the other hint lines (stdout in text mode, stderr in JSON mode); it only checks that the file exists and never fails the command.
+    """
+
+    try:
+        app_ctx: AppContext = ctx.find_root().obj
+        missing = not (Path(app_ctx.control_root) / ".auto-pm" / "continuity.db").is_file()
+    except Exception as error:  # a hint must never stop the command it decorates
+        click.echo(f"⚠️ [无账本] 未能检查账本文件：{type(error).__name__}", err=True)
+        return
+    if missing:
+        click.echo(
+            "⚠️ [无账本] 这个克隆没有 .auto-pm/continuity.db（云端会话或不是账本主机）：上面的 work/run 只是没查到，不代表没有；"
+            "账本只在账本主机写，这里不要执行 continuity、pm 写命令；跨机的占位看 main.py claim list",
+            err=as_json,
+        )
 
 
 def _state_backup_line(ctx: click.Context, as_json: bool) -> None:

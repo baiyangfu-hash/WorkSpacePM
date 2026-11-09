@@ -255,3 +255,27 @@ def test_d60_the_read_only_locators_do_not_write_the_ai_context_file(tmp_path: P
     result = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", command, PROJECT, "--json"])
     assert result.exit_code == 0, result.output
     assert not (tmp_path / ".auto-pm" / "ai_context.json").exists()
+
+
+def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_one(tmp_path: Path) -> None:
+    """A cloud clone has no ledger: "work: -" must not read as "nothing open".  Text on stdout, JSON mode on stderr; resume prints nothing."""
+
+    _workspace(tmp_path)
+    before = _snapshot(tmp_path)
+
+    text = _run(tmp_path, "orient", PROJECT)
+    as_json = _run(tmp_path, "orient", PROJECT, "--json")
+    resumed = _run(tmp_path, "resume", PROJECT)
+
+    assert text.exit_code == 0 and "[无账本]" in text.stdout and "claim list" in text.stdout
+    assert as_json.exit_code == 0 and "[无账本]" not in as_json.stdout and "[无账本]" in as_json.stderr
+    json.loads(as_json.stdout)  # stdout is still one JSON document
+    assert "[无账本]" not in resumed.output
+    assert _snapshot(tmp_path) == before and not (tmp_path / ".auto-pm").exists()  # looking writes nothing
+
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    ContinuityStore(tmp_path).initialize("2026-11-07T00:00:00+00:00", "test")
+    assert (tmp_path / ".auto-pm" / "continuity.db").is_file()
+    with_ledger = _run(tmp_path, "orient", PROJECT)
+    assert with_ledger.exit_code == 0 and "[无账本]" not in with_ledger.stdout
