@@ -579,7 +579,7 @@ STATES: dict[str, AbnormalState] = {
             (),
             "none yet",
             (
-                ExitStep("park the card", "python main.py pm park --pid {pid} --reason <REASON> --summary <SUMMARY> --as <AGENT>", who=WhoCan.ANY_AGENT),
+                ExitStep("park the card", "python main.py pm park --mission-id <MISSION_ID> --reason <REASON> --summary <SUMMARY>", who=WhoCan.ANY_AGENT),
                 ExitStep("renew the lease", "python main.py continuity lease renew --run-id {run_id} --owner <AGENT>", who=WhoCan.ANY_AGENT),
             ),
             WhoCan.ANY_AGENT,

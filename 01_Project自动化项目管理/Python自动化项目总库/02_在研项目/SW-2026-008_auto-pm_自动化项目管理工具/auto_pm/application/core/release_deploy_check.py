@@ -25,6 +25,7 @@ from auto_pm.application.core.release_consistency import check_release_consisten
 
 PROJECT_DIR = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 CONTAINER = Path("00_Infrastructure") / "auto_pm"
+EVIDENCE_PREFIX = "release-deploy-"  # the deploy writes <reports>/<prefix><release id>/receipt.json; ``release status`` reads the same name (D-188)
 PASS, FAIL, UNVERIFIED = "PASS", "FAIL", "UNVERIFIED"
 GIT_TIMEOUT_SECONDS = 30
 EXACT_TREE_TIMEOUT_SECONDS = 120
@@ -361,7 +362,7 @@ def status(root: Path) -> dict[str, Any]:
         pointers[name.split("_")[0]] = {"release_id": (data or {}).get("release_id"), "updated_at": (data or {}).get("updated_at")}
     manifest = _json(base / "deployment_manifest.json")
     releases = sorted((manifest or {}).get("releases", {})) if manifest else []
-    receipts = sorted((root / ".auto-pm" / "reports").glob("deploy-*/receipt.json"), key=lambda p: p.stat().st_mtime) if (root / ".auto-pm" / "reports").is_dir() else []
+    receipts = sorted((root / ".auto-pm" / "reports").glob(f"{EVIDENCE_PREFIX}*/receipt.json"), key=lambda p: p.stat().st_mtime) if (root / ".auto-pm" / "reports").is_dir() else []
     consistency = check_release_consistency(str(root))
     return {
         "pointers": pointers,

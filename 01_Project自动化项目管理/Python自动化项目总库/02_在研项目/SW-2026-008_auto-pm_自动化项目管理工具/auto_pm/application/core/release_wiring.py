@@ -31,7 +31,7 @@ from auto_pm.application.core import release_deploy as rd
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core.memory_gate_arming import disarm_this_process
 from auto_pm.application.core.release_deploy import REQUIRED_SELF_CHECKS, DeployError, SelfCheck
-from auto_pm.application.core.release_deploy_check import CONTAINER, exact_tree_ok
+from auto_pm.application.core.release_deploy_check import CONTAINER, EVIDENCE_PREFIX, exact_tree_ok
 from auto_pm.application.core.release_ledger import PROJECT_ID, DeployPlan, LedgerError, pick_change
 
 COMMAND_TIMEOUT_SECONDS = 300
@@ -363,7 +363,7 @@ def plan_for(root: Path, report: Any, *, approver: str, confirm_ref: str, now: d
     container = ops.container_of(base)
     old = ops.pointer_release(container, "active_release.json")
     stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
-    evidence = base / ".auto-pm" / "reports" / f"release-deploy-{report.release_id}"
+    evidence = base / ".auto-pm" / "reports" / f"{EVIDENCE_PREFIX}{report.release_id}"
     prefix = CONTAINER.as_posix()
     paths = (
         f"{prefix}/deployment_manifest.json", f"{prefix}/active_release.json", f"{prefix}/previous_release.json", f"{prefix}/releases/{report.release_id}",
