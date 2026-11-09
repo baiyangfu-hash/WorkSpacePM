@@ -236,6 +236,7 @@ class PrOpenService:
         notes.extend(chg_notes)
         body = build_body(
             task_card=task_card,
+            card=card,
             fields=fields,
             scope_paths=self._card_scope(task_card, card_text),
             safety_circuit=str(safety_circuit),

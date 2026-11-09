@@ -90,6 +90,7 @@ def signature_lines(commit_messages: Sequence[str]) -> list[str]:
 def build_body(
     *,
     task_card: str,
+    card: str,
     fields: CardFields,
     scope_paths: Sequence[str],
     safety_circuit: str,
@@ -107,7 +108,9 @@ def build_body(
         out += ["## 署名", "", *signature, ""]
     summary = fields.title + (f"：{fields.goal}" if fields.goal else "")
     out += ["## 做了什么", "", summary, ""]
-    out += ["## 可改范围", "", f"任务卡: {task_card}", ""]
+    # D-194: the overlap gate (reviews/tools/pr_overlap_check.CLAIM_LINE) needs this exact line; it stands alone,
+    # half-width colon, nothing after the card number.
+    out += ["## 可改范围", "", f"领卡占位: {card}", f"任务卡: {task_card}", ""]
     out += [f"- {path}" for path in scope_paths]
     out += ["", "## 安全回路", "", f"安全回路: {safety_circuit}", ""]
     out += ["## 证据", ""]
