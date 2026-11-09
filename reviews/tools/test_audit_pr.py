@@ -540,3 +540,85 @@ def test_an_unreadable_ci_workflow_means_ci_is_expected(tmp_path):
     write(tmp_path, "a.txt", "x\n")
     sha = commit(tmp_path, "no workflow here")
     assert audit_pr.ci_path_patterns(sha, cwd=str(tmp_path)) is None
+
+
+# --- D-71: an older cancelled/failed check run of the same job must not outvote the newest one ---------------------
+
+
+def _cr(cid: int, name: str, conclusion: str, run_id: int, app_id: int = 15368) -> dict:
+    return {
+        "id": cid,
+        "name": name,
+        "status": "completed",
+        "conclusion": conclusion,
+        "app": {"id": app_id},
+        "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/{cid}",
+    }
+
+
+def _wf_run(rid: int, workflow_id: int) -> dict:
+    return {**_run(rid), "workflow_id": workflow_id}
+
+
+_SAFETY_OK = [{"context": "safety-zone", "state": "success"}]
+
+
+def test_old_cancelled_check_run_of_the_same_job_is_superseded_by_the_newest_success():
+    runs = [_wf_run(10, 1), _wf_run(20, 1)]
+    checks = [_cr(100, "safety", "cancelled", 10), _cr(200, "safety", "success", 20)]
+    assert audit_pr.judge_ci(runs, checks, _SAFETY_OK, True)[0] == "PASS"
+
+
+def test_newest_failure_still_fails_even_if_an_older_run_succeeded():
+    runs = [_wf_run(10, 1), _wf_run(20, 1)]
+    checks = [_cr(100, "safety", "success", 10), _cr(200, "safety", "failure", 20)]
+    assert audit_pr.judge_ci(runs, checks, _SAFETY_OK, True)[0] == "FAIL"
+
+
+def test_same_job_name_in_different_workflows_is_not_merged():
+    runs = [_wf_run(10, 1), _wf_run(20, 2)]
+    checks = [_cr(100, "guard", "failure", 10), _cr(200, "guard", "success", 20)]
+    assert audit_pr.judge_ci(runs, checks, _SAFETY_OK, True)[0] == "FAIL"
+
+
+def test_check_run_with_unknown_run_or_no_id_is_never_deduplicated():
+    bad = {"name": "lint", "status": "completed", "conclusion": "cancelled"}
+    good = {"name": "lint", "status": "completed", "conclusion": "success"}
+    assert audit_pr.judge_ci([_run()], [bad, good], _SAFETY_OK, True)[0] == "FAIL"
+    unknown = [_cr(100, "x", "cancelled", 999), _cr(200, "x", "success", 998)]
+    assert audit_pr.judge_ci([_run()], unknown, _SAFETY_OK, True)[0] == "FAIL"
+
+
+# ── the four dimensions of the de-duplication key and the "never merge when unsure" branches (audit of #609, round 1) ──
+
+
+@pytest.mark.parametrize(
+    ("older", "newer"),
+    [("failure", "success"), ("success", "failure")],
+)
+def test_two_differently_named_jobs_of_one_workflow_are_never_collapsed_into_one(older, newer):
+    """The older id is the `lint` job, the newer id the `test` job: whichever of them failed must still fail the verdict."""
+    runs = [_wf_run(10, 1)]
+    checks = [_cr(100, "lint", older, 10), _cr(200, "test", newer, 10)]
+    assert audit_pr.judge_ci(runs, checks, _SAFETY_OK, True)[0] == "FAIL"
+
+
+def test_same_job_name_from_two_apps_is_not_merged():
+    runs = [_wf_run(10, 1)]
+    checks = [_cr(100, "guard", "failure", 10, app_id=1), _cr(200, "guard", "success", 10, app_id=2)]
+    assert audit_pr.judge_ci(runs, checks, _SAFETY_OK, True)[0] == "FAIL"
+
+
+def test_a_check_run_with_a_mappable_run_url_but_no_id_is_not_deduplicated():
+    """Unlike the case above, these two carry an Actions run URL that maps to a known workflow: only the missing id keeps them apart."""
+    runs = [_wf_run(10, 1), _wf_run(20, 1)]
+    older = {k: v for k, v in _cr(100, "safety", "cancelled", 10).items() if k != "id"}
+    newer = {k: v for k, v in _cr(200, "safety", "success", 20).items() if k != "id"}
+    assert audit_pr.judge_ci(runs, [older, newer], _SAFETY_OK, True)[0] == "FAIL"
+
+
+def test_a_rerun_on_another_commit_does_not_cover_the_result_on_this_one():
+    runs = [_wf_run(10, 1), _wf_run(20, 1)]
+    here = {**_cr(100, "safety", "failure", 10), "head_sha": "a" * 40}
+    elsewhere = {**_cr(200, "safety", "success", 20), "head_sha": "b" * 40}
+    assert audit_pr.judge_ci(runs, [here, elsewhere], _SAFETY_OK, True)[0] == "FAIL"
