@@ -29,6 +29,7 @@ from auto_pm.application.core.gate_run_service import (
     GateSummary,
     sha256_file,
 )
+from auto_pm.infrastructure import memory_preflight
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
@@ -109,6 +110,7 @@ def run_command(
 ) -> None:
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
     require_runtime_identity_for_workspace(ctx, candidate_release)
+    memory_preflight.arm("long-gate")  # D-168: the full regression (eleven pytest groups, hours) is the heavy job the memory gate protects; never raises
     try:
         summary = GateRunService().run(
             worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60
@@ -187,6 +189,7 @@ def _precheck_report(report: PrecheckReport) -> None:
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
 def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None, as_json: bool) -> None:
     """只读：推送前一条命令跑 ruff + mypy(win32) + 与改动相关的 pytest；不写账本、不写工作树。"""
+    memory_preflight.arm("full-tests")  # D-168: mypy plus the related pytest is a heavy job; never raises
     try:
         report = PrecheckService().run(worktree, base=base, out_dir=out_dir, jobs=jobs)
     except GateRunError as error:
