@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,23 @@ from auto_pm.ui.cli.__main__ import cli
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 NOW = datetime(2026, 11, 8, 12, 0, 0, tzinfo=UTC)
+
+
+class _FrozenDatetime(datetime):
+    """``datetime.now()`` stands still at ``NOW``: ``project recycle-list`` reads the clock itself."""
+
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[no-untyped-def]
+        return NOW.astimezone(tz) if tz is not None else NOW.replace(tzinfo=None)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The samples are dated relative to ``NOW``; the command must measure from the same instant, or every
+    boundary case ("exactly 30 days", "one day short") drifts with the real date (it broke on 2026-11-09 12:00Z).
+    The command imports ``datetime`` inside the function, so replacing the module attribute is enough."""
+
+    monkeypatch.setattr(datetime_module, "datetime", _FrozenDatetime)
 
 
 def _recycle(root: Path, project_id: str, *, days_ago: int) -> Path:
@@ -147,3 +165,11 @@ def test_the_listing_ends_with_the_read_only_notice_and_unknown_age_is_spelled_o
 
     assert "时间未知" in output
     assert output.rstrip().splitlines()[-1].startswith("只读列表：这里不会删除任何东西")
+
+
+def test_the_command_measures_age_from_the_frozen_clock_not_the_real_date(tmp_path: Path) -> None:
+    """Guards the fixture above: a sample dated 7 days before ``NOW`` is exactly 7 days old whatever today is."""
+
+    _recycle(tmp_path, "SW-2026-001", days_ago=7)
+    (item,) = json.loads(_recycle_list(tmp_path, "--json"))
+    assert item["age_days"] == 7
