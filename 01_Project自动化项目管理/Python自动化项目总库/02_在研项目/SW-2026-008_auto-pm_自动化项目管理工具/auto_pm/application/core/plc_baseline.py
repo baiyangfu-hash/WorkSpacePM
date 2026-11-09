@@ -57,7 +57,7 @@ def _exists(repo: Path, rev: str, path: str) -> bool:
 def _libraries(repo: Path, rev: str, project_rel: str) -> list[str]:
     listing = _git(repo, "ls-tree", "-r", "-z", "--name-only", rev, "--", project_rel)
     if listing.returncode != 0:
-        raise PlcBaselineError(listing.stderr.decode("utf-8", "replace").strip() or "git ls-tree 失败")
+        raise PlcBaselineError(listing.stderr.decode("utf-8", "replace").strip() or "git ls-tree 失败")  # lenient-decode: git stderr only quoted in the error text
     found: list[str] = []
     for name in listing.stdout.decode("utf-8").split("\0"):
         if not name.endswith(".plc.json"):
@@ -92,7 +92,7 @@ def export_plc_baseline(repo: Path, rev: str, project_rel: str, destination: Pat
         paths.append(SPEC_REGISTRY)
     archive = _git(repo, "archive", "--format=tar", rev, "--", *sorted(set(paths)))
     if archive.returncode != 0:
-        raise PlcBaselineError(archive.stderr.decode("utf-8", "replace").strip() or "git archive 失败")
+        raise PlcBaselineError(archive.stderr.decode("utf-8", "replace").strip() or "git archive 失败")  # lenient-decode: git stderr only quoted in the error text
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
         _extract(bundle, destination)
@@ -139,7 +139,7 @@ def repo_top(path: Path) -> Path:
 
     top = _git(path, "rev-parse", "--show-toplevel")
     if top.returncode != 0:
-        raise PlcBaselineError(top.stderr.decode("utf-8", "replace").strip() or "不是 Git 仓库")
+        raise PlcBaselineError(top.stderr.decode("utf-8", "replace").strip() or "不是 Git 仓库")  # lenient-decode: git stderr only quoted in the error text
     return Path(top.stdout.decode("utf-8").strip()).resolve()
 
 

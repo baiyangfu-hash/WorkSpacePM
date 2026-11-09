@@ -95,7 +95,7 @@ def _git(cwd: Path, *arguments: str) -> bytes:
         check=False,
     )
     if done.returncode != 0:
-        raise _GitError(done.stderr.decode("utf-8", errors="replace").strip()[:200] or f"git {arguments[0]} 失败")
+        raise _GitError(done.stderr.decode("utf-8", errors="replace").strip()[:200] or f"git {arguments[0]} 失败")  # lenient-decode: git stderr only quoted in the error text
     return done.stdout
 
 

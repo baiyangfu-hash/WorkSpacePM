@@ -1163,7 +1163,7 @@ class EvidenceCollectionService:
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
-                    errors="replace",
+                    errors="replace",  # lenient-decode: evidence collection keeps going with a replacement character rather than losing the whole verification (user ruling 11-08)
                     check=False,
                     env=environment,
                     timeout=_quality_gate_timeout_seconds(),

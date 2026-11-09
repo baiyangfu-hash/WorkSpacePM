@@ -103,7 +103,7 @@ def find_audit_report(number: int, head: str, report_dirs: Sequence[Path]) -> tu
             continue
         except UnicodeDecodeError:
             # An unreadable report must never be quoted as a verdict; it only matters when it is this PR's own report.
-            guessed = path.read_text(encoding="utf-8", errors="replace")
+            guessed = path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: fallback after the strict read failed; the file is refused whenever it names this PR
             if pattern.search(path.name) or pattern.search("\n".join(guessed.splitlines()[:HEADER_LINES])):
                 return False, f"{path.name} 不是合法 UTF-8，拒绝采信其中的放行判定"
             continue

@@ -1420,19 +1420,18 @@ class PmFacadeService:
                 done = subprocess.run(
                     ["git", "-C", worktree, *args],
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
                     check=False,
                     timeout=60,
                 )
                 if done.returncode != 0:
                     return None
-                found = {item for item in done.stdout.split("\0") if item}
+                # Strict on purpose: a path that does not decode would otherwise become a different string and could slip past the
+                # protected-path comparison; "Git cannot say" (None) is the fail-closed answer.
+                found = {item for item in done.stdout.decode("utf-8").split("\0") if item}
                 names.update(found)
                 if is_added:
                     added.update(found)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
             return None
         return unauthorised_protected_changes(names, getattr(run, "owned_paths", ()) or (), added)
 
