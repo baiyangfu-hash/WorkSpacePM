@@ -248,6 +248,33 @@ def test_the_shell_wrapper_only_hands_over_to_the_script(tmp_path: Path) -> None
     assert done.returncode == 1 and "[失败] 没有 .venv" in done.stdout
 
 
+@pytest.mark.skipif(shutil.which("sh") is None, reason="需要 sh")
+def test_the_shell_wrapper_skips_a_python3_stub_that_cannot_run(tmp_path: Path) -> None:
+    """D-198：Windows 应用商店的 python3 占位桩 command -v 找得到、一运行就退出 49；壳必须跳过它去用下一个真 Python。"""
+
+    folder = _copy_script_into_a_bare_tree(tmp_path)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    fake = stubs / "python3"
+    fake.write_text("#!/bin/sh\nexit 49\n", encoding="utf-8", newline="\n")
+    real = stubs / "python"
+    real.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8", newline="\n")
+    for stub in (fake, real):
+        stub.chmod(0o755)
+
+    done = subprocess.run(
+        ["sh", str(folder / "cloud_selfcheck.sh")],
+        env={**os.environ, "PATH": os.pathsep.join([str(stubs), os.environ.get("PATH", "")]), "PYTHONIOENCODING": "cp1252"},
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert done.returncode == 1 and "[失败] 没有 .venv" in done.stdout, done.stdout + done.stderr
+
+
 def _runtime_nodes(tree: ast.Module) -> list[ast.AST]:
     """模块里会在导入时真正求值的节点：跳过 TYPE_CHECKING 块和各种注解（有 __future__ annotations 时它们是字符串）。"""
 
