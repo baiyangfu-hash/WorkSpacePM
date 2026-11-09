@@ -1,7 +1,7 @@
 {
-  "bundle_sha256": "0735f6b88bff3782c960bcc3ac51c98d4a2fce85994f687afb85a1d3d63e9f70",
+  "bundle_sha256": "9a04413c26b3f02a98a68a0cb3f1592c5fd53986993232a9f513854553e99b80",
   "files": {
-    "auto_pm/infrastructure/long_run_core.py": "0782fd34c452f1916094de0050b598a0f1e95ac1ae08337e4427e2f3c065d75c",
+    "auto_pm/infrastructure/long_run_core.py": "d3703134653f09d7a5c1892893b6c4567dd4e86b6bd2bdfc91c88957966c58b1",
     "auto_pm/infrastructure/memory_preflight.py": "1f545517cf4f7d27820baca9fb7ec7aefe94e4510395a7a29dc75d3764d76913",
     "scripts/install_memory_gate.ps1": "f937a3d7267af802e46cebd228307acae87a3a21f55ed1575a2578c39edd2046",
     "scripts/memory_gate.py": "28f9507e60fc8b687303227682be13f0474ccc8aeb2e7679cca2288344e909ee"
