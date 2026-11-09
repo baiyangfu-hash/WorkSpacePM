@@ -29,9 +29,14 @@ from auto_pm.application.core.agent_worktree_service import (
     MAIN_REF,
     AgentWorktreeError,
     AgentWorktreeService,
+    Station,
     StationRefusedError,
+    acts_for,
+    base_agent,
     caller_agent,
+    caller_alias,
 )
+from auto_pm.application.core.claim_service import claim_refusal
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
 from auto_pm.application.core.paths import PG_MONITORING_DIR
 from auto_pm.application.core.pr_body_builder import (
@@ -43,7 +48,7 @@ from auto_pm.application.core.pr_body_builder import (
 from auto_pm.domain.change.path_resolver import LEGACY_MONITORING_DIR
 from auto_pm.infrastructure.control_root_guard import clean_git_environment
 from auto_pm.infrastructure.executable_lookup import find_on_path
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text, run_git_bounded_text
 
 UNKNOWN_CALLER = "?"  # what caller_agent() returns when the markers name nobody on the roster
 # Whitelist: the only accepted form is CHG-<PROJECT>-YYYY-NNN in ASCII.  Any other mention of "CHG"
@@ -89,6 +94,8 @@ class PrPlan:
     head_sha: str
     scope_report: str = ""
     notes: list[str] = field(default_factory=list)
+    # The station the card is really in; empty means the one named ``agent`` (D-106).
+    station: str = ""
 
 
 @dataclass(frozen=True)
@@ -112,7 +119,7 @@ def default_gh(args: Sequence[str], stdin: str | None) -> subprocess.CompletedPr
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="replace",  # lenient-decode: gh output is shown to the user and its JSON is parsed after; a damaged byte shows up as a parse error there
             check=False,
             stdin=None if stdin is not None else subprocess.DEVNULL,
             timeout=_GH_TIMEOUT_SECONDS,
@@ -168,7 +175,7 @@ class PrOpenService:
         sweep: str | None = None,
         fetch: bool = True,
     ) -> PrPlan:
-        prefix = AGENT_ROSTER.get(agent)
+        prefix = AGENT_ROSTER.get(base_agent(agent))
         if prefix is None:
             raise PrOpenRefusedError(
                 f"`{agent}` 不在 agent 名册里（{'、'.join(sorted(AGENT_ROSTER))}）"
@@ -177,24 +184,31 @@ class PrOpenService:
         branch = f"{prefix}{card}"
         task_card = self._normalize_card_path(task_card)
         if fetch:
-            fetched = self._git(self._root, "fetch", "origin", "main")
+            fetched = self._git_text(self._root, "fetch", "origin", "main")
             if fetched.returncode != 0:
                 raise AgentWorktreeError(
                     f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch"
                 )
-        station = next(
-            (s for s in self._stations.stations(only=agent) if s.name == agent and s.registered),
-            None,
-        )
+        station = self._station_of_card(agent, branch)
         if station is None or station.kind != "agent":
             raise PrOpenRefusedError(
                 f"{agent} 没有登记的工位；先 `main.py worktree open {agent} {card}`"
             )
         if station.branch != branch:
+            own = caller_alias()
+            hint = (
+                f"；{agent} 是同名对话共用的工位，这一张卡请在本对话自己的工位 {own} 上做"
+                f"（main.py worktree open {own} {card}，再 pr open {own} {card}）"
+                if own and own != agent
+                else ""
+            )
             raise PrOpenRefusedError(
                 f"工位在分支 {station.branch or '(无)'}，应为 {branch}（前缀 {prefix} + 卡号 {card}）；"
-                "分支名不符，不开 PR"
+                f"分支名不符，不开 PR{hint}"
             )
+        claim_problem = claim_refusal(self._root, card, agent)
+        if claim_problem:
+            raise PrOpenRefusedError(claim_problem)
         if station.dirty_paths:
             shown = "、".join(station.dirty_paths[:3])
             raise PrOpenRefusedError(
@@ -240,6 +254,7 @@ class PrOpenService:
             )
         return PrPlan(
             agent=agent,
+            station=station.name if station.name != agent else "",
             branch=branch,
             title=title or f"[{card}] {card_title}",
             body=body,
@@ -269,7 +284,7 @@ class PrOpenService:
             raise PrOpenRefusedError(
                 f"分支 {plan.branch} 已有打开的 PR：{existing.stdout.strip()}；不重复开，也不改它"
             )
-        station = self._stations.stations_dir / plan.agent
+        station = self._stations.stations_dir / (plan.station or plan.agent)
         self._push(station, plan.branch, plan.head_sha)
         created = self._gh(
             [
@@ -287,14 +302,45 @@ class PrOpenService:
 
     # ── pieces ───────────────────────────────────────────────────────
 
+    def _station_of_card(self, agent: str, branch: str) -> Station | None:
+        """The station named ``agent``, or -- when it is on another card -- the same agent's station that is on ``branch``.
+
+        One conversation has one alias station, so a second card runs in a station under another name of the same agent
+        (D-106); asking for the card's PR must find that station by the card's branch, not only the named one.  A station of
+        another conversation is found the same way but still needs ``_require_caller``.
+        """
+
+        named = next(
+            (s for s in self._stations.stations(only=agent) if s.name == agent and s.registered),
+            None,
+        )
+        if named is not None and named.kind == "agent" and named.branch == branch:
+            return named
+        base = base_agent(agent)
+        for other in self._stations.stations(deep=False):
+            if (
+                other.name != agent
+                and other.registered
+                and other.kind == "agent"
+                and other.branch == branch
+                and base_agent(other.name) == base
+            ):
+                self._require_caller(other.name)
+                deep = next((s for s in self._stations.stations(only=other.name) if s.name == other.name), None)
+                if deep is not None:
+                    return deep
+        return named
+
     def _require_caller(self, agent: str) -> None:
         caller = caller_agent()
         if caller == UNKNOWN_CALLER:
             raise PrOpenRefusedError(
                 "认不出是哪个 agent 在执行（环境标记不在名册里或互相矛盾），不开 PR；请用户在自己的终端执行"
             )
-        if caller and caller != agent:
-            raise PrOpenRefusedError(f"你是 {caller}，不能替 {agent} 开 PR")
+        if not acts_for(caller, agent) and not self._stations.lent_to_caller(agent):
+            raise PrOpenRefusedError(
+                f"你是 {caller}，不能替 {agent} 开 PR；要用别人的空闲工位，先自己 `worktree open {agent} <卡号>` 借用"
+            )
 
     @staticmethod
     def _normalize_card_path(task_card: str) -> str:
@@ -348,7 +394,7 @@ class PrOpenService:
         return declared
 
     def _card_at_base(self, task_card: str, base_sha: str) -> str:
-        shown = self._git(self._root, "show", f"{base_sha}:{task_card}")
+        shown = self._git_text(self._root, "show", f"{base_sha}:{task_card}")
         if shown.returncode != 0:
             raise PrOpenRefusedError(
                 f"任务卡 `{task_card}` 在 origin/main（{base_sha[:8]}）上不存在：卡要先合入 main，范围才算数"
@@ -356,12 +402,12 @@ class PrOpenService:
         return shown.stdout
 
     def _commits(self, station: Path, base_sha: str) -> list[tuple[str, str]]:
-        revs = self._git(station, "rev-list", "--no-merges", "--reverse", f"{base_sha}..HEAD")
+        revs = self._git_text(station, "rev-list", "--no-merges", "--reverse", f"{base_sha}..HEAD")
         if revs.returncode != 0:
             raise AgentWorktreeError(f"读提交失败：{_detail(revs)}")
         commits: list[tuple[str, str]] = []
         for sha in revs.stdout.split():
-            message = self._git(station, "show", "-s", "--format=%B", sha)
+            message = self._git_text(station, "show", "-s", "--format=%B", sha)
             commits.append((sha, message.stdout.strip()))
         return commits
 
@@ -418,7 +464,7 @@ class PrOpenService:
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
-                text = raw.decode("utf-8", errors="replace")
+                text = raw.decode("utf-8", errors="replace")  # lenient-decode: only after a strict decode failed; the note below tells the reader to check
                 notes.append(f"变更单 {number} 不是 UTF-8 编码，按容错方式读，关联 TD 可能不全，请核对")
             found.extend(TD_ID.findall(text))
         return tuple(dict.fromkeys(found)), notes
@@ -459,7 +505,7 @@ class PrOpenService:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                errors="replace",
+                errors="replace",  # lenient-decode: the guard script's output is only quoted back to the user
                 check=False,
                 env=env,
                 stdin=subprocess.DEVNULL,
@@ -473,9 +519,9 @@ class PrOpenService:
         # Explicit refspec: push exactly the commit that was checked, whatever remote.origin.push or push.default say.
         attempts = len(PUSH_BACKOFF_SECONDS) + 1
         for attempt in range(attempts):
-            pushed = self._git(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")
+            pushed = self._git_text(station, "push", "origin", f"{head_sha}:refs/heads/{branch}")
             if pushed.returncode == 0:
-                self._git(station, "branch", f"--set-upstream-to=origin/{branch}", branch)
+                self._git_text(station, "branch", f"--set-upstream-to=origin/{branch}", branch)
                 return
             detail = _detail(pushed)
             if not NETWORK_FAILURE.search(detail):
@@ -485,14 +531,33 @@ class PrOpenService:
         raise AgentWorktreeError(f"推送失败，网络重试 {attempts} 次都不通：{detail}")
 
     def _rev(self, cwd: Path, ref: str) -> str:
-        result = self._git(cwd, "rev-parse", ref)
+        result = self._git_text(cwd, "rev-parse", ref)
         if result.returncode != 0:
             raise AgentWorktreeError(f"git rev-parse {ref} 失败：{_detail(result)}")
         return result.stdout.strip()
 
     @staticmethod
-    def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def _git_text(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        """Lenient Git run (D-171): for output that is only an exit code, an object id, file/commit CONTENT or text shown back.
+
+        A push that succeeded must not fail afterwards because the remote's message is not UTF-8, and a task card or commit
+        message in another encoding is content, not a path.  Output that carries PATHS compared with a scope uses :meth:`_git`.
+        """
         return run_git_bounded_text(
+            ["git", "-C", str(cwd), *args],
+            default_timeout=300.0,
+            error_cls=PrOpenRefusedError,
+            where=cwd,
+            capture_output=True,
+            check=False,
+            env=clean_git_environment(),
+            stdin=subprocess.DEVNULL,
+        )
+
+    @staticmethod
+    def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        """Strict Git run: a path that is not UTF-8 is refused (``diff --name-only -z`` is compared with the claimed scope)."""
+        return run_git_bounded_strict_text(
             ["git", "-C", str(cwd), *args],
             default_timeout=300.0,
             error_cls=PrOpenRefusedError,

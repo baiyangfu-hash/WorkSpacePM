@@ -451,6 +451,11 @@ def find_signature(comments: list[dict[str, Any]], head_sha: str) -> tuple[str |
         if comment.get("performed_via_github_app"):
             notes.append("经由 App 发出，不算")
             continue
+        created, updated = comment.get("created_at"), comment.get("updated_at")
+        if not created or not updated or created != updated:
+            # 与 safety_zone_check.find_signature 同口径：有写权限的账号能改别人的评论而作者不变，编辑过（或缺时间戳）不认
+            notes.append("评论被编辑过（或缺少时间戳），不算；请删掉后重发")
+            continue
         if not any(head_sha.startswith(sha) for sha in shas):
             notes.append(f"签的是 {shas[0][:8]}，现在的头是 {head_sha[:8]}，要重签")
             continue

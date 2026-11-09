@@ -462,3 +462,37 @@ def test_decision_cli_help_documents_target_work_id(cli_runner: CliRunner) -> No
     assert result.exit_code == 0
     assert "--target-work-id" in result.output
     assert "--target-run-id" in result.output
+
+
+# --- D-97: an approval whose §5 file cell is blank must not silently become "no file limit" --------------------------------
+
+
+def _create_without_files(extra: list[str] | None = None) -> list[str]:
+    return [
+        "decision", "create", "--change-id", "CHG-SCPT-2026-214", "--approver", "fubai", "--pid", "SW-2026-008",
+        "--decision-id", "DEC-20261107-D97A0001", *(extra or []),
+    ]  # fmt: skip
+
+
+def test_decision_cli_refuses_an_empty_file_list_and_says_how_to_fix_it(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _approved_repository(tmp_path)
+
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), *_create_without_files()])
+
+    assert result.exit_code == 1
+    assert "批准文件清单为空" in result.output
+    assert "change edit" in result.output and "--allow-no-files" in result.output
+    assert not (tmp_path / ".auto-pm" / "decisions" / "DEC-20261107-D97A0001.json").exists()
+
+
+def test_decision_cli_allows_an_explicit_file_or_an_explicit_no_files(cli_runner: CliRunner, tmp_path: Path) -> None:
+    _approved_repository(tmp_path)
+
+    with_file = cli_runner.invoke(cli, ["-w", str(tmp_path), *_create_without_files(["--file", "a/b.py"])])
+    assert with_file.exit_code == 0, with_file.output
+
+    explicit = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), *_create_without_files(["--allow-no-files"])]
+    )
+    assert explicit.exit_code == 1  # same id: the earlier decision is never overwritten, but not because of the file list
+    assert "批准文件清单为空" not in explicit.output

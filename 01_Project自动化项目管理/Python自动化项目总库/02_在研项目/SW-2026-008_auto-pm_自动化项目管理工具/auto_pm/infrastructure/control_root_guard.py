@@ -305,6 +305,59 @@ def governed_worktree_snapshot(
     return final_candidate, head_before, dirty_before
 
 
+def worktree_head_and_dirty(
+    worktree_path: str | Path, scope_paths: Iterable[str]
+) -> tuple[str, tuple[str, ...]]:
+    """Cheap HEAD and dirty-file facts for one worktree, for re-checking inside a ledger write transaction.
+
+    Two git calls instead of the roughly twenty of ``governed_worktree_snapshot``: ``rev-parse HEAD`` and one
+    ``status`` limited to *scope_paths*.  It reports the same files (changed, staged, untracked and not ignored)
+    as the full snapshot restricted to that scope, without the path-identity checks, which the caller already did
+    before taking the lock.
+    """
+
+    candidate = Path(worktree_path)
+    scope = [path for path in scope_paths if path]
+    head = _git_output(candidate, "rev-parse", "--verify", "HEAD")
+    if not scope:
+        return head, ()
+    output = _git_optional_output(
+        candidate,
+        "--literal-pathspecs",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--no-renames",
+        "--untracked-files=all",
+        "--",
+        *scope,
+    )
+    dirty = {entry[3:].replace("\\", "/") for entry in output.split("\0") if len(entry) > 3}
+    return head, tuple(sorted(dirty))
+
+
+def worktree_path_identity_problem(stored_path: str | Path) -> str:
+    """Cheap, git-free re-check that a Run's worktree path is still the canonical path stored at Run start ("" = fine).
+
+    The full snapshot resolved the path to its canonical form before the ledger lock was taken.  If, between that and the
+    lock, the directory was swapped for a symlink/junction (or its ``.git`` marker was), the path resolves somewhere else.
+    This costs a few filesystem calls and no git process, so it is safe to run while the lock is held.
+    """
+
+    stored = Path(stored_path)
+    try:
+        resolved = stored.resolve(strict=True)
+    except OSError:
+        return "Run worktree 不存在或无法规范化"
+    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
+        os.path.normpath(str(stored))
+    ):
+        return "Run worktree canonical identity 发生漂移"
+    if is_link_like(stored / ".git"):
+        return "Run worktree .git 标记不得是 symlink/junction/reparse point"
+    return ""
+
+
 def _real_control_directory(root: Path) -> Path:
     """Require the in-workspace ``.git`` entry to be a real directory, never an alias."""
 

@@ -47,13 +47,34 @@ cd My_Workspace
 
 > 💡 **Git 中文路径防乱码提示**：建议在终端执行一次 `git config --global core.quotepath false`，防止中文目录显示为八进制转义。
 
-#### 2. 一键环境初始化向导 (Windows)
-在工作空间根目录下，直接双击运行 **`setup_env.bat`**：
-- 脚本只接受 Python 3.12（依赖锁定文件只覆盖 3.12）；
-- 自动创建专属 `.venv` 虚拟环境（已有的 `.venv` 不是 3.12 时会停下并提示，不会删除它）；
-- 按依赖锁定文件 `00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt` 以 `--no-deps` 精确安装全部桌面 GUI、CLI 与单测依赖包，并运行 `pip check`。
+#### 2. 装环境 → 自检 → 定位（换电脑、换云服务商、换 AI agent 都照这三步）
 
-*(Linux / macOS 用户：在工作空间根目录执行 `sh 00_Infrastructure/auto_pm/environment/setup_env.sh`，步骤与 `setup_env.bat` 相同、用同一份锁定文件。根目录 `requirements.txt` 已不再列依赖，只指向这份锁定文件；锁定文件冻结于 Windows、Python 3.12，CI 在 Linux 上安装的是同一份，macOS 和其他 Python 版本没有完整验证。)*
+**第一步：装环境。** 没有 `.venv`，或 `.venv` 不是 Python 3.12，就装：
+- **Windows**：在工作空间根目录双击 **`setup_env.bat`**。脚本只接受 Python 3.12（依赖锁定文件只覆盖 3.12）；自动创建专属 `.venv`（已有的 `.venv` 不是 3.12 时会停下并提示，不会删除它）；按依赖锁定文件 `00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt` 以 `--no-deps` 精确安装全部桌面 GUI、CLI 与单测依赖包，并运行 `pip check`。
+- **Linux / 云端 / macOS**：在工作空间根目录执行 `sh 00_Infrastructure/auto_pm/environment/setup_env.sh`，步骤与 `setup_env.bat` 相同、用同一份锁定文件。云端会话缺 Qt 系统库时它会自己 `apt-get` 装（需要 root）。根目录 `requirements.txt` 已不再列依赖，只指向这份锁定文件；锁定文件冻结于 Windows、Python 3.12，CI 在 Linux 上安装的是同一份，macOS 和其他 Python 版本没有完整验证。
+
+**第二步：自检。** 装完（或开新会话时）跑一遍，确认环境真的能用。检查脚本只用 Python 标准库，`.venv` 还没装好时也能跑，Windows、Linux、云端是同一个入口：
+- **Windows**：`python 00_Infrastructure\auto_pm\environment\env_check.py`（`python` 不行就用 `py -3`）；
+- **Linux / 云端 / macOS**：`python3 00_Infrastructure/auto_pm/environment/env_check.py`，或等价的 `sh 00_Infrastructure/auto_pm/environment/cloud_selfcheck.sh`（它只是调用上面那个脚本）。
+
+只读，不改任何东西。检查：`.venv` 存在且是 Python 3.12、开发依赖和 Qt 能导入、不是浅克隆。退出码 **0 才能开工**，非 0 就照它打印的 `[失败]` 行下面的"补救"命令做，再跑一遍。装好之后想看更多体检项，用 `python main.py doctor`。
+
+**第三步：定位。** 环境没问题后，AI agent 先读 `AGENTS.md` 和 `.trae/skills/cockpit-entry/SKILL.md`，按它做只读定位，再动手。没有已授权的 Work、Run 与有效租约之前只允许只读命令。
+
+**换云服务商 / 换 agent 时，哪些跟着仓库走、哪些要在云端设置页自己填：**
+
+| 跟着仓库走（克隆即得） | 要在那家云自己的设置页填 |
+|---|---|
+| `setup_env.sh`、`env_check.py`（自检）、`cloud_selfcheck.sh`、依赖锁定文件、`AGENTS.md`、`CLAUDE.md` | 安装脚本 / 初始化命令（粘贴下面那几行）；网络放行（至少能访问 PyPI，装 Qt 系统库还要能访问系统包源）；以 root 运行（`apt-get` 要用） |
+
+安装脚本（脚本运行时的起始目录假定是"放仓库的那一层"，若不是，改成进入仓库根目录再执行）：
+```bash
+cd WorkSpacePM   # 仓库目录名；起始目录就是仓库根时，这一行去掉
+git fetch --unshallow origin 2>/dev/null || true   # 浅克隆补成完整历史，失败不拦
+AUTO_PM_INSTALL_SYSLIBS=1 sh 00_Infrastructure/auto_pm/environment/setup_env.sh \
+  || echo "[警告] setup_env.sh 没成功；进会话后运行 env_check.py 看缺什么"
+```
+不要把令牌、密码写进环境变量或脚本（多数云是明文保存）。Claude Code 的 `SessionStart` 钩子（`.claude/hooks/session-start.sh`）只对 Claude Code 生效，而且在"项目线程"这类会话里不一定被执行，所以**不能只靠它**：其他 agent、其他云都要靠上面这三步。别家云的安装脚本字段叫什么、起始目录是哪一层，未核实，以它的文档为准。
 
 #### 3. 启动桌面驾驶舱
 - **方式 1**：双击根目录下的 **`双击启动驾驶舱.bat`**；

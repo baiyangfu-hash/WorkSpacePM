@@ -25,16 +25,77 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeService,
     Station,
     StationRefusedError,
+    base_agent,
+    caller_alias,
+    ensure_session_id,
 )
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
-AGENTS = click.Choice(sorted(AGENT_ROSTER))
+
+
+class _AgentName(click.ParamType):  # type: ignore[type-arg]
+    """名册里的基名，或 <基名>-<6位十六进制> 的会话别名（每个对话一个工位）。"""
+
+    name = "agent"
+
+    def convert(self, value: Any, param: click.Parameter | None, ctx: click.Context | None) -> str:
+        text = str(value)
+        if text == "self":  # 本对话自己的别名工位：不用手写别名，任何 agent 都能用
+            alias = caller_alias()
+            if not alias:
+                self.fail("`self` 只能由 agent 在有会话 ID 的对话里使用；用户终端请写明 agent 名或别名", param, ctx)
+            return alias
+        if base_agent(text):
+            return text
+        self.fail(f"`{text}` 不是名册里的 agent（{'、'.join(sorted(AGENT_ROSTER))}）或会话别名（如 claude-b89bc8）", param, ctx)
+
+    def get_metavar(self, param: click.Parameter, ctx: click.Context | None = None) -> str:
+        return "[" + "|".join(sorted(AGENT_ROSTER)) + "|<基名>-<6位十六进制>]"
+
+
+AGENTS = _AgentName()
+
+
+def resolve_station_name(service: AgentWorktreeService, agent: str, *, opening: bool = False) -> str:
+    """D-112: a bare roster name from an agent that has its own conversation alias means *this conversation's* station.
+
+    Every Claude conversation used to pass ``claude`` and land on the one shared ``claude`` station, so whoever opened it first
+    held it for days and nobody else could open a PR from a different card.  With a session id the caller has its own station
+    ``claude-<6 hex>``; ``opening`` always uses it, other commands use it when it exists and otherwise keep the name they were
+    given (an older station opened under the bare name keeps working).  Without a session id (the user's terminal, other AIs)
+    nothing changes.  Only the caller's own alias can come out of here, so one conversation cannot reach another's station.
+    """
+
+    alias = caller_alias()
+    if not alias or agent == alias or agent != base_agent(alias):
+        return agent
+    if opening or (service.stations_dir / alias).exists():
+        console.print(f"[cyan]按本对话别名 {alias} 处理（{agent} 是所有同名对话共用的名字）[/cyan]")
+        return alias
+    return agent
+
+
+def shared_station_refusal(agent: str) -> str:
+    """D-112: ``close claude`` with no station of the caller's own would close the one station every same-named conversation shares.
+
+    Returns the refusal text when the caller has a conversation alias and ``agent`` is the bare shared name, else "".  The caller who
+    really means the shared station says so with ``--shared``.
+    """
+
+    alias = caller_alias()
+    if alias and agent == base_agent(alias) and agent != alias:
+        return (
+            f"{agent} 是所有同名对话共用的工位，不是本对话（{alias}）的；收它会动到别的对话的工作。"
+            f"确定要收这个共用工位，加 --shared"
+        )
+    return ""
 
 
 def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeService:
     app_ctx: AppContext = ctx.obj
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
+    ensure_session_id(root)
     try:
         return AgentWorktreeService(root, measure_size=measure_size)
     except AgentWorktreeError as error:
@@ -134,6 +195,7 @@ def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
     """为 AGENT 开工位，分支 <前缀><CARD>，从最新 origin/main 起"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
+    agent = resolve_station_name(service, agent, opening=True)
     try:
         station = service.open(agent, card, fetch=not no_fetch)
     except AgentWorktreeError as error:
@@ -207,16 +269,84 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
 @worktree_group.command("close")
 @click.argument("agent", type=AGENTS)
 @click.option("--no-fetch", is_flag=True, help="断网时按本机已知的远程分支判断")
+@click.option("--shared", is_flag=True, help="确认要收同名对话共用的工位（裸名，如 claude）")
 @click.pass_context
-def close_cmd(ctx: click.Context, agent: str, no_fetch: bool) -> None:
+def close_cmd(ctx: click.Context, agent: str, no_fetch: bool, shared: bool) -> None:
     """收 AGENT 的工位：无未提交改动、提交都已推送才删；已并进 main 的再删本地分支"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
+    agent = resolve_station_name(service, agent)
+    refusal = "" if shared else shared_station_refusal(agent)
+    if refusal:
+        _fail(AgentWorktreeError(refusal))
     try:
         result = service.close(agent, fetch=not no_fetch)
     except AgentWorktreeError as error:
         _fail(error)
     console.print(f"[green]已收工位[/green] {result.path}（分支 {result.branch}）：{result.note}")
+
+
+@worktree_group.command("release")
+@click.argument("agent", type=AGENTS, required=False)
+@click.option("--self", "mine", is_flag=True, help="回收本对话自己的别名工位（给包装脚本、SessionEnd 钩子在对话结束时调用）")
+@click.pass_context
+def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
+    """回收一个会话别名工位（对话结束时用）：先把未提交和未跟踪的内容存成救援引用，再收目录；分支保留"""
+    if mine == (agent is not None):
+        _fail(AgentWorktreeError("要么给出别名，要么用 --self，二选一"))
+    require_runtime_identity_for_workspace(ctx)
+    service = _service(ctx, measure_size=False)
+    if mine:
+        agent = caller_alias()
+        if not agent:
+            console.print("本对话没有会话别名（不是 agent 调用，或没有会话 ID），没有可回收的工位")
+            return
+        if not (service.stations_dir / agent).exists():
+            console.print(f"本对话（{agent}）没有开过工位，没有可回收的")
+            return
+    assert agent is not None
+    try:
+        result = service.release(agent, via="release-self" if mine else "release")
+    except AgentWorktreeError as error:
+        _fail(error)
+    console.print(f"[green]已回收工位[/green] {result.path}（分支 {result.branch} 保留）")
+    if result.rescue_ref:
+        console.print(f"工位里有没提交的内容，已存为救援引用 {result.rescue_ref}；找回：git checkout {result.rescue_ref} -- .")
+    else:
+        console.print("工位是干净的，没有需要救援的内容")
+
+
+@worktree_group.command("heartbeat")
+@click.pass_context
+def heartbeat_cmd(ctx: click.Context) -> None:
+    """刷新本对话工位的心跳（给 Claude Code 的 Stop / PreToolUse 钩子调用；没有本对话的工位就什么都不做）"""
+    service = _service(ctx, measure_size=False)
+    alias = caller_alias()
+    if alias and service.touch_heartbeat(alias):
+        console.print(f"已刷新 {alias} 的心跳")
+
+
+@worktree_group.command("reclaim")
+@click.option("--stale", "stale", is_flag=True, required=True, help="回收持有对话已经不在的会话别名工位")
+@click.option("--apply", "apply", is_flag=True, help="真的回收；不加时只列出")
+@click.pass_context
+def reclaim_cmd(ctx: click.Context, stale: bool, apply: bool) -> None:
+    """快捷回收：列出（加 --apply 则回收）持有对话已不在的会话别名工位；回收前一样先存救援引用，分支保留"""
+    del stale
+    if apply:
+        require_runtime_identity_for_workspace(ctx)
+    service = _service(ctx, measure_size=False)
+    try:
+        found = service.reclaim_stale(apply=apply)
+    except AgentWorktreeError as error:
+        _fail(error)
+    if not found:
+        console.print("没有持有对话已不在的会话别名工位")
+        return
+    for name, reason in found:
+        console.print(f"{'[green]已回收[/green]' if apply else '可回收'} {name}：{reason}")
+    if not apply:
+        console.print("加 --apply 才会真的回收（先存救援引用，分支保留）")
 
 
 @worktree_group.command("sweep")

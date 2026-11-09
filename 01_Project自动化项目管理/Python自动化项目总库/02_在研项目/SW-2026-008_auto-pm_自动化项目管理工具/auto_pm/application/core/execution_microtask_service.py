@@ -435,7 +435,7 @@ class ExecutionMicrotaskService:
             env=env or clean_git_environment(),
         )
         if result.returncode != 0 or result.stderr:
-            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            detail = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: stderr only quoted in the refusal text
             raise ExecutionMicrotaskError(
                 f"Git 命令无法证明微任务状态 ({result.returncode}): {detail}"
             )
@@ -445,9 +445,14 @@ class ExecutionMicrotaskService:
     def _git_text(
         cls, root: Path, *args: str, env: dict[str, str] | None = None
     ) -> str:
-        return cls._git_bytes(root, *args, env=env).decode(
-            "utf-8", errors="replace"
-        ).strip()
+        raw = cls._git_bytes(root, *args, env=env)
+        try:
+            return raw.decode("utf-8").strip()
+        except UnicodeDecodeError as error:
+            # Strict: these outputs (top level, HEAD, common dir, object ids) are compared to prove the microtask boundary.
+            raise ExecutionMicrotaskError(
+                f"Git 输出不是合法 UTF-8，无法证明微任务状态: git {' '.join(args[:2])}"
+            ) from error
 
 
 __all__ = ["ExecutionMicrotaskError", "ExecutionMicrotaskService"]

@@ -34,6 +34,10 @@ class PlcBaselineError(RuntimeError):
     """基线取不出来（提交不存在、Git 出错）。"""
 
 
+class PlcPluginPanicError(PlcBaselineError):
+    """插件的测试进程 panic 退出：失败清单不完整，这次检查没有“修好／新增”可言，必须按失败处理（D-137）。"""
+
+
 def _git(repo: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
     return run_git_bounded(
         ["git", "-c", "core.quotePath=false", "-C", str(repo), *arguments],
@@ -53,7 +57,7 @@ def _exists(repo: Path, rev: str, path: str) -> bool:
 def _libraries(repo: Path, rev: str, project_rel: str) -> list[str]:
     listing = _git(repo, "ls-tree", "-r", "-z", "--name-only", rev, "--", project_rel)
     if listing.returncode != 0:
-        raise PlcBaselineError(listing.stderr.decode("utf-8", "replace").strip() or "git ls-tree 失败")
+        raise PlcBaselineError(listing.stderr.decode("utf-8", "replace").strip() or "git ls-tree 失败")  # lenient-decode: git stderr only quoted in the error text
     found: list[str] = []
     for name in listing.stdout.decode("utf-8").split("\0"):
         if not name.endswith(".plc.json"):
@@ -88,7 +92,7 @@ def export_plc_baseline(repo: Path, rev: str, project_rel: str, destination: Pat
         paths.append(SPEC_REGISTRY)
     archive = _git(repo, "archive", "--format=tar", rev, "--", *sorted(set(paths)))
     if archive.returncode != 0:
-        raise PlcBaselineError(archive.stderr.decode("utf-8", "replace").strip() or "git archive 失败")
+        raise PlcBaselineError(archive.stderr.decode("utf-8", "replace").strip() or "git archive 失败")  # lenient-decode: git stderr only quoted in the error text
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
         _extract(bundle, destination)
@@ -135,7 +139,7 @@ def repo_top(path: Path) -> Path:
 
     top = _git(path, "rev-parse", "--show-toplevel")
     if top.returncode != 0:
-        raise PlcBaselineError(top.stderr.decode("utf-8", "replace").strip() or "不是 Git 仓库")
+        raise PlcBaselineError(top.stderr.decode("utf-8", "replace").strip() or "不是 Git 仓库")  # lenient-decode: git stderr only quoted in the error text
     return Path(top.stdout.decode("utf-8").strip()).resolve()
 
 
@@ -148,6 +152,11 @@ def checked_keys(
 
     recorder = RecordingLanguageService(service, project) if service is not None else None
     result = PlcChecker(str(workspace), language_service=recorder).check_project(str(project))
+    if recorder is not None and recorder.panic_note:
+        raise PlcPluginPanicError(
+            f"{recorder.panic_note}。进程一崩，哪些用例失败取决于谁先撞上崩点，每次不一样，"
+            "所以不给“新增／修好”结论，按失败处理（根因是插件原生桩，见 D-37）"
+        )
     language = recorder.diagnostics if recorder is not None else None
     incomplete = recorder.incomplete if recorder is not None else False
     return result, failure_keys(result, str(project), language), incomplete
@@ -178,6 +187,7 @@ def check_against_baseline(
 
 __all__ = [
     "PlcBaselineError",
+    "PlcPluginPanicError",
     "baseline_anchor_note",
     "check_against_baseline",
     "checked_keys",

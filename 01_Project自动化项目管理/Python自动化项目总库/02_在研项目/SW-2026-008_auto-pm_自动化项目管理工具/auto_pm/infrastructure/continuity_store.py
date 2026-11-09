@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -87,12 +88,18 @@ from auto_pm.infrastructure.control_root_guard import (
     is_link_like,
     require_control_root,
     require_safe_workspace_path,
+    worktree_head_and_dirty,
+    worktree_path_identity_problem,
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
 
 class ContinuityStoreError(RuntimeError):
     """Raised when a continuity transaction cannot be completed safely."""
+
+
+class LedgerIntegrityError(ContinuityStoreError):
+    """The ledger file itself is damaged (a fact about the file, not a registered guard refusing a command)."""
 
 
 class RunNotFoundError(ContinuityStoreError):
@@ -127,6 +134,10 @@ _SIDECAR_RETRY_SECONDS = 0.025
 # (HEAD and status) while it owns the lock, which takes seconds on a loaded Windows runner; 5 s was too short
 # and a second writer failed with "database is locked" (TD-SW008-214 follow-up). Waiting longer only delays.
 _WRITE_LOCK_TIMEOUT_SECONDS = 30.0
+# A write transaction that waited or held the write lock longer than this is logged as a WARNING on
+# ``auto_pm.infrastructure.continuity_store`` (logger name), with the calling method.  Every write also leaves
+# its numbers in ``ContinuityStore.last_write_timing``.  Keep lock-held work short: no git subprocess inside.
+WRITE_LOCK_SLOW_SECONDS = 1.0
 # A Run may keep renewing its lease for at most this long after creation; only the user extends it (extend_lease_hold).
 LEASE_HOLD_CAP_SECONDS = 3 * 3_600
 LEASE_HOLD_MAX_EXTENSION_SECONDS = 12 * 3_600
@@ -450,6 +461,34 @@ CREATE TABLE IF NOT EXISTS planning_scope_cards (
 """
 _DDL += _PLANNING_SCOPE_CARDS_DDL
 
+# TD-SW008 073: the inbox tables used to be created lazily by ``IntakeStore`` on first use.  They now live in the base DDL like
+# ``planning_scope_cards`` above: every ``initialize`` runs it, all statements are ``IF NOT EXISTS``, so an existing ledger gains
+# the tables without a schema-version bump (an older release still opens it; a rollback stays possible) and keeps its rows.
+INTAKE_ITEMS_DDL = """
+CREATE TABLE IF NOT EXISTS intake_items (
+    item_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    seq INTEGER NOT NULL CHECK (seq >= 1),
+    title_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ticket_hash TEXT NOT NULL,
+    item_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (project_id, seq)
+)
+"""
+INTAKE_BINDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS planning_draft_intake_bindings (
+    request_id TEXT PRIMARY KEY REFERENCES planning_drafts(request_id),
+    classification_json TEXT NOT NULL,
+    item_id TEXT UNIQUE REFERENCES intake_items(item_id),
+    created_at TEXT NOT NULL
+)
+"""
+_DDL += INTAKE_ITEMS_DDL + ";\n" + INTAKE_BINDINGS_DDL + ";\n"
+
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
@@ -556,6 +595,8 @@ class ContinuityStore:
             raise ContinuityStoreError(str(error)) from error
         self._read_snapshot: _ReadSnapshot | None = None
         self._read_snapshot_lock = threading.Lock()
+        self._write_integrity_checked = False
+        self.last_write_timing: dict[str, Any] = {}
 
     def _utc_now(self) -> datetime:
         current = self._clock()
@@ -663,6 +704,34 @@ class ContinuityStore:
         ):
             raise ContinuityStoreError("declared_dirty_paths 超出 owned_paths")
         return worktree
+
+    def _confirm_run_snapshot_in_lock(
+        self,
+        worktree: str,
+        git_head: str,
+        owned_paths: tuple[str, ...],
+        observed_dirty_paths: tuple[str, ...],
+    ) -> None:
+        """Lock-held re-check of a Run's worktree: the same two facts as the full snapshot, in two git calls."""
+
+        problem = worktree_path_identity_problem(worktree)
+        if not problem:
+            try:
+                head, dirty = worktree_head_and_dirty(worktree, owned_paths)
+            except ControlRootGuardError as error:
+                problem = str(error)
+            else:
+                actual = {
+                    self._authority_path_key(path)
+                    for path in dirty
+                    if any(self._authority_path_covered(path, (owned,)) for owned in owned_paths)
+                }
+                if head != git_head:
+                    problem = f"Run git_head 在开工检查与写账本之间变了：Run 记的是 {git_head}，工位现在是 {head}；请重新开工"
+                elif actual != {self._authority_path_key(path) for path in observed_dirty_paths}:
+                    problem = "Run observed_dirty_paths 在开工检查与写账本之间变了；请重新开工"
+        if problem:
+            raise ContinuityStoreError(problem)
 
     @classmethod
     def _run_paths(cls, value: object, *, label: str, allow_empty: bool) -> tuple[str, ...]:
@@ -801,7 +870,7 @@ class ContinuityStore:
             raise ContinuityStoreError("Decision Git immutable 事实无法复核") from error
         if result.returncode != 0:
             raise ContinuityStoreError("Decision Git commit/blob 不存在或无法读取")
-        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: diagnostic text for the refusal message; the refusal itself rests on the exit code
         if diagnostic:
             raise ContinuityStoreError(f"Decision Git 事实包含诊断: {diagnostic[:1000]}")
         return result.stdout
@@ -840,7 +909,7 @@ class ContinuityStore:
             )
         except OSError as error:
             raise ContinuityStoreError("Decision Git clean 事实无法复核") from error
-        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+        diagnostic = result.stderr.decode("utf-8", errors="replace").strip()  # lenient-decode: diagnostic text for the refusal message; the refusal itself rests on the exit code
         if result.returncode == 1:
             raise ContinuityStoreError(
                 "Decision immutable snapshot 未跟踪或相对恢复 Run git_head 存在脏改漂移"
@@ -1152,12 +1221,17 @@ class ContinuityStore:
         db_path = self._validated_db_path()
         conn = sqlite3.connect(db_path, timeout=_WRITE_LOCK_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
+        caller = sys._getframe(2).f_code.co_name  # the method that wrote ``with self._transaction()``
+        asked = time.monotonic()
+        acquired: float | None = None
         try:
             self._validated_db_path()
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute(f"PRAGMA busy_timeout={int(_WRITE_LOCK_TIMEOUT_SECONDS * 1000)}")
             conn.execute("BEGIN IMMEDIATE")
+            acquired = time.monotonic()
+            self._require_intact_before_first_write(conn)
             self._validated_db_path()
             yield conn
             self._validated_db_path()
@@ -1167,6 +1241,42 @@ class ContinuityStore:
             raise
         finally:
             conn.close()
+            self._record_write_timing(caller, asked, acquired)
+
+    def _record_write_timing(self, caller: str, asked: float, acquired: float | None) -> None:
+        """Remember how long the last write waited for the lock and how long it held it; warn when slow."""
+
+        done = time.monotonic()
+        waited = (acquired if acquired is not None else done) - asked
+        held = (done - acquired) if acquired is not None else 0.0
+        self.last_write_timing = {"caller": caller, "waited_seconds": waited, "held_seconds": held}
+        if waited > WRITE_LOCK_SLOW_SECONDS or held > WRITE_LOCK_SLOW_SECONDS:
+            log.warning(
+                "Continuity Store 写锁偏慢: %s 等锁 %.2fs，持锁 %.2fs（持锁内不应有 git 调用）",
+                caller,
+                waited,
+                held,
+            )
+
+    def _require_intact_before_first_write(self, conn: sqlite3.Connection) -> None:
+        """D-02: a damaged ledger is refused at the first write of this process, not found at the next start.
+
+        ``quick_check`` runs once per store object (the write path of one command), inside the write lock, so no
+        other writer can change the file between the check and the write.
+        """
+
+        if self._write_integrity_checked:
+            return
+        try:
+            rows = conn.execute("PRAGMA quick_check").fetchall()
+        except sqlite3.DatabaseError:
+            rows = []  # a page SQLite cannot even read is damage too
+        if len(rows) != 1 or str(rows[0][0]) != "ok":
+            raise LedgerIntegrityError(
+                "Continuity Store 账本完整性检查失败，拒绝写入；先 `main.py continuity verify-backup` 核对备份，"
+                "不要继续写这本账"
+            )
+        self._write_integrity_checked = True
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
@@ -4218,15 +4328,14 @@ class ContinuityStore:
             )
             if replay is not None:
                 return replay
-            final_worktree = self._validated_run_snapshot(
+            # The full snapshot (about twenty git calls) was taken above, before the lock.  Inside the lock only
+            # two cheap git calls confirm nothing moved in between: HEAD, and the dirty files inside owned_paths.
+            self._confirm_run_snapshot_in_lock(
                 stored_values["worktree_path"],
                 stored_values["git_head"],
                 owned_paths,
-                declared_dirty_paths,
                 observed_paths,
             )
-            if str(final_worktree) != stored_values["worktree_path"]:
-                raise ContinuityStoreError("Run worktree canonical identity 发生漂移")
             if stored_values.get("state") != RunState.READY.value:
                 raise ContinuityStoreError("新 Run 初始状态必须是 READY")
             if stored_values.get("version") != 1:
@@ -4318,6 +4427,7 @@ class ContinuityStore:
         lease_token: str,
         expected_epoch: int | None = None,
         failure: ExecutionFailure | None = None,
+        abandon: bool = False,
     ) -> RunItem:
         del now
         idempotency_key = self._validated_idempotency_key(idempotency_key)
@@ -4392,7 +4502,11 @@ class ContinuityStore:
             current = self._get_run(conn, run_id)
             if current.version != expected_version:
                 raise ContinuityStoreError("Run 不存在或版本冲突")
-            if destination not in _STORE_RUN_TRANSITIONS[current.state]:
+            # D-41：持有者放弃“验证中”的 Run 是唯一在普通迁移图之外多开的一条边，只能由 abandon 入口走
+            abandoning = (
+                abandon and current.state is RunState.VERIFYING and destination is RunState.CANCELLED
+            )
+            if not abandoning and destination not in _STORE_RUN_TRANSITIONS[current.state]:
                 raise ContinuityStoreError(f"非法 Run 状态迁移: {current.state} -> {destination}")
             if destination is RunState.SUCCEEDED:
                 self._refuse_while_closure_prepared(conn, "run_id", run_id, "Run")
@@ -4451,7 +4565,50 @@ class ContinuityStore:
                 event_time,
                 aggregate_type="run",
             )
+            if destination in {RunState.FAILED, RunState.CANCELLED}:
+                self._block_work_without_live_run(conn, current.work_id, idempotency_key, event_time)
             return self._get_run(conn, run_id)
+
+    def _block_work_without_live_run(
+        self, conn: sqlite3.Connection, work_id: str, run_key: str, event_time: str
+    ) -> None:
+        """D-109 layer 3: a Run that ends FAILED/CANCELLED must not leave its Work IN_PROGRESS with nobody working on it.
+
+        Same transaction as the Run's own transition, so there is no moment where the Run is terminal and the Work is not.
+        BLOCKED is an existing legal state (``IN_PROGRESS -> BLOCKED``) that a person clears by retrying (READY) or by
+        cancelling; nothing is deleted.  A Work in any other state, or one that still has a live Run, is left alone.
+        """
+
+        work = self._get_work(conn, work_id)
+        if work.state is not WorkState.IN_PROGRESS:
+            return
+        live = conn.execute(
+            """SELECT run_id FROM run_items WHERE work_id=?
+            AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED') LIMIT 1""",
+            (work_id,),
+        ).fetchone()
+        if live is not None:
+            return
+        cursor = conn.execute(
+            """UPDATE work_items SET state=?, version=version+1, updated_at=?
+            WHERE work_id=? AND version=?""",
+            (WorkState.BLOCKED.value, event_time, work_id, work.version),
+        )
+        if cursor.rowcount != 1:  # cannot happen inside this write transaction; kept so a CAS miss refuses instead of passing
+            from auto_pm.infrastructure.guard_refusal import (
+                GuardStoreRefusal,  # lazy: guard_refusal imports this module
+            )
+
+            raise GuardStoreRefusal("G-LEASE-VALID", "Work 在 Run 终态迁移的同一事务里被改动（版本冲突）")
+        key = "work-blocked-" + hashlib.sha256(run_key.encode()).hexdigest()[:48]
+        self._append_event(
+            conn,
+            work_id,
+            "WORK_TRANSITIONED",
+            {"state": WorkState.BLOCKED.value, "authorization_ref": work.authorization_ref},
+            key,
+            event_time,
+        )
 
     @classmethod
     def _release_lease_in_transaction(
@@ -8256,6 +8413,17 @@ class ContinuityStore:
             )
         return self._get_run(conn, str(rows[0]["run_id"]))
 
+    @staticmethod
+    def _expired_lease_park_hint(run_id: str) -> str:
+        """What follows "lease 已过期" when parking (D-49): the card can be neither parked nor renewed any more, the way out is a takeover."""
+
+        return (
+            "：租约过期后既不能搁着也不能续租，要先换人接手。"
+            "完整出口：python main.py continuity recovery plan --pid <项目号> --state LEASE_EXPIRED；"
+            f"最短一条：python main.py continuity run reclaim --run-id {run_id} --claimant <另一个 agent 名> --reason <原因>"
+            "（接手方须和原持有者不同；原持有者进程是否还活着查不出来时，由用户本人运行 pm sign-risk）"
+        )
+
     def park_mission(
         self,
         *,
@@ -8370,7 +8538,12 @@ class ContinuityStore:
             if self._open_park_row(conn, "run_id", run.run_id) is not None:
                 raise ContinuityStoreError("这个 Run 已有未拿回的搁着记录")
             lease = self._require_lease_in_tx(
-                conn, run_id=run.run_id, owner_id=owner_id, lease_token=lease_token, expected_epoch=None
+                conn,
+                run_id=run.run_id,
+                owner_id=owner_id,
+                lease_token=lease_token,
+                expected_epoch=None,
+                expired_hint=self._expired_lease_park_hint(run.run_id),
             )
             if git_head != run.git_head:
                 raise ContinuityStoreError("断点 git_head 与 Run 基线不一致（Git baseline drift）")
@@ -8905,6 +9078,7 @@ class ContinuityStore:
         owner_id: str,
         lease_token: str,
         expected_epoch: int | None,
+        expired_hint: str = "",
     ) -> LeaseItem:
         """Check the holder, the expiry and (when presented) the epoch INSIDE the write transaction, so a transfer cannot slip in between the check and the write.
 
@@ -8923,7 +9097,7 @@ class ContinuityStore:
                 + self._holder_notice(conn, run_id)
             )
         if self._aware_timestamp(lease.expires_at, "lease") <= self._utc_now():
-            raise ContinuityStoreError("lease 已过期")
+            raise ContinuityStoreError("lease 已过期" + expired_hint)
         if expected_epoch is not None:  # no epoch presented: accepted during the compatibility period, and the grant event is not even read
             verdict = check_write_epoch(self._grant_epoch(conn, run_id), expected_epoch)
             if not verdict.accepted:

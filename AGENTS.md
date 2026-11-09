@@ -80,6 +80,15 @@
 
 表外的 AI 先由用户登记名字和前缀，再开工位。已合并的历史分支（如主执行用过的 `codex/pr-…`）不改名，新卡按本表。
 
+**agent 名字规则（对所有 agent 一视同仁，写给 Claude 以外的 AI 看；CHG-SCPT-2026-483 落地后生效）：**
+
+1. **基名**就是上表第一列（claude、trae、cursor、vscode、codex），决定分支前缀；**别名**是 `<基名>-<会话ID前6位十六进制>`（如 `claude-b89bc8`），决定工位目录名，让同一台电脑上同时开的多个对话各占一个工位、互不踩。分支仍用 `<基名前缀><卡号>`，PR 脚本和审计脚本不受影响。
+2. **身份靠环境变量 `AUTO_PM_AGENT` 声明，不靠哪家 AI**：值写基名（冒号后的备注随意，如 `trae:cn`）。Claude Code 和 Codex 因自带环境变量（`CLAUDECODE`、`CODEX_*`）可被自动认出；**Cursor、VS Code 里的 AI、Trae 等没有自带标记，必须自己带上 `AUTO_PM_AGENT=<基名>` 再跑 `main.py`，否则驾驶舱会把它当成用户本人，口令类命令（`pm approve`、`pm accept`、`pm sign-risk`）和收别人工位的护栏都拦不住**。只在这一条命令期间设置，命令结束即还原，不在终端长期设置（否则用户自己在同一终端敲口令会被当成 agent 拒绝）。
+3. **会话 ID 的取值顺序**：`AUTO_PM_SESSION_ID`（任何 agent 都能设，优先）→ `CLAUDE_CODE_SESSION_ID` → 首次调用自动生成并记在工位元数据里。拿不到会话 ID 就退回只用基名。别名只能由会话 ID 派生，agent 不得在命令行手写别名冒用别的对话；手写别名只允许用户终端。
+4. **回收**：有 `SessionEnd` 类钩子的 agent（目前只有 Claude Code）可在对话结束时即时回收；其他 agent 靠兜底：持有对话的进程已不在、心跳超时且没有未过期的 Run 租约，才算过期，默认只列出，用户或 `worktree reclaim --stale --apply` 才真正回收。所有 agent 收工时都应主动执行 `worktree close <别名>`。回收前未提交改动先存成补丁，分支永远保留。
+5. **新 agent 登记**：表外的 AI 由用户登记基名和前缀（加一行到上表）后即可使用，其余规则不用改。
+6. **各家入口文件只做薄引用**：`CLAUDE.md`、`.cursor/rules/`、`.agent/rules/`、`.trae/rules/` 只写“读 `AGENTS.md` 与 `cockpit-entry`”和各自的身份声明方式，不复制规则。通用规则只写在本文件。
+
 **铁律：**
 
 1. **一台电脑只克隆一次。** 工位一律用 `git worktree add` 从控制根派生，放在 `R/.auto-pm/worktrees/<agent>`。放到别处会出问题：
@@ -105,7 +114,7 @@ main.py worktree close <agent>          # 收工：无未提交改动、提交�
 main.py worktree sweep                  # 只列可清理的；加 --apply 才删（已并进 main 的工位、远程已删的本地分支、已结束 Run 的 run-plan-*）
 ```
 
-命令的护栏：不删有未提交改动或没推送提交的工位；不删远程分支（合并后由 GitHub 自动删）；不动别的 agent 的工位；认不出调用方（带了 agent 标记但不在名册里）一律拒绝，只有用户自己的终端（没有任何 agent 标记）才能收别人的工位和清 run-plan。调用方靠环境变量 `AUTO_PM_AGENT`（冒号前一段，如 `trae:cn`）、`CLAUDECODE`、`CODEX_*` 识别。
+命令的护栏：不删有未提交改动或没推送提交的工位；不删远程分支（合并后由 GitHub 自动删）；不动别的 agent 的工位；认不出调用方（带了 agent 标记但不在名册里）一律拒绝，只有用户自己的终端（没有任何 agent 标记）才能收别人的工位和清 run-plan。调用方靠环境变量 `AUTO_PM_AGENT`（冒号前一段，如 `trae:cn`）识别；Claude Code 的 `CLAUDECODE` 和 Codex 的 `CODEX_*` 是额外的自动标记，其他 agent 没有，必须自己声明（见上面“agent 名字规则”第 2 条）。
 
 发版切换前的手工命令（等价于上面四条）：
 
@@ -134,6 +143,14 @@ git worktree remove .auto-pm/worktrees/claude    # 收工：分支已推送、�
 5. **开新卡撞车要放行**：新卡要改的文件和开着的卡重叠，或者项目已开满 8 张，`pm approve` 会拒并说明撞了谁；用户同意后加 `--admission-release-ref <用户原话位置>` 再批。驾驶舱上没有放行按钮。
 6. **不插队抢钥匙**：正在干的卡不能被别人直接抢走（插队 PREEMPT 不支持）；要切换只能先 park。`pm missions --pid <项目>` 随时只读查看四栏。
 7. 搁着超过 7 天的卡在看板上标黄：提醒用户决定拿回还是作废，不要自己作废。
+
+## 开工先订卡 (D-101)
+
+多个 agent、多个云端会话同时干活，靠“占位表”避免改同一批文件。云端会话用 GitHub 工具直接开 PR，不走 `pm pr open`，所以这一步由 GitHub 检查强制。
+
+1. **开工顺序**：先 `main.py claim list` 看占位表；要改的路径和别人的占位重叠就停下、告诉用户；不重叠就 `main.py claim open <卡号> --paths … --goal …` 订卡；**订上了才改代码**。订卡租期 4 小时，还在干就 `main.py claim renew <卡号>`；没动静的占位只有用户一句话能 `claim reclaim` 收回。
+2. **PR 描述写一行** `领卡占位: <卡号>`，并有 `可改范围` 清单，清单里每条路径都要落在占位登记的路径里。
+3. **机器判定**（GitHub 的 `gate` 检查，脚本 `reviews/tools/pr_overlap_check.py`）：远程有 `claims/<卡号>`、领卡时间不晚于本 PR 最早的提交、占位没被收回、范围在占位路径内；并且**编号更小的、开着的 PR（含草稿）和本 PR 改同一批文件就报红并点名**，先来的先合，后来的等。确需并行写 `重叠放行: #<编号> <理由>`，审计要核对理由。2026-11-08 之后创建的 PR 强制，之前已开着的只提示。
 
 ## 独立审计 (AUD-001)
 

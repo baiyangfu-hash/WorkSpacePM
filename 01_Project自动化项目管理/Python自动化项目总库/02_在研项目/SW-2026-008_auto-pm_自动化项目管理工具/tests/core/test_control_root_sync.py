@@ -9,6 +9,7 @@ The service must also stay read-only and must not fail offline.
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +23,11 @@ from tests.git_support import git_do, git_out
 
 SCOPE = ("proj",)
 IDENTITY = ("user.email=t@example.invalid", "user.name=tester")
+
+
+def _json_items(value: object) -> list[dict[str, Any]]:
+    assert isinstance(value, list)
+    return value
 
 
 def _git(root: Path, *args: str) -> None:
@@ -86,7 +92,8 @@ def test_two_hundred_commits_behind_is_reported_with_what_to_do_and_blocks_run_s
     assert report.blocks_run_start
     text = "\n".join(report.lines())
     assert "落后 origin/main 200 个提交" in text and "git merge --ff-only origin/main" in text
-    assert "run start" in text and "一定会被拒" in text
+    assert "run start" in text and "一定会被拒" not in text  # D-104: not an absolute, it depends on the Run's own scope
+    assert "范围里含上面这些文件就会被拒" in text and "不在开工范围内" in text
 
 
 def test_being_behind_in_files_outside_the_scope_is_reported_but_does_not_block(world: World) -> None:
@@ -424,3 +431,175 @@ def test_a_local_rename_that_moves_a_file_out_of_the_scope_still_counts_as_scope
     assert report.unique_ahead and report.drift_in_scope == ("proj/a.txt",)
     assert not report.maybe_squashed  # main still has the file, so this is real work, not a squash
     assert "先推送成 PR" in "\n".join(report.lines())
+
+
+# ── D-44 / D-13: where the control root stands and whose uncommitted files it holds ─────────────────────────────────
+
+
+def test_a_control_root_on_another_branch_is_flagged_for_other_threads_to_read(world: World) -> None:
+    """D-44: after a settlement card the control root may sit on another branch; nothing machine-readable said so."""
+
+    _git(world.control, "switch", "-q", "-c", "codex/settle-card")
+
+    report = world.service().check(SCOPE)
+
+    assert report.off_main and not report.on_main and report.branch == "codex/settle-card"
+    assert report.needs_attention
+    assert any("不在 main" in line and "codex/settle-card" in line for line in report.lines())
+    data = report.as_json()
+    assert data["on_main"] is False and data["branch"] == "codex/settle-card" and data["detached"] is False
+
+
+def test_a_detached_control_root_is_flagged_too(world: World) -> None:
+    _git(world.control, "checkout", "-q", "--detach")
+
+    report = world.service().check(SCOPE)
+
+    assert report.off_main and report.detached
+    assert any("游离 HEAD" in line for line in report.lines())
+
+
+def test_a_control_root_on_main_is_not_flagged(world: World) -> None:
+    report = world.service().check(SCOPE)
+
+    assert report.on_main and not report.off_main
+    assert report.as_json()["on_main"] is True
+
+
+def test_the_branch_signal_survives_when_origin_main_is_unknown(world: World) -> None:
+    """Offline / never fetched: the sync answer is "not verified", yet the branch is a local fact and still shown."""
+
+    _git(world.control, "switch", "-q", "-c", "trae/x")
+    _git(world.control, "update-ref", "-d", "refs/remotes/origin/main")
+
+    report = world.service().check(SCOPE)
+
+    assert not report.verified and report.off_main
+    assert any("不在 main" in line for line in report.lines())
+
+
+def test_uncommitted_files_outside_the_scope_are_listed_with_owner_and_age(world: World) -> None:
+    """D-13: another thread's files sat in the control root and nobody could tell whose they were."""
+
+    (world.control / "other" / "b.txt").write_text("someone else is editing\n", encoding="utf-8")
+    stale = world.control / "other" / "forgotten.txt"
+    stale.write_text("left behind\n", encoding="utf-8")
+    old = stale.stat().st_mtime - 14 * 86400
+    import os
+
+    os.utime(stale, (old, old))
+
+    def owner_of(path: str) -> str:
+        return "Run RUN-9（claude:cloud）" if path == "other/b.txt" else ""
+
+    report = ControlRootSyncService(world.control, owner_of=owner_of).check(SCOPE)
+
+    by_path = {item.path: item for item in report.uncommitted}
+    assert by_path["other/b.txt"].owner == "Run RUN-9（claude:cloud）"
+    assert by_path["other/forgotten.txt"].owner == "" and (by_path["other/forgotten.txt"].age_days or 0) >= 14
+    assert report.forgotten == (by_path["other/forgotten.txt"],)
+    text = "\n".join(report.lines())
+    assert "RUN-9" in text and "没有 Run 认领" in text and "已放了 3 天以上" in text
+    assert "不要自己删" in text
+    assert report.needs_attention
+    assert [item.path for item in report.uncommitted] == ["other/b.txt", "other/forgotten.txt"]
+    assert [item["path"] for item in _json_items(report.as_json()["uncommitted"])] == ["other/b.txt", "other/forgotten.txt"]
+
+
+def test_a_failing_owner_lookup_never_hides_the_files(world: World) -> None:
+    (world.control / "other" / "b.txt").write_text("x\n", encoding="utf-8")
+
+    def broken(_path: str) -> str:
+        raise RuntimeError("ledger is gone")
+
+    report = ControlRootSyncService(world.control, owner_of=broken).check(SCOPE)
+
+    assert [item.path for item in report.uncommitted] == ["other/b.txt"]
+    assert report.uncommitted[0].owner == ""
+
+
+def test_checking_the_holders_stays_read_only(world: World) -> None:
+    (world.control / "other" / "b.txt").write_text("x\n", encoding="utf-8")
+    before = _out(world.control, "status", "--porcelain")
+
+    world.service().check(SCOPE)
+
+    assert _out(world.control, "status", "--porcelain") == before
+
+
+def test_live_run_owner_lookup_names_the_run_that_claims_a_path() -> None:
+    from auto_pm.application.core.control_root_sync import live_run_owner_lookup
+
+    run = SimpleNamespace(run_id="RUN-7", executor_id="claude:cloud", owned_paths=("proj/sub",))
+    store = SimpleNamespace(
+        list_works=lambda project: (SimpleNamespace(work_id="W-1"),) if project == "P-1" else (),
+        list_runs=lambda work_id: (run,) if work_id == "W-1" else (),
+    )
+
+    lookup = live_run_owner_lookup(store, "P-1")
+
+    assert lookup("proj/sub/file.py") == "Run RUN-7（claude:cloud）"
+    assert lookup("proj/other.py") == ""
+    assert live_run_owner_lookup(store, "")("proj/sub/file.py") == "", "没有项目号就不去问账本"
+
+
+def test_control_root_status_command_prints_json_for_other_threads(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D-44: a machine-readable answer to "is the control root on main?" (stdout is pure JSON)."""
+
+    import json
+
+    _git(world.control, "switch", "-q", "-c", "codex/settle-card")
+    (world.control / "other" / "note.txt").write_text("x\n", encoding="utf-8")
+
+    callback = pm_cli.control_root_status.callback
+    assert callback is not None
+    inspect.unwrap(callback)(_ctx(world.control), "", True)  # the command's own body, without click's context plumbing
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["on_main"] is False and data["branch"] == "codex/settle-card"
+    assert [item["path"] for item in data["uncommitted"]] == ["other/note.txt"]
+
+
+# ── D-46: another thread's uncommitted file in the same owned scope must not block a Run that will not touch it ────
+
+
+def _execution_service(world: World) -> Any:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionService
+
+    service: Any = object.__new__(ContinuityExecutionService)
+    service._root = world.control
+    service._store = SimpleNamespace(
+        get_work=lambda _id: (_ for _ in ()).throw(RuntimeError("no ledger in this test")),
+    )
+    return service
+
+
+def _station(world: World) -> Path:
+    station = world.control / ".auto-pm" / "worktrees" / "claude"
+    station.mkdir(parents=True)
+    return station
+
+
+def test_a_foreign_uncommitted_file_in_the_owned_scope_does_not_block_a_run_that_declares_other_files(world: World) -> None:
+    from auto_pm.application.core.continuity_execution_service import ContinuityExecutionError
+
+    (world.control / "proj" / "a.txt").write_text("another thread is editing this\n", encoding="utf-8")
+    head = _out(world.control, "rev-parse", "HEAD")
+    service = _execution_service(world)
+    station = _station(world)
+
+    # The Run owns all of proj/ but declares only proj/mine.txt as its change: the foreign proj/a.txt cannot collide on closure.
+    service._reject_control_root_drift(station, ("proj/mine.txt",), head, "W-1")
+
+    with pytest.raises(ContinuityExecutionError, match="没有 Run 认领") as refused:
+        service._reject_control_root_drift(station, ("proj/a.txt",), head, "W-1")
+    assert "proj/a.txt" in str(refused.value)
+
+
+def test_a_run_that_declares_nothing_has_nothing_to_merge_back_and_is_never_blocked(world: World) -> None:
+    (world.control / "proj" / "a.txt").write_text("another thread is editing this\n", encoding="utf-8")
+    head = _out(world.control, "rev-parse", "HEAD")
+
+    _execution_service(world)._reject_control_root_drift(_station(world), (), head, "W-1")

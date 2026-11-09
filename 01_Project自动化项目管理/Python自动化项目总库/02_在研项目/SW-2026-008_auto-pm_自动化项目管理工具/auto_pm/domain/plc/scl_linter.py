@@ -578,7 +578,7 @@ class SclLinter:
             array_only = path.suffix.lower() in cls.ARRAY_ONLY_SUFFIXES
             # .db 不一定是 PLC 声明（别的项目里有 SQLite 数据库），也可能是 GBK 老文件：这两类只看看得懂的 ASCII 声明，
             # 不能因为解不了码就报“读取失败”；.scl 仍按 UTF-8 严格读（DEV-ENC-001：写坏了要报出来）。
-            content = path.read_text(encoding="utf-8", errors="replace" if array_only else "strict")
+            content = path.read_text(encoding="utf-8-sig", errors="replace" if array_only else "strict")
             report = cls.lint_text(content, file_path=str(path))
             if array_only:
                 cls._keep_only_array_lower_bound(report)

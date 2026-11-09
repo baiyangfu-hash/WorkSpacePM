@@ -4391,3 +4391,100 @@ def test_extend_hold_checks_the_user_evidence_format_in_the_store_too(tmp_path: 
     with pytest.raises(ContinuityExecutionError, match="用户"):
         service.extend_lease_hold("RUN-001", 3_600, forged, "forged-ext")
     assert service.lease_hold_status("RUN-001")["hold_end"] == (clock.start + timedelta(hours=3)).isoformat()
+
+
+def test_d46_run_start_checks_the_declared_files_not_the_whole_owned_scope(tmp_path: Path) -> None:
+    """Another thread's uncommitted file inside the owned scope blocks a Run only if the Run declares that file.
+
+    Guards the call site of ``_reject_control_root_drift``: passing the owned scope instead of the declared files
+    (the D-46 bug) refuses this first Run over a file it will never touch.
+    """
+
+    clock = Clock()
+    _, service = _services(tmp_path, clock)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text("another thread is editing this\n", encoding="utf-8")
+    linked = tmp_path / ".auto-pm" / "worktrees" / "RUN-D46"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "--detach", str(linked), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(linked), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    owned = ["auto_pm/core/a.py", "tests/test_a.py"]
+
+    with pytest.raises(ContinuityExecutionError, match="没有 Run 认领") as refused:
+        _start(
+            service,
+            run_id="RUN-D46-A",
+            owned_paths=owned,
+            declared_dirty_paths=["tests/test_a.py"],
+            git_head=head,
+            worktree_path=str(linked),
+            idempotency_key="d46-declares-it",
+        )
+    assert "tests/test_a.py" in str(refused.value)
+
+    run = _start(
+        service,
+        run_id="RUN-D46-B",
+        owned_paths=owned,
+        declared_dirty_paths=[],
+        git_head=head,
+        worktree_path=str(linked),
+        idempotency_key="d46-does-not-declare-it",
+    )
+    assert Path(run.worktree_path) == linked.resolve()
+
+
+def _to_state(service: ContinuityExecutionService, state: RunState) -> None:
+    service.transition_run("RUN-001", RunState.RUNNING, "agent-a", "lease-secret", "to-running")
+    if state is RunState.VERIFYING:
+        service.transition_run(
+            "RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-verifying"
+        )
+
+
+def test_holder_can_abandon_a_verifying_run_and_the_lease_is_released(tmp_path: Path) -> None:
+    """D-41：验证没过的 Run 有干净的放弃出口（VERIFYING -> CANCELLED），不必记成失败。"""
+
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.VERIFYING)
+
+    cancelled = service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-1")
+
+    assert cancelled.state is RunState.CANCELLED
+    assert service._store.get_lease("RUN-001").lease_token.startswith("RELEASED:")
+    with pytest.raises(ContinuityExecutionError):
+        service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-2")
+
+
+def test_abandon_is_refused_for_a_running_run_and_for_a_wrong_token(tmp_path: Path) -> None:
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.RUNNING)
+
+    with pytest.raises(ContinuityExecutionError, match="只有验证中"):
+        service.abandon_verifying_run("RUN-001", "agent-a", "lease-secret", "abandon-running")
+    service.transition_run("RUN-001", RunState.VERIFYING, "agent-a", "lease-secret", "to-ver")
+    with pytest.raises(ContinuityExecutionError, match="ownership"):
+        service.abandon_verifying_run("RUN-001", "agent-a", "wrong-secret", "abandon-bad")
+    assert service._store.get_run("RUN-001").state is RunState.VERIFYING
+
+
+def test_normal_transition_graph_still_refuses_cancel_from_verifying(tmp_path: Path) -> None:
+    _, service = _services(tmp_path, Clock())
+    _start(service)
+    _to_state(service, RunState.VERIFYING)
+
+    with pytest.raises(ContinuityExecutionError, match="非法 Run 状态迁移"):
+        service.transition_run(
+            "RUN-001", RunState.CANCELLED, "agent-a", "lease-secret", "normal-cancel"
+        )

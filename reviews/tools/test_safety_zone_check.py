@@ -105,13 +105,28 @@ def commit(repo: Path, files: dict[str, str | None]) -> tuple[str, str]:
     return git(repo, "rev-parse", "main"), git(repo, "rev-parse", "HEAD")
 
 
-def sign(head: str, user: dict | None = None, app: dict | None = None, body: str | None = None) -> dict:
-    return {
+POSTED_AT = "2026-11-03T01:00:00Z"
+
+
+def sign(
+    head: str,
+    user: dict | None = None,
+    app: dict | None = None,
+    body: str | None = None,
+    updated_at: str | None = POSTED_AT,
+) -> dict:
+    """默认是没被编辑过的评论（创建时间等于更新时间）；``updated_at=None`` 模拟缺时间戳。"""
+
+    comment = {
         "id": 1,
         "body": body if body is not None else f"安全签字 {head[:12]}\n已看仿真记录：急停全过",
         "user": user or USER,
         "performed_via_github_app": app,
+        "created_at": POSTED_AT,
     }
+    if updated_at is not None:
+        comment["updated_at"] = updated_at
+    return comment
 
 
 def edit_feed(old: str, new: str) -> str:
@@ -322,6 +337,39 @@ def test_s05_comment_posted_through_an_app_does_not_count(repo: Path) -> None:
     result = gate.check(repo, base, head, [sign(head, app={"slug": "claude"})])
     assert not result.passed
     assert any("App" in n for n in result.notes)
+
+
+def test_s05b_a_comment_edited_after_it_was_posted_does_not_count(repo: Path) -> None:
+    """第二账号（有写权限）能把用户的旧评论改成“安全签字 <新头>”，作者字段不变：编辑过的评论不算。"""
+    base, head = touch(repo)
+    result = gate.check(repo, base, head, [sign(head, updated_at="2026-11-03T02:30:00Z")])
+    assert not result.passed
+    assert any("被编辑过" in n and "删掉后重新发" in n and head[:12] in n for n in result.notes)
+
+
+def test_s05c_a_comment_without_timestamps_does_not_count(repo: Path) -> None:
+    """看不出是否编辑过（缺 updated_at 或 created_at）就不认。"""
+    base, head = touch(repo)
+    assert not gate.check(repo, base, head, [sign(head, updated_at=None)]).passed
+    no_created = sign(head)
+    del no_created["created_at"]
+    assert not gate.check(repo, base, head, [no_created]).passed
+    no_both = sign(head)
+    del no_both["created_at"], no_both["updated_at"]  # 两个都缺：None == None 也不能当成“没编辑过”
+    assert not gate.check(repo, base, head, [no_both]).passed
+
+
+def test_s05d_an_unedited_signature_still_counts_next_to_an_edited_one(repo: Path) -> None:
+    base, head = touch(repo)
+    edited = sign(head, updated_at="2026-11-03T02:30:00Z")
+    assert gate.check(repo, base, head, [edited, sign(head)]).passed
+
+
+def test_s05e_an_edited_comment_of_another_user_is_still_not_a_signature(repo: Path) -> None:
+    base, head = touch(repo)
+    other = sign(head, user={"login": "someone", "id": 1}, updated_at="2026-11-03T02:30:00Z")
+    result = gate.check(repo, base, head, [other])
+    assert not result.passed and any("不是指定签字人" in n for n in result.notes)
 
 
 @pytest.mark.parametrize("body", ["> 安全签字 {sha}", "请用户写 安全签字 {sha}", "安全签字"])
@@ -755,6 +803,24 @@ def test_w05_a_rerun_on_a_merged_or_closed_pr_fails_loudly_and_writes_no_status(
     for step in steps:
         if "context=safety-zone" in step.get("run", ""):
             assert "steps.pr.outputs.state == 'open'" in step.get("if", ""), step.get("name")
+
+
+def test_d124_comments_unrelated_to_the_signature_neither_run_the_job_nor_cancel_a_running_judgement() -> None:
+    """D-124：agent 与用户共用一个账号。无关评论的运行单独成组（不取消在跑的判定），任务也不跑；含“安全签字”（或把它改掉）的评论照旧。"""
+    yaml = pytest.importorskip("yaml")
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "safety-gate.yml"
+    data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    group = data["concurrency"]["group"]
+    assert data["concurrency"]["cancel-in-progress"] is True
+    # unrelated comment run: unique group named after the run id, so it can cancel nothing
+    assert "format('noise-{0}', github.run_id)" in group
+    for expression in ("github.event.comment.body", "github.event.changes.body.from"):
+        assert f"!contains({expression}, '安全签字')" in group  # both must lack the word to count as noise
+    # PR events and signature comments keep sharing the per-PR group (serial, newest wins)
+    assert "github.event.pull_request.number || github.event.issue.number" in group
+    condition = data["jobs"]["safety"]["if"]
+    assert "contains(github.event.comment.body, '安全签字') || contains(github.event.changes.body.from, '安全签字')" in condition
+    assert "github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open'" in condition  # PR events unchanged
 
 
 def test_w06_a_fresh_event_on_a_closed_pr_skips_the_job_instead_of_running_it_green() -> None:

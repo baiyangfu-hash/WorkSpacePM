@@ -13,9 +13,10 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
 
-# Read-only token; no secrets are used by any step.
+# Read-only token; no secrets are used by any step.  pull-requests: read lets the overlap check list the other open PRs.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: pr-gate-${{ github.event.pull_request.number }}
@@ -77,3 +78,18 @@ jobs:
         run: >-
           python -I "$GITHUB_WORKSPACE/reviews/tools/pr_scope_check.py" --ci
           --base "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" --head "$HEAD_SHA" --repo "$RUNNER_TEMP/pr-head"
+
+      # D-101: two open PRs must not change the same files, and a PR needs a card claim made before its first commit
+      # (cloud sessions open PRs with GitHub tools, so `pm pr open`'s claim gate never sees them).  Reads the GitHub API
+      # only; the PR body is untrusted text and reaches the script through the environment.  Runs even when the scope
+      # check failed, so both findings show in one go.
+      - name: Overlap and claim check
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          # Only PRs created from this moment on must carry a claim; older open PRs are only told.
+          CLAIM_ENFORCE_FROM: "2026-11-08T00:00:00Z"
+        run: >-
+          python -I "$GITHUB_WORKSPACE/reviews/tools/pr_overlap_check.py" --ci
+          --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"

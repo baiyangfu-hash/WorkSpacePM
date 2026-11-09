@@ -9,14 +9,42 @@ not scanned here because they produce false positives in lease-token code.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 import sys
+from pathlib import Path
+from typing import NoReturn
 
+
+def _cannot_load(path: Path, why: str) -> NoReturn:
+    """Exit 2: the scan did not run.  (``SystemExit("text")`` would exit 1, which reads as "secrets found".)"""
+    print(f"cannot load the shared secret rules from {path}: {why}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _shared_patterns() -> dict[str, re.Pattern[str]]:
+    """The commit hook's rules (``auto_pm/domain/secret_patterns.py``), loaded by path: one list, not two (D-70).
+
+    That file is pure stdlib with no I/O, so it loads without the rest of the package.  Before this, the CI list
+    had ``{30,}`` / ``{40,}`` length floors and no ``sk-`` / ``AIza`` rules while the hook had the opposite gaps.
+    """
+    path = Path(__file__).resolve().parents[3] / "auto_pm" / "domain" / "secret_patterns.py"
+    spec = importlib.util.spec_from_file_location("sw008_secret_patterns", path)
+    if spec is None or spec.loader is None:
+        _cannot_load(path, "no import spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # the dataclass in that file looks its own module up here
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:  # noqa: BLE001 - any load failure is "scan could not run" (exit 2), never "secrets found" (exit 1)
+        _cannot_load(path, f"{type(error).__name__}: {error}")
+    return dict(module.SECRET_PATTERNS)
+
+
+# CI-only extra: credentials inside a URL.  The commit hook leaves it out (false positives in lease-token code).
 PATTERNS = {
-    "github-token": re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}"),
-    "aws-access-key": re.compile(r"AKIA[0-9A-Z]{16}"),
-    "private-key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    **_shared_patterns(),
     "url-credentials": re.compile(r"https?://[^/@\s:]+:[^/@\s]+@"),
 }
 

@@ -182,7 +182,7 @@ class WorkflowEngine:
                         f"命令执行超时：超过 {_COMMAND_TIMEOUT_SECONDS:g} 秒被终止: {cmd}"
                     ) from error
                 if completed.returncode != 0:
-                    stderr_msg = completed.stderr.decode("utf-8", errors="replace")
+                    stderr_msg = completed.stderr.decode("utf-8", errors="replace")  # lenient-decode: stderr only goes into the failure message; the verdict is the exit code
                     raise RuntimeError(
                         f"命令执行失败 exit={completed.returncode}: {stderr_msg}"
                     )

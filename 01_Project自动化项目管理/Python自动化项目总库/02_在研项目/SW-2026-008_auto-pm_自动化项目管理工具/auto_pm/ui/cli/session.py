@@ -379,7 +379,7 @@ def _cmd_archive_auto(
         # 统计行数
         line_count = 0
         try:
-            with open(pm_file, encoding="utf-8", errors="ignore") as f:
+            with open(pm_file, encoding="utf-8", errors="ignore") as f:  # lenient-decode: only counts lines to decide whether archiving is worth offering
                 for _ in f:
                     line_count += 1
         except OSError:

@@ -91,7 +91,7 @@ class World:
         return {pid for pid, count in self.suspended.items() if count > 0}
 
     def gate(self, folder: Path) -> Any:
-        return mg.Gate(
+        gate = mg.Gate(
             folder,
             committed_gib=lambda: self.committed,
             processes=lambda: list(self.procs.values()),
@@ -104,6 +104,8 @@ class World:
             self_pids=[SELF],
             eligible=lambda pid: pid not in self.system_pids,
         )
+        gate.self_pids = {SELF}  # Gate adds the real os.getpid() to its protected set; a real pid equal to a fake pid of the world (26936) hid it from the ladder (D-92)
+        return gate
 
     def tick(self, gate: Any, seconds: float = 5.0, steps: int = 1) -> None:
         for _ in range(steps):
@@ -908,8 +910,8 @@ def test_a_stop_that_cannot_read_the_state_raises_a_loud_alert_instead_of_claimi
 
     mg.run_forever(gate, sleep=stop_now)
 
-    alerts = list(tmp_path.glob("ALERT-*.txt"))
-    assert alerts and "没有解冻任何进程" in alerts[-1].read_text(encoding="utf-8") and "resume-all" in alerts[-1].read_text(encoding="utf-8")
+    texts = [path.read_text(encoding="utf-8") for path in tmp_path.glob("ALERT-*.txt")]  # the names carry only the second, so a run crossing a second writes two files and the glob order says nothing (D-91)
+    assert any("没有解冻任何进程" in text and "resume-all" in text for text in texts)
     assert "已解冻" not in (tmp_path / "gate.log").read_text(encoding="utf-8").split("【锁定】")[-1]
 
 
@@ -943,7 +945,8 @@ def test_a_stop_that_never_gets_the_state_back_retries_three_minutes_then_alerts
     mg.run_forever(gate, sleep=sleep)
 
     assert len(sleeps) == 1 + int(mg.STOP_RETRY_SECONDS / mg.POLL_SECONDS) == 37  # the loop's own sleep + 36 retries = 180 s
-    text = list(tmp_path.glob("ALERT-*.txt"))[-1].read_text(encoding="utf-8")
+    texts = [path.read_text(encoding="utf-8") for path in tmp_path.glob("ALERT-*.txt")]
+    text = next((candidate for candidate in texts if "没有解冻任何进程" in candidate), "")  # not the glob's last file: a run that crosses a second writes two (D-91)
     assert "没有解冻任何进程" in text and "resume-all" in text and "180" in text
     assert all(str(root) in text for root in roots) and roots
     assert w.frozen()  # (and the alert says so, instead of the log claiming "已解冻")
@@ -1105,3 +1108,229 @@ def test_an_installed_file_held_for_a_moment_is_hashed_after_a_retry_and_a_file_
     monkeypatch.setattr(Path, "read_bytes", always)
     problem = mg.verify_install(tmp_path)
     assert "memory_gate.py" in problem and "读不出" in problem and "缺失" not in problem  # present but unreadable is not "missing"
+
+
+# ---------------------------------------------------------------- D-168: the gate acts only inside armed trees
+def _armed_gate(w: World, folder: Path, roots: list[int] | None = None, rejected: list[str] | None = None) -> Any:
+    gate = w.gate(folder)
+    given = list(roots or [])
+    gate.armed_roots = lambda procs, now: ([pid for pid in given if pid in procs], list(rejected or []))
+    return gate
+
+
+def _log(folder: Path) -> str:
+    text: str = (folder / mg.LOG_FILE).read_text(encoding="utf-8")
+    return text
+
+
+def test_d168_nothing_armed_means_nothing_is_frozen_only_a_snapshot_is_logged(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = _armed_gate(w, tmp_path, [], ["x.json: 已过期"])
+    _warm(w, gate)
+    _leak(w, gate, 45.0)
+
+    assert w.frozen() == set()
+    assert w.notices == []
+    text = _log(tmp_path)
+    assert "没有任何有效的武装记录" in text
+    assert "x.json: 已过期" in text
+    assert f"{PYTEST}:python.exe:" in text
+
+
+def test_d168_an_armed_root_is_frozen_with_its_subtree_and_the_ladder_never_climbs_above_it(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = _armed_gate(w, tmp_path, [LAUNCHER])
+    _warm(w, gate)
+    _leak(w, gate, 45.0)
+    below = set(gate._subtree(LAUNCHER, {p.pid: p for p in w.procs.values()}))
+    assert w.frozen() and w.frozen() <= below
+
+    for _ in range(6):  # the rise goes on: the old ladder would now climb to the shell and the terminal owner
+        w.spawn(PYTEST, count=6)
+        w.committed += 2.0
+        w.tick(gate, seconds=10)
+
+    assert w.frozen() <= below
+    assert SHELL not in w.frozen() and TERMINAL_OWNER not in w.frozen()
+
+
+def test_d168_a_runaway_outside_every_armed_tree_is_left_alone_even_when_it_grows_faster(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = _armed_gate(w, tmp_path, [LAUNCHER])
+    _warm(w, gate)
+    w.add(50_000, 700_001, "node.exe", 0.1)  # a browser-like process elsewhere
+    w.spawn(50_000, count=10)
+    w.grow(50_000, 5.0)
+    w.committed = 45.0
+    w.tick(gate)
+
+    assert w.frozen() == set()
+    assert "总闸不动手" in _log(tmp_path)
+
+
+def test_d168_the_snapshot_lists_the_top_15_processes_and_is_logged_at_most_once_a_minute_while_unarmed(tmp_path: Path) -> None:
+    w = _trae_world()
+    for index in range(20):
+        w.add(60_000 + index, 700_000, "python.exe", 0.2 + index)
+    gate = _armed_gate(w, tmp_path, [])
+    _warm(w, gate)
+    w.committed = 45.0
+    w.tick(gate, seconds=5, steps=5)  # 25 seconds over the limit: one snapshot
+    lines = [line for line in _log(tmp_path).splitlines() if "没有任何有效的武装记录" in line]
+    assert len(lines) == 1
+    assert lines[0].count(":G:") == 0 and lines[0].count("G:") == mg.SNAPSHOT_TOP
+    assert "60019:python.exe:19.20G" in lines[0]
+    w.tick(gate, seconds=5, steps=14)  # past a minute: one more
+    assert len([line for line in _log(tmp_path).splitlines() if "没有任何有效的武装记录" in line]) == 2
+
+
+def test_d168_without_an_arming_callback_the_old_behaviour_is_unchanged(tmp_path: Path) -> None:
+    w = _trae_world()
+    gate = w.gate(tmp_path)
+    assert gate.armed_roots is None
+    _warm(w, gate)
+    _leak(w, gate, 45.0)
+    assert w.frozen()
+
+
+# ---- the arm records
+BOOT = 1_000_000.0
+NOW = BOOT + 1000.0
+
+
+def _record(folder: Path, owner: int, /, **changes: Any) -> Path:
+    data: dict[str, Any] = {"schema": mg.ARM_SCHEMA, "pid": owner, "created": 1000 + owner, "label": "pm-verify", "armed_at": NOW - 10, "expires_at": NOW + 3000}
+    data.update(changes)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{owner}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _read(w: World, folder: Path, boot: float | None = BOOT) -> tuple[list[int], list[str]]:
+    found: tuple[list[int], list[str]] = mg.read_armed_roots(folder, w.procs, lambda pid: w.created.get(pid, 0), NOW, boot)
+    return found
+
+
+def _arm_world() -> World:
+    w = World()
+    w.add(100, 1, "python.exe")
+    w.add(101, 1, "pytest.exe")
+    w.add(102, 1, "chrome.exe")
+    return w
+
+
+def test_d168_a_valid_record_arms_its_process(tmp_path: Path) -> None:
+    w = _arm_world()
+    _record(tmp_path, 100)
+    _record(tmp_path, 101, label="long-run", expires_at=NOW + 40000)
+    assert _read(w, tmp_path) == ([100, 101], [])
+
+
+@pytest.mark.parametrize(
+    ("changes", "why"),
+    [
+        ({"expires_at": NOW - 1}, "已过期"),
+        ({"created": 5}, "创建时间"),
+        ({"label": "whatever"}, "未知标签"),
+        ({"expires_at": NOW + 6000}, "时间窗口"),  # pm-verify allows 5400 s
+        ({"armed_at": NOW + 600, "expires_at": NOW + 900}, "时间窗口"),  # armed in the future
+        ({"armed_at": BOOT - 5}, "早于本次开机"),
+        ({"schema": "memory-gate-arm.v0"}, "schema"),
+        ({"pid": "100"}, "字段类型"),
+        ({"created": True}, "字段类型"),
+        ({"armed_at": "now"}, "字段类型"),
+    ],
+)
+def test_d168_a_record_that_fails_any_rule_is_rejected_with_its_reason(tmp_path: Path, changes: dict[str, Any], why: str) -> None:
+    w = _arm_world()
+    _record(tmp_path, 100, **changes)
+    roots, rejected = _read(w, tmp_path)
+    assert roots == [] and len(rejected) == 1 and why in rejected[0]
+
+
+def test_d168_dead_process_wrong_image_wrong_file_name_oversize_symlink_and_bad_json_are_rejected(tmp_path: Path) -> None:
+    w = _arm_world()
+    _record(tmp_path, 999)  # no such process
+    _record(tmp_path, 102)  # chrome is not a python-family root
+    (tmp_path / "100.json").write_text("{", encoding="utf-8")
+    _record(tmp_path, 100).write_text("x" * 2000, encoding="utf-8")
+    other = tmp_path / "101.json"
+    other.write_text(json.dumps({"schema": mg.ARM_SCHEMA}), encoding="utf-8")
+    (tmp_path / "7.json").write_text(json.dumps({"schema": mg.ARM_SCHEMA, "pid": 100, "created": 1100, "label": "pm-verify", "armed_at": NOW - 1, "expires_at": NOW + 5}), encoding="utf-8")
+    target = tmp_path / "real.txt"
+    target.write_text(json.dumps({"schema": mg.ARM_SCHEMA, "pid": 101, "created": 1101, "label": "pm-verify", "armed_at": NOW - 1, "expires_at": NOW + 5}), encoding="utf-8")
+    try:
+        (tmp_path / "103.json").symlink_to(target)
+    except OSError:
+        pytest.skip("no symlinks here")
+    roots, rejected = _read(w, tmp_path)
+    assert roots == []
+    joined = "\n".join(rejected)
+    for expected in ("进程已不在", "不是 python", "超过 1024", "文件名与 pid 不符", "不是普通文件"):
+        assert expected in joined
+    assert len(rejected) == 6
+
+
+def test_d168_at_most_eight_records_count_and_a_missing_folder_or_unknown_boot_time_is_not_a_failure(tmp_path: Path) -> None:
+    w = _arm_world()
+    for pid in range(200, 210):
+        w.add(pid, 1, "python.exe")
+        _record(tmp_path, pid)
+    roots, rejected = _read(w, tmp_path)
+    assert len(roots) == mg.ARM_MAX_RECORDS and any("上限" in item for item in rejected)
+    assert _read(w, tmp_path / "missing") == ([], [])
+    assert mg.read_armed_roots(None, w.procs, lambda pid: 0, NOW, BOOT) == ([], [])
+    _record(tmp_path / "b", 100, armed_at=BOOT - 5)
+    assert _read(w, tmp_path / "b", boot=None)[0] == [100]  # an unreadable boot time skips only that one rule
+
+
+def test_d168_the_gate_clears_stale_records_at_start_and_find_arm_dir_prefers_the_auto_pm_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / ".auto-pm" / mg.ARM_DIR_NAME
+    _record(folder, 100)
+    (folder / "100.json.tmp").write_text("x", encoding="utf-8")
+    assert mg.clear_arm_dir(folder) == 2 and list(folder.iterdir()) == []
+    assert mg.clear_arm_dir(None) == 0 and mg.clear_arm_dir(tmp_path / "nope") == 0
+
+    config = tmp_path / "01_p" / "proj" / "scripts" / mg.CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    assert mg.find_arm_dir(config) == folder
+    assert mg.find_arm_dir(None) is None
+    inner = tmp_path / ".auto-pm" / "worktrees" / "w" / "proj" / "scripts" / mg.CONFIG_FILE
+    (inner.parent.parent.parent / ".auto-pm").mkdir(parents=True)  # a worktree that holds an .auto-pm of its own
+    assert mg.find_arm_dir(inner) == folder  # the ancestor named .auto-pm wins over the nearer folder that merely contains one
+    monkeypatch.setattr(mg, "ARM_SEARCH_LEVELS", 1)  # see the writer test: a runner's home may hold an .auto-pm further up
+    assert mg.find_arm_dir(tmp_path / "elsewhere" / "scripts" / mg.CONFIG_FILE) is None
+
+
+def test_d168_the_writer_and_the_gate_agree_on_the_record_format_the_limits_and_the_creation_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pre = mg.Host().preflight
+    assert pre.ARM_SCHEMA == mg.ARM_SCHEMA and pre.ARM_DIR_NAME == mg.ARM_DIR_NAME
+    assert {label: cap for label, (_default, cap) in pre.ARM_LABEL_LIMITS.items()} == mg.ARM_LABEL_CAPS
+    assert pre.process_created(os.getpid()) == mg.created_of(os.getpid()) != 0
+
+    start = tmp_path / ".auto-pm" / "x" / "memory_preflight.py"
+    path = pre.arm("long-run", timeout_seconds=3600, start=start, now=lambda: NOW)
+    assert path == tmp_path / ".auto-pm" / mg.ARM_DIR_NAME / f"{os.getpid()}.json"
+    record = json.loads(path.read_text(encoding="ascii"))
+    assert record["expires_at"] - record["armed_at"] == 3600 + 600
+    assert pre.arm("long-run", timeout_seconds=10**7, start=start, now=lambda: NOW) == path
+    assert json.loads(path.read_text(encoding="ascii"))["expires_at"] - NOW == 43800  # the cap, not the huge timeout
+    pre.arm("pm-verify", start=start, now=lambda: NOW)
+    assert json.loads(path.read_text(encoding="ascii"))["expires_at"] - NOW == 5400  # unknown timeout: the label's default
+    procs = {os.getpid(): mg.Proc(os.getpid(), 1, "python.exe", 0)}
+    assert mg.read_armed_roots(path.parent, procs, mg.created_of, NOW + 5, NOW - 100) == ([os.getpid()], [])
+
+    stale = path.parent / "999999.json"
+    stale.write_text(json.dumps({"created": 12345}), encoding="ascii")
+    other = path.parent / "notes.json"
+    other.write_text("{}", encoding="ascii")
+    pre.arm("pm-verify", start=start, now=lambda: NOW)
+    assert not stale.exists() and other.exists() and path.exists()  # a record of a process that is gone is swept; foreign files are not touched
+
+    pre.disarm(path)
+    assert not path.exists()
+    pre.disarm(path)  # already gone is fine
+    assert pre.arm("nonsense", start=start) is None
+    monkeypatch.setattr(pre, "ARM_SEARCH_LEVELS", 1)  # a CI runner's home may hold an .auto-pm further up: look only at the start and its parent
+    assert pre.arm("pm-verify", start=tmp_path / "no-auto-pm-here" / "f.py") is None

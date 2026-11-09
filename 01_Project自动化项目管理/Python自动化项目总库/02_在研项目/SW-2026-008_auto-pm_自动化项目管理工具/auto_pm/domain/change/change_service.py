@@ -99,6 +99,22 @@ _LEDGER_STATUS_MAP = LEDGER_STATUS_MAP  # 向后兼容别名（CHG-108 缺陷 1�
 _PROJECT_MONITOR_DIRS = (PG_MONITORING_DIR, "11_监控")
 
 
+# D-154: states in which the §5 file list is an approved scope, and where editing it sends the record
+_APPROVED_STATUSES = frozenset({"approved", "conditionally_approved"})
+_IN_PROGRESS_STATUSES = frozenset({"implementing", "pending_acceptance", "accepting", "completed", "closed", "archived"})
+_REVOKED_TO_STATUS = "under_review"
+_REVOKER = "系统(D-154)"
+
+
+def _brief(items: list[str]) -> str:
+    """At most three names for the approval-table line; the full list stays in §5 itself."""
+
+    if not items:
+        return "无"
+    shown = "、".join(items[:3])
+    return shown + (f" 等 {len(items)} 项" if len(items) > 3 else "")
+
+
 class ChangeService:
     """变更管理 Service - 变更单 CRUD + 状态流转
 
@@ -121,6 +137,8 @@ class ChangeService:
         "propagation_chain",
         "constraint_impacts",
         "domain_impacts",
+        # §5 涉及文件/交付物（D-97）
+        "files",
     }
 
     # update_change_request 禁止修改的字段（受保护）
@@ -402,6 +420,15 @@ class ChangeService:
             return (d, s.change_number or "")
         summaries.sort(key=sort_key, reverse=True)
         return summaries
+
+    def read_change_files(self, change_number: str, project_id: str | None = None) -> list[str] | None:
+        """读出变更单 §5 现有的涉及文件清单（占位算空）；找不到单子返回 None（D-97）。"""
+
+        file_path = self._locator.find_change_file(change_number, project_id=project_id, require_unique=True)
+        if not file_path:
+            return None
+        content, _ = read_file_snapshot(file_path)
+        return self._editor.read_files(content) if content else None
 
     def get_change_request(
         self, change_number: str, project_id: str | None = None
@@ -926,6 +953,13 @@ class ChangeService:
             log.error("修改变更单: 读取文件失败 %s", file_path)
             return None
 
+        # D-154: the approved file scope is read from §5, so remember what it held and in which state the record was
+        files_before: list[str] | None = None
+        status_before = ""
+        if kwargs.get("files") is not None:
+            files_before = self._editor.read_files(content)
+            status_before = self._parser.parse(file_path).status
+
         # 5. 逐字段修改 .md 章节
         updated_fields: list[str] = []
         for field, value in kwargs.items():
@@ -941,11 +975,53 @@ class ChangeService:
             log.warning("修改变更单: 无有效字段被更新 %s", change_number)
             return self._parser.parse(file_path)
 
+        # D-154: adding or removing files after approval widens (or narrows) what was approved; the old approval no longer
+        # covers it, so the record goes back to review and says why.  Only the list's members count, not their order.
+        revoke_reason = ""
+        if files_before is not None and status_before in (_APPROVED_STATUSES | _IN_PROGRESS_STATUSES) and "files" in updated_fields:
+            files_after = self._editor.read_files(content)
+            added = [item for item in files_after if item not in files_before]
+            removed = [item for item in files_before if item not in files_after]
+            if (added or removed) and status_before in _IN_PROGRESS_STATUSES:
+                # Sending a record that is already being carried out back to review would rewind the work, and leaving it
+                # alone would let the scope grow unnoticed: refuse, nothing is written.
+                raise TransitionGuardError(
+                    f"变更单 {change_number} 状态为 {status_before}，实施中不能改文件清单，"
+                    "请另开变更单，或先显式撤回重批；没有写入任何内容"
+                )
+            if added or removed:
+                revoke_reason = (
+                    f"§5 涉及文件清单在批准后变更（增 {len(added)}：{_brief(added)}；减 {len(removed)}：{_brief(removed)}），"
+                    f"原批准（{status_before}）不再覆盖，已退回审核中，需重新批准"
+                )
+                today = datetime.date.today().isoformat()
+                content = self._editor.update_status_field(content, _REVOKED_TO_STATUS)
+                content = self._editor.append_to_approval_table(
+                    content, f"| **批准失效** | {_REVOKER} | {revoke_reason} | {today} | {_REVOKER} |\n"
+                )
+                self._record_transition(
+                    self._parser.parse(file_path).project_id,
+                    change_number,
+                    status_before,
+                    _REVOKED_TO_STATUS,
+                    _REVOKER,
+                    revoke_reason,
+                )
+
         # 6. 写回文件
         try:
             write_file(file_path, content, expected_mtime=original_mtime)
         except StaleFileError as exc:
             log.error("修改变更单: 文件已被外部修改，取消写入 %s: %s", file_path, exc)
+            if revoke_reason:  # the journal already says "revoked"; add the line that takes it back so it matches the file
+                self._record_transition(
+                    self._parser.parse(file_path).project_id,
+                    change_number,
+                    _REVOKED_TO_STATUS,
+                    status_before,
+                    _REVOKER,
+                    "文件写入失败，退回批准撤回",
+                )
             return None
         log.info("变更单已修改: %s, 字段=%s", change_number, updated_fields)
 
@@ -960,6 +1036,28 @@ class ChangeService:
             analysis = self._parser.to_impact_analysis(updated)
             self._repo.save_impact_analysis(analysis)
             log.debug("DB 缓存和影响分析已更新: %s", change_number)
+            if revoke_reason:
+                self._repo.save_approval_record(
+                    change_number=change_number,
+                    to_status=_REVOKED_TO_STATUS,
+                    approver=_REVOKER,
+                    comment=revoke_reason,
+                    from_status=status_before,
+                    project_id=updated.project_id,
+                )
+
+        if revoke_reason:
+            project_path = self._find_project_root_from_path(file_path)
+            ledger_path = find_ledger_file(project_path) if project_path else None
+            if ledger_path:
+                self._get_ledger_updater().update_status(
+                    ledger_path,
+                    change_number,
+                    _LEDGER_STATUS_MAP.get(_REVOKED_TO_STATUS, "🔄进行中"),
+                    complete_date="",
+                    applicant=updated.applicant,
+                    apply_date=updated.apply_date,
+                )
 
         return updated
 

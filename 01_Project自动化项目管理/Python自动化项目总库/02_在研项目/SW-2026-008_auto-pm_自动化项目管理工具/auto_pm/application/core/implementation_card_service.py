@@ -32,7 +32,7 @@ from auto_pm.infrastructure.control_root_guard import (
     require_governed_worktree,
     require_safe_workspace_path,
 )
-from auto_pm.infrastructure.git_timeout import run_git_bounded_text
+from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 
 class ImplementationCardError(RuntimeError):
@@ -55,7 +55,7 @@ class ImplementationCardService:
         target = self._target(card_id)
         try:
             raw = target.read_bytes()
-            text = raw.decode("utf-8", errors="replace")
+            text = raw.decode("utf-8", errors="replace")  # lenient-decode: a U+FFFD in the result is refused on the next line, so this is strict in effect
             if "\ufffd" in text:
                 raise ImplementationCardError("card is not valid UTF-8")
             def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -117,7 +117,7 @@ class ImplementationCardService:
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                     raise ImplementationCardError(f"source ref is not a unique regular file: {relative}")
                 raw = target.read_bytes()
-                text = raw.decode("utf-8", errors="replace")
+                text = raw.decode("utf-8", errors="replace")  # lenient-decode: a U+FFFD in the result is refused on the next line, so this is strict in effect
                 if "\ufffd" in text:
                     raise ImplementationCardError(f"source ref is not valid UTF-8: {relative}")
                 if kind == "WBS":
@@ -218,7 +218,7 @@ class ImplementationCardService:
 
     @staticmethod
     def _git(worktree: Path, *args: str) -> str:
-        result = run_git_bounded_text(
+        result = run_git_bounded_strict_text(
             ["git", "-C", str(worktree), *args],
             default_timeout=60.0,
             error_cls=ImplementationCardError,

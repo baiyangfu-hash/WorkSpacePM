@@ -45,7 +45,7 @@ def make_stdio_encoding_safe() -> None:
         if reconfigure is None:
             continue  # pytest capture 等没有 reconfigure 的流
         try:
-            reconfigure(errors="replace")
+            reconfigure(errors="replace")  # lenient-decode: this is the OUTPUT error handler (characters the terminal cannot encode), not a decode of input
         except (ValueError, OSError):
             pass
 

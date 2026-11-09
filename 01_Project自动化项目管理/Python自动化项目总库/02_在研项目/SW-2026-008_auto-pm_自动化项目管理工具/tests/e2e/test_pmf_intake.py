@@ -615,7 +615,7 @@ print(card.model_dump_json())
     assert result.returncode == 0, result.stdout + result.stderr
     payload: dict[str, Any] = json.loads(result.stdout)
     assert payload["request_id"] == request
-    assert "planning_draft_intake_bindings" not in _rehearsal_rows(scene.root)
+    assert _rehearsal_rows(scene.root)["planning_draft_intake_bindings"] == []
     return payload
 
 

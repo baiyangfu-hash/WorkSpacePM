@@ -90,9 +90,13 @@ def _run(name: str, sha: str, conclusion: str | None, number: int = 1) -> dict[s
     }
 
 
+POSTED_AT = "2026-11-03T01:00:00Z"
+
+
 def _signature(sha: str, login: str = "baiyangfu-hash", uid: int = 246858089, app: bool = False) -> dict[str, Any]:
     return {"body": f"仿真过了\n安全签字 {sha[:12]}", "user": {"login": login, "id": uid},
-            "performed_via_github_app": {"slug": "bot"} if app else None, "html_url": "c"}
+            "performed_via_github_app": {"slug": "bot"} if app else None, "html_url": "c",
+            "created_at": POSTED_AT, "updated_at": POSTED_AT}
 
 
 def routes(**override: object) -> dict[str, object]:
@@ -455,12 +459,30 @@ def test_a_signature_shorter_than_12_digits_does_not_count_on_the_board_either()
     head = "0123456789abcdef0123456789abcdef01234567"
     signer = {"login": "baiyangfu-hash", "id": 246858089}
     for length in (7, 8, 11):
-        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None}
+        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None,
+                   "created_at": POSTED_AT, "updated_at": POSTED_AT}
         signed, why = gh.find_signature([comment], head)
         assert signed is None and "12 位" in why, length
     for length in (12, 20, 40):
-        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None}
+        comment = {"body": f"安全签字 {head[:length]}", "user": signer, "performed_via_github_app": None,
+                   "created_at": POSTED_AT, "updated_at": POSTED_AT}
         assert gh.find_signature([comment], head) == (head[:8], ""), length
+
+
+def test_a_signature_comment_edited_after_posting_does_not_count_on_the_board_either() -> None:
+    """与 safety-gate 同口径：有写权限的账号能把用户的旧评论改成“安全签字 <新头>”，编辑过或缺时间戳的评论不算已签。"""
+    head = "0123456789abcdef0123456789abcdef01234567"
+    base = _signature(head)
+    assert gh.find_signature([base], head) == (head[:8], "")
+    edited = {**base, "updated_at": "2026-11-03T02:30:00Z"}
+    signed, why = gh.find_signature([edited], head)
+    assert signed is None and "被编辑过" in why
+    for missing in ("created_at", "updated_at"):
+        incomplete = {key: value for key, value in base.items() if key != missing}
+        assert gh.find_signature([incomplete], head)[0] is None, missing
+    both_missing = {key: value for key, value in base.items() if key not in ("created_at", "updated_at")}
+    assert gh.find_signature([both_missing], head)[0] is None  # 两个都缺：不能因 None == None 当成没编辑过
+    assert gh.find_signature([edited, base], head) == (head[:8], "")
 
 
 def test_the_safety_signature_line_is_exactly_what_the_judge_accepts(tmp_path: Path) -> None:
