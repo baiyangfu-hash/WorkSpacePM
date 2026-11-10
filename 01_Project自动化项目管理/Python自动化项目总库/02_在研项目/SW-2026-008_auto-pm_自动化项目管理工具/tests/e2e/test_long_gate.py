@@ -20,7 +20,10 @@ from typing import Any, cast
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "long_gate.py"
+from tests.e2e.fixed_memory_lab import lab_script
+
+# D-205: a lab copy whose memory reading is fixed; the real script would judge the host's memory of the moment.
+SCRIPT = lab_script("long_gate.py")
 PY = sys.executable
 
 FAKE_RENEW = r"""

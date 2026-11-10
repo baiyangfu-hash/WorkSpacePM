@@ -53,7 +53,15 @@ PLAN_CHECKLIST = (
     "--check", f"{passing_command()} => 0", "--rollback", "git revert 本次提交，恢复原块",
 )
 
-LAUNCHER = """from auto_pm.cli.__main__ import cli
+# D-205: the drill's own launcher fixes the memory reading before the command runs, so a drill never depends on the host's memory of the
+# moment.  This is the test's process, not a product switch: nothing in the product reads it, and an agent cannot set it from outside.
+LAUNCHER = """from auto_pm.infrastructure import memory_preflight
+
+memory_preflight.read_commit = lambda: memory_preflight.CommitSnapshot(
+    committed=8 * memory_preflight.GIB, limit=64 * memory_preflight.GIB, physical=32 * memory_preflight.GIB
+)
+
+from auto_pm.cli.__main__ import cli
 
 if __name__ == "__main__":
     cli()
