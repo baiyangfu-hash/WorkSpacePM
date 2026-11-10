@@ -38,7 +38,7 @@ def _workspace_root() -> Path:
 
 _WORKSPACE = str(_workspace_root()) + os.sep
 _PROJECT_PREFIX = str(_PROJECT) + os.sep
-_IGNORED = tuple(str(_workspace_root() / name) for name in (".venv", ".git", ".auto-pm"))
+_IGNORED = tuple(str(_workspace_root() / name) for name in (".venv", ".git", ".auto-pm/worktrees"))
 _WRITE_MODE_LETTERS = "wax+"
 _EVENTS_WITH_PATH = {"os.listdir", "os.scandir", "glob.glob", "shutil.copyfile", "shutil.copytree"}
 _current = {"id": "startup"}

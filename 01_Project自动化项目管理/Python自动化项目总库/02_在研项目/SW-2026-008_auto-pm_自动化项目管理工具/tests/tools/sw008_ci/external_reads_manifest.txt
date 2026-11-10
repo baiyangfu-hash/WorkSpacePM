@@ -39,3 +39,4 @@ tests/vartable/test_communications_parser.py
 tests/vartable/test_io_points_parser.py
 tests/vartable/test_program_blocks_parser.py
 tests/vartable/test_scl_parser.py
+tests/core/test_authority_path_covered.py

@@ -54,12 +54,36 @@ def _climb(node: ast.AST) -> int | None:
     return None
 
 
+def _is_step_up(node: ast.AST, file_names: set[str]) -> bool:
+    """``name = name.parent`` for a ``name`` that started as a path built from ``__file__``: one step of a hand-written walk up the tree."""
+
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+        return False
+    if node.targets[0].id not in file_names:
+        return False
+    value = node.value
+    while isinstance(value, ast.Attribute) and value.attr == "parent":
+        value = value.value
+        if isinstance(value, ast.Name) and value.id == node.targets[0].id:
+            return True
+    return False
+
+
 def climbs_out_of_project(source: str, depth: int) -> bool:
     """True when the module builds a path above the project directory from ``__file__`` (``depth`` = path parts below the project dir)."""
 
     tree = ast.parse(source)
     parent_of = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    file_names = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and _climb(node.value) is not None
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
     for node in ast.walk(tree):
+        if _is_step_up(node, file_names):
+            return True  # ``while ...: here = here.parent`` walks up until it finds a marker directory
         levels = _climb(node)
         if levels is not None and levels > depth:
             return True
@@ -151,6 +175,9 @@ def test_pending_entries_are_real_and_still_unmarked() -> None:
         ("from pathlib import Path\nROOT = (Path(__file__).resolve().parents[1] / 'x').name\n", 2, False),
         ("from pathlib import Path\nROOT = Path(__file__).resolve().parents[2]\n", 2, True),
         ("import tmp\nROOT = tmp.parents[9]\n", 3, False),
+        ("from pathlib import Path\nhere = Path(__file__).resolve()\nwhile not (here / 'x').is_dir():\n    here = here.parent\n", 3, True),
+        ("from pathlib import Path\nhere = Path('somewhere')\nwhile not (here / 'x').is_dir():\n    here = here.parent\n", 3, False),
+        ("import ast\nx = __file__\nnode = ast.parse('1')\nwhile node:\n    node = node.parent\n", 3, False),
     ],
 )
 def test_the_scanner_tells_climbing_out_from_staying_inside(source: str, depth: int, expected: bool) -> None:
