@@ -571,6 +571,91 @@ def test_default_runner_kills_a_group_that_overruns_and_reports_124(tmp_path: Pa
     assert gate.default_runner([sys.executable, "-c", "print('ok')"], tmp_path, {}, log, 30) == 0
 
 
+# ── D-235: a killed group says which cases it was in ─────────────────────────────
+
+
+def _note(folder: Path, name: str, started: float, node: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}{gate.PROGRESS_SUFFIX}").write_text(f"{started:.0f}\t{node}\n" if node else "", encoding="utf-8")
+
+
+def test_running_cases_lists_only_processes_inside_a_case_longest_first(tmp_path: Path) -> None:
+    _note(tmp_path, "gw0-11", 1000, "tests/core/test_a.py::test_slow")
+    _note(tmp_path, "gw1-12", 1090, "tests/core/test_b.py::test_quick[x-1]")
+    _note(tmp_path, "gw2-13", 0, "")  # between two cases
+    (tmp_path / "other.txt").write_text("999\ttests/core/test_c.py::test_not_a_note\n", encoding="utf-8")
+    assert gate.running_cases(tmp_path, now=1100) == [
+        "tests/core/test_a.py::test_slow (gw0, running for 100 s)",
+        "tests/core/test_b.py::test_quick[x-1] (gw1, running for 10 s)",
+    ]
+    assert gate.running_cases(tmp_path / "missing") == []
+
+
+def test_a_note_with_an_unreadable_time_is_still_listed(tmp_path: Path) -> None:
+    (tmp_path / f"main-1{gate.PROGRESS_SUFFIX}").write_text("soon\ttests/core/test_a.py::test_x\n", encoding="utf-8")
+    assert gate.running_cases(tmp_path, now=5) == ["tests/core/test_a.py::test_x (main, running for 0 s)"]
+
+
+def test_a_group_killed_for_overrunning_leaves_the_running_cases_in_its_log_and_in_the_reason(tmp_path: Path) -> None:
+    """The 11-10 round: ``core`` was killed at 180 minutes and the record could not say where it was stuck."""
+
+    import sys
+
+    progress = tmp_path / "g.running"
+    child = (
+        "import os, pathlib, time\n"
+        f"d = pathlib.Path(os.environ[{gate.PROGRESS_ENV!r}]); d.mkdir(parents=True, exist_ok=True)\n"
+        f"(d / ('gw3-' + str(os.getpid()) + {gate.PROGRESS_SUFFIX!r})).write_text(str(int(time.time())) + '\\ttests/core/test_stuck.py::test_never_returns\\n', encoding='utf-8')\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    log = tmp_path / "g.txt"
+    code = gate.default_runner([sys.executable, "-c", child], tmp_path, {**gate.child_environment(), gate.PROGRESS_ENV: str(progress)}, log, 5)
+    text = log.read_text(encoding="utf-8")
+    assert code == 124 and "killed after 5 s" in text
+    assert f"{gate.RUNNING_MARK} tests/core/test_stuck.py::test_never_returns (gw3, running for " in text
+    verdict, why = gate.judge_group(_group(), code, log)
+    assert verdict == "FAIL" and "退出码 124" in why and "被杀时在跑：tests/core/test_stuck.py::test_never_returns (gw3" in why
+
+
+def test_a_killed_group_with_no_note_says_so_instead_of_staying_silent(tmp_path: Path) -> None:
+    import sys
+
+    log = tmp_path / "g.txt"
+    env = {**gate.child_environment(), gate.PROGRESS_ENV: str(tmp_path / "empty")}
+    assert gate.default_runner([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, env, log, 1) == 124
+    assert gate.NO_NOTE_MARK in log.read_text(encoding="utf-8")
+    assert "没有用例登记为在跑" in gate.judge_group(_group(), 124, log)[1]
+
+
+def test_the_reason_of_exit_124_names_at_most_three_cases_and_counts_the_rest(tmp_path: Path) -> None:
+    lines = [f"{gate.KILLED_MARK} 9 s"] + [f"{gate.RUNNING_MARK} tests/t.py::test_{n} (gw{n}, running for {9 - n} s)" for n in range(5)]
+    why = gate.judge_group(_group(), 124, _log(tmp_path, "....\n" + "\n".join(lines) + "\n"))[1]
+    assert "test_0" in why and "test_2" in why and "test_3" not in why and "等 5 条" in why
+
+
+def test_an_ordinary_failure_or_an_old_log_gets_no_killed_note(tmp_path: Path) -> None:
+    assert gate.judge_group(_group(), 1, _log(tmp_path, f"{gate.RUNNING_MARK} x\n1 failed, 3 passed in 1.0s\n"))[1] == "退出码 1"
+    assert gate.judge_group(_group(), 124, _log(tmp_path, "....\n"))[1] == "退出码 124"
+
+
+def test_every_group_loads_the_progress_plugin_and_gets_its_own_fresh_progress_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    stale = tmp_path / f"core{gate.PROGRESS_SUFFIX}"
+    _note(stale, "gw0-1", 1, "tests/core/test_old.py::test_from_an_earlier_round")
+    recorder = _Recorder()
+    GateRunService(runner=recorder).run(repo, tmp_path)
+    folders = [env[gate.PROGRESS_ENV] for env in recorder.envs]
+    assert folders == [str(tmp_path / f"{g.name}{gate.PROGRESS_SUFFIX}") for g in GROUPS]
+    assert not stale.exists()  # an earlier round's notes are not this round's
+    for group in GROUPS:
+        argv = gate.group_argv(group, python="py", jobs=8)
+        assert argv[argv.index(gate.PROGRESS_PLUGIN) - 1] == "-p"
+    assert all(not key.upper().startswith("AUTO_PM_") for env in recorder.envs for key in env)  # D-108 still holds
+
+
 def test_a_git_that_fails_is_unknown_not_clean(tmp_path: Path) -> None:
     """Counterexample (audit 2): a broken index makes ``git status`` exit 128 with empty output; that must not read as a clean tree."""
 

@@ -21,8 +21,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -40,6 +42,16 @@ SUMMARY_FILE = "gate_summary.json"
 DEFAULT_TIMEOUT_SECONDS = 3 * 3600
 LOG_TAIL_BYTES = 64 * 1024
 MAX_SKIPPED = 40  # the deployment run had at most 15 skipped in one group
+
+# D-235: every test process notes the case it is in (``tests/tools/gate_progress.py``), so a group killed for overrunning can say where it
+# was.  The plugin is named on the command line; the directory travels in this variable, which the gate sets itself for each group.
+PROGRESS_PLUGIN = "tests.tools.gate_progress"
+PROGRESS_ENV = "GATE_RUN_PROGRESS_DIR"
+PROGRESS_SUFFIX = ".running"
+KILLED_MARK = "[gate run] killed after"
+RUNNING_MARK = "[gate run] running when killed:"
+NO_NOTE_MARK = "[gate run] no case was noted as running when killed"
+MAX_RUNNING_SHOWN = 16
 
 # Variables a test child may inherit.  Everything else is dropped, so a new cockpit variable can never leak in by default.
 ENV_ALLOW = frozenset(
@@ -164,7 +176,7 @@ def group_argv(group: GateGroup, *, python: str, jobs: int) -> list[str]:
     argv = [python, "-B", "-m", "pytest", *group.targets]
     argv += [f"--ignore={path}" for path in group.ignore]
     argv += [f"--deselect={node}" for node in group.deselect]
-    argv += ["-p", "no:cacheprovider", "--no-cov", "-q"]
+    argv += ["-p", "no:cacheprovider", "-p", PROGRESS_PLUGIN, "--no-cov", "-q"]
     if group.parallel and jobs > 1:
         argv += ["-n", str(jobs), "--dist", "loadfile"]
     return argv
@@ -235,7 +247,7 @@ def judge_group(group: GateGroup, exit_code: int | None, log: Path) -> tuple[str
         hint = (
             "（4/5：用法错误或一个用例都没收集到，通常是目录不对）" if exit_code in (4, 5) else ""
         )
-        return "FAIL", f"退出码 {exit_code}{hint}"
+        return "FAIL", f"退出码 {exit_code}{hint}{_killed_note(log) if exit_code == 124 else ''}"
     counts = pytest_counts(log)
     if counts is None and _says_no_tests(log):
         return "FAIL", "一个用例都没跑（no tests ran）"
@@ -259,6 +271,55 @@ def judge_group(group: GateGroup, exit_code: int | None, log: Path) -> tuple[str
     return "PASS", ""
 
 
+def running_cases(progress_dir: Path, now: float | None = None) -> list[str]:
+    """One line per test process that was inside a case: ``<node id> (<worker>, running for <n> s)``, longest first (D-235)."""
+
+    now = time.time() if now is None else now
+    found: list[tuple[float, str]] = []
+    try:
+        notes = sorted(progress_dir.glob(f"*{PROGRESS_SUFFIX}"))
+    except OSError:
+        return []
+    for note in notes:
+        try:
+            text = note.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: a damaged node id is still shown; nothing is judged from it
+        except OSError:
+            continue
+        started, _, node = text.partition("\t")
+        if not node.strip():
+            continue  # between two cases
+        try:
+            seconds = max(now - float(started), 0.0)
+        except ValueError:
+            seconds = 0.0
+        worker = note.name[: -len(PROGRESS_SUFFIX)].rsplit("-", 1)[0]
+        found.append((seconds, f"{node.strip()} ({worker}, running for {seconds:.0f} s)"))
+    return [line for _seconds, line in sorted(found, key=lambda pair: (-pair[0], pair[1]))]
+
+
+def _killed_note(log: Path) -> str:
+    """What the log says the group was doing when the gate killed it, for the verdict's reason (D-235); empty when it says nothing."""
+
+    try:
+        with log.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(handle.tell() - LOG_TAIL_BYTES, 0))
+            tail = handle.read()
+    except OSError:
+        return ""
+    text = tail.decode("utf-8", errors="replace")  # lenient-decode: only quoted into the reason; the exit code already decided the verdict
+    lines = text.splitlines()
+    running = [line[len(RUNNING_MARK) :].strip() for line in lines if line.startswith(RUNNING_MARK)]
+    if running:
+        more = f" 等 {len(running)} 条" if len(running) > 3 else ""
+        return "（超时被杀；被杀时在跑：" + "；".join(running[:3]) + more + "）"
+    if any(line.startswith(NO_NOTE_MARK) for line in lines):
+        return "（超时被杀；被杀时没有用例登记为在跑，可能卡在收集、夹具收尾或进程退出）"
+    if any(line.startswith(KILLED_MARK) for line in lines):
+        return "（超时被杀）"
+    return ""
+
+
 def sha256_file(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -274,7 +335,11 @@ Runner = Callable[[Sequence[str], Path, Mapping[str, str], Path, int], int]
 def default_runner(
     argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int
 ) -> int:
-    """Run one group with its output in ``log``; 124 on timeout (what ``timeout`` returns)."""
+    """Run one group with its output in ``log``; 124 on timeout (what ``timeout`` returns).
+
+    On a timeout the log also gets the cases that were running (D-235), read from the directory in ``env[PROGRESS_ENV]`` before anything
+    else is done, so the record of a killed group says where it was stuck.
+    """
 
     with log.open("wb") as handle:
         try:
@@ -289,7 +354,15 @@ def default_runner(
                 check=False,
             ).returncode
         except subprocess.TimeoutExpired:
-            handle.write(f"\n[gate run] killed after {timeout} s\n".encode())
+            folder = env.get(PROGRESS_ENV, "")
+            running = running_cases(Path(folder)) if folder else []
+            lines = [f"{KILLED_MARK} {timeout} s"]
+            lines += [f"{RUNNING_MARK} {line}" for line in running[:MAX_RUNNING_SHOWN]]
+            if len(running) > MAX_RUNNING_SHOWN:
+                lines.append(f"[gate run] ... and {len(running) - MAX_RUNNING_SHOWN} more")
+            if not running:
+                lines.append(f"{NO_NOTE_MARK} ({'no progress directory' if not folder else folder})")
+            handle.write(("\n" + "\n".join(lines) + "\n").encode("utf-8"))
             return 124
 
 
@@ -544,7 +617,9 @@ class GateRunService:
             argv = group_argv(group, python=self._python, jobs=group_jobs)
             result = GroupResult(group.name, argv, str(project), started=_now())
             log = out_dir / f"{group.name}.txt"
-            result.exit = self._runner(argv, project, env, log, timeout_seconds)
+            progress = out_dir / f"{group.name}{PROGRESS_SUFFIX}"
+            shutil.rmtree(progress, ignore_errors=True)  # notes of an earlier round in the same directory are not this round's
+            result.exit = self._runner(argv, project, {**env, PROGRESS_ENV: str(progress)}, log, timeout_seconds)
             result.finished = _now()
             (out_dir / f"{group.name}.exit").write_text(f"{result.exit}\n", encoding="utf-8")
             result.exit_file = result.exit
