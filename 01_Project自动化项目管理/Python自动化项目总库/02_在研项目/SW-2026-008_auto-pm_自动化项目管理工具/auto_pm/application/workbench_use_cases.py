@@ -17,7 +17,7 @@ from auto_pm.application.core.protocols import (
 from auto_pm.contracts.gate_dtos import ProcessGroupStage
 from auto_pm.domain.models.project import InvalidBusinessLineError, resolve_business_line
 from auto_pm.domain.project.state_machine import build_change_state_machine
-from auto_pm.infrastructure.user_name import current_user_name
+from auto_pm.infrastructure.user_name import UserNameUnavailableError, require_user_name
 from auto_pm.ui.contracts.dto.workbench_dto import (
     ClearCacheResultDTO,
     DashboardSnapshotDTO,
@@ -513,6 +513,16 @@ class WorkbenchUseCases:
                 return CommandOutcome(False, f"未找到项目: {project_id}", {"success": False})
 
             stack_str = str(project.stack).lower()
+            applicant = ""
+            if self.change_service:
+                # D-204: the applicant of a change order is a "who did this" record; resolve it before anything is written,
+                # and refuse when nobody can be named rather than file the order under a placeholder.
+                try:
+                    applicant = os.getenv("AUTO_PM_AUTHOR") or require_user_name()
+                except UserNameUnavailableError as error:
+                    return CommandOutcome(
+                        False, f"{error}，未初始化：变更单要记下申请人。请在正常登录的环境里重试，或设置环境变量 AUTO_PM_AUTHOR。", {"success": False}
+                    )
             self.project_service.init_project_pm_framework(
                 project_path=project.path,
                 project_id=project_id,
@@ -520,7 +530,6 @@ class WorkbenchUseCases:
                 stack_type=stack_str,
             )
             if self.change_service:
-                applicant = os.getenv("AUTO_PM_AUTHOR") or current_user_name()
                 domain = "PLC" if stack_str == "plc" else "SCPT"
                 self.change_service.create_change_request(
                     project_id=project_id,
