@@ -24,14 +24,18 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
+    StationLeasedError,
     StationRefusedError,
     base_agent,
     caller_alias,
     ensure_session_id,
 )
+from auto_pm.application.core.station_presence import Presence, list_presence, record_presence
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
+
+HEARTBEAT_MIN_SECONDS = 300.0
 
 
 class _AgentName(click.ParamType):  # type: ignore[type-arg]
@@ -97,7 +101,13 @@ def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeS
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
     ensure_session_id(root)
     try:
-        return AgentWorktreeService(root, measure_size=measure_size)
+        service = AgentWorktreeService(root, measure_size=measure_size)
+        # D-180 B: any worktree command of a conversation that holds a station is proof it is still there (throttled).
+        alias = caller_alias()
+        if alias:
+            service.touch_heartbeat(alias, min_interval_seconds=HEARTBEAT_MIN_SECONDS)
+        record_presence(root)  # D-195: running any worktree command says "this conversation is here" (agents only, throttled)
+        return service
     except AgentWorktreeError as error:
         _fail(error)
         raise AssertionError("unreachable") from error  # pragma: no cover
@@ -172,6 +182,21 @@ def _print_count(stations: list[Any]) -> None:
         )
 
 
+def _print_orphan_hint(service: AgentWorktreeService) -> None:
+    """D-180 A: records whose station is gone used to be invisible; say so (best effort, never fails the listing)."""
+
+    try:
+        orphans = service.orphan_records()
+    except (AgentWorktreeError, OSError):
+        return
+    if orphans:
+        names = "、".join(name for name, _reason in orphans)
+        console.print(
+            f"[yellow]有 {len(orphans)} 条孤儿持有者记录[/yellow]（工位目录已不在）：{names}；"
+            "用户在自己的终端 `worktree reclaim --stale --apply` 清理"
+        )
+
+
 def _print_broken_hint(stations: list[Any]) -> None:
     broken = [s for s in stations if s.broken]
     if not broken:
@@ -232,6 +257,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         return
     if not stations:
         console.print(f"没有工位（{service.stations_dir}）")
+        _print_orphan_hint(service)
         return
     table = Table(title="工位", show_header=True, header_style="bold cyan")
     if not deep:
@@ -242,6 +268,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         console.print(table)
         _print_count(stations)
         _print_broken_hint(stations)
+        _print_orphan_hint(service)
         console.print(
             "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
         )
@@ -264,6 +291,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
     console.print(table)
     _print_count(stations)
     _print_broken_hint(stations)
+    _print_orphan_hint(service)
 
 
 @worktree_group.command("close")
@@ -307,6 +335,12 @@ def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
     assert agent is not None
     try:
         result = service.release(agent, via="release-self" if mine else "release")
+    except StationLeasedError as error:
+        if not mine:
+            _fail(error)
+        # D-169: a closing conversation must not fail its SessionEnd hook; the station stays and the stale sweep takes it later.
+        console.print(f"[yellow]跳过回收[/yellow] {error}")
+        return
     except AgentWorktreeError as error:
         _fail(error)
     console.print(f"[green]已回收工位[/green] {result.path}（分支 {result.branch} 保留）")
@@ -314,6 +348,60 @@ def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
         console.print(f"工位里有没提交的内容，已存为救援引用 {result.rescue_ref}；找回：git checkout {result.rescue_ref} -- .")
     else:
         console.print("工位是干净的，没有需要救援的内容")
+
+
+_VERDICT_LABEL = {"alive": "在场", "quiet": "安静", "orphan": "疑似孤儿", "elsewhere": "别的电脑"}
+_WHERE_LABEL = {"station": "自己的工位", "control-root": "控制根", "other": "别处"}
+
+
+def _presence_json(entry: Presence) -> dict[str, Any]:
+    return {
+        "key": entry.key,
+        "alias": entry.alias,
+        "source": entry.source,
+        "machine": entry.machine,
+        "pid": entry.pid,
+        "where": entry.where,
+        "title": entry.title,
+        "opened_at": entry.opened_at,
+        "seen_at": entry.seen_at,
+        "silent_hours": entry.silent_hours,
+        "verdict": entry.verdict,
+        "reason": entry.reason,
+    }
+
+
+@worktree_group.command("who")
+@click.option("--json", "as_json", is_flag=True, help="机器可读输出")
+@click.pass_context
+def who_cmd(ctx: click.Context, as_json: bool) -> None:
+    """只读：本机控制根上现在有哪些会话在场（来源、所在位置、多久没动静、疑似孤儿）。
+
+    在场登记只给 agent 会话写（用户自己的终端不算会话）；跑任何 `worktree` 子命令的 agent 会自动登记自己，所以从没跑过
+    `worktree` 命令的会话在这里看不到。这个命令只提供信息，不拒绝、不删除任何东西。
+    """
+    service = _service(ctx, measure_size=False)
+    entries = list_presence(service.control_root)
+    if as_json:
+        click.echo(json.dumps([_presence_json(e) for e in entries], ensure_ascii=False, indent=2))
+        return
+    if not entries:
+        console.print("本机没有在场登记（还没有 agent 会话跑过 `worktree` 命令）")
+        return
+    mine = caller_alias()
+    table = Table(title="本机在场会话", show_header=True, header_style="bold cyan")
+    for column in ("会话", "来源", "位置", "状态", "最后动静", "说明"):
+        table.add_column(column)
+    for e in entries:
+        name = e.alias or e.key
+        if mine and e.alias == mine:
+            name += "（你）"
+        seen = "-" if e.silent_hours is None else f"{e.silent_hours:.1f} 小时前"
+        table.add_row(name, e.source or "-", _WHERE_LABEL.get(e.where, e.where), _VERDICT_LABEL.get(e.verdict, e.verdict), seen, e.reason)
+    console.print(table)
+    orphans = [e for e in entries if e.verdict == "orphan"]
+    if orphans:
+        console.print(f"[yellow]有 {len(orphans)} 条疑似孤儿记录[/yellow]：只标记，不会自动删除；确认已退出后由用户处理")
 
 
 @worktree_group.command("heartbeat")
@@ -341,7 +429,7 @@ def reclaim_cmd(ctx: click.Context, stale: bool, apply: bool) -> None:
     except AgentWorktreeError as error:
         _fail(error)
     if not found:
-        console.print("没有持有对话已不在的会话别名工位")
+        console.print("没有持有对话已不在的会话别名工位，也没有孤儿持有者记录")
         return
     for name, reason in found:
         console.print(f"{'[green]已回收[/green]' if apply else '可回收'} {name}：{reason}")

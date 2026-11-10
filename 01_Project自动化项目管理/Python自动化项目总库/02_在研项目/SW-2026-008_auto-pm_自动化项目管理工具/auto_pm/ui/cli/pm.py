@@ -24,6 +24,7 @@ from auto_pm.application.core.control_root_sync import (
 from auto_pm.application.core.pm_facade_service import PmFacadeError, PmFacadeService
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.pm_resume_service import PmResumeError, PmResumeService
+from auto_pm.application.core.station_presence import orient_lines
 from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.application.core.workspace_context_service import (
     WorkspaceContextError,
@@ -1526,6 +1527,8 @@ def orient_pm(
     _emit_query(payload, as_json)
     _no_ledger_line(ctx, as_json)
     _memory_gate_line(ctx, as_json)
+    for presence_line in orient_lines(app_ctx.control_root):  # D-195: read-only; JSON mode keeps stdout pure
+        click.echo(presence_line, err=as_json)
     _state_backup_line(ctx, as_json)
 
 

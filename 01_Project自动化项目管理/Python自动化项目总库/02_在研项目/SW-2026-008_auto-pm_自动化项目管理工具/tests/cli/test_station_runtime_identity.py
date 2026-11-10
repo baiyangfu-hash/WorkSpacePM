@@ -17,7 +17,7 @@ from auto_pm.ui.cli.runtime_identity_guard import COCKPIT_PROJECT_ID
 from auto_pm.ui.cli.worktree import worktree_group
 
 WORKTREE_WRITES = {"open", "close", "release"}  # sweep and reclaim write only with --apply
-WORKTREE_READS = {"list"}
+WORKTREE_READS = {"list", "who"}  # D-195: who only reads (and notes the caller as present, runtime data only)
 PR_WRITES = {"open"}  # open writes unless --dry-run
 PR_READS = {"ready", "settle-scan"}
 
