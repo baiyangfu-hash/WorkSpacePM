@@ -12,6 +12,7 @@ from auto_pm.application.core.pr_body_builder import build_body, read_card_field
 REPO = Path(__file__).resolve().parents[2].parents[3]
 sys.path.insert(0, str(REPO / "reviews" / "tools"))
 
+import pr_overlap_check as overlap  # noqa: E402
 import pr_scope_check as gate  # noqa: E402
 import safety_zone_check as safety  # noqa: E402
 
@@ -35,6 +36,7 @@ def body(**over: object) -> str:
     fields = read_card_fields(CARD_TEXT, "CARD-9")
     kwargs: dict[str, object] = {
         "task_card": CARD,
+        "card": "251",
         "fields": fields,
         "scope_paths": SCOPE,
         "safety_circuit": "否",
@@ -110,3 +112,9 @@ def test_b11_signature_lines_come_from_the_newest_commit_that_has_them() -> None
 
 def test_b12_sweep_text_is_written_when_given() -> None:
     assert "根因X" in body(sweep="根因X")
+
+
+def test_b20_claim_line_is_read_by_the_overlap_gate_as_exactly_the_card() -> None:
+    found = [m.group(1) for m in overlap.CLAIM_LINE.finditer(body())]
+    assert found == ["251"]
+    assert [line for line in body().splitlines() if line.startswith("领卡占位")] == ["领卡占位: 251"]
