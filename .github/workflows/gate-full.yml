@@ -112,7 +112,8 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$dest/plugin.vsix" "$dest/unpacked"
           exe="$dest/unpacked/extension/out/go/windows-amd64/siemens-lsp.exe"
           test -f "$exe" || { echo "siemens-lsp.exe not found in the package"; exit 1; }
-          actual=$(sha256sum "$exe" | cut -d' ' -f1)
+          # hashlib: Git-Bash's own hash tool prefixes the digest with a backslash when the path has backslashes
+          actual=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c "import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())" "$exe" | tr -d '\r')
           echo "siemens-lsp.exe sha256: $actual"
           if [ "$actual" != "$LSP_EXE_SHA256" ]; then
             echo "::error::siemens-lsp.exe hash $actual is not the pinned $LSP_EXE_SHA256; the plugin is not used"

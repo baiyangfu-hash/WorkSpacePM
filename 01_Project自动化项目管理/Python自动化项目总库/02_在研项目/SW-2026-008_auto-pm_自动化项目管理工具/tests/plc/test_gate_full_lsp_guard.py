@@ -63,6 +63,8 @@ def test_the_hash_is_checked_before_the_command_line_is_handed_to_the_tests() ->
     hand_over = text.index(f"{ENV_NAME}=")
     assert compare < hand_over and "exit 1" in text[compare:hand_over]
     assert '"$RUNNER_TEMP/siemens-lsp"' in text  # kept on the runner's temporary disk, outside the checkout
+    # Git-Bash's sha256sum prints "\\<digest>" for a Windows path, which never equals the pin (first gate-full run, 11-10)
+    assert "sha256sum" not in text and "hashlib.sha256" in text
 
 
 def test_nothing_in_gate_full_caches_or_uploads_the_plugin() -> None:
