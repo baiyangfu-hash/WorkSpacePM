@@ -22,6 +22,7 @@ from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import WorkKind
 from auto_pm.infrastructure import lease_wallet
 from auto_pm.infrastructure.continuity_store import ContinuityStore
+from auto_pm.infrastructure.user_name import UserNameUnavailableError
 from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_do, run_worktree
 
@@ -301,7 +302,7 @@ def test_d204_sign_risk_refuses_when_the_platform_cannot_say_who_signs(root: Pat
     assert _invoke(root, *reclaim).exit_code == 3  # pending, waiting for the user's signature
 
     def nobody() -> str:
-        raise pm_handoff_cli.UserNameUnavailableError("取不到当前登录用户名")
+        raise UserNameUnavailableError("取不到当前登录用户名")
 
     monkeypatch.setattr(pm_handoff_cli, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(pm_handoff_cli, "_stdout_is_tty", lambda: True)
