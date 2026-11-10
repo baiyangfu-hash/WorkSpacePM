@@ -70,16 +70,14 @@ def probe_interpreter(python: str, *, prober: Prober = _run_probe) -> EnvReport:
     except (OSError, subprocess.TimeoutExpired) as error:
         return EnvReport(error=f"解释器 {python} 起不来或探测超时：{error}")
     if done.returncode != 0:
-        tail = (
-            done.stderr.decode("utf-8", errors="replace").strip().splitlines()
-        )  # lenient-decode: diagnostic text only
+        text = done.stderr.decode("utf-8", errors="replace")  # lenient-decode: 只用来写给人看的错误原因，不参与判定
+        tail = text.strip().splitlines()
         return EnvReport(
             error=f"解释器 {python} 运行探测脚本失败（退出码 {done.returncode}）：{tail[-1] if tail else '无输出'}"
         )
     try:
-        data = json.loads(
-            done.stdout.decode("utf-8", errors="replace")
-        )  # lenient-decode: a JSON parse follows
+        raw = done.stdout.decode("utf-8", errors="replace")  # lenient-decode: 紧接着做 JSON 解析，坏字节会让解析失败并如实报错
+        data = json.loads(raw)
         return EnvReport(
             version=tuple(int(n) for n in data["version"]),
             in_venv=bool(data["venv"]),
