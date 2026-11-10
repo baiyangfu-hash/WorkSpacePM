@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 #: import names the test children need.  The first four are what a gate group loads before its first test runs.
-REQUIRED_MODULES: tuple[str, ...] = ("pytest", "xdist", "pytest_qt", "PySide6", "jinja2")
+REQUIRED_MODULES: tuple[str, ...] = ("pytest", "xdist", "pytestqt", "PySide6", "jinja2")
 PROBE_TIMEOUT_SECONDS = 60
 UNFIT_HEADLINE = "环境不合格，未开跑"
 
