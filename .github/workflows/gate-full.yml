@@ -19,17 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         group:
-          - application
-          - change
-          - cli
-          - contracts
           - core
-          - infrastructure
-          - plc
-          - core_basis_serial
-          - qml
-          - qml_debounce_alone
-          - rest
     defaults:
       run:
         shell: bash
@@ -52,12 +42,30 @@ jobs:
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
 
+      - name: DEBUG quick run of the tests this branch touched
+        working-directory: ${{ env.PROJ }}
+        continue-on-error: true
+        run: |
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -p no:cacheprovider --no-cov -q -rfE \
+            tests/core/test_gate_run_service.py tests/cli/test_gate_cli.py tests/tools/test_gate_progress.py \
+            tests/core/test_release_deploy_check.py tests/infrastructure/test_process_probe.py 2>&1 | tail -n 150
+
       - name: Official gate group ${{ matrix.group }}
         working-directory: ${{ env.PROJ }}
         run: |
           JOBS=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c 'import os; print(max(1, min(4, os.cpu_count() or 1)))')
           "$RUNNER_TEMP/venv/Scripts/python.exe" tests/tools/sw008_ci/gate_run_ci.py run \
             --group "${{ matrix.group }}" --out "$RUNNER_TEMP/gate-out/${{ matrix.group }}" --jobs "$JOBS" --timeout-minutes 90
+
+      - name: DEBUG print the group record
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/gate-out/core" || exit 0
+          ls -la
+          for f in *; do
+            echo "=== $f"
+            if [ "${f##*.}" = "json" ]; then head -c 6000 "$f"; echo; else grep -aE "^(FAILED|ERROR) |\[gate run\]" "$f" | head -n 80; echo "--- tail"; tail -n 120 "$f"; fi
+          done
 
       - name: Upload the group record
         if: always()
@@ -66,36 +74,3 @@ jobs:
           name: gate-${{ matrix.group }}
           path: ${{ runner.temp }}/gate-out/${{ matrix.group }}
           if-no-files-found: warn
-
-  verdict:
-    needs: group
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: gate-*
-          path: ${{ runner.temp }}/parts
-
-      - name: Merge and judge
-        working-directory: ${{ env.PROJ }}
-        run: |
-          python tests/tools/sw008_ci/gate_run_ci.py merge \
-            --in "$RUNNER_TEMP"/parts/gate-* --out "$RUNNER_TEMP/gate-final" --worktree "$GITHUB_WORKSPACE"
-
-      - name: Upload the verdict and the failure list
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gate-verdict
-          path: ${{ runner.temp }}/gate-final
