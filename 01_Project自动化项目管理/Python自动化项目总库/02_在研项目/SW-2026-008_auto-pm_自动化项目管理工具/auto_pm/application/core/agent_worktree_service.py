@@ -72,6 +72,9 @@ CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_ca
 _CARD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 RunStateLookup = Callable[[str], str | None]
+# D-169: a station path -> "" when no live Run lease sits on it, else the plain-words description of the lease holding it.
+# A probe that cannot tell raises; the service then refuses (fail-closed), it never treats "cannot tell" as "free".
+LeaseProbe = Callable[[Path], str]
 
 
 _UNKNOWN_CALLER = "?"
@@ -261,6 +264,10 @@ class StationRefusedError(AgentWorktreeError):
     """A safety check refused the action; the message says why and what to do next."""
 
 
+class StationLeasedError(StationRefusedError):
+    """D-169: a Run with an unexpired lease still works in this station; nothing is removed."""
+
+
 @dataclass(frozen=True)
 class Station:
     """One directory under ``.auto-pm/worktrees`` and what Git says about it."""
@@ -352,6 +359,46 @@ def _ledger_run_state(root: Path) -> RunStateLookup:
     return lookup
 
 
+def _ledger_lease_probe(root: Path) -> LeaseProbe:
+    """D-169: describe the unexpired Run lease that sits on a station path, read-only through the ledger's public reads.
+
+    No ledger file means no Run was ever registered here: free.  A ledger that exists but cannot be read raises, so the
+    caller refuses instead of guessing "free".  Only Runs that are not terminal are looked at; a lease whose expiry has
+    passed does not hold the station (the Run is dead by the lease's own rule).
+    """
+
+    def probe(station: Path) -> str:
+        if not (root / ".auto-pm" / "continuity.db").is_file():
+            return ""
+        from auto_pm.application.core.workspace_context_service import WorkspaceContextService
+        from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+        wanted = _same_path_key(station)
+        store = ContinuityStore(root)
+        now = datetime.now(UTC)
+        for project_id in WorkspaceContextService(str(root)).registered_project_ids():
+            for work in store.list_works(project_id):
+                for run in store.list_runs(work.work_id):
+                    if _same_path_key(Path(run.worktree_path)) != wanted:
+                        continue
+                    lease = store.get_lease(run.run_id)
+                    expires = datetime.fromisoformat(lease.expires_at)
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=UTC)
+                    if expires > now:
+                        return f"Run {run.run_id}（{run.state.value}）的租约到 {lease.expires_at} 才过期"
+        return ""
+
+    return probe
+
+
+def _same_path_key(path: Path) -> str:
+    try:
+        return os.path.normcase(str(path.resolve()))
+    except OSError:
+        return os.path.normcase(str(path))
+
+
 class AgentWorktreeService:
     """Open, inspect, close and sweep agent stations of one control root."""
 
@@ -360,6 +407,7 @@ class AgentWorktreeService:
         control_root: str | Path,
         *,
         run_state: RunStateLookup | None = None,
+        lease_probe: LeaseProbe | None = None,
         measure_size: bool = True,
     ) -> None:
         try:
@@ -370,6 +418,7 @@ class AgentWorktreeService:
             ) from error
         self._stations_dir = self._root / ".auto-pm" / "worktrees"
         self._run_state = run_state or _ledger_run_state(self._root)
+        self._lease_probe = lease_probe or _ledger_lease_probe(self._root)
         self._measure_size = measure_size
 
     @property
@@ -570,6 +619,9 @@ class AgentWorktreeService:
             result = self._release_checked(agent, record)
         except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
             record.update(outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error))
+            if isinstance(error, StationLeasedError) and via == "release-self":
+                # The SessionEnd hook never fails a closing conversation: it skips and leaves the station to the stale sweep.
+                record.update(via="release-self-skipped", outcome="skipped")
             self._log_reclaim(record)
             raise
         record.update(outcome="removed", rescue_ref=result.rescue_ref, branch=result.branch)
@@ -600,6 +652,7 @@ class AgentWorktreeService:
             raise StationRefusedError(f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状")
         self._require_inside(path)
         record.update(branch=info.branch, head=info.head, path=str(path))
+        self._require_no_live_lease(path)
         rescue = self._save_rescue_ref(path, agent)
         record["rescue_ref"] = rescue
         removed = self._git("worktree", "remove", "--force", str(path))
@@ -609,6 +662,16 @@ class AgentWorktreeService:
         with contextlib.suppress(OSError):
             (self._notes_dir / f"{agent}.json").unlink()
         return ReleaseResult(path=path, branch=info.branch, rescue_ref=rescue)
+
+    def _require_no_live_lease(self, path: Path) -> None:
+        """D-169: one gate for every way a station directory can go (release, close, sweep, reclaim, make-room)."""
+
+        try:
+            held = self._lease_probe(path)
+        except Exception as error:  # noqa: BLE001 - a ledger that cannot answer must not read as "no lease"
+            raise StationLeasedError(f"读不出 {path} 上的 Run 租约（{error}）；不能证明没人在用，不回收") from error
+        if held:
+            raise StationLeasedError(f"{path} 还有未过期的 Run 租约：{held}；Run 结束或租约过期后再收")
 
     def _save_rescue_ref(self, path: Path, agent: str) -> str:
         """工位里有任何没进分支的东西（改动、未跟踪文件）就存成救援引用并返回引用名；干净则返回空串。"""
@@ -658,12 +721,20 @@ class AgentWorktreeService:
                 temp_index.unlink()
         return ref
 
-    def touch_heartbeat(self, agent: str) -> bool:
-        """刷新别名工位的心跳（并把持有进程号更新成当前这个对话的）。没有这个工位的记录就什么都不做，返回 False。"""
+    def touch_heartbeat(self, agent: str, *, min_interval_seconds: float = 0.0) -> bool:
+        """刷新别名工位的心跳（并把持有进程号更新成当前这个对话的）。没有这个工位的记录就什么都不做，返回 False。
+
+        ``min_interval_seconds`` > 0 时，上次心跳不到这个间隔就不再写（每条命令都调用也不会把磁盘写花，D-180）；
+        返回 True 表示记录在、心跳是新的。
+        """
 
         note = self._read_holder_note(agent)
         if not note:
             return False
+        if min_interval_seconds > 0:
+            silent = _hours_since(note.get("heartbeat_at"))
+            if silent is not None and silent * 3600 < min_interval_seconds:
+                return True
         note["heartbeat_at"] = datetime.now(UTC).isoformat()
         pid = int(os.environ.get("CLAUDE_PID", "0") or 0)
         if pid > 0:
@@ -699,17 +770,73 @@ class AgentWorktreeService:
             found.append((child.name, f"记录的持有进程 {pid} 已不在，且 {silent:.1f} 小时没有心跳（阈值 {limit:g} 小时）"))
         return found
 
+    def orphan_records(self, *, max_silence_hours: float | None = None) -> list[tuple[str, str]]:
+        """D-180 A: holder records whose station directory is gone for good: returns (alias, reason).
+
+        ``stale_aliases`` walks the station directories, so a record without a directory never reached it and stayed for days.
+        A record is an orphan only when all of these hold: the alias has no directory and no Git registration, the recorded
+        process is gone (or was never declared: pid 0) and the heartbeat has been silent past the limit.  A record whose
+        process is still alive is kept (the conversation may be about to open the station again).
+        """
+
+        limit = max_silence_hours if max_silence_hours is not None else _stale_hours()
+        found: list[tuple[str, str]] = []
+        if not self._notes_dir.is_dir():
+            return found
+        registered = {_same_path_key(path) for path in self._worktrees()}
+        for entry in sorted(self._notes_dir.glob("*.json")):
+            name = entry.stem
+            if not _ALIAS.match(name):
+                continue
+            station = self._stations_dir / name
+            if station.exists() or _same_path_key(station) in registered:
+                continue
+            note = self._read_holder_note(name)
+            pid = note.get("pid")
+            if isinstance(pid, int) and pid > 0 and _process_alive(pid):
+                continue
+            silent = _hours_since(note.get("heartbeat_at") or note.get("opened_at"))
+            if silent is None or silent < limit:
+                continue
+            who = f"进程 {pid} 已不在" if isinstance(pid, int) and pid > 0 else "没有记录持有进程号"
+            found.append((name, f"孤儿持有者记录：工位目录已不存在，{who}，{silent:.1f} 小时没有心跳（阈值 {limit:g} 小时）"))
+        return found
+
     def reclaim_stale(self, *, apply: bool = False) -> list[tuple[str, str]]:
-        """列出（加 ``apply`` 则回收）持有者已不在的别名工位；回收走 release，所以一样先存救援引用。"""
+        """列出（加 ``apply`` 则回收）持有者已不在的别名工位和孤儿持有者记录；工位回收走 release，所以一样先存救援引用。"""
 
         with self._stations_lock():
             stale = self.stale_aliases()
+            orphans = self.orphan_records()
             if apply:
                 if caller_agent():
                     raise StationRefusedError("回收别的对话的陈旧工位只由用户在自己的终端执行")
                 for name, _reason in stale:
-                    self._release_locked(name, via="reclaim-stale")
-            return stale
+                    try:
+                        self._release_locked(name, via="reclaim-stale")
+                    except StationLeasedError:
+                        continue  # D-169: a live Run lease keeps this one (logged as refused); the others are still reclaimed
+                for name, reason in orphans:
+                    self._drop_orphan_record(name, reason)
+            return stale + orphans
+
+    def _drop_orphan_record(self, name: str, reason: str) -> None:
+        """Delete only the holder record (nothing else exists for it) and log it like every other reclaim."""
+
+        record: dict[str, object] = {
+            "agent": name,
+            "via": "orphan-record",
+            "caller": caller_alias() or caller_agent() or "user",
+            "reason": reason,
+        }
+        try:
+            (self._notes_dir / f"{name}.json").unlink()
+            record["outcome"] = "removed"
+        except FileNotFoundError:
+            return  # someone else removed it meanwhile: nothing to log
+        except OSError as error:
+            record.update(outcome="failed", reason=f"{reason}；删除失败：{error}")
+        self._log_reclaim(record)
 
     def count(self) -> int:
         """How many directories sit under ``.auto-pm/worktrees`` (registered or not, a missing one still registered counts)."""
@@ -1140,6 +1267,7 @@ class AgentWorktreeService:
         info = self._worktrees().get(station.path.resolve())
         if info is None:
             raise StationRefusedError(f"工位 {station.path} 已不在 Git 登记里，不动")
+        self._require_no_live_lease(station.path)
         if info.branch != station.branch:
             raise StationRefusedError(
                 f"工位 {station.path} 已从 {station.branch} 换到 {info.branch or '(detached)'}，有人在用，不删"

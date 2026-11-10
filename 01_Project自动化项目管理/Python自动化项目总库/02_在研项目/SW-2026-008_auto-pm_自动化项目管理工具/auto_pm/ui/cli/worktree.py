@@ -24,6 +24,7 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
+    StationLeasedError,
     StationRefusedError,
     base_agent,
     caller_alias,
@@ -32,6 +33,8 @@ from auto_pm.application.core.agent_worktree_service import (
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
+
+HEARTBEAT_MIN_SECONDS = 300.0
 
 
 class _AgentName(click.ParamType):  # type: ignore[type-arg]
@@ -97,7 +100,12 @@ def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeS
     root = app_ctx.control_root or app_ctx.workspace_root or os.getcwd()
     ensure_session_id(root)
     try:
-        return AgentWorktreeService(root, measure_size=measure_size)
+        service = AgentWorktreeService(root, measure_size=measure_size)
+        # D-180 B: any worktree command of a conversation that holds a station is proof it is still there (throttled).
+        alias = caller_alias()
+        if alias:
+            service.touch_heartbeat(alias, min_interval_seconds=HEARTBEAT_MIN_SECONDS)
+        return service
     except AgentWorktreeError as error:
         _fail(error)
         raise AssertionError("unreachable") from error  # pragma: no cover
@@ -172,6 +180,21 @@ def _print_count(stations: list[Any]) -> None:
         )
 
 
+def _print_orphan_hint(service: AgentWorktreeService) -> None:
+    """D-180 A: records whose station is gone used to be invisible; say so (best effort, never fails the listing)."""
+
+    try:
+        orphans = service.orphan_records()
+    except (AgentWorktreeError, OSError):
+        return
+    if orphans:
+        names = "、".join(name for name, _reason in orphans)
+        console.print(
+            f"[yellow]有 {len(orphans)} 条孤儿持有者记录[/yellow]（工位目录已不在）：{names}；"
+            "用户在自己的终端 `worktree reclaim --stale --apply` 清理"
+        )
+
+
 def _print_broken_hint(stations: list[Any]) -> None:
     broken = [s for s in stations if s.broken]
     if not broken:
@@ -232,6 +255,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         return
     if not stations:
         console.print(f"没有工位（{service.stations_dir}）")
+        _print_orphan_hint(service)
         return
     table = Table(title="工位", show_header=True, header_style="bold cyan")
     if not deep:
@@ -242,6 +266,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
         console.print(table)
         _print_count(stations)
         _print_broken_hint(stations)
+        _print_orphan_hint(service)
         console.print(
             "只列了名字、分支、路径；要看未提交、未推送、是否并进 main，加 --deep（会慢）"
         )
@@ -264,6 +289,7 @@ def list_cmd(ctx: click.Context, as_json: bool, no_size: bool, deep: bool) -> No
     console.print(table)
     _print_count(stations)
     _print_broken_hint(stations)
+    _print_orphan_hint(service)
 
 
 @worktree_group.command("close")
@@ -307,6 +333,12 @@ def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
     assert agent is not None
     try:
         result = service.release(agent, via="release-self" if mine else "release")
+    except StationLeasedError as error:
+        if not mine:
+            _fail(error)
+        # D-169: a closing conversation must not fail its SessionEnd hook; the station stays and the stale sweep takes it later.
+        console.print(f"[yellow]跳过回收[/yellow] {error}")
+        return
     except AgentWorktreeError as error:
         _fail(error)
     console.print(f"[green]已回收工位[/green] {result.path}（分支 {result.branch} 保留）")
@@ -341,7 +373,7 @@ def reclaim_cmd(ctx: click.Context, stale: bool, apply: bool) -> None:
     except AgentWorktreeError as error:
         _fail(error)
     if not found:
-        console.print("没有持有对话已不在的会话别名工位")
+        console.print("没有持有对话已不在的会话别名工位，也没有孤儿持有者记录")
         return
     for name, reason in found:
         console.print(f"{'[green]已回收[/green]' if apply else '可回收'} {name}：{reason}")

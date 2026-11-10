@@ -22,6 +22,7 @@ from auto_pm.application.core.agent_worktree_service import (
     AgentWorktreeError,
     AgentWorktreeService,
     Station,
+    StationLeasedError,
     StationRefusedError,
     SweepItem,
 )
@@ -64,8 +65,8 @@ class Lab:
         git(tmp_path, "clone", "-q", str(self.origin), str(self.github))
         self.runs: dict[str, str] = {}
 
-    def service(self) -> AgentWorktreeService:
-        return AgentWorktreeService(self.root, run_state=self.runs.get, measure_size=False)
+    def service(self, lease_probe: Callable[[Path], str] | None = None) -> AgentWorktreeService:
+        return AgentWorktreeService(self.root, run_state=self.runs.get, lease_probe=lease_probe, measure_size=False)
 
     def station(self, agent: str) -> Path:
         return self.root / ".auto-pm" / "worktrees" / agent
@@ -1775,3 +1776,210 @@ def test_an_unexpected_error_while_removing_is_logged_as_failed_for_close_and_sw
     assert by_via["close"]["outcome"] == "failed" and "disk exploded" in str(by_via["close"]["reason"])
     assert by_via["sweep"]["outcome"] == "failed"
     assert lab.station("claude-e5e5e5").exists() and _holder(lab, "claude-e5e5e5").exists()
+
+
+# ── D-169: a Run lease that has not expired keeps its station ───────────────────
+
+LEASED = "Run RUN-X（RUNNING）的租约到 2999-01-01T00:00:00+00:00 才过期"
+
+
+def _leased(path: Path) -> str:
+    return LEASED
+
+
+def _unreadable(path: Path) -> str:
+    raise RuntimeError("ledger locked")
+
+
+def test_release_refuses_a_station_under_a_live_lease_and_the_station_stays(lab: Lab) -> None:
+    station = _alias_station(lab)
+    with pytest.raises(StationLeasedError, match="RUN-X"):
+        lab.service(_leased).release("claude-abcdef")
+    assert station.exists() and (_holder(lab, "claude-abcdef")).exists()
+    (entry,) = _reclaim_log(lab)
+    assert entry["outcome"] == "refused" and entry["via"] == "release" and "RUN-X" in str(entry["reason"])
+
+
+def test_release_self_under_a_live_lease_is_skipped_and_logged_as_skipped(lab: Lab) -> None:
+    station = _alias_station(lab)
+    with pytest.raises(StationLeasedError):
+        lab.service(_leased).release("claude-abcdef", via="release-self")
+    assert station.exists()
+    (entry,) = _reclaim_log(lab)
+    assert entry["via"] == "release-self-skipped" and entry["outcome"] == "skipped"
+
+
+def test_cli_release_self_under_a_live_lease_exits_zero_and_keeps_the_station(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("auto_pm.ui.cli.worktree.require_runtime_identity_for_workspace", lambda _ctx: None)
+    monkeypatch.setattr("auto_pm.application.core.agent_worktree_service._ledger_lease_probe", lambda root: _leased)
+    lab.service().open("claude-abcdef", "CARD-9")
+    runner = CliRunner(env={"AUTO_PM_AGENT": "claude", "AUTO_PM_SESSION_ID": "abcdef0123456789"})
+    result = runner.invoke(cli, ["--workspace", str(lab.root), "worktree", "release", "--self"])
+    assert result.exit_code == 0, result.output
+    assert "跳过回收" in result.output
+    assert lab.station("claude-abcdef").exists()
+    (entry,) = _reclaim_log(lab)
+    assert entry["via"] == "release-self-skipped"
+
+
+def test_cli_release_by_name_under_a_live_lease_is_refused_with_exit_one(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("auto_pm.ui.cli.worktree.require_runtime_identity_for_workspace", lambda _ctx: None)
+    monkeypatch.setattr("auto_pm.application.core.agent_worktree_service._ledger_lease_probe", lambda root: _leased)
+    lab.service().open("claude-abcdef", "CARD-9")
+    result = CliRunner().invoke(cli, ["--workspace", str(lab.root), "worktree", "release", "claude-abcdef"])
+    assert result.exit_code == 1, result.output
+    assert lab.station("claude-abcdef").exists()
+
+
+def test_an_expired_lease_does_not_hold_the_station(lab: Lab) -> None:
+    station = _alias_station(lab)
+    lab.service(lambda path: "").release("claude-abcdef")
+    assert not station.exists()
+
+
+def test_a_probe_that_cannot_answer_refuses_instead_of_reading_as_free(lab: Lab) -> None:
+    station = _alias_station(lab)
+    with pytest.raises(StationLeasedError, match="ledger locked"):
+        lab.service(_unreadable).release("claude-abcdef")
+    assert station.exists()
+
+
+def test_close_refuses_a_station_under_a_live_lease(lab: Lab) -> None:
+    station = _alias_done(lab, "claude-abcdef")
+    with pytest.raises(StationLeasedError, match="RUN-X"):
+        lab.service(_leased).close("claude-abcdef", fetch=False)
+    assert station.exists()
+    assert _reclaim_log(lab)[-1]["via"] == "close" and _reclaim_log(lab)[-1]["outcome"] == "refused"
+
+
+def test_sweep_apply_leaves_a_station_under_a_live_lease_and_reports_it(lab: Lab) -> None:
+    station = _alias_done(lab, "claude-abcdef")
+    report = lab.service(_leased).sweep(apply=True, fetch=True)
+    assert station.exists()
+    assert any("RUN-X" in text for text in report.failed)
+
+
+def test_reclaim_stale_apply_leaves_a_station_under_a_live_lease(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    station = _alias_station(lab)
+    monkeypatch.setattr(AgentWorktreeService, "stale_aliases", lambda self: [("claude-abcdef", "test")])
+    lab.service(_leased).reclaim_stale(apply=True)
+    assert station.exists()
+    assert _reclaim_log(lab)[-1]["via"] == "reclaim-stale" and _reclaim_log(lab)[-1]["outcome"] == "refused"
+
+
+def test_make_room_never_frees_a_station_under_a_live_lease(lab: Lab) -> None:
+    station = _alias_done(lab, "claude-abcdef")
+    _full_floor_with(lab, "claude-abcdef")
+    assert lab.service().count() == MAX_STATIONS
+    with pytest.raises(StationRefusedError, match="上限"):
+        lab.service(_leased).open("trae", "CARD-NEW")
+    assert station.exists() and not lab.station("trae").exists()
+
+
+# ── D-180 A/B: orphan holder records, throttled heartbeat ──────────────────────
+
+
+def _orphan(lab: Lab, name: str = "claude-0ab0ab", *, pid: int = DEAD_PID, hours: float = 10.0) -> Path:
+    """A holder record with no station directory behind it (the directory went first)."""
+
+    from datetime import UTC, datetime, timedelta
+
+    folder = lab.root / HOLDERS
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+    path = folder / f"{name}.json"
+    path.write_text(
+        json.dumps({"agent": name, "session_id": "", "pid": pid, "title": "", "opened_at": stamp, "heartbeat_at": stamp}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_dead_silent_record_without_a_station_is_listed_as_an_orphan(lab: Lab) -> None:
+    _orphan(lab)
+    (name, reason), = lab.service().orphan_records()
+    assert name == "claude-0ab0ab" and "孤儿" in reason and "10." in reason
+    assert lab.service().reclaim_stale(apply=False) == [(name, reason)]
+    assert _holder(lab, name).exists() and _reclaim_log(lab) == []
+
+
+def test_reclaim_apply_removes_only_the_orphan_record_and_logs_it(lab: Lab) -> None:
+    path = _orphan(lab)
+    lab.service().reclaim_stale(apply=True)
+    assert not path.exists()
+    (entry,) = _reclaim_log(lab)
+    assert entry["via"] == "orphan-record" and entry["outcome"] == "removed" and entry["agent"] == "claude-0ab0ab"
+
+
+def test_a_record_that_has_no_pid_is_an_orphan_once_silent_but_a_fresh_one_is_not(lab: Lab) -> None:
+    _orphan(lab, "claude-aaaaaa", pid=0, hours=10.0)
+    _orphan(lab, "claude-bbbbbb", pid=0, hours=0.1)
+    assert [name for name, _ in lab.service().orphan_records()] == ["claude-aaaaaa"]
+
+
+@pytest.mark.parametrize("why", ["station-exists", "process-alive", "unreadable-stamp", "not-an-alias"])
+def test_a_record_is_not_an_orphan_when_anything_says_it_may_still_be_in_use(lab: Lab, why: str) -> None:
+    if why == "station-exists":
+        _alias_station(lab, "claude-abcdef")
+        _make_dead(lab, "claude-abcdef")  # stale station, not an orphan record
+    elif why == "process-alive":
+        _orphan(lab, pid=os.getpid())
+    elif why == "unreadable-stamp":
+        path = _orphan(lab)
+        note = json.loads(path.read_text(encoding="utf-8"))
+        note.update(heartbeat_at="garbage", opened_at="garbage")
+        path.write_text(json.dumps(note), encoding="utf-8")
+    else:
+        _orphan(lab, "notes", hours=100.0)
+    assert lab.service().orphan_records() == []
+
+
+def test_orphan_cleanup_for_a_user_only_and_an_agent_is_refused(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _orphan(lab)
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    with pytest.raises(StationRefusedError):
+        lab.service().reclaim_stale(apply=True)
+    assert path.exists()
+
+
+def test_list_says_there_are_orphan_records(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("auto_pm.ui.cli.worktree.require_runtime_identity_for_workspace", lambda _ctx: None)
+    _orphan(lab)
+    result = CliRunner().invoke(cli, ["--workspace", str(lab.root), "worktree", "list"])
+    assert result.exit_code == 0, result.output
+    assert "孤儿持有者记录" in result.output and "claude-0ab0ab" in result.output
+
+
+def test_heartbeat_with_an_interval_does_not_rewrite_a_fresh_record(lab: Lab) -> None:
+    _alias_station(lab)
+    path = _holder(lab, "claude-abcdef")
+    before = path.read_text(encoding="utf-8")
+    assert lab.service().touch_heartbeat("claude-abcdef", min_interval_seconds=300.0) is True
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_heartbeat_with_an_interval_refreshes_a_record_older_than_the_interval(lab: Lab) -> None:
+    _alias_station(lab)
+    _make_dead(lab, "claude-abcdef", hours=1.0)
+    old = json.loads(_holder(lab, "claude-abcdef").read_text(encoding="utf-8"))["heartbeat_at"]
+    assert lab.service().touch_heartbeat("claude-abcdef", min_interval_seconds=300.0) is True
+    assert json.loads(_holder(lab, "claude-abcdef").read_text(encoding="utf-8"))["heartbeat_at"] > old
+
+
+def test_any_worktree_command_of_a_conversation_with_a_station_refreshes_its_heartbeat(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("auto_pm.ui.cli.worktree.require_runtime_identity_for_workspace", lambda _ctx: None)
+    lab.service().open("claude-abcdef", "CARD-9")
+    _make_dead(lab, "claude-abcdef", hours=1.0)
+    old = json.loads(_holder(lab, "claude-abcdef").read_text(encoding="utf-8"))["heartbeat_at"]
+    runner = CliRunner(env={"AUTO_PM_AGENT": "claude", "AUTO_PM_SESSION_ID": "abcdef0123456789"})
+    result = runner.invoke(cli, ["--workspace", str(lab.root), "worktree", "list"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(_holder(lab, "claude-abcdef").read_text(encoding="utf-8"))["heartbeat_at"] > old
