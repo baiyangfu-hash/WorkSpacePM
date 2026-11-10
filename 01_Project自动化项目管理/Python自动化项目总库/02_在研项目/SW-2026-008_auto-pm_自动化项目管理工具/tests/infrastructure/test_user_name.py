@@ -9,7 +9,11 @@ import pytest
 
 from auto_pm.application.core.gate_run_service import child_environment
 from auto_pm.infrastructure import user_name
-from auto_pm.infrastructure.user_name import current_user_name
+from auto_pm.infrastructure.user_name import (
+    UserNameUnavailableError,
+    current_user_name,
+    require_user_name,
+)
 
 
 def _no_pwd(*_a: object) -> str:
@@ -70,3 +74,15 @@ CI_IDENTITY_VARIABLES = {
 def test_u05_gate_child_env_matches_the_ci_identity_variable_set() -> None:
     source = dict.fromkeys(CI_IDENTITY_VARIABLES, "v")
     assert CI_IDENTITY_VARIABLES <= set(child_environment(source))
+
+
+def test_u06_a_record_that_says_who_did_it_never_gets_the_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-204: a signature by "unknown" proves nothing; ``require_user_name`` raises instead of falling back."""
+
+    monkeypatch.setattr(getpass, "getuser", _no_pwd)
+    monkeypatch.setattr(os, "getlogin", lambda: "")
+    with pytest.raises(UserNameUnavailableError):
+        require_user_name()
+    assert current_user_name() == user_name.UNKNOWN_USER  # display and metadata keep the harmless placeholder
+    monkeypatch.setattr(getpass, "getuser", lambda: " alice ")
+    assert require_user_name() == "alice"

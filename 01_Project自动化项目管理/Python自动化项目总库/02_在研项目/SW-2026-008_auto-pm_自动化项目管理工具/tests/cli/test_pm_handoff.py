@@ -290,3 +290,22 @@ def test_the_database_and_the_wallet_are_never_tracked_by_git() -> None:
     for path in (".auto-pm/continuity.db", f"{lease_wallet.WALLET_DIR.as_posix()}/RUN-ANY.json"):
         ignored = subprocess.run(["git", "-C", str(repository), "check-ignore", "-q", path], check=False)
         assert ignored.returncode == 0, f"{path} is not git-ignored"
+
+
+def test_d204_sign_risk_refuses_when_the_platform_cannot_say_who_signs(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A signature by "unknown" proves nothing; with no login name the command signs nothing and says so."""
+
+    assert _start(root).exit_code == 0
+    reclaim = ("continuity", "run", "reclaim", "--run-id", RUN, "--claimant", "agent-b", "--reason", "power loss", "--holder-pid", "none")
+    _expire(root)
+    assert _invoke(root, *reclaim).exit_code == 3  # pending, waiting for the user's signature
+
+    def nobody() -> str:
+        raise pm_handoff_cli.UserNameUnavailableError("取不到当前登录用户名")
+
+    monkeypatch.setattr(pm_handoff_cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(pm_handoff_cli, "_stdout_is_tty", lambda: True)
+    monkeypatch.setattr(pm_handoff_cli, "require_user_name", nobody)
+    refused = _invoke(root, "pm", "sign-risk", "--run-id", RUN, "--claimant", "agent-b", input_text=f"{RUN}\n接受风险\n")
+    assert refused.exit_code == 1 and "未签署" in refused.output and "unknown" in refused.output
+    assert _invoke(root, *reclaim).exit_code == 3, "nothing was signed: the reclaim is still pending"
