@@ -287,7 +287,15 @@ def _step_verdict(name: str, exit_code: int | None, log: Path) -> tuple[str, str
         return "FAIL", "超时被杀掉"
     if _NO_MODULE.search(tail) and name != "pytest":
         return "UNVERIFIED", f"本环境没装 {name}（No module named）；用 setup_env.sh 建的 .venv 里的 python 来跑"
-    return "FAIL", ""
+    last = next((line.strip() for line in reversed(tail.splitlines()) if line.strip()), "")
+    if _NO_MODULE.search(tail) and name == "pytest":
+        return "FAIL", f"环境错误（pytest 或它的插件没装，测试没能开始）：{_missing_module_line(tail)}；用 setup_env.sh 建的 .venv 里的 python 来跑"
+    # D-196: a FAIL always says why; an empty reason is what made the 11-09 gate summary unreadable.
+    return "FAIL", f"退出码 {exit_code}" + (f"；日志最后一行：{last[:160]}" if last else "；日志是空的")
+
+
+def _missing_module_line(tail: str) -> str:
+    return next((line.strip()[:160] for line in tail.splitlines() if _NO_MODULE.search(line)), "No module named")
 
 
 class PrecheckService:

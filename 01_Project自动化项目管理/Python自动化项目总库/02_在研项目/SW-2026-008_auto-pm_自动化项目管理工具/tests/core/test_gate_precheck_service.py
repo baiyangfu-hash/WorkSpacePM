@@ -336,6 +336,21 @@ def test_a_failing_step_fails_the_report_although_the_others_pass(
     assert {s.name: s.verdict for s in report.steps}[step] == "FAIL"
 
 
+@pytest.mark.parametrize("step", ["ruff", "mypy", "pytest"])
+def test_d196_a_failing_step_always_says_why(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, step: str) -> None:
+    for text, expected in (("boom\n", "boom"), ("", "日志是空的")):
+        report = _service_run(monkeypatch, tmp_path, _Recorder({step: (3, text)}), _py_changed(), (["tests/t.py"], ""))
+        why = next(s.why for s in report.steps if s.name == step)
+        assert "退出码 3" in why and expected in why, (step, text, why)
+
+
+def test_d196_pytest_missing_is_named_an_environment_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    recorder = _Recorder({"pytest": (1, "/usr/bin/python: No module named pytest\n")})
+    report = _service_run(monkeypatch, tmp_path, recorder, _py_changed(), (["tests/t.py"], ""))
+    why = next(s.why for s in report.steps if s.name == "pytest")
+    assert report.verdict == "FAIL" and "环境错误" in why and "No module named pytest" in why
+
+
 def test_a_missing_tool_is_unverified_not_a_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorder = _Recorder({"mypy": (1, "/usr/bin/python: No module named mypy\n")})
     report = _service_run(monkeypatch, tmp_path, recorder, _py_changed(), (["tests/t.py"], ""))
