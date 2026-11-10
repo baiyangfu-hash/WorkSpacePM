@@ -25,7 +25,7 @@ from auto_pm.application.core.worktree_policy_service import (
 from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.infrastructure import process_probe
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
-from auto_pm.infrastructure.user_name import current_user_name
+from auto_pm.infrastructure.user_name import UserNameUnavailableError, require_user_name
 from auto_pm.ui.cli.approval_pin import require_approval_pin
 from auto_pm.ui.cli.runtime_identity_guard import project_of_run, require_runtime_identity
 
@@ -222,10 +222,17 @@ def sign_risk_pm(ctx: click.Context, run_id: str, claimant_id: str) -> None:
         ctx.find_root().obj.control_root, summary=f"签署接受风险：Run {run_id} → {claimant_id}", purpose="sign-risk", subject=f"{run_id}:{claimant_id}"
     )
     try:
+        signer = proof.approver if proof is not None else require_user_name()
+    except UserNameUnavailableError as error:
+        raise click.ClickException(
+            f"{error}，未签署：签字必须记下是谁，不能记成 unknown。请在正常登录的终端里运行同一条命令，"
+            "或设置环境变量 USERNAME / USER 后重试。"
+        ) from error
+    try:
         signature = service.sign_risk(
             run_id=run_id,
             claimant_id=claimant_id,
-            signer=proof.approver if proof is not None else current_user_name(),
+            signer=signer,
             environ=os.environ,
             stdin_is_tty=_stdin_is_tty(),
             stdout_is_tty=_stdout_is_tty(),

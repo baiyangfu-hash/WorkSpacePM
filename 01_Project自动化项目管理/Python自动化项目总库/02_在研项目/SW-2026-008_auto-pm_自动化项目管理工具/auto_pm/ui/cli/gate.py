@@ -111,13 +111,17 @@ def run_command(
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
     require_runtime_identity_for_workspace(ctx, candidate_release)
     arm_for_heavy_job("long-gate")  # D-168: the full regression (eleven pytest groups, hours) is the heavy job the memory gate protects; never raises
+    service = GateRunService()
     try:
-        summary = GateRunService().run(
+        summary = service.run(
             worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60
         )
     except GateRunError as error:
         click.echo(f"无法开始: {error}", err=True)
         raise SystemExit(2) from error
+    finally:
+        for warning in service.preflight_warnings:
+            click.echo(f"⚠ {warning}", err=True)
     _report(summary)
     click.echo(
         f"记录 SHA-256 {sha256_file(out_dir / SUMMARY_FILE)}（存进检查点，之后 gate judge --expect-sha256 核对）"

@@ -13,6 +13,10 @@ import os
 UNKNOWN_USER = "unknown"
 
 
+class UserNameUnavailableError(RuntimeError):
+    """The platform cannot say who is logged in (no env name, no ``pwd``, no console)."""
+
+
 def current_user_name(default: str = UNKNOWN_USER) -> str:
     """The login name, or ``default`` when the platform cannot tell (no env name and no ``pwd`` / no console)."""
     try:
@@ -25,3 +29,17 @@ def current_user_name(default: str = UNKNOWN_USER) -> str:
         except OSError:
             name = ""
     return name or default
+
+
+def require_user_name() -> str:
+    """The login name, or :class:`UserNameUnavailableError`.
+
+    For records that answer "who did this" (a signature, an approval).  Never put the ``unknown`` placeholder into those:
+    a signature by "unknown" proves nothing and cannot be told from another "unknown" (D-204).
+    ``current_user_name`` is for display and for document metadata, where a placeholder is harmless.
+    """
+
+    name = current_user_name("").strip()
+    if not name:
+        raise UserNameUnavailableError("取不到当前登录用户名")
+    return name

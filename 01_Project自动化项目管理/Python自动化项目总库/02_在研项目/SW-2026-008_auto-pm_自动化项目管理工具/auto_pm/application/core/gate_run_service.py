@@ -28,6 +28,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from auto_pm.application.core.gate_env_preflight import (
+    UNFIT_HEADLINE,
+    looks_like_environment_error,
+    preflight_problems,
+)
+
 SCHEMA = "gate-run.v1"
 SUMMARY_FILE = "gate_summary.json"
 DEFAULT_TIMEOUT_SECONDS = 3 * 3600
@@ -203,12 +209,28 @@ def _says_no_tests(log: Path) -> bool:
         return False
 
 
+def _environment_error_line(log: Path) -> str:
+    """A log line showing the group died of its environment; empty when pytest got as far as passing tests (D-196)."""
+
+    counts = pytest_counts(log)
+    if counts is not None and counts.get("passed", 0) > 0:
+        return ""
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")  # lenient-decode: diagnostic scan of a log
+    except OSError:
+        return ""
+    return looks_like_environment_error(text)
+
+
 def judge_group(group: GateGroup, exit_code: int | None, log: Path) -> tuple[str, str]:
     """``("PASS"|"FAIL", why)`` for one group from its exit code and its own summary line."""
 
     if exit_code is None:
         return "FAIL", "没有退出码（没跑完）"
     if exit_code != 0:
+        env_line = _environment_error_line(log)
+        if env_line:
+            return "ENV_ERROR", f"环境错误（测试没能开始跑，不是用例失败）：{env_line}"
         hint = (
             "（4/5：用法错误或一个用例都没收集到，通常是目录不对）" if exit_code in (4, 5) else ""
         )
@@ -423,9 +445,17 @@ def project_dir_in(worktree: Path, module_file: Path | None = None) -> Path:
 
 
 class GateRunService:
-    def __init__(self, *, runner: Runner = default_runner, python: str = sys.executable) -> None:
+    def __init__(
+        self,
+        *,
+        runner: Runner = default_runner,
+        python: str = sys.executable,
+        preflight: Callable[[str, Path], tuple[list[str], list[str]]] | None = None,
+    ) -> None:
         self._runner = runner
         self._python = python
+        self._preflight = preflight or preflight_problems  # looked up now, so a test can swap the module attribute
+        self.preflight_warnings: list[str] = []
 
     def select(self, only: Sequence[str] = ()) -> tuple[GateGroup, ...]:
         known = {g.name: g for g in GROUPS}
@@ -464,6 +494,9 @@ class GateRunService:
         if not (project / "tests").is_dir():
             raise GateRunError(f"{project} 下没有 tests/；门禁不会在别的目录里空跑")
         selected = self.select(only)
+        refusals, self.preflight_warnings = self._preflight(self._python, worktree)
+        if refusals:
+            raise GateRunError(f"{UNFIT_HEADLINE}：" + "；".join(refusals))
         out_dir.mkdir(parents=True, exist_ok=True)
         env = child_environment(base_env)
         before = tree_state(worktree, project)
@@ -487,6 +520,9 @@ class GateRunService:
             self._judge(result, group, log)
             summary.results[group.name] = result
             self._write(out_dir, summary)
+            if result.verdict == "ENV_ERROR":  # every later group would die of the same cause; say so once and stop
+                summary.reasons.append(f"第 {len(summary.results)} 组 {group.name} 出现环境错误，已停止后面的组：{result.why}")
+                break
         after = tree_state(
             worktree, project
         )  # the round takes hours; the tree it judged must be the tree it started on
@@ -590,6 +626,9 @@ class GateRunService:
             r.verdict == "PASS" for r in summary.results.values()
         )
         problems = list(summary.reasons)
+        for name, result in summary.results.items():
+            if result.verdict != "PASS":
+                problems.append(f"组 {name}：{result.verdict}，{result.why or '没有原因记录'}")
         if summary.git_dirty is not False or summary.git_dirty_end is not False:
             problems.append("工作树不干净（含未跟踪文件）或读不出")
         if not summary.commit or summary.commit != summary.commit_end:
