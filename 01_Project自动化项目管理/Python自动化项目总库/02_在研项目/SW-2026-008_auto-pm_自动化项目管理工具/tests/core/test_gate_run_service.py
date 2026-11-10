@@ -25,6 +25,13 @@ from auto_pm.application.core.gate_run_service import (
 _PASS_LINE = "123 passed, 2 skipped in 4.20s\n"
 
 
+@pytest.fixture(autouse=True)
+def _interpreter_is_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests are about judging; whether the test machine's own interpreter is fit is pinned in test_gate_env_preflight."""
+
+    monkeypatch.setattr(gate, "preflight_problems", lambda _python, _worktree: ([], []))
+
+
 def _group(name: str = "g", **changes: object) -> GateGroup:
     return GateGroup(name, ("tests/x",), **changes)  # type: ignore[arg-type]
 
@@ -593,3 +600,69 @@ def test_a_round_is_not_pass_when_git_cannot_answer(
     summary = GateRunService(runner=_Recorder()).run(tree.install(monkeypatch), tmp_path)
     assert summary.verdict == "PARTIAL" and summary.reasons
     assert GateRunService().judge_dir(tmp_path).verdict == "PARTIAL"
+
+
+# ── the environment is judged before and during the run (D-196) ──────────────
+
+_XDIST_DEATH = "ERROR: usage: main.py [options]\nmain.py: error: unrecognized arguments: -n 8\n"
+
+
+def test_d196_an_unfit_interpreter_is_refused_before_any_group_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    recorder = _Recorder()
+    unfit = GateRunService(
+        runner=recorder, preflight=lambda python, _w: ([f"解释器 {python} 缺少测试要用的包：xdist", "正确的启动方式：…"], [])
+    )
+    with pytest.raises(GateRunError, match="环境不合格，未开跑.*xdist"):
+        unfit.run(repo, tmp_path / "out")
+    assert recorder.envs == [] and not (tmp_path / "out").exists()  # nothing ran, nothing was written
+
+
+def test_d196_the_default_preflight_is_the_real_one_and_a_warning_is_kept_for_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()  # the autouse stub off: GateRunService() must pick up the module's own preflight
+    from auto_pm.application.core import gate_env_preflight as pre
+
+    assert GateRunService()._preflight is pre.preflight_problems
+    repo = _clean_repo(monkeypatch)
+    service = GateRunService(runner=_Recorder(), preflight=lambda _p, _w: ([], ["不在虚拟环境里"]))
+    service.run(repo, tmp_path)
+    assert service.preflight_warnings == ["不在虚拟环境里"]
+
+
+def test_d196_an_environment_error_in_the_first_group_stops_the_gate_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    first = GROUPS[0].name
+    recorder = _Recorder({first: (4, _XDIST_DEATH)})
+    summary = GateRunService(runner=recorder).run(repo, tmp_path)
+    assert len(recorder.envs) == 1, "the other ten groups would die of the same cause; they must not be started"
+    assert summary.results[first].verdict == "ENV_ERROR" and "unrecognized arguments" in summary.results[first].why
+    assert summary.verdict == "FAIL"
+    assert any("环境错误" in r and first in r for r in summary.reasons)
+
+
+def test_d196_an_environment_error_is_not_a_test_failure_and_a_test_failure_is_not_an_environment_error(
+    tmp_path: Path,
+) -> None:
+    group = _group()
+    log = _log(tmp_path, _XDIST_DEATH)
+    assert gate.judge_group(group, 4, log)[0] == "ENV_ERROR"
+    real_failure = _log(tmp_path, "FAILED tests/x.py::test_a - ModuleNotFoundError: No module named 'foo'\n1 failed, 40 passed in 3.0s\n")
+    assert gate.judge_group(group, 1, real_failure)[0] == "FAIL"  # pytest got as far as passing tests: it ran
+
+
+def test_d196_a_failed_summary_always_names_the_failed_group_and_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-09: the summary said FAIL with an empty reasons column."""
+
+    repo = _clean_repo(monkeypatch)
+    name = GROUPS[1].name
+    summary = GateRunService(runner=_Recorder({name: (1, "3 failed, 90 passed in 9.0s\n")})).run(repo, tmp_path)
+    assert summary.verdict == "FAIL" and summary.reasons, "FAIL with no reason is the bug"
+    assert any(r.startswith(f"组 {name}：FAIL") and "退出码 1" in r for r in summary.reasons)
