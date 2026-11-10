@@ -13,6 +13,7 @@ tests/core/test_github_collector.py
 tests/core/test_plc_gate_baseline.py
 tests/core/test_pm_dashboard_gui.py
 tests/core/test_pm_flow_v2_prototype.py
+tests/core/test_pr_body_builder.py
 tests/core/test_pr_open_service.py
 tests/core/test_pr_ready_service.py
 tests/core/test_protected_files.py

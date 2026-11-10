@@ -16,6 +16,8 @@ import pr_overlap_check as overlap  # noqa: E402
 import pr_scope_check as gate  # noqa: E402
 import safety_zone_check as safety  # noqa: E402
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 TEMPLATE = (REPO / ".github" / "pull_request_template.md").read_text(encoding="utf-8", errors="replace")
 CARD = "plans/cards/CARD-9.md"
 SCOPE = ["a/b/one.py", "a/b/tests", "docs/two.md"]

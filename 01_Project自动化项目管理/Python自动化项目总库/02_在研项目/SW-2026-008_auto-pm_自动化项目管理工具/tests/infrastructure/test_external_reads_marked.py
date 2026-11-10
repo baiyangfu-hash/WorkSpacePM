@@ -23,9 +23,7 @@ MANIFEST = TESTS / "tools" / "sw008_ci" / "external_reads_manifest.txt"
 MARKER = "external_reads"
 
 # Files that should be in the manifest but are held back by an open claim on them.  Remove an entry once the file is marked.
-PENDING: dict[str, str] = {
-    "tests/core/test_pr_body_builder.py": "card 254 (D-194) holds this file; mark it and move it to the manifest when that PR is merged",
-}
+PENDING: dict[str, str] = {}
 
 
 def _climb(node: ast.AST) -> int | None:
