@@ -1983,3 +1983,106 @@ def test_any_worktree_command_of_a_conversation_with_a_station_refreshes_its_hea
     result = runner.invoke(cli, ["--workspace", str(lab.root), "worktree", "list"])
     assert result.exit_code == 0, result.output
     assert json.loads(_holder(lab, "claude-abcdef").read_text(encoding="utf-8"))["heartbeat_at"] > old
+
+
+# ── D-169: the real ledger probe (审计第 1 轮：真探针此前零测试，且不分终态) ──────────────────────────────
+
+
+class _FakeRun:
+    def __init__(self, run_id: str, state: str, path: Path) -> None:
+        self.run_id = run_id
+        self.worktree_path = str(path)
+        self.state = type("S", (), {"value": state})()
+
+
+class _FakeLease:
+    def __init__(self, token: str, minutes_from_now: float) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        self.lease_token = token
+        self.expires_at = (datetime.now(UTC) + timedelta(minutes=minutes_from_now)).isoformat()
+
+
+def _real_probe(lab: Lab, monkeypatch: pytest.MonkeyPatch, runs: list[tuple[str, str, str, float]], *, broken: bool = False) -> str:
+    """Run the real ``_ledger_lease_probe`` against a stand-in ledger; ``runs`` = (run_id, state, token, minutes to expiry)."""
+
+    from auto_pm.application.core import agent_worktree_service as module
+
+    station = lab.root / ".auto-pm" / "worktrees" / "claude-abcdef"
+    by_id = {run_id: (state, token, minutes) for run_id, state, token, minutes in runs}
+
+    class FakeStore:
+        def __init__(self, _root: Path) -> None:
+            if broken:
+                raise OSError("ledger unreadable")
+
+        def list_works(self, _project: str) -> list[Any]:
+            return [type("W", (), {"work_id": "W1"})()]
+
+        def list_runs(self, _work: str) -> list[Any]:
+            return [_FakeRun(run_id, state, station) for run_id, (state, _t, _m) in by_id.items()]
+
+        def get_lease(self, run_id: str) -> _FakeLease:
+            _state, token, minutes = by_id[run_id]
+            return _FakeLease(token, minutes)
+
+    class FakeContext:
+        def __init__(self, _root: str) -> None:
+            pass
+
+        def registered_project_ids(self) -> list[str]:
+            return ["P1"]
+
+    monkeypatch.setattr("auto_pm.infrastructure.continuity_store.ContinuityStore", FakeStore)
+    monkeypatch.setattr("auto_pm.application.core.workspace_context_service.WorkspaceContextService", FakeContext)
+    return module._ledger_lease_probe(lab.root)(station)
+
+
+def _with_ledger_file(lab: Lab) -> None:
+    (lab.root / ".auto-pm").mkdir(exist_ok=True)
+    (lab.root / ".auto-pm" / "continuity.db").write_bytes(b"")
+
+
+def test_real_probe_refuses_a_running_run_whose_lease_has_not_expired(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_ledger_file(lab)
+    message = _real_probe(lab, monkeypatch, [("R1", "RUNNING", "live-token", 20.0)])
+    assert "R1" in message and "RUNNING" in message
+
+
+@pytest.mark.parametrize("state", ["SUCCEEDED", "FAILED", "CANCELLED"])
+def test_real_probe_lets_a_finished_run_go_even_if_its_lease_row_has_not_expired(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    _with_ledger_file(lab)
+    assert _real_probe(lab, monkeypatch, [("R1", state, "RELEASED:abc", 20.0)]) == ""
+    assert _real_probe(lab, monkeypatch, [("R1", state, "live-token", 20.0)]) == ""
+
+
+def test_real_probe_lets_a_fenced_lease_go_whatever_the_run_state(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_ledger_file(lab)
+    assert _real_probe(lab, monkeypatch, [("R1", "BLOCKED", "RELEASED:abc", 20.0)]) == ""
+
+
+def test_real_probe_lets_an_expired_lease_go(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_ledger_file(lab)
+    assert _real_probe(lab, monkeypatch, [("R1", "RUNNING", "live-token", -5.0)]) == ""
+
+
+def test_real_probe_still_refuses_when_one_of_several_runs_on_the_path_is_live(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_ledger_file(lab)
+    message = _real_probe(
+        lab, monkeypatch, [("R1", "SUCCEEDED", "RELEASED:abc", 20.0), ("R2", "RUNNING", "live-token", 20.0)]
+    )
+    assert "R2" in message and "R1" not in message
+
+
+def test_real_probe_treats_a_missing_ledger_as_free(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _real_probe(lab, monkeypatch, [("R1", "RUNNING", "live-token", 20.0)]) == ""
+
+
+def test_real_probe_raises_when_the_ledger_exists_but_cannot_be_read(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_ledger_file(lab)
+    with pytest.raises(OSError):
+        _real_probe(lab, monkeypatch, [("R1", "RUNNING", "live-token", 20.0)], broken=True)

@@ -359,6 +359,9 @@ def _ledger_run_state(root: Path) -> RunStateLookup:
     return lookup
 
 
+_TERMINAL_RUN_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
+
+
 def _ledger_lease_probe(root: Path) -> LeaseProbe:
     """D-169: describe the unexpired Run lease that sits on a station path, read-only through the ledger's public reads.
 
@@ -381,7 +384,11 @@ def _ledger_lease_probe(root: Path) -> LeaseProbe:
                 for run in store.list_runs(work.work_id):
                     if _same_path_key(Path(run.worktree_path)) != wanted:
                         continue
+                    if run.state.value in _TERMINAL_RUN_STATES:
+                        continue  # a finished Run no longer holds the station, whatever its lease row still says
                     lease = store.get_lease(run.run_id)
+                    if lease.lease_token.startswith("RELEASED:"):
+                        continue  # the ledger fenced this lease on purpose (expiry is left unchanged when it does)
                     expires = datetime.fromisoformat(lease.expires_at)
                     if expires.tzinfo is None:
                         expires = expires.replace(tzinfo=UTC)
