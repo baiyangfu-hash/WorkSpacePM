@@ -19,6 +19,7 @@ from auto_pm.application.core import pm_facade_service as facade_module
 from auto_pm.application.core.acceptance_runner import worktree_environment
 from auto_pm.contracts.plan_checklist import AcceptanceCheck
 from auto_pm.infrastructure import long_run_core as core
+from tests.infrastructure.test_long_run_core import stop_leftover_jobs, use_lab
 from tests.plan_checklist_support import native_command, passing_command
 
 PY = sys.executable
@@ -443,7 +444,19 @@ def test_a_long_check_without_a_record_is_refused_with_the_exact_command_and_a_s
     assert f"{tree}/test_big.py" in refused.error  # {worktree} already replaced (the template's own "/" stays, also on Windows): copy and run
 
 
-def test_the_printed_command_really_produces_evidence_that_the_next_verify_accepts(tmp_path: Path) -> None:
+def test_the_printed_command_really_produces_evidence_that_the_next_verify_accepts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # D-226/D-227: the job runs the long-run lab (a fixed memory reading, not the host's) and is never left frozen behind
+    lab = use_lab(monkeypatch, tmp_path_factory.mktemp("long-run-lab"))
+    monkeypatch.setattr(lab, "arm", lambda *_args, **_kwargs: None)
+    try:
+        _the_printed_command_produces_accepted_evidence(tmp_path)
+    finally:
+        stop_leftover_jobs(tmp_path)
+
+
+def _the_printed_command_produces_accepted_evidence(tmp_path: Path) -> None:
     tree = _repo(tmp_path, 101)
     check = AcceptanceCheck(command=_pytest_command(), expected_exit_code=0)
     env = worktree_environment(tree, tmp_path)

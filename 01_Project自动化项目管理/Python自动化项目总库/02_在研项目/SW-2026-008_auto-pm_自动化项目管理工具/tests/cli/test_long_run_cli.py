@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from click.testing import CliRunner
@@ -13,11 +15,22 @@ from click.testing import CliRunner
 from auto_pm.infrastructure import long_run_core as core
 from auto_pm.infrastructure import memory_preflight as mp
 from auto_pm.ui.cli.__main__ import cli
+from tests.infrastructure.test_long_run_core import stop_leftover_jobs, use_lab
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 GIB = mp.GIB
 PY = sys.executable
+
+
+@pytest.fixture(autouse=True)
+def lab(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[ModuleType]:
+    """D-226/D-227: jobs run the long-run lab (a fixed, healthy memory reading, not the host's) and nothing is left frozen afterwards."""
+
+    module = use_lab(monkeypatch, tmp_path_factory.mktemp("long-run-lab"))
+    monkeypatch.setattr(module, "arm", lambda *_args, **_kwargs: None)
+    yield module
+    stop_leftover_jobs(tmp_path)
 
 
 def _run(workspace: Path, *args: str):  # type: ignore[no-untyped-def]
@@ -54,9 +67,9 @@ def test_a_failing_command_is_recorded_as_failed_with_its_exit_code(tmp_path: Pa
     assert final["exit_code"] == 3
 
 
-def test_start_is_refused_on_a_hot_machine_and_creates_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mp, "read_commit", lambda: mp.CommitSnapshot(40 * GIB, 64 * GIB, 32 * GIB, 2 * GIB))
-    monkeypatch.setattr(mp, "all_processes", lambda: (mp.ProcessUse(7, "pytest.exe", 12 * GIB),))
+def test_start_is_refused_on_a_hot_machine_and_creates_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lab: ModuleType) -> None:
+    monkeypatch.setattr(lab, "read_commit", lambda: lab.CommitSnapshot(40 * GIB, 64 * GIB, 32 * GIB, 2 * GIB))
+    monkeypatch.setattr(lab, "all_processes", lambda: (lab.ProcessUse(7, "pytest.exe", 12 * GIB),))
 
     result = _run(tmp_path, "start", "--name", "hot", "--cwd", str(tmp_path), "--", PY, "-c", "pass")
 

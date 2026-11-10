@@ -50,8 +50,15 @@ from typing import Any
 SCHEMA = "long-run.v1"
 RUN_ROOT = Path(".auto-pm") / "long-run"
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
-GUARD_LIMIT_GIB = 40.0  # pause the tree at this much committed memory (the frozen mem_guard's default)
-GUARD_RESUME_GIB = 36.0  # resume below this
+#: D-226: the guard pauses the tree at ``GUARD_LIMIT_RATIO`` of the machine's commit limit and resumes below ``GUARD_RESUME_RATIO`` of it, the
+#: same lines as the resident memory gate (``scripts/memory_gate.py`` ``default_thresholds``).  A fixed 40 GiB paused every job on a laptop
+#: whose ordinary load is 40-42 GiB of a much larger limit.  The fixed numbers stay only as the fallback when the limit cannot be read.
+GUARD_LIMIT_RATIO = 0.80
+GUARD_RESUME_RATIO = 0.75
+GUARD_MIN_GAP_GIB = 3.0  # the resume line stays at least this far below the pause line
+GUARD_SMALL_LIMIT_GIB = 20.0  # below this commit limit the ratios are not trusted (memory_gate: MIN_LIMIT_FLOOR_GIB / MIN_LIMIT_RATIO)
+GUARD_LIMIT_GIB = 40.0  # fallback pause line when the commit limit is unknown (the frozen mem_guard's default)
+GUARD_RESUME_GIB = 36.0  # fallback resume line
 UNOWNED_RISE_GIB = 8.0
 GIT_TIMEOUT_SECONDS = 60
 #: pytest reads these from the environment and they can select part of a suite (``-k``) or change which plugins run; a long-run record is
@@ -501,14 +508,28 @@ def worker_main(run_dir: Path) -> int:
 
 
 # ---------------------------------------------------------------- the guard
+def guard_thresholds(commit_limit_gib: float | None) -> tuple[float, float, str]:
+    """(pause line, resume line, where they come from) in GiB for a machine whose commit limit is ``commit_limit_gib`` (D-226).
+
+    Same rule as the resident memory gate's defaults: pause at limit x ``GUARD_LIMIT_RATIO``, resume below min(limit x ``GUARD_RESUME_RATIO``,
+    pause line - ``GUARD_MIN_GAP_GIB``); an unknown or very small limit falls back to the fixed ``GUARD_LIMIT_GIB`` / ``GUARD_RESUME_GIB``.
+    """
+
+    if commit_limit_gib is None or commit_limit_gib < GUARD_SMALL_LIMIT_GIB:
+        return GUARD_LIMIT_GIB, GUARD_RESUME_GIB, f"fixed {GUARD_LIMIT_GIB:g}/{GUARD_RESUME_GIB:g} GiB (commit limit unknown or below {GUARD_SMALL_LIMIT_GIB:g} GiB)"
+    limit = commit_limit_gib * GUARD_LIMIT_RATIO
+    resume = min(commit_limit_gib * GUARD_RESUME_RATIO, limit - GUARD_MIN_GAP_GIB)
+    return limit, resume, f"commit limit {commit_limit_gib:.1f} GiB x {GUARD_LIMIT_RATIO:g}/{GUARD_RESUME_RATIO:g}"
+
+
 def guard_loop(
     run_dir: Path,
     *,
     read_committed_gib: Callable[[], float | None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-    limit_gib: float = GUARD_LIMIT_GIB,
-    resume_gib: float = GUARD_RESUME_GIB,
+    limit_gib: float | None = None,
+    resume_gib: float | None = None,
     poll_seconds: float = GUARD_POLL_SECONDS,
     max_seconds: float = MAX_SECONDS,
     tree: Callable[[int], list[int]] = process_tree,
@@ -517,11 +538,15 @@ def guard_loop(
     awake: Callable[[bool], None] = keep_awake,
     read_unowned_gib: Callable[[], float | None] | None = None,
     unowned_rise_gib: float = UNOWNED_RISE_GIB,
+    read_commit_limit_gib: Callable[[], float | None] | None = None,
 ) -> None:
     """Watch the system commit charge until the job ends (``DONE``/``FAILED``) or ``max_seconds``.
 
-    At ``limit_gib`` committed the worker's whole process tree is paused (``ALERT_<time>.txt`` and ``PAUSED``); it is resumed when the charge
-    falls below ``resume_gib`` or a ``RESUME`` file appears.  Also keeps the machine awake while it watches, and records the peak in ``guard.json``.
+    ``limit_gib`` / ``resume_gib`` given: those lines.  Not given: ``guard_thresholds`` of the commit limit read with each sample (D-226), so the
+    lines follow the machine; ``guard.json`` records the lines in force and where they came from.
+
+    At the pause line the worker's whole process tree is paused (``ALERT_<time>.txt`` and ``PAUSED``); it is resumed when the charge
+    falls below the resume line or a ``RESUME`` file appears.  Also keeps the machine awake while it watches, and records the peak in ``guard.json``.
 
     Besides, it records (does not pause) an alert each time the commit that no readable process owns has grown by ``unowned_rise_gib`` over
     the first reading of this run: that growth is invisible to the per-process numbers (11-03 coordinator ruling).
@@ -531,10 +556,20 @@ def guard_loop(
         preflight = _preflight_module()
         if read_unowned_gib is None:
             read_unowned_gib = preflight.read_unowned_gib
+        last_limit: list[float | None] = [None]
 
         def read_committed_gib() -> float | None:
             snapshot = preflight.read_commit()
-            return None if snapshot is None else float(snapshot.committed) / preflight.GIB
+            if snapshot is None:
+                return None
+            gib = float(preflight.GIB)
+            last_limit[0] = float(snapshot.limit) / gib if snapshot.limit > 0 else None
+            return float(snapshot.committed) / gib
+
+        if read_commit_limit_gib is None:
+
+            def read_commit_limit_gib() -> float | None:
+                return last_limit[0]  # read together with the committed number above, not a second reading
 
     paused: list[int] = []
     started = clock()
@@ -552,6 +587,15 @@ def guard_loop(
             awake(True)
             committed = read_committed_gib()
             if committed is not None:
+                if limit_gib is not None and resume_gib is not None:
+                    pause_line, resume_line, source = limit_gib, resume_gib, "given"
+                else:
+                    pause_line, resume_line, source = guard_thresholds(read_commit_limit_gib() if read_commit_limit_gib is not None else None)
+                    pause_line = limit_gib if limit_gib is not None else pause_line
+                    resume_line = resume_gib if resume_gib is not None else resume_line
+                state["limit_gib"] = round(pause_line, 2)
+                state["resume_gib"] = round(resume_line, 2)
+                state["threshold_source"] = source
                 state["samples"] += 1
                 state["peak_committed_gib"] = max(float(state["peak_committed_gib"]), round(committed, 2))
                 state["last_committed_gib"] = round(committed, 2)
@@ -559,7 +603,7 @@ def guard_loop(
                 _write_json(run_dir / "guard.json", state)  # at once: the first sample must be visible long before the (slower) process listing below
                 if ended:
                     pass  # nothing left to protect: no pause, no resume
-                elif not paused and committed >= limit_gib:
+                elif not paused and committed >= pause_line:
                     try:
                         root = _worker_pid(run_dir)
                     except LongRunError as problem:
@@ -577,11 +621,11 @@ def guard_loop(
                     if members:
                         paused = members
                         count = pause(paused)
-                        text = f"{_now()} committed {committed:.1f} GiB >= {limit_gib:g} GiB: paused {count} processes of the tree of pid {root}\n"
+                        text = f"{_now()} committed {committed:.1f} GiB >= {pause_line:.1f} GiB: paused {count} processes of the tree of pid {root}\n"
                         (run_dir / f"ALERT_{int(time.time())}.txt").write_text(text, encoding="utf-8")
                         (run_dir / "PAUSED").write_text(f"{_now()} committed {committed:.1f} GiB\n", encoding="utf-8")
                         state["alerts"].append(text.strip())
-                elif paused and (committed < resume_gib or (run_dir / "RESUME").exists()):
+                elif paused and (committed < resume_line or (run_dir / "RESUME").exists()):
                     count = unpause(paused)
                     (run_dir / "PAUSED").unlink(missing_ok=True)
                     (run_dir / "RESUME").unlink(missing_ok=True)
