@@ -60,12 +60,16 @@ jobs:
       - name: DEBUG print the group record
         if: always()
         run: |
+          set +e +o pipefail
           cd "$RUNNER_TEMP/gate-out/core" || exit 0
           ls -la
-          for f in *; do
-            echo "=== $f"
-            if [ "${f##*.}" = "json" ]; then head -c 6000 "$f"; echo; else grep -aE "^(FAILED|ERROR) |\[gate run\]" "$f" | head -n 80; echo "--- tail"; tail -n 120 "$f"; fi
-          done
+          echo "=== core.exit"; cat core.exit; echo
+          echo "=== gate_summary.json"; cat gate_summary.json; echo
+          echo "=== core.txt summary lines"
+          grep -aE "^(FAILED|ERROR) |\[gate run\]|^=+ .* in [0-9]" core.txt | head -n 80
+          echo "=== core.txt tail"
+          tail -n 160 core.txt
+          exit 0
 
       - name: Upload the group record
         if: always()
