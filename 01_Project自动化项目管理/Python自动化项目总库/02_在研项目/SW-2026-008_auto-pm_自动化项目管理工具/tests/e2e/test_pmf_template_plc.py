@@ -337,6 +337,7 @@ def test_v11_the_plugin_test_catches_a_reset_that_does_not_write_the_outputs(tmp
     report = evaluate_project(plugin_service, project)
     assert report.check.passed  # the source is still well formed ...
     assert report.test is not None and not report.test.passed  # ... but the test sees the stale output after a reset
+    assert not report.test.panicked, report.test.messages  # a crashed run proves nothing about the reset (gate-full, 11-10)
 
 
 def test_v12_an_emptied_source_file_fails_the_cockpit_structure_check_although_the_plugin_reports_nothing(tmp_path: Path) -> None:

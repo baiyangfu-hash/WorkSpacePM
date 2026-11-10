@@ -128,7 +128,17 @@ jobs:
         run: |
           go version || echo "no Go toolchain on PATH"  # the plugin's test runner builds Go; record which one the runner had
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -vv -p no:cacheprovider --no-cov -rs \
-            tests/e2e/test_pmf_template_plc.py -k "plugin"
+            --basetemp "$RUNNER_TEMP/plugin-tests" tests/e2e/test_pmf_template_plc.py -k "plugin"
+
+      - name: Plugin test raw output when it failed (diagnosis only, nothing is kept)
+        if: failure()
+        run: |
+          # the cockpit keeps only the first panic line; print the plugin's whole output for the V09 project
+          for dir in "$RUNNER_TEMP"/plugin-tests/test_v09_*/*/02_PLC程序/PLC_ST; do
+            [ -d "$dir" ] || continue
+            echo "== $dir"
+            (cd "$dir" && "$(cygpath -u "$AUTO_PM_SIEMENS_LSP")" test . 2>&1 | tail -n 200) || true
+          done
 
   verdict:
     needs: group
