@@ -46,6 +46,8 @@ from tests.e2e.test_pmf_plc import (
     git,
 )
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 EXECUTOR = "trae:cn"
 TOKEN_ENV = "DRILL_TRAE_LEASE_TOKEN"
 SESSION_FILE = f"{PROJECT}/PM_SESSION_{PROJECT_ID}.md"

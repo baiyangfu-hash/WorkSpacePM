@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from auto_pm.ui.cli.__main__ import cli
 
-pytestmark = pytest.mark.usefixtures("identity_guard_off")
+pytestmark = [pytest.mark.usefixtures("identity_guard_off"), pytest.mark.external_reads]  # D-200: reads real files outside the project
 
 
 def _real_workspace() -> Path:

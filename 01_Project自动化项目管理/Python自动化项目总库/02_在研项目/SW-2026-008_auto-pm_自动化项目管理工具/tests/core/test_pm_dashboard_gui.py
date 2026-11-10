@@ -20,6 +20,8 @@ from typing import Any, cast
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

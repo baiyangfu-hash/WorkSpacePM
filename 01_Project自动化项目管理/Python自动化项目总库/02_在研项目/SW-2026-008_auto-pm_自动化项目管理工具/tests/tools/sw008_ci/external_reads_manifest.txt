@@ -1,0 +1,43 @@
+# Test files that read real files OUTSIDE the SW-2026-008 project directory (D-200).
+# One project-relative path per line.  Each listed file carries `pytestmark = pytest.mark.external_reads`.
+# tests/infrastructure/test_external_reads_marked.py keeps this list, the markers and the source of the tests in step.
+# To regenerate the list from a real run: tests/tools/sw008_ci/trace_external_reads.py (usage in its docstring).
+tests/cli/test_role.py
+tests/cli/test_root_entry_runtime_identity.py
+tests/contracts/test_quarantined_skill_routing.py
+tests/core/test_cockpit_board.py
+tests/core/test_cockpit_rules_approval.py
+tests/core/test_decision_handoff_binding.py
+tests/core/test_default_lease_seconds.py
+tests/core/test_github_collector.py
+tests/core/test_plc_gate_baseline.py
+tests/core/test_pm_dashboard_gui.py
+tests/core/test_pm_flow_v2_prototype.py
+tests/core/test_pr_body_builder.py
+tests/core/test_pr_open_service.py
+tests/core/test_pr_ready_service.py
+tests/core/test_protected_files.py
+tests/core/test_release_consistency.py
+tests/core/test_role_pack_service.py
+tests/core/test_toolchain_lock_matches_pyproject.py
+tests/core/test_trae_agent_marker.py
+tests/domain/test_secret_patterns.py
+tests/e2e/test_pmf_python.py
+tests/e2e/test_pmf_template_plc.py
+tests/e2e/test_raw_requirement_drill.py
+tests/e2e/test_release_pycache_drill.py
+tests/e2e/test_trial_run_drill.py
+tests/infrastructure/test_claude_settings_deny_rules.py
+tests/infrastructure/test_env_check.py
+tests/infrastructure/test_memory_gate_in_cockpit.py
+tests/infrastructure/test_ps1_native_stderr.py
+tests/infrastructure/test_ps1_venv_missing.py
+tests/infrastructure/test_shell_script_exec_bit.py
+tests/plc/test_cycle_plan.py
+tests/plc/test_milestones.py
+tests/plc/test_scl_linter.py
+tests/vartable/test_communications_parser.py
+tests/vartable/test_io_points_parser.py
+tests/vartable/test_program_blocks_parser.py
+tests/vartable/test_scl_parser.py
+tests/core/test_authority_path_covered.py

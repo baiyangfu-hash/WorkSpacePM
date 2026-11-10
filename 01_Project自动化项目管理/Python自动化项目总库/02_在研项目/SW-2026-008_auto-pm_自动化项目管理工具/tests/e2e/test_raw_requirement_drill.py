@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from tests.e2e.test_closure_drill import APPROVER, MAIN_DOMAIN, comment_files, make_drill
 from tests.e2e.test_pmf_plc import (
     PROJECT,
@@ -21,6 +23,8 @@ from tests.e2e.test_pmf_plc import (
     git,
 )
 from tests.plan_checklist_support import passing_command
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 SENTENCE = "公共报警加一个蜂鸣器输出，任意报警激活时响"
 def _skill_text() -> str:

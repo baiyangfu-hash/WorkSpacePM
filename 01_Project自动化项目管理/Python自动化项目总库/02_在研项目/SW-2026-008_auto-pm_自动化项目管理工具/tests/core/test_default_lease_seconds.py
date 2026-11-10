@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import pytest
 
 from auto_pm.application.core.local_execution_orchestrator import LocalExecutionOrchestrator
 from auto_pm.application.core.mission_switch_service import MissionSwitchService
@@ -16,6 +17,8 @@ from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS
 from auto_pm.ui.cli.continuity import continuity_group
 from auto_pm.ui.cli.pm_handoff import takeover_pm
 from auto_pm.ui.cli.pm_switch import switch_pm, unpark_pm
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 _NAMES = ("lease_seconds", "planning_lease_seconds")
 

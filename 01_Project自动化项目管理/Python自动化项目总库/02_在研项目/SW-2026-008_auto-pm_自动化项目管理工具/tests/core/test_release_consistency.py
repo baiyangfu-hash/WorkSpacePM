@@ -11,6 +11,8 @@ import pytest
 
 from auto_pm.application.core.release_consistency import check_release_consistency
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 BASE = Path("00_Infrastructure") / "auto_pm"
 OLD = "1.3.1-aaaaaaa"
 NEW = "1.3.2-bbbbbbb"

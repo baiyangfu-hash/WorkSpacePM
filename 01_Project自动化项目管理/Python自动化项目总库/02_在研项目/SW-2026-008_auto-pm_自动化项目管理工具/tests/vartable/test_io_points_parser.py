@@ -8,7 +8,11 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
+
 from auto_pm.domain.vartable.parsers.io_points_parser import IoPointsParser
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 
 class TestIoPointsParserBasic:

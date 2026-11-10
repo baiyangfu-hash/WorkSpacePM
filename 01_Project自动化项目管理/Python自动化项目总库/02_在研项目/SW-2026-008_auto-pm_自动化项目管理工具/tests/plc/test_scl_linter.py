@@ -8,6 +8,8 @@ import pytest
 
 from auto_pm.domain.plc.scl_linter import SclLinter
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 
 def test_scl_linter_detects_valid_clean_code() -> None:
     valid_scl = """

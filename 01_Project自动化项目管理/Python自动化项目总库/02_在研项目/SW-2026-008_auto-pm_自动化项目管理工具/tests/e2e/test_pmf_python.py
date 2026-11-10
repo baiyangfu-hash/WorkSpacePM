@@ -7,6 +7,10 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 
 class TestDictionaryPrefixSearchPython(unittest.TestCase):
     def test_real_dictionary_search_limit_and_cefr(self) -> None:

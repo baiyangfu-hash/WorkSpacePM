@@ -10,6 +10,8 @@ import pytest
 from auto_pm.application.core.agent_worktree_service import caller_agent
 from auto_pm.application.core.lease_handover_service import agent_markers
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 REPO = Path(__file__).resolve().parents[6]
 WRAPPER = REPO / ".trae" / "bin" / "pm-as-trae.ps1"
 RULE = REPO / ".trae" / "rules" / "cockpit-entry.md"

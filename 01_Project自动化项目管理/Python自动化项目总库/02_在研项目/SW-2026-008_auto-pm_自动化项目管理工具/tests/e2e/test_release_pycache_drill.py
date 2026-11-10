@@ -16,8 +16,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import auto_pm
 from tests.git_support import run_git
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 ACTIVE, PREVIOUS = "9.9.9-active", "9.9.8-previous"
 PROJECT_ID = "DJ-2026-011"

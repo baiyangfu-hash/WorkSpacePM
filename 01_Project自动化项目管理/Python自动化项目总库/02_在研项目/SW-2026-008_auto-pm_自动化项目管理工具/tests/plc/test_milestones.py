@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from auto_pm.domain.plc import milestones as ms
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 ROOT = Path(__file__).resolve().parents[6]
 TEMPLATE = ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板" / "11_里程碑表模板.md"

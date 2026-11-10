@@ -21,6 +21,8 @@ from auto_pm.domain.plc.checker import PlcChecker
 from auto_pm.domain.plc.language_service import evaluate_project
 from auto_pm.infrastructure.siemens_language_service import SiemensLanguageService
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 PID, NAME = "DJ-2026-901", "TESTMACHINE"
 

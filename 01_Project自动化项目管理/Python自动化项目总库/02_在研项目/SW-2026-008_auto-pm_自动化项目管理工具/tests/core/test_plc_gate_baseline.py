@@ -31,6 +31,8 @@ from tests.core.test_plc_quality_gate import (
     plc_workspace,
 )
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 ST = f"{PROJECT}/02_PLC程序/PLC_ST"
 ALARM = f"{ST}/05_公共报警/FB_2001_CommonAlarm.scl"
 BASIC_TEST = f"{ST}/Test/basic_test.scltest"

@@ -17,6 +17,8 @@ from auto_pm.contracts.protected_files import (
     unauthorised_protected_changes,
 )
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 
 def _git(root: Path, *args: str) -> str:
     done = subprocess.run(

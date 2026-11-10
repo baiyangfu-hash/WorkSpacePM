@@ -20,6 +20,9 @@ while not (DECISION_FILE / ".auto-pm" / "decisions").is_dir() and DECISION_FILE 
     DECISION_FILE = DECISION_FILE.parent
 
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
+
 @pytest.mark.parametrize(
     ("path", "roots", "expected"),
     [

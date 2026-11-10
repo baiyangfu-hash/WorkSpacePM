@@ -16,6 +16,8 @@ import pytest
 
 from auto_pm.domain.vartable.parsers.scl_parser import SclParser
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 # 工作空间根目录（从 tests/vartable 推导：7 级父目录）
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
 

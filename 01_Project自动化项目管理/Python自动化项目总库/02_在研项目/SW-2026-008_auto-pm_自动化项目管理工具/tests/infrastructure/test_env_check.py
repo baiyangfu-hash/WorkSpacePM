@@ -13,6 +13,8 @@ from types import ModuleType
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 WORKSPACE = Path(__file__).resolve().parents[6]
 ENV_DIR = WORKSPACE / "00_Infrastructure" / "auto_pm" / "environment"
 SCRIPT = ENV_DIR / "env_check.py"

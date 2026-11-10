@@ -14,6 +14,8 @@ from auto_pm.domain.plc import milestones as ms
 from auto_pm.ui.cli.__main__ import cli
 from tests.plc.test_milestones import FILLED, write
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 ROOT = Path(__file__).resolve().parents[6]
 SPEC = ROOT / cp.SPEC_RELATIVE
 D = dt.date(2026, 10, 10)

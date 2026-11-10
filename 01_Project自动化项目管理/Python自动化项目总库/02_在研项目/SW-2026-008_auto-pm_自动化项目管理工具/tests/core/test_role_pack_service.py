@@ -7,12 +7,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from auto_pm.application.core.role_pack_service import (
     FAIL,
     UNVERIFIED,
     RolePackService,
     split_front_matter,
 )
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 OLD_BODY = "# Old\n\n先完整读取 `../shared/refs/skill_coordination.md`。\n\n## 步骤\n\n- 一\n"
 CONFIG = {
