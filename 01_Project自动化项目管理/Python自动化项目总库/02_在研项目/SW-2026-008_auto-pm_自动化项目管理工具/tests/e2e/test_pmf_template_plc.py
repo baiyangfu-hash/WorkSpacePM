@@ -9,9 +9,11 @@ and well-formed by the product's static PLC rules", not "the PLC program runs".
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -279,18 +281,29 @@ def _shared_libraries() -> Path | None:
     return None
 
 
+#: CHG-SCPT-2026-626: gate-full's ``plugin`` job installs the real command line and sets this, so a missing plugin there is a failure, not a skip
+#: (a skipped plugin test must never read as "the plugin passed").
+REQUIRE_PLUGIN_ENV = "AUTO_PM_REQUIRE_SIEMENS_LSP"
+
+
+def _missing_plugin(reason: str) -> NoReturn:
+    if os.environ.get(REQUIRE_PLUGIN_ENV) == "1":
+        pytest.fail(f"{REQUIRE_PLUGIN_ENV}=1 but {reason}")
+    pytest.skip(f"UNVERIFIED: {reason}")
+
+
 @pytest.fixture(scope="module")
 def plugin_service() -> SiemensLanguageService:
     service = SiemensLanguageService.discover()
     if not service.available:
-        pytest.skip("UNVERIFIED: the Dynamic Siemens Language Support command line is not installed on this machine")
+        _missing_plugin("the Dynamic Siemens Language Support command line is not installed on this machine")
     return service
 
 
 def _plugin_workspace(tmp_path: Path) -> Path:
     libraries = _shared_libraries()
     if libraries is None:
-        pytest.skip("UNVERIFIED: 0100_PLC自动化/01_SharedLibraries is not part of this checkout")
+        _missing_plugin("0100_PLC自动化/01_SharedLibraries is not part of this checkout")
     shutil.copytree(libraries, tmp_path / "01_SharedLibraries")
     return _generate(tmp_path)
 
