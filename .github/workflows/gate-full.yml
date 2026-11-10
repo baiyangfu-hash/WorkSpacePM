@@ -32,34 +32,57 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install -q --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
-      - name: Probe inside the gate's white-listed child environment
+      - name: Probe variants inside the gate's white-listed child environment
         working-directory: ${{ env.PROJ }}
         run: |
           cat > "$RUNNER_TEMP/probe_env.py" <<'PY'
           import os, subprocess, sys, time
           sys.path.insert(0, os.getcwd())
           from auto_pm.application.core.gate_run_service import child_environment
-          from auto_pm.application.core import release_deploy_check as rdc
-          script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
-          command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
-          def probe(label, env):
+          CIM = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
+          IMPORT = "Import-Module CimCmdlets; " + CIM
+          SEARCHER = "foreach ($p in ([wmisearcher]'SELECT ProcessId,ParentProcessId,CommandLine FROM Win32_Process').Get()) { '{0}|{1}|{2}' -f $p['ProcessId'], $p['ParentProcessId'], $p['CommandLine'] }"
+          TRIVIAL = "'hello'"
+          def probe(label, script, env):
+              command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
               start = time.monotonic()
               try:
                   done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False, env=env)
                   rows = [r for r in done.stdout.splitlines() if r.strip()]
-                  print(f"PROBE {label}: rc={done.returncode} seconds={time.monotonic() - start:.1f} stdout_lines={len(rows)} stderr={done.stderr.strip()[:3000]!r}", flush=True)
+                  mine = sum(1 for r in rows if r.split("|")[0] == str(os.getpid()))
+                  print(f"PROBE {label}: rc={done.returncode} seconds={time.monotonic() - start:.1f} stdout_lines={len(rows)} own_pid_rows={mine} stderr={done.stderr.strip()[:1500]!r}", flush=True)
               except Exception as error:
                   print(f"PROBE {label}: EXCEPTION after {time.monotonic() - start:.1f}s: {error!r}", flush=True)
           full = dict(os.environ)
           white = child_environment()
-          print("DROPPED", sorted(set(full) - set(white)), flush=True)
-          probe("full-env", full)
-          probe("whitelist-env", white)
-          for name in sorted(set(full) - set(white)):
-              if name.upper() in {"PSMODULEPATH", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"}:
-                  probe(f"whitelist-plus-{name}", {**white, name: full[name]})
-          os.environ.clear(); os.environ.update(white)
-          rows = rdc._list_processes()
-          print("PROBE _list_processes under whitelist:", None if rows is None else len(rows), flush=True)
+          for round_ in (1, 2):
+              probe(f"r{round_} full cim", CIM, full)
+              probe(f"r{round_} white trivial", TRIVIAL, white)
+              probe(f"r{round_} white cim", CIM, white)
+              probe(f"r{round_} white import-module", IMPORT, white)
+              probe(f"r{round_} white wmisearcher", SEARCHER, white)
+              for name in ("PSMODULEANALYSISCACHEPATH", "POWERSHELL_DISTRIBUTION_CHANNEL", "POWERSHELL_UPDATECHECK", "DRIVERDATA", "LOGONSERVER", "PROCESSOR_IDENTIFIER", "USERDOMAIN_ROAMINGPROFILE"):
+                  got = next((v for k, v in full.items() if k.upper() == name), None)
+                  if got is not None:
+                      probe(f"r{round_} white+{name} cim", CIM, {**white, name: got})
+          forced = {k: v for k, v in white.items() if k not in full or full[k] != v}
+          print("FORCED_OR_CHANGED", sorted(forced), flush=True)
+          for name in sorted(forced):
+              env = dict(white); env.pop(name)
+              if name in full: env[name] = full[name]
+              probe(f"white-minus-forced-{name} cim", CIM, env)
           PY
           "$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe_env.py"
+      - name: Durations of the tests that start PowerShell, inside the white-listed environment
+        working-directory: ${{ env.PROJ }}
+        run: |
+          cat > "$RUNNER_TEMP/run_white.py" <<'PY'
+          import os, subprocess, sys
+          sys.path.insert(0, os.getcwd())
+          from auto_pm.application.core.gate_run_service import child_environment
+          argv = [sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "--no-cov", "-q", "--durations=25", "-rs",
+                  "tests/infrastructure/test_powershell_script_rules.py", "tests/infrastructure/test_memory_gate_in_cockpit.py",
+                  "tests/core/test_release_deploy_check.py", "tests/core/test_release_deploy.py", "tests/core/test_release_ops.py", "tests/e2e/test_long_gate.py"]
+          print("EXIT", subprocess.run(argv, env=child_environment(), check=False).returncode)
+          PY
+          "$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/run_white.py" || true
