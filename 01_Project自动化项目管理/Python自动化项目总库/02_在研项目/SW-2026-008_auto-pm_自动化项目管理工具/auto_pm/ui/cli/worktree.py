@@ -30,6 +30,7 @@ from auto_pm.application.core.agent_worktree_service import (
     caller_alias,
     ensure_session_id,
 )
+from auto_pm.application.core.station_presence import Presence, list_presence, record_presence
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
@@ -105,6 +106,7 @@ def _service(ctx: click.Context, *, measure_size: bool = True) -> AgentWorktreeS
         alias = caller_alias()
         if alias:
             service.touch_heartbeat(alias, min_interval_seconds=HEARTBEAT_MIN_SECONDS)
+        record_presence(root)  # D-195: running any worktree command says "this conversation is here" (agents only, throttled)
         return service
     except AgentWorktreeError as error:
         _fail(error)
@@ -346,6 +348,60 @@ def release_cmd(ctx: click.Context, agent: str | None, mine: bool) -> None:
         console.print(f"工位里有没提交的内容，已存为救援引用 {result.rescue_ref}；找回：git checkout {result.rescue_ref} -- .")
     else:
         console.print("工位是干净的，没有需要救援的内容")
+
+
+_VERDICT_LABEL = {"alive": "在场", "quiet": "安静", "orphan": "疑似孤儿", "elsewhere": "别的电脑"}
+_WHERE_LABEL = {"station": "自己的工位", "control-root": "控制根", "other": "别处"}
+
+
+def _presence_json(entry: Presence) -> dict[str, Any]:
+    return {
+        "key": entry.key,
+        "alias": entry.alias,
+        "source": entry.source,
+        "machine": entry.machine,
+        "pid": entry.pid,
+        "where": entry.where,
+        "title": entry.title,
+        "opened_at": entry.opened_at,
+        "seen_at": entry.seen_at,
+        "silent_hours": entry.silent_hours,
+        "verdict": entry.verdict,
+        "reason": entry.reason,
+    }
+
+
+@worktree_group.command("who")
+@click.option("--json", "as_json", is_flag=True, help="机器可读输出")
+@click.pass_context
+def who_cmd(ctx: click.Context, as_json: bool) -> None:
+    """只读：本机控制根上现在有哪些会话在场（来源、所在位置、多久没动静、疑似孤儿）。
+
+    在场登记只给 agent 会话写（用户自己的终端不算会话）；跑任何 `worktree` 子命令的 agent 会自动登记自己，所以从没跑过
+    `worktree` 命令的会话在这里看不到。这个命令只提供信息，不拒绝、不删除任何东西。
+    """
+    service = _service(ctx, measure_size=False)
+    entries = list_presence(service.control_root)
+    if as_json:
+        click.echo(json.dumps([_presence_json(e) for e in entries], ensure_ascii=False, indent=2))
+        return
+    if not entries:
+        console.print("本机没有在场登记（还没有 agent 会话跑过 `worktree` 命令）")
+        return
+    mine = caller_alias()
+    table = Table(title="本机在场会话", show_header=True, header_style="bold cyan")
+    for column in ("会话", "来源", "位置", "状态", "最后动静", "说明"):
+        table.add_column(column)
+    for e in entries:
+        name = e.alias or e.key
+        if mine and e.alias == mine:
+            name += "（你）"
+        seen = "-" if e.silent_hours is None else f"{e.silent_hours:.1f} 小时前"
+        table.add_row(name, e.source or "-", _WHERE_LABEL.get(e.where, e.where), _VERDICT_LABEL.get(e.verdict, e.verdict), seen, e.reason)
+    console.print(table)
+    orphans = [e for e in entries if e.verdict == "orphan"]
+    if orphans:
+        console.print(f"[yellow]有 {len(orphans)} 条疑似孤儿记录[/yellow]：只标记，不会自动删除；确认已退出后由用户处理")
 
 
 @worktree_group.command("heartbeat")

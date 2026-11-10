@@ -279,3 +279,33 @@ def test_orient_says_when_this_clone_has_no_ledger_and_stays_quiet_when_it_has_o
     assert (tmp_path / ".auto-pm" / "continuity.db").is_file()
     with_ledger = _run(tmp_path, "orient", PROJECT)
     assert with_ledger.exit_code == 0 and "[无账本]" not in with_ledger.stdout
+
+
+def test_orient_adds_one_read_only_presence_line_and_keeps_json_pure_and_writes_nothing(tmp_path: Path) -> None:
+    """D-195: another conversation known on this computer is mentioned in one line (stderr in JSON mode); orient itself still writes nothing."""
+
+    import platform
+
+    _workspace(tmp_path)
+    folder = tmp_path / ".auto-pm" / "presence"
+    folder.mkdir(parents=True)
+    now = __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat()
+    (folder / "k.json").write_text(
+        json.dumps({"schema": "presence.v1", "key": "k", "alias": "trae-123456", "source": "trae", "machine": platform.node(),
+                    "pid": __import__("os").getpid(), "where": "control-root", "title": "", "opened_at": now, "seen_at": now}),
+        encoding="utf-8",
+    )
+    before = _snapshot(tmp_path)
+
+    text = _run(tmp_path, "orient", PROJECT)
+    as_json = _run(tmp_path, "orient", PROJECT, "--json")
+
+    assert text.exit_code == 0 and "[在场] 本机另有 1 个会话在场" in text.stdout and "trae-123456" in text.stdout
+    assert as_json.exit_code == 0 and "[在场]" not in as_json.stdout and "[在场]" in as_json.stderr
+    json.loads(as_json.stdout)
+    assert _snapshot(tmp_path) == before
+
+
+def test_orient_prints_no_presence_line_when_nobody_else_is_known(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    assert "[在场]" not in _run(tmp_path, "orient", PROJECT).output

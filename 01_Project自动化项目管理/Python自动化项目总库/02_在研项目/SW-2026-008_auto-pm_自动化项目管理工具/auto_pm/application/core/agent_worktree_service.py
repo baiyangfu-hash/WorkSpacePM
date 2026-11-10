@@ -425,6 +425,10 @@ class AgentWorktreeService:
     def stations_dir(self) -> Path:
         return self._stations_dir
 
+    @property
+    def control_root(self) -> Path:
+        return self._root
+
     # ── open ─────────────────────────────────────────────────────────
 
     @contextlib.contextmanager
