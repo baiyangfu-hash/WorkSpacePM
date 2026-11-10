@@ -26,6 +26,13 @@ _PASS_LINE = "123 passed, 2 skipped in 4.20s\n"
 
 
 @pytest.fixture(autouse=True)
+def _plenty_of_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-207: the --jobs cap reads this host's memory; every test but the ones below the line sees a roomy machine."""
+
+    monkeypatch.setattr(gate, "_available_memory", lambda: 64 * 2**30)
+
+
+@pytest.fixture(autouse=True)
 def _interpreter_is_fit(monkeypatch: pytest.MonkeyPatch) -> None:
     """These tests are about judging; whether the test machine's own interpreter is fit is pinned in test_gate_env_preflight."""
 
@@ -628,7 +635,9 @@ def test_d196_the_default_preflight_is_the_real_one_and_a_warning_is_kept_for_th
 
     assert GateRunService()._preflight is pre.preflight_problems
     repo = _clean_repo(monkeypatch)
-    service = GateRunService(runner=_Recorder(), preflight=lambda _p, _w: ([], ["不在虚拟环境里"]))
+    service = GateRunService(
+        runner=_Recorder(), preflight=lambda _p, _w: ([], ["不在虚拟环境里"]), available_memory=lambda: 64 * 2**30
+    )  # undo() also removed the memory stand-in: give the roomy reading explicitly
     service.run(repo, tmp_path)
     assert service.preflight_warnings == ["不在虚拟环境里"]
 
@@ -666,3 +675,45 @@ def test_d196_a_failed_summary_always_names_the_failed_group_and_why(
     summary = GateRunService(runner=_Recorder({name: (1, "3 failed, 90 passed in 9.0s\n")})).run(repo, tmp_path)
     assert summary.verdict == "FAIL" and summary.reasons, "FAIL with no reason is the bug"
     assert any(r.startswith(f"组 {name}：FAIL") and "退出码 1" in r for r in summary.reasons)
+
+
+# ── --jobs follows the available memory (D-207) ─────────
+
+
+@pytest.mark.parametrize(
+    ("requested", "available_gib", "expected"),
+    [(8, 64.0, 8), (8, 19.0, 8), (8, 18.9, 7), (8, 9.0, 3), (8, 5.0, 1), (8, 1.0, 1), (4, 64.0, 4)],
+)
+def test_d207_jobs_fit_the_available_memory(requested: int, available_gib: float, expected: int) -> None:
+    assert gate.jobs_for_memory(requested, int(available_gib * 2**30)) == expected
+
+
+def test_d207_an_unreadable_memory_reading_leaves_the_request_alone() -> None:
+    assert gate.jobs_for_memory(8, None) == 8
+
+
+def test_d207_gate_run_lowers_the_xdist_workers_and_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    argvs: list[list[str]] = []
+
+    def runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int) -> int:
+        argvs.append(list(argv))
+        log.write_text(_line(next(g for g in GROUPS if g.name == log.stem)), encoding="utf-8")
+        return 0
+
+    service = GateRunService(runner=runner, available_memory=lambda: 9 * 2**30)  # (9 - 3) // 2 = 3 workers
+    summary = service.run(repo, tmp_path, jobs=8)
+
+    parallel = [argv for argv in argvs if "-n" in argv]
+    assert parallel and all(argv[argv.index("-n") + 1] == "3" for argv in parallel)
+    assert service.job_notes and "8 降到 3" in service.job_notes[0]
+    assert summary.verdict == "PASS"  # a lowered job count is a note, never a failed gate
+
+
+def test_d207_a_roomy_machine_keeps_the_requested_workers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    service = GateRunService(runner=_Recorder())
+
+    service.run(repo, tmp_path, jobs=8)
+
+    assert service.job_notes == []

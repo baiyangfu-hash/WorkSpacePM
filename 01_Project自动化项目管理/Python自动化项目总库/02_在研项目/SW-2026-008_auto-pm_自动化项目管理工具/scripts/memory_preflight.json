@@ -1,0 +1,4 @@
+{
+  "min_available_gib": 4,
+  "max_commit_ratio": 0.80
+}

@@ -689,7 +689,8 @@ def test_the_elevated_phase_requires_the_hash_and_the_bundle_covers_the_three_so
     assert list(mg.BUNDLE_FILES) == sorted(mg.BUNDLE_FILES)
     assert set(mg.BUNDLE_FILES) == {
         "auto_pm/infrastructure/long_run_core.py", "auto_pm/infrastructure/memory_preflight.py", "scripts/install_memory_gate.ps1", "scripts/memory_gate.py",
-    }  # fmt: skip
+        "scripts/memory_preflight.json",
+    }  # the thresholds of the preflight are pinned like the code (D-207)  # fmt: skip
     listed = re.search(r"\$BundleFiles = @\((.*?)\n\)", script, re.S)
     assert listed is not None
     assert re.findall(r'"([^"]+)"', listed.group(1)) == list(mg.BUNDLE_FILES)  # the PowerShell side hashes the very same list in the same order

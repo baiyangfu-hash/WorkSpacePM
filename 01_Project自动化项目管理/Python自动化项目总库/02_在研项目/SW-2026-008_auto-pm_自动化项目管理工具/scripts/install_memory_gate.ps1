@@ -7,8 +7,8 @@
 
   -Install    （在普通窗口运行，setup_env.bat 第 5 步调用它）
               预备阶段（不需要管理员，不碰 Program Files）：
-                a) git 核对：四个文件加钉哈希文件没有未提交改动，HEAD 已经在 origin/main 里（-AllowUnmerged 可跳过，只给开发者）；
-                b) 四个文件的合并 SHA-256 等于仓库里钉住的 scripts\memory_gate.pin.json；
+                a) git 核对：五个文件加钉哈希文件没有未提交改动，HEAD 已经在 origin/main 里（-AllowUnmerged 可跳过，只给开发者）；
+                b) 五个文件的合并 SHA-256 等于仓库里钉住的 scripts\memory_gate.pin.json；
                 c) 官方嵌入式 Python 3.12.10 下载到当前用户缓存目录并核对写死的 SHA-256（-PythonZip 可指向事先核对过的本地包）；
                 d) 试运行：解压到临时目录，核对 python.exe 的 Authenticode 签名、_pth 没打开 import site、真跑一遍 selftest（杀毒拦截在这里就暴露）。
               预备全过后，只弹一次 UAC，由提权窗口做「应用」：
@@ -70,7 +70,8 @@ $BundleFiles = @(
     "auto_pm/infrastructure/long_run_core.py",
     "auto_pm/infrastructure/memory_preflight.py",
     "scripts/install_memory_gate.ps1",
-    "scripts/memory_gate.py"
+    "scripts/memory_gate.py",
+    "scripts/memory_preflight.json"
 )
 $CopiedFiles = @("auto_pm/infrastructure/memory_preflight.py", "auto_pm/infrastructure/long_run_core.py", "scripts/memory_gate.py")
 $PinRelative = "scripts/memory_gate.pin.json"
@@ -205,7 +206,7 @@ function Invoke-Prepare([string]$Root, [string]$LocalZip, [bool]$SkipGit) {
     $pinned = Read-PinnedHash $Root
     $bundle = Get-BundleHash $Root
     if ($bundle.Combined -ne $pinned) {
-        throw "四个文件的合并 SHA-256 是 $($bundle.Combined)，仓库里钉住的是 ${pinned}，两者不符。请先 git pull 到最新的 main；若你在改总闸文件，要同时重写钉哈希文件并走 PR。"
+        throw "五个文件的合并 SHA-256 是 $($bundle.Combined)，仓库里钉住的是 ${pinned}，两者不符。请先 git pull 到最新的 main；若你在改总闸文件，要同时重写钉哈希文件并走 PR。"
     }
 
     Write-Log "预备 2/4 git 核对（文件无未提交改动，HEAD 已在 origin/main 里）..."
@@ -499,7 +500,7 @@ function Invoke-Apply([string]$Root, [string]$Expected, [string]$Zip) {
     Write-Log "1/6 在提权窗口里再核对一遍要安装的文件 ..."
     $bundle = Get-BundleHash $Root
     if ($bundle.Combined -ne $Expected.ToLower() -or $bundle.Combined -ne (Read-PinnedHash $Root)) {
-        throw "四个文件的合并 SHA-256 是 $($bundle.Combined)，与预备阶段核对过的、仓库钉住的不一致（文件在预备之后被改动），拒绝安装。"
+        throw "五个文件的合并 SHA-256 是 $($bundle.Combined)，与预备阶段核对过的、仓库钉住的不一致（文件在预备之后被改动），拒绝安装。"
     }
     $installedPython = Join-Path $Dest "python\python.exe"
     $installedGate = Join-Path $Dest "scripts\memory_gate.py"
