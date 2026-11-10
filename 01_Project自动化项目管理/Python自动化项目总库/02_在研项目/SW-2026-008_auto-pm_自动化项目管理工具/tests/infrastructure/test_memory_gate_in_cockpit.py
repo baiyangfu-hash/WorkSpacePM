@@ -46,12 +46,13 @@ LAPTOP = 63.3  # the 31.3 GiB laptop's commit limit
 
 
 # ---------------------------------------------------------------- thresholds: a ratio of this machine's commit limit
-def test_the_default_lines_are_a_ratio_of_the_commit_limit_and_match_the_old_40_36_on_the_laptop() -> None:
+def test_the_default_lines_are_a_ratio_of_the_commit_limit_and_are_80_75_on_the_laptop() -> None:
     lines = mg.compute_thresholds(LAPTOP)
 
-    assert lines.limit_gib == pytest.approx(39.25, abs=0.01) and lines.resume_gib == pytest.approx(36.08, abs=0.01)
+    assert lines.limit_gib == pytest.approx(50.64, abs=0.01) and lines.resume_gib == pytest.approx(47.475, abs=0.01)  # D-207: freeze 0.80, thaw 0.75
     assert lines.limit_gib - lines.resume_gib >= mg.MIN_GAP_GIB
-    assert (mg.LIMIT_RATIO, mg.RESUME_RATIO) == (0.62, 0.57)
+    assert (mg.LIMIT_RATIO, mg.RESUME_RATIO) == (0.80, 0.75)
+    assert lines.resume_gib < lines.limit_gib  # the thaw line is always under the freeze line
 
 
 def test_an_unreadable_or_tiny_commit_limit_falls_back_to_40_36() -> None:
@@ -61,9 +62,9 @@ def test_an_unreadable_or_tiny_commit_limit_falls_back_to_40_36() -> None:
 
 
 def test_the_resume_line_is_kept_three_gib_under_the_freeze_line_on_a_smaller_machine() -> None:
-    lines = mg.compute_thresholds(30.0)  # 0.62 x 30 = 18.6, 0.57 x 30 = 17.1: only 1.5 apart, so the resume line is pulled down
+    lines = mg.compute_thresholds(30.0)  # 0.80 x 30 = 24.0, 0.75 x 30 = 22.5: only 1.5 apart, so the resume line is pulled down
 
-    assert lines.limit_gib == pytest.approx(18.6) and lines.resume_gib == pytest.approx(15.6)
+    assert lines.limit_gib == pytest.approx(24.0) and lines.resume_gib == pytest.approx(21.0)
 
 
 def test_a_valid_config_overrides_the_defaults_by_ratio_or_by_absolute_gib() -> None:
@@ -73,7 +74,7 @@ def test_a_valid_config_overrides_the_defaults_by_ratio_or_by_absolute_gib() -> 
 
     assert (by_ratio.limit_gib, by_ratio.resume_gib) == (pytest.approx(44.31), pytest.approx(37.98))
     assert (by_gib.limit_gib, by_gib.resume_gib) == (45.0, 40.0) and "配置文件" in by_gib.source
-    assert only_limit.limit_gib == 45.0 and only_limit.resume_gib == pytest.approx(45.0 * 0.57 / 0.62)
+    assert only_limit.limit_gib == 45.0 and only_limit.resume_gib == pytest.approx(min(45.0 * mg.RESUME_RATIO / mg.LIMIT_RATIO, 45.0 - mg.MIN_GAP_GIB))
 
 
 @pytest.mark.parametrize(
@@ -225,7 +226,7 @@ def test_a_failing_reload_keeps_the_lines_in_force_and_never_stops_the_gate(tmp_
 
 
 # ---------------------------------------------------------------- the hash pinned in the repository
-def test_the_pin_in_the_repository_matches_the_four_files() -> None:
+def test_the_pin_in_the_repository_matches_the_five_files() -> None:
     """If this fails: you changed a gate file. Run ``python -B scripts/memory_gate.py pin-write`` and send the change through a PR with an independent audit."""
 
     assert mg.pin_problem() == ""

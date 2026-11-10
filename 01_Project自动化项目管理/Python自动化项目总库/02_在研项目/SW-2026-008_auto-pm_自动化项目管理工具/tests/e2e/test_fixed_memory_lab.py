@@ -39,7 +39,7 @@ def test_m02_the_product_rule_is_not_loosened_by_the_lab() -> None:
     """The same module, with a hot reading handed in, still refuses: only the *reading* is fixed in the lab."""
 
     module = _load(REAL, "real_memory_preflight")
-    hot = module.CommitSnapshot(committed=40 * module.GIB, limit=64 * module.GIB, physical=32 * module.GIB)
+    hot = module.CommitSnapshot(committed=40 * module.GIB, limit=64 * module.GIB, physical=32 * module.GIB, available=2 * module.GIB)  # D-207: 2 GiB left
     assert module.run_preflight(read=lambda: hot, list_all=lambda: ()).ok is False
 
 

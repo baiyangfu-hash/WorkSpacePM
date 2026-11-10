@@ -4,9 +4,12 @@ Why: the same regression run detached stays flat for 20 minutes, run in an agent
 (every test builds a real Git repository).  A job started on a machine that is already close to the limit only makes it worse, so
 ``pm verify`` and ``scripts/long_gate.py launch`` ask this module first.
 
-Rule (the coordinator's ruling of 11-03, measured by the main executor on the 31.3 GiB laptop): refuse when the committed memory is at
-least ``ABSOLUTE_GIB`` GiB **or** at least ``RATIO`` of the current commit limit.  There is deliberately no environment switch or option
-to continue anyway: an agent could set it, and the check exists to stop agents.
+Rule (D-207, the coordinator's ruling of 11-10; it replaces the 11-03 "committed >= 35 GiB" rule, which was wrong on the 31.3 GiB laptop where
+the kernel pools alone hold about 17 GiB of "committed" memory): refuse when the available physical memory is below ``min_available_gib``
+**or** the committed memory is at least ``max_commit_ratio`` of the current commit limit.  The two numbers live in
+``scripts/memory_preflight.json`` (part of the pinned bundle: changing them needs a change order, a rewritten pin and the user's own approval).
+A parameter file that is present but invalid refuses to start and names the item; an absent file means the built-in defaults.
+There is deliberately no environment switch or option to continue anyway: an agent could set it, and the check exists to stop agents.
 
 Readings (``\\Memory\\Committed Bytes`` and the current limit):
 
@@ -35,8 +38,13 @@ from typing import TypeVar
 
 T = TypeVar("T")
 GIB = 2**30
-ABSOLUTE_GIB = 35.0
-RATIO = 0.85
+#: Built-in defaults, used only when ``scripts/memory_preflight.json`` does not exist; the file's values are the ones the user maintains.
+DEFAULT_MIN_AVAILABLE_GIB = 4.0
+DEFAULT_MAX_COMMIT_RATIO = 0.80
+#: Legal range of each parameter (inclusive); a value outside it makes the whole file invalid.
+MIN_AVAILABLE_GIB_RANGE = (1.0, 16.0)
+MAX_COMMIT_RATIO_RANGE = (0.50, 0.95)
+PARAMETER_FILE_NAME = "memory_preflight.json"
 TOP_COUNT = 5
 #: Committed memory that no readable process owns (committed minus the sum of readable per-process private commit).  The laptop's normal
 #: baseline is about 17.5 GiB (unreadable system processes, kernel pools, shared sections); the 11-03 incident was estimated at 45-55 GiB.
@@ -48,6 +56,61 @@ class MemoryPreflightRefusedError(RuntimeError):
     """The machine has no memory headroom for a long job; the message is the plain-words refusal."""
 
 
+class MemoryPreflightConfigError(ValueError):
+    """``scripts/memory_preflight.json`` exists but cannot be used; the message names the file and the item."""
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """The two numbers of the rule."""
+
+    min_available_gib: float = DEFAULT_MIN_AVAILABLE_GIB
+    max_commit_ratio: float = DEFAULT_MAX_COMMIT_RATIO
+
+
+def parameter_file() -> Path | None:
+    """``<project root>/scripts/memory_preflight.json`` next to this file's package; None when this copy does not sit in a project tree."""
+
+    try:
+        return Path(__file__).resolve().parents[2] / "scripts" / PARAMETER_FILE_NAME
+    except IndexError:
+        return None
+
+
+def _number(data: dict[str, object], key: str, low: float, high: float, where: Path) -> float:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise MemoryPreflightConfigError(f"{where} 的 {key} 缺失或不是数字")
+    if not low <= float(value) <= high:
+        raise MemoryPreflightConfigError(f"{where} 的 {key} = {value:g} 超出合法范围 [{low:g}, {high:g}]")
+    return float(value)
+
+
+def load_thresholds(path: Path | None = None) -> Thresholds:
+    """The thresholds from the parameter file; the built-in defaults when it does not exist.
+
+    Raises ``MemoryPreflightConfigError`` when it exists but is unreadable, not a JSON object, has unknown or missing keys, or a value out of range.
+    The location is fixed (next to the project tree this file belongs to): there is no environment variable or option that points elsewhere.
+    """
+
+    where = path if path is not None else parameter_file()
+    if where is None or not where.is_file():
+        return Thresholds()
+    try:
+        data = json.loads(where.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:  # ValueError covers undecodable bytes and invalid JSON
+        raise MemoryPreflightConfigError(f"读不了 {where}：{error}") from error
+    if not isinstance(data, dict):
+        raise MemoryPreflightConfigError(f"{where} 的内容不是 JSON 对象")
+    unknown = sorted(set(data) - {"min_available_gib", "max_commit_ratio"})
+    if unknown:
+        raise MemoryPreflightConfigError(f"{where} 里有不认识的项：{'、'.join(unknown)}")
+    return Thresholds(
+        min_available_gib=_number(data, "min_available_gib", *MIN_AVAILABLE_GIB_RANGE, where),
+        max_commit_ratio=_number(data, "max_commit_ratio", *MAX_COMMIT_RATIO_RANGE, where),
+    )
+
+
 @dataclass(frozen=True)
 class CommitSnapshot:
     """System-wide commit charge in bytes: what is committed now, the current limit, and the installed physical memory."""
@@ -55,6 +118,8 @@ class CommitSnapshot:
     committed: int
     limit: int
     physical: int
+    #: Physical memory available right now (bytes); None when the reading does not provide it (the available-memory rule is then not applied).
+    available: int | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +143,8 @@ class Preflight:
     #: Sum of the private commit of every process that could be read; None when no process list was available.
     #: The part of the committed memory that no process owns (``committed - attributed``) is what the top five cannot point at.
     attributed: int | None = None
+    #: Non-empty when the parameter file is unusable: the run is refused for that reason alone.
+    invalid_config: str = ""
 
 
 def _gib(value: int) -> str:
@@ -134,7 +201,10 @@ if sys.platform == "win32":
             return None
         page = int(info.PageSize)
         return CommitSnapshot(
-            committed=int(info.CommitTotal) * page, limit=int(info.CommitLimit) * page, physical=int(info.PhysicalTotal) * page
+            committed=int(info.CommitTotal) * page,
+            limit=int(info.CommitLimit) * page,
+            physical=int(info.PhysicalTotal) * page,
+            available=int(info.PhysicalAvailable) * page,
         )
 
 
@@ -209,7 +279,10 @@ def _read_commit_linux(meminfo: Path = Path("/proc/meminfo"), overcommit: Path =
         except (OSError, ValueError):
             strict = False
         return CommitSnapshot(
-            committed=values["Committed_AS"] * 1024, limit=values["CommitLimit"] * 1024 if strict else 0, physical=values["MemTotal"] * 1024
+            committed=values["Committed_AS"] * 1024,
+            limit=values["CommitLimit"] * 1024 if strict else 0,
+            physical=values["MemTotal"] * 1024,
+            available=values["MemAvailable"] * 1024 if "MemAvailable" in values else None,
         )
     except (OSError, KeyError, ValueError):  # ValueError: undecodable bytes are "unreadable", never silently replaced
         return None
@@ -270,20 +343,15 @@ else:
 
 
 # ---------------------------------------------------------------- the rule
-def check(
-    snapshot: CommitSnapshot,
-    top: tuple[ProcessUse, ...] = (),
-    *,
-    absolute_gib: float = ABSOLUTE_GIB,
-    ratio: float = RATIO,
-) -> Preflight:
-    """Apply the two rules to a reading: committed >= absolute GiB, or committed / limit >= ratio (both inclusive)."""
+def check(snapshot: CommitSnapshot, top: tuple[ProcessUse, ...] = (), *, thresholds: Thresholds | None = None) -> Preflight:
+    """Apply the two rules to a reading: available physical memory < min GiB, or committed / limit >= ratio (the ratio is inclusive)."""
 
+    rule = thresholds or Thresholds()
     reasons: list[str] = []
-    if snapshot.committed >= absolute_gib * GIB:
-        reasons.append(f"已提交内存 {_gib(snapshot.committed)} GiB ≥ {absolute_gib:g} GiB")
-    if snapshot.limit > 0 and snapshot.committed / snapshot.limit >= ratio:
-        reasons.append(f"已提交内存占当前提交上限的 {snapshot.committed / snapshot.limit:.0%} ≥ {ratio:.0%}")
+    if snapshot.available is not None and snapshot.available < rule.min_available_gib * GIB:
+        reasons.append(f"可用物理内存 {_gib(snapshot.available)} GiB < {rule.min_available_gib:g} GiB")
+    if snapshot.limit > 0 and snapshot.committed / snapshot.limit >= rule.max_commit_ratio:
+        reasons.append(f"已提交内存占当前提交上限的 {snapshot.committed / snapshot.limit:.0%} ≥ {rule.max_commit_ratio:.0%}")
     return Preflight(ok=not reasons, reasons=tuple(reasons), snapshot=snapshot, top=top)
 
 
@@ -298,12 +366,16 @@ def run_preflight(
     The readers are looked up when called, not bound as defaults, so a test can replace ``read_commit`` / ``all_processes`` on the module.
     """
 
+    try:
+        thresholds = load_thresholds()
+    except MemoryPreflightConfigError as error:
+        return Preflight(ok=False, reasons=(f"内存预检参数文件不合格：{error}",), snapshot=None, top=(), invalid_config=str(error))
     snapshot = (read or read_commit)()
     if snapshot is None:
         if (platform or sys.platform) == "win32":
             return Preflight(ok=False, reasons=("读不到已提交内存（无法确认机器有余量，按规矩拒绝）",), snapshot=None, top=())
         return Preflight(ok=True, reasons=(), snapshot=None, top=(), unverified="本机读不到已提交内存，内存预检未验证")
-    verdict = check(snapshot)
+    verdict = check(snapshot, thresholds=thresholds)
     if verdict.ok:
         return verdict
     processes = tuple(sorted((list_all or all_processes)(), key=lambda item: item.committed, reverse=True))
@@ -335,12 +407,19 @@ def read_unowned_gib() -> float | None:
 def refusal_text(result: Preflight) -> str:
     """The plain-words refusal: what was read, which rule fired, the five biggest processes, and what to do."""
 
-    lines = ["拒绝启动：这台电脑的已提交内存已经太高，再起长任务会把它拖垮。"]
+    if result.invalid_config:
+        return (
+            f"拒绝启动：内存预检的参数文件不能用——{result.invalid_config}。\n"
+            "怎么办：这个文件只有用户能改（要走变更单、重写钉哈希文件、重装守卫），agent 不要自己动它；请把上面这句话转给用户。"
+            "这个检查没有“强行继续”的选项。"
+        )
+    lines = ["拒绝启动：这台电脑的内存余量不够，再起长任务会把它拖垮。"]
     snapshot = result.snapshot
     if snapshot is not None:
         share = f"{snapshot.committed / snapshot.limit:.0%}" if snapshot.limit > 0 else "未知"
+        free = f"，可用物理内存 {_gib(snapshot.available)} GiB" if snapshot.available is not None else ""
         lines.append(
-            f"当前已提交 {_gib(snapshot.committed)} GiB，提交上限 {_gib(snapshot.limit)} GiB（占 {share}），物理内存 {_gib(snapshot.physical)} GiB。"
+            f"当前已提交 {_gib(snapshot.committed)} GiB，提交上限 {_gib(snapshot.limit)} GiB（占 {share}），物理内存 {_gib(snapshot.physical)} GiB{free}。"
         )
     lines.append("触发：" + "；".join(result.reasons) + "。")
     if result.top:
@@ -357,7 +436,7 @@ def refusal_text(result: Preflight) -> str:
         else:
             lines.append(f"未归属进程的提交量：{_gib(unowned)} GiB，未超过 {UNOWNED_ALERT_GIB:g} GiB，上面的前几名就是主要占用。{detail}")
     lines.append(
-        f"怎么办：关掉上面没用的程序（尤其是还在跑的 pytest、浏览器、后台终端），等已提交回落到 {ABSOLUTE_GIB:g} GiB 以下再启动；"
+        f"怎么办：关掉上面没用的程序（尤其是还在跑的 pytest、浏览器、后台终端），等可用物理内存回升、提交占比回落后再启动；"
         f"要跑的长任务（超过 10 分钟或超过 100 个用例的回归）请用 {LONG_RUN_USAGE}，它会脱离终端、带内存保护地跑。"
         "这个检查没有“强行继续”的选项。"
     )

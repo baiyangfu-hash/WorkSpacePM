@@ -33,6 +33,7 @@ from auto_pm.application.core.gate_env_preflight import (
     looks_like_environment_error,
     preflight_problems,
 )
+from auto_pm.infrastructure import memory_preflight
 
 SCHEMA = "gate-run.v1"
 SUMMARY_FILE = "gate_summary.json"
@@ -444,6 +445,28 @@ def project_dir_in(worktree: Path, module_file: Path | None = None) -> Path:
     return worktree / relative
 
 
+#: D-207: each xdist worker of a gate group holds about this much memory, and the machine keeps this much for everything else.
+JOB_MEMORY_GIB = 2.0
+JOB_RESERVE_GIB = 3.0
+
+
+def jobs_for_memory(requested: int, available_bytes: int | None) -> int:
+    """``requested`` lowered to what the available physical memory carries: ``(available - 3 GiB) // 2 GiB`` workers, at least one.
+
+    An unreadable reading (None) leaves the request alone: the memory preflight, not this cap, is what refuses a machine it cannot read.
+    """
+
+    if available_bytes is None:
+        return requested
+    fits = int((available_bytes / 2**30 - JOB_RESERVE_GIB) // JOB_MEMORY_GIB)
+    return max(1, min(requested, fits))
+
+
+def _available_memory() -> int | None:
+    snapshot = memory_preflight.read_commit()
+    return None if snapshot is None else snapshot.available
+
+
 class GateRunService:
     def __init__(
         self,
@@ -451,11 +474,14 @@ class GateRunService:
         runner: Runner = default_runner,
         python: str = sys.executable,
         preflight: Callable[[str, Path], tuple[list[str], list[str]]] | None = None,
+        available_memory: Callable[[], int | None] | None = None,
     ) -> None:
         self._runner = runner
         self._python = python
         self._preflight = preflight or preflight_problems  # looked up now, so a test can swap the module attribute
         self.preflight_warnings: list[str] = []
+        self._available_memory = available_memory or _available_memory  # looked up now, so a test can replace the module function
+        self.job_notes: list[str] = []
 
     def select(self, only: Sequence[str] = ()) -> tuple[GateGroup, ...]:
         known = {g.name: g for g in GROUPS}
@@ -510,7 +536,12 @@ class GateRunService:
             groups_run=[g.name for g in selected],
         )
         for group in selected:
-            argv = group_argv(group, python=self._python, jobs=jobs)
+            group_jobs = jobs_for_memory(jobs, self._available_memory()) if group.parallel else jobs
+            if group_jobs < jobs:
+                note = f"组 {group.name}：可用内存不足，--jobs 从 {jobs} 降到 {group_jobs}"
+                self.job_notes.append(note)
+                self.preflight_warnings.append(note)  # the CLI prints this list in its ``finally``
+            argv = group_argv(group, python=self._python, jobs=group_jobs)
             result = GroupResult(group.name, argv, str(project), started=_now())
             log = out_dir / f"{group.name}.txt"
             result.exit = self._runner(argv, project, env, log, timeout_seconds)

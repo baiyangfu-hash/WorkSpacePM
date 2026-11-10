@@ -1,4 +1,4 @@
-r"""内存总闸看门狗：整机已提交内存到冻结线（默认 = 本机提交上限 x 0.62，31.3 GiB 内存的笔记本约 39 GiB）就冻结涨得最快的一棵进程树（只暂停，绝不杀），回落到解冻线（默认 x 0.57）以下再解冻。
+r"""内存总闸看门狗：整机已提交内存到冻结线（默认 = 本机提交上限 x 0.80，31.3 GiB 内存的笔记本约 50 GiB）就冻结涨得最快的一棵进程树（只暂停，绝不杀），回落到解冻线（默认 x 0.75）以下再解冻。
 
 为什么（2026-11-02/03 笔记本内存事件）：agent 在自己终端里直接跑回归，已提交内存线性涨到 72 GB。``main.py long-run`` 的守卫只管
 经它起的任务，相当于每台电机自己的热继电器；这里是总进线断路器：不管谁在跑（Claude、Trae、反重力、手敲命令），都由它兜底。
@@ -38,9 +38,9 @@ SHA-256（``manifest.json``）；解释器是系统安装的（或复制进该�
     python -B scripts/memory_gate.py run         # 看门狗本体（计划任务调用）
     python -B scripts/memory_gate.py status      # 只读：是否在跑、现在多少、冻了谁
     python -B scripts/memory_gate.py resume-all  # 手动解冻全部（含已锁定的）
-    python -B scripts/memory_gate.py bundle-hash # 四个文件的哈希（pin-check 比对仓库里钉住的那份）
-    python -B scripts/memory_gate.py pin-check   # 只读：四个文件的合并哈希是否等于 scripts/memory_gate.pin.json
-    python -B scripts/memory_gate.py pin-write   # 开发者改完四个文件后重写钉哈希文件（改动要走 PR 和独立审计）
+    python -B scripts/memory_gate.py bundle-hash # 五个文件的哈希（pin-check 比对仓库里钉住的那份）
+    python -B scripts/memory_gate.py pin-check   # 只读：五个文件的合并哈希是否等于 scripts/memory_gate.pin.json
+    python -B scripts/memory_gate.py pin-write   # 开发者改完五个文件后重写钉哈希文件（改动要走 PR 和独立审计）
     python -B scripts/memory_gate.py selftest    # 用无害的假进程走一遍 冻结 -> 解冻（不需要内存压力）
 """
 
@@ -69,8 +69,8 @@ from typing import Any, TypeVar
 GIB = 2**30
 LIMIT_GIB = 40.0  # the fallback when the commit limit cannot be read (the ratios below are the normal case)
 RESUME_GIB = 36.0
-LIMIT_RATIO = 0.62
-RESUME_RATIO = 0.57
+LIMIT_RATIO = 0.80
+RESUME_RATIO = 0.75
 MIN_LIMIT_RATIO = 0.40
 MAX_LIMIT_RATIO = 0.90
 MIN_LIMIT_FLOOR_GIB = 8.0
@@ -125,6 +125,7 @@ BUNDLE_FILES = (
     "auto_pm/infrastructure/memory_preflight.py",
     "scripts/install_memory_gate.ps1",
     "scripts/memory_gate.py",
+    "scripts/memory_preflight.json",
 )
 # D-168: the gate acts only inside process trees whose owner armed itself (``memory_preflight.arm``): one JSON file per armed process.
 ARM_DIR_NAME = "memory-gate-arm"
@@ -1209,14 +1210,14 @@ def pin_problem(project_root: Path | None = None) -> str:
     if combined == pinned:
         return ""
     changed = [relative for relative, digest in lines if pinned_files.get(relative) != digest]
-    return f"四个文件的合并哈希 {combined} 不等于 {PIN_FILE} 钉住的 {pinned}；变了的文件：{', '.join(changed) or '（文件清单不同）'}。改了总闸文件后要重写钉哈希文件并走 PR。"
+    return f"五个文件的合并哈希 {combined} 不等于 {PIN_FILE} 钉住的 {pinned}；变了的文件：{', '.join(changed) or '（文件清单不同）'}。改了总闸文件后要重写钉哈希文件并走 PR。"
 
 
 def write_pin(project_root: Path | None = None) -> None:
     combined, lines = bundle_hash(project_root)
     target = pin_path(project_root)
     target.parent.mkdir(parents=True, exist_ok=True)
-    body = {"bundle_sha256": combined, "files": dict(lines), "note": "合并哈希覆盖 BUNDLE_FILES 四个文件；改总闸文件必须同时更新本文件，经 PR、独立审计、手动 sw008-ci，由用户合并"}
+    body = {"bundle_sha256": combined, "files": dict(lines), "note": "合并哈希覆盖 BUNDLE_FILES 五个文件；改总闸文件必须同时更新本文件，经 PR、独立审计、手动 sw008-ci，由用户合并"}
     target.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -1451,7 +1452,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "pin-check":
         problem = pin_problem()
-        print(problem or "钉住的哈希与四个文件一致")
+        print(problem or "钉住的哈希与五个文件一致")
         return 1 if problem else 0
     if args.command == "pin-write":
         write_pin()

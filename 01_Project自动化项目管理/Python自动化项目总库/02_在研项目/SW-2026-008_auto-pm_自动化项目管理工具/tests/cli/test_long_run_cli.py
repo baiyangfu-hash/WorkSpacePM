@@ -55,7 +55,7 @@ def test_a_failing_command_is_recorded_as_failed_with_its_exit_code(tmp_path: Pa
 
 
 def test_start_is_refused_on_a_hot_machine_and_creates_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mp, "read_commit", lambda: mp.CommitSnapshot(40 * GIB, 64 * GIB, 32 * GIB))
+    monkeypatch.setattr(mp, "read_commit", lambda: mp.CommitSnapshot(40 * GIB, 64 * GIB, 32 * GIB, 2 * GIB))
     monkeypatch.setattr(mp, "all_processes", lambda: (mp.ProcessUse(7, "pytest.exe", 12 * GIB),))
 
     result = _run(tmp_path, "start", "--name", "hot", "--cwd", str(tmp_path), "--", PY, "-c", "pass")
