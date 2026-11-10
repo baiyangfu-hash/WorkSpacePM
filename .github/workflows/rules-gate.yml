@@ -32,8 +32,68 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  rules-approval:
+  # 一键批准（CHG-SCPT-2026-623）：先判“要不要等用户点 Approve”。改了规则文件、且评论口令还没批，才进环境；
+  # 其余 PR（含评论口令已批的）不等任何人。
+  scope:
     if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      needs_env: ${{ steps.scope.outputs.needs_env }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Check out main (the judge)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the PR head and comments as data
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
+          gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+
+      - name: Do the rule files need the environment approval?
+        id: scope
+        env:
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: filter.lfs.smudge
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: filter.lfs.process
+          GIT_CONFIG_VALUE_1: ""
+          GIT_CONFIG_KEY_2: filter.lfs.required
+          GIT_CONFIG_VALUE_2: "false"
+        run: |
+          python3 -I "$GITHUB_WORKSPACE/reviews/tools/rules_approval_check.py" --scope \
+            --base "$(git rev-parse HEAD)" --head "$HEAD_SHA" --repo "$GITHUB_WORKSPACE" \
+            --comments "$RUNNER_TEMP/comments.json" >> "$GITHUB_OUTPUT"
+
+  # 环境 rules-approval 的必需审核人只有用户本人；任务停在“等待审核”，用户点 Approve 才往下走。
+  # 新推送会取消旧运行（并发组），所以批准只对这次运行的头提交有效。审核人身份由下一个任务从 API 重新读取并核对，不信这里的“成功”。
+  env-approve:
+    needs: scope
+    if: needs.scope.outputs.needs_env == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: rules-approval
+    permissions: {}
+    steps:
+      - run: echo "环境审核已通过，身份由 rules-approval 任务核对"
+
+  rules-approval:
+    needs: [scope, env-approve]
+    if: always() && !cancelled() && github.event_name == 'pull_request_target' && needs.scope.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -65,6 +125,8 @@ jobs:
           test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA"
           # 取不到评论就让任务失败（检查报红），不当成“没有批准”也不当成“放行”
           gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+          # 环境审核记录：审核人身份从 API 读，脚本核对登录名和数字 ID（env-approve 被拒或跳过时这里是空列表）
+          gh api "repos/$REPO/actions/runs/${{ github.run_id }}/approvals" > "$RUNNER_TEMP/approvals.json"
 
       - name: Rules approval check
         id: check
@@ -81,7 +143,7 @@ jobs:
           set +e
           python3 -I "$GITHUB_WORKSPACE/reviews/tools/rules_approval_check.py" \
             --base "$(git rev-parse HEAD)" --head "$HEAD_SHA" --repo "$GITHUB_WORKSPACE" \
-            --comments "$RUNNER_TEMP/comments.json" | tee "$RUNNER_TEMP/verdict.txt"
+            --comments "$RUNNER_TEMP/comments.json" --approvals "$RUNNER_TEMP/approvals.json" | tee "$RUNNER_TEMP/verdict.txt"
           code=${PIPESTATUS[0]}
           set -e
           { echo '### 规则文件批准检查'; cat "$RUNNER_TEMP/verdict.txt"; } >> "$GITHUB_STEP_SUMMARY"

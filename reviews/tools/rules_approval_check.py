@@ -159,10 +159,37 @@ def find_approval(comments: list[dict[str, Any]], head_sha: str, result: Result)
     return None
 
 
-def judge(files: list[str], comments: list[dict[str, Any]], head_sha: str) -> Result:
+ENV_NAME = "rules-approval"
+
+
+def find_env_approval(approvals: list[dict[str, Any]], result: Result) -> str | None:
+    """环境审核（一键批准）：当前这次运行上，指定批准人点了 Approve。
+
+    运行属于某个具体头提交，新推送会取消旧运行，所以批准天然绑头提交。登录名和数字 ID 都要对上；
+    环境名要是 ``ENV_NAME``，状态要是 approved（rejected 不算）。
+    """
+
+    for item in approvals:
+        user = item.get("user") or {}
+        login, uid = user.get("login"), user.get("id")
+        names = {str(e.get("name")) for e in (item.get("environments") or []) if isinstance(e, dict)}
+        if item.get("state") != "approved" or ENV_NAME not in names:
+            continue
+        if login not in SIGNERS or SIGNERS[login] != uid:
+            result.notes.append(f"环境审核：{login} 不是指定批准人，不算")
+            continue
+        return f"环境审核（{login}）在本次运行上点了 Approve"
+    return None
+
+
+def judge(
+    files: list[str], comments: list[dict[str, Any]], head_sha: str, approvals: list[dict[str, Any]] | None = None
+) -> Result:
     result = Result(rule_files=[f for f in files if is_rule_file(f)])
     if result.rule_files:
         result.approval = find_approval(comments, head_sha, result)
+        if result.approval is None and approvals:
+            result.approval = find_env_approval(approvals, result)
     return result
 
 
@@ -191,7 +218,8 @@ def render(result: Result, head_sha: str) -> str:
         lines.append(f"通过：改了 {len(result.rule_files)} 个规则文件，有用户本人的批准：{result.approval}")
     else:
         lines.append(f"不通过：这个 PR 改了 {len(result.rule_files)} 个规则文件，但 PR 评论里没有用户本人对当前头提交的批准。")
-        lines.append(f"复制这行评论即可批准（在本 PR 页面底部评论框粘贴，点 Comment；检查会自动重跑）：`{APPROVE_WORD} {head_sha[:MIN_SIGN_LEN]}`")
+        lines.append("一键批准：打开本次 rules-gate 运行页，点 Review deployments → 勾选 rules-approval → Approve。")
+        lines.append(f"（过渡期仍可用评论口令：`{APPROVE_WORD} {head_sha[:MIN_SIGN_LEN]}`，评论后检查自动重跑）")
         lines.append("这个号只对当前头提交有效，之后再推新提交要重批；PR 里的批准提示评论会随新推送自动更新。")
     if result.rule_files:
         lines.append("规则文件：")
@@ -205,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="main 当前头（裁判）")
     parser.add_argument("--head", required=True, help="PR 头提交（完整 40 位）")
     parser.add_argument("--comments", required=True, help="PR 评论 JSON 文件（gh api --paginate --slurp 的输出）")
+    parser.add_argument("--approvals", help="本次运行的环境审核记录 JSON（gh api actions/runs/<id>/approvals 的输出）；缺省表示没有")
+    parser.add_argument("--scope", action="store_true", help="只判是否需要环境审核：改了规则文件且评论口令还没批，才输出 needs_env=true；永远退出 0")
     parser.add_argument("--repo", default=".", help="用来取 diff 的检出（只读 git 对象，默认当前目录）")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.head):
@@ -216,7 +246,15 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, GitError) as error:
         print(f"出错：{error}", file=sys.stderr)
         return 2
-    result = judge(files, comments, args.head)
+    try:
+        approvals = flatten_comments(json.loads(Path(args.approvals).read_text(encoding="utf-8"))) if args.approvals else []
+    except (OSError, ValueError) as error:
+        print(f"出错：{error}", file=sys.stderr)
+        return 2
+    result = judge(files, comments, args.head, approvals)
+    if args.scope:
+        print(f"needs_env={'true' if result.rule_files and result.approval is None else 'false'}")
+        return 0
     print(render(result, args.head))
     return 0 if result.passed else 1
 

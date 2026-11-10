@@ -104,7 +104,7 @@ def test_a_rule_file_without_approval_fails() -> None:
     result = rules.judge(["AGENTS.md", "README.md"], [], HEAD)
     assert not result.passed and result.rule_files == ["AGENTS.md"]
     assert f"规则批准 {HEAD[:12]}" in rules.render(result, HEAD)
-    assert "复制这行评论即可批准" in rules.render(result, HEAD)
+    assert "Review deployments" in rules.render(result, HEAD)
 
 
 @pytest.mark.parametrize("sha", [HEAD[:12], HEAD, HEAD[:12].upper()])
@@ -267,6 +267,44 @@ def test_rerun_job_only_fires_on_comments_that_mention_the_approval_word() -> No
     assert "github.event.comment.user.id == 246858089" in condition  # the user filter stays
     # nothing else in the approval check reacts to other words: the safety signature belongs to safety-gate, not here
     assert "安全签字" not in condition
+
+
+def env_approval(user: dict | None = None, state: str = "approved", env: str = "rules-approval") -> dict:
+    return {"state": state, "user": user or USER, "environments": [{"name": env}], "comment": ""}
+
+
+def test_environment_approval_by_the_user_passes_without_a_comment() -> None:
+    result = rules.judge(["AGENTS.md"], [], HEAD, [env_approval()])
+    assert result.passed and result.approval and "环境审核" in result.approval
+
+
+@pytest.mark.parametrize(
+    "approval",
+    [
+        env_approval(SECOND),  # the shared agent account
+        env_approval({"login": "baiyangfu-hash", "id": 1}),  # right name, wrong id
+        env_approval(state="rejected"),
+        env_approval(env="production"),  # another environment
+    ],
+)
+def test_environment_approval_from_anyone_else_or_in_another_state_does_not_count(approval: dict) -> None:
+    assert not rules.judge(["AGENTS.md"], [], HEAD, [approval]).passed
+
+
+def test_environment_approval_is_not_needed_when_no_rule_file_changes() -> None:
+    assert rules.judge(["README.md"], [], HEAD, []).passed
+
+
+def test_scope_mode_asks_for_environment_only_when_rule_files_lack_a_comment_approval() -> None:
+    assert rules.judge(["AGENTS.md"], [], HEAD).approval is None  # needs_env=true in this case
+    assert rules.judge(["AGENTS.md"], [comment(f"规则批准 {HEAD[:12]}")], HEAD).approval  # comment path still skips the environment
+
+
+def test_workflow_environment_job_gates_only_rule_file_prs_and_names_the_environment() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "environment: rules-approval" in text
+    assert "needs.scope.outputs.needs_env == 'true'" in text  # PRs without rule files never wait
+    assert "actions/runs/${{ github.run_id }}/approvals" in text  # approver identity is re-read from the API, not trusted from the job result
 
 
 def test_render_escapes_author_controlled_path_names() -> None:
