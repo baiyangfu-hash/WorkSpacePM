@@ -46,6 +46,9 @@ EXPECTED_TEMPLATE_FILES = [
     "02_PLC程序/PLC_ST/00_主程序/PRD/变更记录_CHG-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/接口文档_IFC-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/详细设计说明书_DSN-OB1.md",
+    "02_PLC程序/PLC_ST/00_全局数据/DB_1001_Station1.scl",
+    "02_PLC程序/PLC_ST/00_全局数据/DB_2001_CommonAlarm.scl",
+    "02_PLC程序/PLC_ST/00_全局数据/DB_3001_ExternalInteraction.scl",
     "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
     "02_PLC程序/PLC_ST/00_全局数据/PRD/变更记录_CHG-GlobalVars.md",
     "02_PLC程序/PLC_ST/00_全局数据/PRD/接口文档_IFC-GlobalVars.md",
@@ -364,15 +367,49 @@ def test_v13_the_root_prd_directory_is_no_longer_generated_and_the_program_schem
         assert (Path(found[0]) / doc).is_file(), doc
 
 
-def test_v14_the_program_scheme_interface_document_lists_exactly_the_fb_instances_declared_in_the_global_data_block(tmp_path: Path) -> None:
+def test_v14_the_program_scheme_interface_document_lists_exactly_the_instance_data_blocks_of_the_project(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    db = (project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db").read_text(encoding="utf-8")
-    declared = sorted(set(re.findall(r"^\s*(fb\w+)\s*:\s*(FB_\w+)\s*;", db, flags=re.M)))
-    assert len(declared) >= 3
+    data = project / "02_PLC程序/PLC_ST/00_全局数据"
+    declared = sorted(
+        (m.group(2), m.group(1))
+        for p in data.glob("DB_*.scl")
+        for m in [re.search(r'^DATA_BLOCK "(DB_\w+)"\s*\n"(FB_\w+)"\s*\nBEGIN\s*\nEND_DATA_BLOCK', p.read_text(encoding="utf-8-sig"), flags=re.M)]
+        if m
+    )
+    assert len(declared) == 3, declared
     text = (project / "02_PLC程序/PLC_ST/00_程序方案/接口文档_INT.md").read_text(encoding="utf-8")
     section = text.split("## 1. FB 实例表", 1)[1].split("## 2. FC 调用表", 1)[0]
-    listed = sorted({(m.group(2), m.group(1)) for m in re.finditer(r"\|\s*`(FB_\w+)`\s*\|\s*`GlobalVars\.(fb\w+)`", section)})
+    listed = sorted({(m.group(1), m.group(2)) for m in re.finditer(r"\|\s*`(FB_\w+)`\s*\|\s*`(DB_\w+)`", section)})
     assert listed == declared, (listed, declared)
+
+
+def test_v14b_no_fb_instance_lives_in_the_global_data_block_and_main_calls_each_instance_data_block_once(tmp_path: Path) -> None:
+    # LSP-905 §4.11-1, verified on TIA V19 in DJ-2026-011: a global DB may not hold FB instances; each FB gets its own instance DB.
+    project = _generate(tmp_path)
+    db = (project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db").read_text(encoding="utf-8-sig")
+    assert re.findall(r"^\s*\w+\s*:\s*\"?FB_\w+", db, flags=re.M) == []
+    assert re.search(r"^BEGIN\s*$", db, flags=re.M), "GlobalVars.db must have BEGIN before END_DATA_BLOCK"
+    ob1 = (project / "02_PLC程序/PLC_ST/00_主程序/OB1.scl").read_text(encoding="utf-8-sig")
+    calls = re.findall(r'^\s*"(DB_\w+)"\s*\(', ob1, flags=re.M)
+    assert sorted(calls) == ["DB_1001_Station1", "DB_2001_CommonAlarm", "DB_3001_ExternalInteraction"], calls
+    assert "GlobalVars.fb" not in ob1
+
+
+def test_v14c_every_generated_scl_and_db_source_starts_with_a_utf8_bom(tmp_path: Path) -> None:
+    # LSP-905 §4.10-2: TIA shows Chinese comments as mojibake without the BOM; copier must not drop it.
+    project = _generate(tmp_path)
+    sources = sorted(p for p in (project / "02_PLC程序/PLC_ST").rglob("*") if p.suffix in {".scl", ".db"})
+    assert len(sources) >= 12, sources
+    missing = [str(p.relative_to(project)) for p in sources if not p.read_bytes().startswith(b"\xef\xbb\xbf")]
+    assert missing == [], missing
+
+
+def test_v14d_the_alarm_queue_tail_index_starts_inside_the_queue(tmp_path: Path) -> None:
+    # D-232: the tail index had no initial value (0) and was only set to 1 on reset, so an alarm before the first reset wrote queue[0].
+    project = _generate(tmp_path)
+    fb = (project / "02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl").read_text(encoding="utf-8-sig")
+    assert re.search(r"^\s*s_iQueueTailIndex\s*:\s*INT\s*:=\s*1\s*;", fb, flags=re.M), "the tail index must start at 1"
+    assert fb.count("q_iMESAlarmQueue[s_iQueueTailIndex]") == 1, "the queue is written in exactly one place"
 
 
 def test_v15_the_program_scheme_interface_document_has_the_fc_table_and_the_exchange_area_contract(tmp_path: Path) -> None:
@@ -404,15 +441,11 @@ def test_v16_the_generated_project_has_all_three_scheme_comparison_items_passing
 
 def test_v17_a_new_instance_in_the_code_that_the_scheme_document_does_not_list_is_warned_not_failed(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    db = project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db"
-    text = db.read_text(encoding="utf-8")
-    anchor = "    fbCommonAlarm   : FB_2001_CommonAlarm_AllStation;"
-    assert anchor in text
-    extra = "    fbStation2      : FB_1001_Station1;  // 工位2功能块实例" + chr(10)
-    db.write_text(text.replace(anchor, extra + anchor, 1), encoding="utf-8")
+    extra = project / "02_PLC程序/PLC_ST/00_全局数据/DB_1002_Station2.scl"
+    extra.write_text(chr(0xFEFF) + 'DATA_BLOCK "DB_1002_Station2"' + chr(10) + '"FB_1001_Station1"' + chr(10) + "BEGIN" + chr(10) + "END_DATA_BLOCK" + chr(10), encoding="utf-8")
     result = _check(tmp_path, project)
     item = next(i for i in result.items if i.item == "接口文档 INT ↔ 代码 [FB 实例]")
-    assert item.status == "warn" and "GlobalVars.fbStation2" in item.message, (item.status, item.message)
+    assert item.status == "warn" and "DB_1002_Station2" in item.message, (item.status, item.message)
     assert [i.item for i in result.items if i.status == "fail" and i.item.startswith("接口文档 INT")] == []
 
 

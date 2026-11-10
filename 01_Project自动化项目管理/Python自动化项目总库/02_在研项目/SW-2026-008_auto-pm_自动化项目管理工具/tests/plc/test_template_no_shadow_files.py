@@ -12,11 +12,8 @@ from pathlib import Path
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 BASE = "plc-standard-project/template/02_PLC程序/PLC_ST/"
 KNOWN_SHADOWS = sorted(BASE + p for p in (
-    "00_主程序/OB1.scl",
-    "00_全局数据/GlobalVars.db",
     "00_全局数据/PRD/变更记录_CHG-GlobalVars.md",
     "00_全局数据/PRD/接口文档_IFC-GlobalVars.md",
-    "02_工位1_动作机构/FB_1001_Station1.scl",
     "02_工位1_动作机构/PRD/使用说明_UM-FB1001-Station1.md",
     "02_工位1_动作机构/PRD/变更记录_CHG-FB1001-Station1.md",
     "02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md",

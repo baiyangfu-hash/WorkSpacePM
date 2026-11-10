@@ -56,9 +56,14 @@
 | stExternal | ST_ExternalDevice | 外部设备交互信号 |
 | stStation1 | ST_Station1 | 工位1全局交互结构体 |
 | astServoAxis | ARRAY[1..4] OF ST_ServoAxis | 伺服轴数组 |
-| fbExternalDevice | FB_3001_ExternalInteraction | 外部设备交互功能块实例 |
-| fbStation1 | FB_1001_Station1 | 工位1功能块实例 |
-| fbCommonAlarm | FB_2001_CommonAlarm_AllStation | 公共报警功能块实例 |
+
+FB 实例不放在 GlobalVars 里（TIA V19 不接受全局 DB 里声明 FB 实例，见 LSP-905 §4.11-1），每个 FB 有自己的背景数据块：
+
+| 背景数据块 | FB 类型 | 说明 |
+|---|---|---|
+| DB_3001_ExternalInteraction | FB_3001_ExternalInteraction | 外部设备交互背景数据块 |
+| DB_1001_Station1 | FB_1001_Station1 | 工位1背景数据块 |
+| DB_2001_CommonAlarm | FB_2001_CommonAlarm_AllStation | 公共报警背景数据块 |
 
 ### ST_UpstreamDocking（结构体）
 

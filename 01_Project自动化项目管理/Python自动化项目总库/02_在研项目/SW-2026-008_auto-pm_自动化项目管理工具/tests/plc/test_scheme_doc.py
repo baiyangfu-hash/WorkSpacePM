@@ -214,3 +214,38 @@ def test_a_duplicated_instance_row_is_named(tmp_path: Path) -> None:
     project = _project(tmp_path, _doc([*FB_GOOD, FB_GOOD[0]], FC_LISTED))
     status, message = _by_item(scheme_items(str(project)))[ITEM_FB]
     assert status == "warn" and "文档里重复" in message and "GlobalVars.fbStation1" in message
+
+
+def test_an_instance_data_block_counts_as_an_fb_instance_named_after_the_data_block(tmp_path: Path) -> None:
+    # LSP-905 §4.11-1 (TIA V19, DJ-2026-011): FB instances live in their own instance DB, not in GlobalVars; the BOM and the
+    # optional attribute/version lines that TIA exports between the two names must not hide the instance.
+    plc = tmp_path / "02_PLC程序" / "PLC_ST"
+    scheme = plc / "00_程序方案"
+    scheme.mkdir(parents=True)
+    (plc / "FB_1001_Station1.scl").write_text(FB_STATION, encoding="utf-8")
+    (plc / "FB_2001_CommonAlarm.scl").write_text(FB_ALARM, encoding="utf-8")
+    (plc / "DB_1001_Station1.scl").write_text(chr(0xFEFF) + NL.join(['DATA_BLOCK "DB_1001_Station1"', '"FB_1001_Station1"', "BEGIN", "END_DATA_BLOCK", ""]), encoding="utf-8")
+    (plc / "DB_2001_Alarm.scl").write_text(
+        NL.join(['DATA_BLOCK "DB_2001_Alarm"', "{ S7_Optimized_Access := 'TRUE' }", "VERSION : 0.1", "NON_RETAIN", '"FB_2001_CommonAlarm"', "BEGIN", "END_DATA_BLOCK", ""]),
+        encoding="utf-8",
+    )
+    (plc / "GlobalVars.db").write_text(NL.join(["DATA_BLOCK GlobalVars", "VAR", "    stExternal : ST_ExternalDevice;", "END_VAR", "BEGIN", "END_DATA_BLOCK", ""]), encoding="utf-8")
+    table = ["| FB 类型名 | 实例名 | 一句话用途 | 块级接口文档 |", "| :--- | :--- | :--- | :--- |"]
+    rows = ["| `FB_1001_Station1` | `DB_1001_Station1` | 工位1 | `x.md` |", "| `FB_2001_CommonAlarm` | `DB_2001_Alarm` | 报警 | `y.md` |"]
+    (scheme / "接口文档_INT.md").write_text(NL.join(["# INT", "", "## 1. FB 实例表", "", *table, *rows, ""]), encoding="utf-8")
+    item = {i: (s, m) for i, s, m in scheme_items(str(tmp_path))}[ITEM_FB]
+    assert item == ("pass", "2 个 FB 实例与代码一致"), item
+    (scheme / "接口文档_INT.md").write_text(NL.join(["# INT", "", "## 1. FB 实例表", "", *table, rows[0], ""]), encoding="utf-8")
+    status, message = {i: (s, m) for i, s, m in scheme_items(str(tmp_path))}[ITEM_FB]
+    assert status == "warn" and "代码有、文档无" in message and "DB_2001_Alarm" in message, message
+
+
+def test_a_global_data_block_with_a_struct_type_is_not_mistaken_for_an_instance_data_block(tmp_path: Path) -> None:
+    plc = tmp_path / "02_PLC程序" / "PLC_ST"
+    scheme = plc / "00_程序方案"
+    scheme.mkdir(parents=True)
+    (plc / "FB_1001_Station1.scl").write_text(FB_STATION, encoding="utf-8")
+    (plc / "DB_Data.scl").write_text(NL.join(['DATA_BLOCK "DB_Data"', '"ST_Station1"', "BEGIN", "END_DATA_BLOCK", ""]), encoding="utf-8")
+    table = ["| FB 类型名 | 实例名 | 一句话用途 | 块级接口文档 |", "| :--- | :--- | :--- | :--- |"]
+    (scheme / "接口文档_INT.md").write_text(NL.join(["# INT", "", "## 1. FB 实例表", "", *table, ""]), encoding="utf-8")
+    assert {i: (s, m) for i, s, m in scheme_items(str(tmp_path))}[ITEM_FB] == ("pass", "0 个 FB 实例与代码一致")

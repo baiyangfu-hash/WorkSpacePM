@@ -3,7 +3,9 @@
 方案级 ``接口文档_INT.md`` 只写三件事（用户 2026-10-14 裁决）：FB 实例表（FB 类型名 + 实例名）、FC 调用表、跨系统交换区契约。
 本模块把这三部分与代码做**存在性对照**，只给警告、从不失败，也不写任何文件：
 
-- FB 实例表：文档里的 (FB 类型名, 实例名) 与数据块里声明的 FB 实例一一对应；
+- FB 实例表：文档里的 (FB 类型名, 实例名) 与代码里的 FB 实例一一对应。实例有两种写法：数据块里声明的成员（实例名写
+  ``数据块.成员``），以及 FB 自己的背景数据块 ``DATA_BLOCK "DB_x" "FB_x" BEGIN END_DATA_BLOCK``（实例名写背景数据块名；
+  TIA V19 不接受全局数据块里声明 FB 实例，LSP-905 §4.11-1，模板因此改用背景数据块）；
 - FC 调用表：表里的 FC 在项目里有定义，代码里被调用的 FC 在表里有登记（定义了但没被调用的 FC 不算差异）；
 - 交换区契约：``负责的块`` 在代码里存在；``本机侧承载的变量`` 的数据块与第一级变量在代码里存在（项目未填的占位格不检查）。
 
@@ -27,6 +29,8 @@ _PATH = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 _BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.S)
 _LIMIT = 5
+_DATA_BLOCK_HEAD = re.compile(r'^[ \t]*DATA_BLOCK[ \t]+"?([A-Za-z_]\w*)"?(.*?)^[ \t]*(?:BEGIN|VAR\w*|STRUCT|END_DATA_BLOCK)\b', re.I | re.M | re.S)
+_HEAD_NOISE = re.compile(r"\{[^}]*\}|\bVERSION\s*:\s*[\d.]+|\b(?:TITLE|AUTHOR|FAMILY|NAME)\s*[:=][^\n]*|\bNON_RETAIN\b|\bREAD_ONLY\b", re.I)
 
 ITEM_FB = "接口文档 INT ↔ 代码 [FB 实例]"
 ITEM_FC = "接口文档 INT ↔ 代码 [FC 调用]"
@@ -87,9 +91,20 @@ def _strip_comments(text: str) -> str:
 
 def _read(path: str) -> str:
     try:
-        return Path(path).read_text(encoding="utf-8", errors="replace")  # lenient-decode: only pass/warn keyword matching; a damaged character can turn a match into a miss (warn), never a miss into a match
+        return Path(path).read_text(encoding="utf-8-sig", errors="replace")  # lenient-decode: only pass/warn keyword matching; a damaged character can turn a match into a miss (warn), never a miss into a match
     except OSError:
         return ""
+
+
+def _instance_data_blocks(text: str, fb_names: dict[str, str]) -> set[tuple[str, str]]:
+    """``(FB 类型名, 背景数据块名)`` for every ``DATA_BLOCK "DB_x" "FB_x"`` header in comment-free source ``text``."""
+
+    found: set[tuple[str, str]] = set()
+    for match in _DATA_BLOCK_HEAD.finditer(text):
+        tokens = _HEAD_NOISE.sub(" ", match.group(2)).split()
+        if len(tokens) == 1 and tokens[0].strip('"').casefold() in fb_names:
+            found.add((fb_names[tokens[0].strip('"').casefold()], match.group(1)))
+    return found
 
 
 def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
@@ -119,6 +134,8 @@ def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
         for var in obj.variables
         if var.type.strip('"').casefold() in fb_names
     }
+    for _path, text in sources:
+        code_instances |= _instance_data_blocks(text, fb_names)
     items: list[tuple[str, str, str]] = []
 
     # ---- FB instance table ------------------------------------------------------------------------------------------------------
@@ -160,7 +177,7 @@ def scheme_items(project_path: str) -> list[tuple[str, str, str]]:
                 parts.append(f"代码有、文档无：{_names(only_code)}")
             if only_doc:
                 parts.append(f"文档有、代码无：{_names(only_doc)}")
-            items.append((ITEM_FB, "warn", "；".join(parts) + "（FB 实例表需要与数据块里的 FB 实例一一对应）"))
+            items.append((ITEM_FB, "warn", "；".join(parts) + "（FB 实例表需要与代码里的 FB 实例（数据块成员或背景数据块）一一对应）"))
         else:
             items.append((ITEM_FB, "pass", f"{len(doc_instances)} 个 FB 实例与代码一致"))
 

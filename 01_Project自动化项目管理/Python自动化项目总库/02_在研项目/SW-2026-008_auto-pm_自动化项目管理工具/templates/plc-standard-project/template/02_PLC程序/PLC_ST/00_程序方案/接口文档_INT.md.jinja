@@ -25,11 +25,13 @@
 
 | FB 类型名 | 实例名 | 一句话用途 | 块级接口文档 |
 | :--- | :--- | :--- | :--- |
-| `FB_3001_ExternalInteraction` | `GlobalVars.fbExternalDevice` | 外部设备交互：上下游握手与心跳 | `01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalInteraction.md` |
-| `FB_1001_Station1` | `GlobalVars.fbStation1` | 工位1 动作机构控制 | `02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md` |
-| `FB_2001_CommonAlarm_AllStation` | `GlobalVars.fbCommonAlarm` | 公共报警汇总与首出报警 | `05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md` |
+| `FB_3001_ExternalInteraction` | `DB_3001_ExternalInteraction` | 外部设备交互：上下游握手与心跳 | `01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalInteraction.md` |
+| `FB_1001_Station1` | `DB_1001_Station1` | 工位1 动作机构控制 | `02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md` |
+| `FB_2001_CommonAlarm_AllStation` | `DB_2001_CommonAlarm` | 公共报警汇总与首出报警 | `05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md` |
 
-调度位置：`00_主程序/OB1.scl`，每个 FB 实例在 OB1 内按“调用 → 结构体写回”的顺序执行；FB 之间不读写对方内部变量，只通过 `VAR_IN_OUT` 结构体或第 3 节的交换区交互。
+实例名一栏写背景数据块名：FB 实例不放在 `GlobalVars` 里（LSP-905 §4.11-1），每个 FB 有自己的背景数据块（`00_全局数据/DB_*.scl`）。
+
+调度位置：`00_主程序/OB1.scl`，每个背景数据块在 OB1 内按工艺顺序调用一次，结构体通过 `VAR_IN_OUT` 直接读写 `GlobalVars`，不需要写回；FB 之间不读写对方内部变量，只通过 `VAR_IN_OUT` 结构体或第 3 节的交换区交互。
 
 ---
 
