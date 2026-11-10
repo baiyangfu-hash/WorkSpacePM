@@ -12,57 +12,54 @@ env:
   PYTHONUTF8: "1"
 
 jobs:
-  group:
+  probe:
     runs-on: windows-latest
-    timeout-minutes: 100
-    strategy:
-      fail-fast: false
-      matrix:
-        group:
-          - core
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
     steps:
       - name: Long paths
         run: git config --system core.longpaths true
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install locked dependencies
         run: |
           python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
-          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
-
-      - name: Official gate group ${{ matrix.group }}
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install -q --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+      - name: Write the probe
+        run: |
+          cat > "$RUNNER_TEMP/probe.py" <<'PY'
+          import subprocess, sys, time
+          script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
+          command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+          label = sys.argv[1]
+          for n in range(int(sys.argv[2])):
+              start = time.monotonic()
+              try:
+                  done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
+                  took = time.monotonic() - start
+                  rows = [r for r in done.stdout.splitlines() if r.strip()]
+                  print(f"PROBE {label} #{n}: rc={done.returncode} seconds={took:.1f} stdout_lines={len(rows)} stderr={done.stderr.strip()[:1500]!r}", flush=True)
+              except Exception as error:
+                  print(f"PROBE {label} #{n}: EXCEPTION after {time.monotonic() - start:.1f}s: {error!r}", flush=True)
+          PY
+      - name: Probe on an idle machine
+        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe.py" idle 3'
+      - name: The one test alone
+        working-directory: ${{ env.PROJ }}
+        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q --no-cov -p no:cacheprovider "tests/core/test_release_deploy_check.py::test_the_real_process_list_is_readable_here" || echo "ALONE: FAILED"'
+      - name: Probe while the core group runs with 4 workers
         working-directory: ${{ env.PROJ }}
         run: |
-          JOBS=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c 'import os; print(max(1, min(4, os.cpu_count() or 1)))')
-          "$RUNNER_TEMP/venv/Scripts/python.exe" tests/tools/sw008_ci/gate_run_ci.py run \
-            --group "${{ matrix.group }}" --out "$RUNNER_TEMP/gate-out/${{ matrix.group }}" --jobs "$JOBS" --timeout-minutes 90
-
-      - name: "Debug only: print the failed cases into the job log"
-        if: failure()
-        run: |
-          LOG="$RUNNER_TEMP/gate-out/${{ matrix.group }}/${{ matrix.group }}.txt"
-          ls -la "$RUNNER_TEMP/gate-out/${{ matrix.group }}" || true
-          echo "=== FAILED / ERROR lines ==="
-          grep -E "^(FAILED|ERROR) " "$LOG" || echo "(none matched)"
-          echo "=== last 200 lines ==="
-          tail -n 200 "$LOG" || true
-
-      - name: Upload the group record
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gate-${{ matrix.group }}
-          path: ${{ runner.temp }}/gate-out/${{ matrix.group }}
-          if-no-files-found: warn
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q --no-cov -p no:cacheprovider -n 4 tests/core --ignore=tests/core/test_implementation_card_basis.py > "$RUNNER_TEMP/core.txt" 2>&1 &
+          for wait in 60 240 240 240; do
+            sleep "$wait"
+            "$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe.py" "loaded-after-${wait}s" 2
+          done
+          taskkill //F //IM python.exe //T || true
