@@ -48,7 +48,7 @@ def test_e02_missing_xdist_is_refused_and_the_message_names_the_package_and_the_
     assert any("正确的启动方式" in line for line in refusals)
 
 
-@pytest.mark.parametrize("module", ["xdist", "pytest_qt", "PySide6", "jinja2", "pytest"])
+@pytest.mark.parametrize("module", ["xdist", "pytestqt", "PySide6", "jinja2", "pytest"])
 def test_e03_every_required_module_is_probed(module: str) -> None:
     assert module in pre.REQUIRED_MODULES
 
@@ -138,3 +138,15 @@ def test_e11_cli_prints_the_preflight_warning_even_when_the_gate_cannot_start(
     )
     assert result.exit_code == 2
     assert "环境不合格，未开跑" in result.output and "不在虚拟环境里" in result.output
+
+
+def test_e12_every_required_module_name_is_a_real_import_name_in_this_environment() -> None:
+    """D-196 regression: "pytest_qt" is the distribution's spelling, the import name is "pytestqt"; the name list was never run against a real interpreter."""
+
+    import importlib.util
+    import sys
+
+    unknown = [name for name in pre.REQUIRED_MODULES if importlib.util.find_spec(name) is None]
+    assert unknown == [], f"REQUIRED_MODULES 里的名字在本环境导入不了（写成了发行包名？）：{unknown}"
+    report = pre.probe_interpreter(sys.executable)  # the real probe, no stand-in prober
+    assert report.error == "" and report.missing == (), "合格环境不应被预检拒绝"
