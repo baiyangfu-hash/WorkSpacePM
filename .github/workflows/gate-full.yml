@@ -32,34 +32,34 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install -q --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
-      - name: Write the probe
+      - name: Probe inside the gate's white-listed child environment
+        working-directory: ${{ env.PROJ }}
         run: |
-          cat > "$RUNNER_TEMP/probe.py" <<'PY'
-          import subprocess, sys, time
+          cat > "$RUNNER_TEMP/probe_env.py" <<'PY'
+          import os, subprocess, sys, time
+          sys.path.insert(0, os.getcwd())
+          from auto_pm.application.core.gate_run_service import child_environment
+          from auto_pm.application.core import release_deploy_check as rdc
           script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
           command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
-          label = sys.argv[1]
-          for n in range(int(sys.argv[2])):
+          def probe(label, env):
               start = time.monotonic()
               try:
-                  done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
-                  took = time.monotonic() - start
+                  done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False, env=env)
                   rows = [r for r in done.stdout.splitlines() if r.strip()]
-                  print(f"PROBE {label} #{n}: rc={done.returncode} seconds={took:.1f} stdout_lines={len(rows)} stderr={done.stderr.strip()[:1500]!r}", flush=True)
+                  print(f"PROBE {label}: rc={done.returncode} seconds={time.monotonic() - start:.1f} stdout_lines={len(rows)} stderr={done.stderr.strip()[:3000]!r}", flush=True)
               except Exception as error:
-                  print(f"PROBE {label} #{n}: EXCEPTION after {time.monotonic() - start:.1f}s: {error!r}", flush=True)
+                  print(f"PROBE {label}: EXCEPTION after {time.monotonic() - start:.1f}s: {error!r}", flush=True)
+          full = dict(os.environ)
+          white = child_environment()
+          print("DROPPED", sorted(set(full) - set(white)), flush=True)
+          probe("full-env", full)
+          probe("whitelist-env", white)
+          for name in sorted(set(full) - set(white)):
+              if name.upper() in {"PSMODULEPATH", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"}:
+                  probe(f"whitelist-plus-{name}", {**white, name: full[name]})
+          os.environ.clear(); os.environ.update(white)
+          rows = rdc._list_processes()
+          print("PROBE _list_processes under whitelist:", None if rows is None else len(rows), flush=True)
           PY
-      - name: Probe on an idle machine
-        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe.py" idle 3'
-      - name: The one test alone
-        working-directory: ${{ env.PROJ }}
-        run: '"$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q --no-cov -p no:cacheprovider "tests/core/test_release_deploy_check.py::test_the_real_process_list_is_readable_here" || echo "ALONE: FAILED"'
-      - name: Probe while the core group runs with 4 workers
-        working-directory: ${{ env.PROJ }}
-        run: |
-          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q --no-cov -p no:cacheprovider -n 4 tests/core --ignore=tests/core/test_implementation_card_basis.py > "$RUNNER_TEMP/core.txt" 2>&1 &
-          for wait in 60 240 240 240; do
-            sleep "$wait"
-            "$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe.py" "loaded-after-${wait}s" 2
-          done
-          taskkill //F //IM python.exe //T || true
+          "$RUNNER_TEMP/venv/Scripts/python.exe" "$RUNNER_TEMP/probe_env.py"
