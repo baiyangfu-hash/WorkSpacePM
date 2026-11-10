@@ -608,7 +608,7 @@ class GateRunService:
         self.preflight_warnings: list[str] = []
         self._available_memory = available_memory or _available_memory  # looked up now, so a test can replace the module function
         self.job_notes: list[str] = []
-        self._announce = announce  # told at once when a group's workers are lowered; without it the note waits in ``preflight_warnings``
+        self.announce = announce  # told at once when a group's workers are lowered; without it the note waits in ``preflight_warnings``
 
     def select(self, only: Sequence[str] = ()) -> tuple[GateGroup, ...]:
         known = {g.name: g for g in GROUPS}
@@ -718,8 +718,8 @@ class GateRunService:
 
     def _say(self, note: str) -> None:
         self.job_notes.append(note)
-        if self._announce is not None:
-            self._announce(note)
+        if self.announce is not None:
+            self.announce(note)
         else:
             self.preflight_warnings.append(note)  # the CLI prints this list in its ``finally``
 

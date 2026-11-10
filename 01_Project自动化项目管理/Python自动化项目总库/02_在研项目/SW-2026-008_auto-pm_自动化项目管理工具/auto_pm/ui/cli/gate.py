@@ -119,7 +119,8 @@ def run_command(
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
     require_runtime_identity_for_workspace(ctx, candidate_release)
     arm_for_heavy_job("long-gate")  # D-168: the full regression (eleven pytest groups, hours) is the heavy job the memory gate protects; never raises
-    service = GateRunService(announce=lambda note: click.echo(f"⚠ {note}", err=True))  # D-235: said when it happens, not after the round
+    service = GateRunService()
+    service.announce = lambda note: click.echo(f"⚠ {note}", err=True)  # D-235: said when it happens, not after the round (set after construction, so a stand-in service class needs no constructor arguments)
     try:
         summary = service.run(
             worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60, require_full_jobs=require_full_jobs
