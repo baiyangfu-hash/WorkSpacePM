@@ -126,7 +126,8 @@ jobs:
         env:
           AUTO_PM_REQUIRE_SIEMENS_LSP: "1"
         run: |
-          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -p no:cacheprovider --no-cov -rs \
+          go version || echo "no Go toolchain on PATH"  # the plugin's test runner builds Go; record which one the runner had
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -vv -p no:cacheprovider --no-cov -rs \
             tests/e2e/test_pmf_template_plc.py -k "plugin"
 
   verdict:
