@@ -14,6 +14,8 @@ import pytest
 
 from tests.core import test_pm_dashboard as base
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 

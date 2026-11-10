@@ -3,6 +3,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 
 def _prototype_path() -> Path:
     workspace = Path(__file__).resolve().parents[6]

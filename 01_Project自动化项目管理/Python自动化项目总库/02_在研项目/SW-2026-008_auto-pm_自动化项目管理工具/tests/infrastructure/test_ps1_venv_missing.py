@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 REPO_ROOT = Path(__file__).resolve().parents[6]
 WRAPPERS = ["00_Infrastructure/bin/pm-as-agent.ps1", ".trae/bin/pm-as-trae.ps1"]
 NATIVE_VENV_CALL = re.compile(r"^\s*&\s+\$python\b", re.MULTILINE)

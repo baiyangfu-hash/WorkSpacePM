@@ -27,6 +27,8 @@ from auto_pm.application.core.pr_open_service import (
 from auto_pm.ui.cli.__main__ import cli
 from tests.core.test_agent_worktree_service import AGENT_MARKER_KEYS, Lab, commit, git
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 PROJECT = Path(__file__).resolve().parents[2]
 REPO = PROJECT.parents[3]
 REAL_JUDGE = REPO / "reviews" / "tools" / "pr_scope_check.py"

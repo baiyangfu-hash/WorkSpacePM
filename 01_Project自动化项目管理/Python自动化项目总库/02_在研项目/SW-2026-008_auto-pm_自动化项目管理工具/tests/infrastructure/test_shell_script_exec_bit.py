@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 HERE = Path(__file__).resolve().parent
 MUST_BE_EXECUTABLE = ("00_Infrastructure/auto_pm/environment/setup_env.sh",)
 

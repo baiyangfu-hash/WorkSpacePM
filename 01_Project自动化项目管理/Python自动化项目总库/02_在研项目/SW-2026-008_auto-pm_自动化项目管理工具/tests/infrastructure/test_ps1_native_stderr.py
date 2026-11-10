@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 REPO_ROOT = Path(__file__).resolve().parents[6]
 STOP = re.compile(r'^\s*\$ErrorActionPreference\s*=\s*"Stop"', re.MULTILINE)
 CONTINUE = re.compile(r'^\s*\$ErrorActionPreference\s*=\s*"Continue"', re.MULTILINE)

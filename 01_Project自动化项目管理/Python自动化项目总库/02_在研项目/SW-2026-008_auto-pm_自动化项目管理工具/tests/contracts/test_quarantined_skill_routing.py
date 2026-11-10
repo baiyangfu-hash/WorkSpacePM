@@ -10,8 +10,12 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
+
 import auto_pm
 from auto_pm.application.core.ai_handoff_service import ENTRY_SKILL, PM_ACTOR
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 QUARANTINED_SKILL = "pm-workflow"
 PACKAGE_ROOT = Path(auto_pm.__file__).resolve().parent

@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT.parents[3]
 SCRIPT = ROOT / "scripts" / "memory_gate.py"

@@ -12,6 +12,8 @@ import pytest
 
 from auto_pm.domain.vartable.parsers.communications_parser import CommunicationsParser
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 # 真实 DJ-2026-005 communications.yml 路径（只读，不修改）
 DJ_2026_005_COMMUNICATIONS = (
     Path(__file__).resolve().parents[6]  # 工作区根目录：tests/vartable → SW-2026-008 → 02_在研项目 → … → 工作区根

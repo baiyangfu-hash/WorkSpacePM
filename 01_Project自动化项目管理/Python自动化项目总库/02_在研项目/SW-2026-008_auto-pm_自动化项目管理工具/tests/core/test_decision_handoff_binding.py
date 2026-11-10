@@ -14,6 +14,8 @@ from auto_pm.application.core.ai_handoff_service import (
 from auto_pm.contracts.decision_package import DecisionPackageDTO
 from auto_pm.domain.change.decision_service import DecisionService
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 
 @pytest.fixture
 def mock_decision(tmp_path: Path) -> DecisionPackageDTO:

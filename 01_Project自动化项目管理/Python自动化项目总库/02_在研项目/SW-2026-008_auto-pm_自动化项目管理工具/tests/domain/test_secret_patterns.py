@@ -13,6 +13,8 @@ from auto_pm.domain import secret_patterns as sp
 from auto_pm.infrastructure.git_hook_enforcer import enforce_pre_commit
 from tests.git_support import run_git
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 GHP = "ghp_" + "a" * 36
 PAT = "github_pat_" + "A1b2C3d4E5" * 3
 REPO_ROOT = Path(__file__).resolve().parents[6]

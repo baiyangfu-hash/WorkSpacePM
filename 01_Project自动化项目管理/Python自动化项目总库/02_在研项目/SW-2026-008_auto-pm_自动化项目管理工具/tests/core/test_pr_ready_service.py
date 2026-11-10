@@ -19,6 +19,8 @@ from auto_pm.application.core.pr_ready_service import (
 )
 from auto_pm.ui.cli.__main__ import cli
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 REPO_ROOT = Path(__file__).resolve().parents[2].parents[3]
 HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 OLD = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"

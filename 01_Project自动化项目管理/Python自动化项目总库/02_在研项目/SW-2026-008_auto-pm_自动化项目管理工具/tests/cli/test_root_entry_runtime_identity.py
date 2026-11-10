@@ -6,6 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
 ROOT_ENTRY = WORKSPACE_ROOT / "main.py"
 

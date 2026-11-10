@@ -10,8 +10,11 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
 PROJECT = Path(__file__).resolve().parents[2]
 LOCK = PROJECT.parents[3] / "00_Infrastructure" / "auto_pm" / "environment" / "requirements-lock-py312-win.txt"

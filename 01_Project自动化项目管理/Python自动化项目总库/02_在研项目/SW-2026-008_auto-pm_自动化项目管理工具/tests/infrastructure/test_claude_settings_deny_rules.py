@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
+
 # 必需的拒绝规则。新增规则可以直接追加；删除或改写其中任何一条，必须在本清单同步修改。
 REQUIRED_DENY_RULES: tuple[str, ...] = (
     # 防止 agent 改自己的拒绝规则与钩子、账本数据库
