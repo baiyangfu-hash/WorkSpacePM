@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -19,6 +21,92 @@ PY = sys.executable
 
 
 _REAL_PREFLIGHT_MODULE = core._preflight_module
+_REAL_CORE_FILE = core.__file__
+_INFRA = Path(_REAL_CORE_FILE).resolve().parent
+
+# ------------------------------------------------------------------ a lab whose memory reading is fixed (D-226/D-227, CHG-SCPT-2026-627)
+# The worker and the guard are separate processes started from ``core.__file__``; a monkeypatch in this process cannot reach them, so a
+# guard started from the product file judged the laptop's real memory of the moment (11-10: 40-42 GiB committed, every job paused at the
+# old fixed 40 GiB line, four tests failed).  The lab is a throw-away copy of ``long_run_core.py`` next to a copy of ``memory_preflight.py``
+# whose ``read_commit`` returns a fixed, healthy reading; ``core.__file__`` points at the copy, so the guard and the worker run it.
+# The product files are read, never changed (the same pattern as tests/e2e/fixed_memory_lab.py, D-205).
+GIB = 2**30
+#: 8 GiB committed of a 64 GiB limit, 24 GiB physical available: far below every rule, whatever the rules are set to.
+LAB_READING = (
+    "\n\n# --- long-run lab (tests/infrastructure/test_long_run_core.py): a fixed, healthy reading instead of the host's ---\n"
+    "def read_commit() -> CommitSnapshot | None:\n"
+    "    return CommitSnapshot(committed=8 * GIB, limit=64 * GIB, physical=32 * GIB, available=24 * GIB)\n"
+)
+_PREFLIGHT_LOOKUP = 'def _preflight_module() -> ModuleType:\n    return _sibling("memory_preflight", "long_run_memory_preflight")\n'
+_LAB_PREFLIGHT_LOOKUP = (
+    "def _preflight_module() -> ModuleType:\n"
+    "    # long-run lab: always the patched copy next to this file, even when the real package is importable for the child\n"
+    '    spec = importlib.util.spec_from_file_location("long_run_lab_memory_preflight", Path(__file__).with_name("memory_preflight.py"))\n'
+    "    if spec is None or spec.loader is None:\n"
+    '        raise LongRunError("no lab memory_preflight")\n'
+    "    module = importlib.util.module_from_spec(spec)\n"
+    '    sys.modules["long_run_lab_memory_preflight"] = module\n'
+    "    try:\n"
+    "        spec.loader.exec_module(module)\n"
+    "    finally:\n"
+    '        sys.modules.pop("long_run_lab_memory_preflight", None)\n'
+    "    return module\n"
+)
+
+
+def build_lab(root: Path) -> Path:
+    """Copy the long-run core and its siblings under ``root`` (preflight patched); returns the copy of ``long_run_core.py``."""
+
+    infra = root / "auto_pm" / "infrastructure"
+    infra.mkdir(parents=True)
+    source = (_INFRA / "long_run_core.py").read_text(encoding="utf-8")
+    assert source.count(_PREFLIGHT_LOOKUP) == 1, "long_run_core._preflight_module changed: update the long-run lab"
+    (infra / "long_run_core.py").write_text(source.replace(_PREFLIGHT_LOOKUP, _LAB_PREFLIGHT_LOOKUP), encoding="utf-8", newline="\n")
+    (infra / "executable_lookup.py").write_bytes((_INFRA / "executable_lookup.py").read_bytes())
+    preflight = (_INFRA / "memory_preflight.py").read_text(encoding="utf-8")
+    (infra / "memory_preflight.py").write_text(preflight + LAB_READING, encoding="utf-8", newline="\n")
+    return infra / "long_run_core.py"
+
+
+def load_lab_preflight(lab_core: Path) -> ModuleType:
+    """The lab's patched preflight module, loaded in this process (what ``start`` uses for its headroom check)."""
+
+    name = "long_run_lab_preflight_in_test"
+    spec = importlib.util.spec_from_file_location(name, lab_core.with_name("memory_preflight.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses look the module up by name while it executes
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+def use_lab(monkeypatch: pytest.MonkeyPatch, lab_root: Path) -> ModuleType:
+    """Point ``core`` at a fresh lab: child processes run the lab copy, ``start`` checks the fixed reading.  Returns the in-process preflight."""
+
+    lab_core = build_lab(lab_root)
+    module = load_lab_preflight(lab_core)
+    monkeypatch.setattr(core, "__file__", str(lab_core))
+    monkeypatch.setattr(core, "_preflight_module", lambda: module)
+    return module
+
+
+def stop_leftover_jobs(control_root: Path) -> list[str]:
+    """D-227: after a test, passed or failed, no job of it may stay frozen or running: ``stop`` unfreezes the tree, kills it, ends the guard."""
+
+    stopped: list[str] = []
+    runs = control_root / core.RUN_ROOT
+    if not runs.is_dir():
+        return stopped
+    for run_dir in sorted(path for path in runs.iterdir() if path.is_dir()):
+        if any((run_dir / marker).exists() for marker in (*core.END_MARKERS, "STOPPED")):
+            continue
+        with contextlib.suppress(Exception):  # cleanup must never hide the test's own result
+            core.stop(run_dir)
+            stopped.append(run_dir.name)
+    return stopped
 
 
 class _Arming:
@@ -35,12 +123,12 @@ class _Arming:
 
 
 @pytest.fixture(autouse=True)
-def _arming(monkeypatch: pytest.MonkeyPatch) -> _Arming:
+def _arming(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Arming]:
     recorder = _Arming()
-    module = _REAL_PREFLIGHT_MODULE()  # the real module, with only ``arm`` replaced
+    module = use_lab(monkeypatch, tmp_path_factory.mktemp("long-run-lab"))  # the lab's preflight, with only ``arm`` replaced
     monkeypatch.setattr(module, "arm", recorder.arm)
-    monkeypatch.setattr(core, "_preflight_module", lambda: module)
-    return recorder
+    yield recorder
+    stop_leftover_jobs(tmp_path)  # D-227
 
 
 def _spec(run_dir: Path, argv: list[str], *, timeout: float = 60, cwd: Path | None = None) -> None:
@@ -412,6 +500,115 @@ def test_the_guard_stops_watching_once_a_stop_was_asked_and_lets_the_job_go(tmp_
     assert world.paused_calls == [] and world.polls == 0
 
 
+# ------------------------------------------------------------------ D-226: the guard's lines follow the machine's commit limit
+def _memory_gate_module() -> ModuleType:
+    path = _INFRA.parents[1] / "scripts" / "memory_gate.py"
+    spec = importlib.util.spec_from_file_location("long_run_test_memory_gate", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["long_run_test_memory_gate"] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop("long_run_test_memory_gate", None)
+    return module
+
+
+@pytest.mark.parametrize("limit", [None, 8.0, 19.9, 20.0, 47.6, 64.0, 95.7, 128.0])
+def test_d226_the_guard_lines_are_the_resident_memory_gate_defaults(limit: float | None) -> None:
+    mg = _memory_gate_module()
+    pause, resume, _source = core.guard_thresholds(limit)
+    gate = mg.default_thresholds(limit)
+
+    assert (pause, resume) == pytest.approx((gate.limit_gib, gate.resume_gib))
+    assert (core.GUARD_LIMIT_RATIO, core.GUARD_RESUME_RATIO) == (mg.LIMIT_RATIO, mg.RESUME_RATIO)
+
+
+def test_d226_a_laptop_at_its_ordinary_42_gib_of_a_96_gib_limit_is_not_paused(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [40.0, 42.0, 41.0], end_after=4)
+
+    core.guard_loop(
+        run_dir, read_committed_gib=world.read, read_commit_limit_gib=lambda: 95.7, sleep=world.sleep, clock=lambda: world.now,
+        tree=world.tree_of, pause=world._pause, unpause=world._unpause, awake=world.awake.append, poll_seconds=20, max_seconds=10_000,
+    )
+
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert world.paused_calls == [] and not list(run_dir.glob("ALERT_*.txt"))
+    assert guard["limit_gib"] == pytest.approx(95.7 * 0.80, abs=0.01) and guard["resume_gib"] == pytest.approx(95.7 * 0.75, abs=0.01)
+    assert "95.7" in guard["threshold_source"]
+
+
+def test_d226_the_ratio_line_still_pauses_a_really_full_machine_and_resumes_below_its_resume_line(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [50.0, 52.0, 49.0, 47.0], end_after=5)
+
+    core.guard_loop(
+        run_dir, read_committed_gib=world.read, read_commit_limit_gib=lambda: 64.0, sleep=world.sleep, clock=lambda: world.now,
+        tree=world.tree_of, pause=world._pause, unpause=world._unpause, awake=world.awake.append, poll_seconds=20, max_seconds=10_000,
+    )
+
+    # 64 GiB limit: pause at 51.2, resume below 48.0
+    assert world.paused_calls == [[4242, 4243]] and world.resumed_calls == [[4242, 4243]]
+    assert "51.2 GiB" in json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))["alerts"][0]
+
+
+def test_d226_an_unknown_commit_limit_falls_back_to_the_fixed_lines(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [39.0, 41.0], end_after=3)
+
+    core.guard_loop(
+        run_dir, read_committed_gib=world.read, read_commit_limit_gib=lambda: None, sleep=world.sleep, clock=lambda: world.now,
+        tree=world.tree_of, pause=world._pause, unpause=world._unpause, awake=world.awake.append, poll_seconds=20, max_seconds=10_000,
+    )
+
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert world.paused_calls == [[4242, 4243]]
+    assert (guard["limit_gib"], guard["resume_gib"]) == (core.GUARD_LIMIT_GIB, core.GUARD_RESUME_GIB) and guard["threshold_source"].startswith("fixed")
+
+
+def test_d226_the_real_guard_reads_the_limit_with_the_same_reading_as_the_committed_number(tmp_path: Path) -> None:
+    run_dir = _guard_dir(tmp_path)
+    world = _World(run_dir, [0.0], end_after=2)
+    fake = SimpleNamespace(
+        GIB=GIB, read_unowned_gib=lambda: None,
+        read_commit=lambda: SimpleNamespace(committed=45 * GIB, limit=96 * GIB, physical=32 * GIB, available=8 * GIB),
+    )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(core, "_preflight_module", lambda: fake)
+        core.guard_loop(
+            run_dir, sleep=world.sleep, clock=lambda: world.now, tree=world.tree_of, pause=world._pause, unpause=world._unpause,
+            awake=world.awake.append, poll_seconds=20, max_seconds=10_000,
+        )
+
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert world.paused_calls == [] and guard["last_committed_gib"] == 45.0 and guard["limit_gib"] == pytest.approx(76.8)
+
+
+def test_d226_the_lab_guard_process_judges_the_fixed_reading_not_the_host(tmp_path: Path) -> None:
+    core.start(tmp_path, "lab", [PY, "-c", "import time; time.sleep(1)"], cwd=tmp_path, poll_seconds=0.2)
+    run_dir = core.run_directory(tmp_path, "lab")
+
+    assert _wait(lambda: core.read_status(run_dir)["state"] == "DONE", _STARTUP_CEILING), _guard_diagnostics(run_dir)
+    assert _wait(lambda: core.read_status(run_dir)["guard"]["samples"] >= 1, _STARTUP_CEILING), _guard_diagnostics(run_dir)
+    guard = json.loads((run_dir / "guard.json").read_text(encoding="utf-8"))
+    assert guard["last_committed_gib"] == 8.0 and guard["limit_gib"] == pytest.approx(51.2)
+
+
+def test_d227_a_job_left_frozen_by_a_failed_test_is_unfrozen_and_ended_by_the_cleanup(tmp_path: Path) -> None:
+    core.start(tmp_path, "left", [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path, poll_seconds=0.2)
+    run_dir = core.run_directory(tmp_path, "left")
+    assert _wait(lambda: core.read_status(run_dir).get("child_pid"), _STARTUP_CEILING)
+    child = int(core.read_status(run_dir)["child_pid"])
+    core.suspend(core.process_tree(core._worker_pid(run_dir)))  # what a guard does on a full machine; the test "fails" here
+
+    assert stop_leftover_jobs(tmp_path) == ["left"]
+
+    assert core.read_status(run_dir)["state"] == "STOPPED" and not core.pid_alive(child)
+    assert stop_leftover_jobs(tmp_path) == []  # an ended job is left alone
+
+
 # ------------------------------------------------------------------ start / status / stop with real processes
 def test_start_runs_the_command_detached_under_a_worker_and_a_guard_and_leaves_the_evidence(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
@@ -440,7 +637,9 @@ def test_the_guard_starts_whether_or_not_auto_pm_is_importable_for_the_child(
 ) -> None:
     """D-123: run as a plain script the guard must not put auto_pm/infrastructure/ on sys.path (its logging/ would shadow the stdlib)."""
 
-    project_root = Path(core.__file__).resolve().parents[2]
+    # this test is about the product file run as a script (its folder holds a logging/ package), so it starts the real file, not the lab
+    monkeypatch.setattr(core, "__file__", _REAL_CORE_FILE)
+    project_root = Path(_REAL_CORE_FILE).resolve().parents[2]
     if project_importable:
         monkeypatch.setenv("PYTHONPATH", str(project_root))
     else:
@@ -588,7 +787,7 @@ def test_the_status_report_names_an_unreadable_guard_file_instead_of_showing_zer
 
 
 def test_the_module_is_standard_library_only_so_the_worker_runs_as_a_plain_script() -> None:
-    source = Path(core.__file__).read_text(encoding="utf-8")
+    source = Path(_REAL_CORE_FILE).read_text(encoding="utf-8")
 
     assert "from auto_pm" not in source and "import auto_pm" not in source
 
