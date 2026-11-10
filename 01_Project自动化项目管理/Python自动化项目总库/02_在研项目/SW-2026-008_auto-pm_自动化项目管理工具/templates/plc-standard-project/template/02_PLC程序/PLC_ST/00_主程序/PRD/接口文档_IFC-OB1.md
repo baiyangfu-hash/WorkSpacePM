@@ -28,20 +28,20 @@ OB1是边框缓存机的**主程序组织块**，负责：
 
 ## 3. 程序架构
 
-> 注：下图是来源项目 DJ-2026-005 的历史架构，图里的 `fbXxx` 当时声明在 GlobalVars 里。现行模板改为每个 FB 一个背景数据块（`00_全局数据/DB_*.scl`），OB1 调用 `"DB_xxx"(...)`，不再写回结构体（LSP-905 §4.11-1）。
+> 注：下图是来源项目 DJ-2026-005 的历史架构，只用来示意调用顺序。FB 实例不声明在 GlobalVars 里：现行模板是每个 FB 一个背景数据块（`00_全局数据/DB_*.scl`），OB1 调用 `"DB_xxx"(...)`，不再写回结构体（LSP-905 §4.11-1）。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      OB1 主程序组织块 (V7.1.1)                │
 ├─────────────────────────────────────────────────────────────┤
-│  Step 1: fbExternalDevice (FB_ExternalDeviceInteraction)    │
+│  Step 1: 背景DB 调用 FB_ExternalDeviceInteraction           │
 │          ← stExternal.i_* (27输入) → stExternal.o_* (20输出) │
 │                                                                 │
-│  Step 2: fbConveyor_L1~L4 (4×FB_1002 展开)                   │
+│  Step 2: 4 个背景DB 调用 FB_1002 (L1~L4 展开)                │
 │          ← stConveyor.i_* → stConveyor.o_*                  │
 │          + 汇总: q_bRunning(OR) / q_bFault(OR) / q_iAlarmCode(MIN)│
 │                                                                 │
-│  Step 3: fbPickPlace (FB_1003 V7.0.0)                        │
+│  Step 3: 背景DB 调用 FB_1003 (V7.0.0)                        │
 │          ← stPickPlace.i_* → stPickPlace.o_*                │
 │          + VAR_IN_OUT: io_stZAxis => astServoAxis[1]         │
 │          + VAR_IN_OUT: io_stX1Axis => astServoAxis[2]        │
@@ -50,10 +50,10 @@ OB1是边框缓存机的**主程序组织块**，负责：
 │  Step 4: 工站间信号: Feeder.i_PickPlace_FeedComplete          │
 │          := PickPlace.o_PlaceComplete_ToFeeder               │
 │                                                                 │
-│  Step 5: fbGlueFeeder (FB_1004 V6.0.0)                       │
+│  Step 5: 背景DB 调用 FB_1004 (V6.0.0)                        │
 │          ← stFeeder.i_* → stFeeder.o_*                      │
 │                                                                 │
-│  Step 6: fbCommonAlarm (FB_2001 V6.0.0)                      │
+│  Step 6: 背景DB 调用 FB_2001 (V6.0.0)                        │
 │          ← 各站报警码 → stGlobal.o_*                         │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -77,7 +77,7 @@ OB1是边框缓存机的**主程序组织块**，负责：
 ### 5.1 FB_1003 VAR_IN_OUT 轴引用 (V7.0.0新增)
 
 ```
-fbPickPlace(
+"DB_1003_PickPlace"(
     ...
     (* V7.0.0: VAR_IN_OUT 必须在VAR_OUTPUT之前声明 *)
     io_stZAxis   => GlobalVars.astServoAxis[1],    // Z轴(升降)
@@ -148,7 +148,7 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 | stPickPlace | 取放料机构 | 56 (53in+3out? 实际53+3out后处理) | FB_1003 |
 | stFeeder | 打胶机送料 | 35 (21in+14out) | FB_1004 |
 | astServoAxis[1..3] | 伺服轴数组 | 3×ST_ServoAxis | FB_1003/FB_1004(预留) |
-| fb* (7个实例) | 功能块实例 | 7 | 各FB实例化 |
+| （FB 实例） | 不在 GlobalVars 里 | - | 每个 FB 一个背景数据块，见 `00_全局数据/DB_*.scl` |
 
 ### 6.2 HMI关键地址
 

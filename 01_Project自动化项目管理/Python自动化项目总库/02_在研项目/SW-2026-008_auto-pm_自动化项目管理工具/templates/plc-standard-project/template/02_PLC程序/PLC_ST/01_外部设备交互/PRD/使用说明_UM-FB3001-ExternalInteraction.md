@@ -11,5 +11,5 @@ domain: plc
 
 ## 1. 快速接入指引
 1. 在全局数据块中声明 `stExternal: ST_ExternalDevice`；
-2. 在 OB1 主循环中按周期调用 `fbExternal(..., io_stExternal := GlobalVars.stExternal)`；
+2. 在 OB1 主循环中按周期调用它的背景数据块 `"DB_3001_ExternalInteraction"(io_stExternal := GlobalVars.stExternal)`（实例在 `00_全局数据/DB_3001_ExternalInteraction.scl`，不放进 `GlobalVars`，LSP-905 §4.11-1）；
 3. 将 `stExternal` 中的输入输出位与现场硬线 I/O 或通讯 DB 块完成变量映射。
