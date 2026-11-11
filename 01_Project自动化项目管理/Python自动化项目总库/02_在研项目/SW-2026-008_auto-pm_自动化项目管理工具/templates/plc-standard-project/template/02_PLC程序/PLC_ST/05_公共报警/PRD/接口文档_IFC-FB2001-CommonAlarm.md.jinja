@@ -1,4 +1,4 @@
-# 接口文档 FB_2001_CommonAlarm_AllStation
+# 接口文档 FB_2001_CommonAlarm_AllStation_{{ project_tag }}
 
 ## 0. 文档基础信息
 
@@ -20,9 +20,9 @@
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| io_stGlobal | ST_CommonAlarm | 公共报警工站全量数据结构体 |
+| io_stGlobal | ST_CommonAlarm{{ udt_suffix }} | 公共报警工站全量数据结构体 |
 
-结构体 `ST_CommonAlarm` 的字段不在本文档展开，统一在 `PLC变量定义文档_VAR.md` 的“ST_CommonAlarm”小节维护（接口字段只在一处维护，`plc docs check` 会核对）。
+结构体 `ST_CommonAlarm{{ udt_suffix }}` 的字段不在本文档展开，统一在 `PLC变量定义文档_VAR.md` 的“ST_CommonAlarm{{ udt_suffix }}”小节维护（接口字段只在一处维护，`plc docs check` 会核对）。
 
 ## 3. 报警码完整表（按优先级）
 

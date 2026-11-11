@@ -9,7 +9,7 @@
 //   - 4.0s ON / 4.0s OFF 双向心跳翻转与 12.0s 超时监视
 // ============================================================================
 
-TYPE ST_UpstreamDocking :
+TYPE ST_UpstreamDocking{{ udt_suffix }} :
 STRUCT
     // --- 本机 -> 上游流水线 (Machine Output / Upstream Input) ---
     bMachine_ReadyIn            : BOOL;     (* (1) 机器准备好进料信号 *)
@@ -32,7 +32,7 @@ STRUCT
 END_STRUCT
 END_TYPE
 
-TYPE ST_DownstreamDocking :
+TYPE ST_DownstreamDocking{{ udt_suffix }} :
 STRUCT
     // --- 本机 -> 下游流水线 (Machine Output / Downstream Input) ---
     bMachine_ReadyOut           : BOOL;     (* (2) 机器准备好出料信号 *)
@@ -55,10 +55,10 @@ STRUCT
 END_STRUCT
 END_TYPE
 
-TYPE ST_ExternalDevice :
+TYPE ST_ExternalDevice{{ udt_suffix }} :
 STRUCT
-    stUpstream      : ST_UpstreamDocking;  // 上游设备对接信号
-    stDownstream    : ST_DownstreamDocking;  // 下游设备对接信号
+    stUpstream      : ST_UpstreamDocking{{ udt_suffix }};  // 上游设备对接信号
+    stDownstream    : ST_DownstreamDocking{{ udt_suffix }};  // 下游设备对接信号
     bEmergencyStop  : BOOL;                 (* 外部总线急停 (1=正常, 0=急停) *)
     bSafetyDoorOK   : BOOL;                 (* 外部安全门锁信号 *)
     bAnyComFault    : BOOL;                 (* 外部通讯综合故障 *)

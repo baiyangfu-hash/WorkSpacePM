@@ -15,7 +15,7 @@
 | **文档版本** | {{ version }} |
 | **编制日期** | {{ '%Y-%m-%d' | strftime }} |
 | **适用范围** | {{ project_name }} 项目 ({{ project_id }}) |
-| **架构版本** | {{ version }} (OB1/DB/FB组件化交付 + 语义对齐优先) |
+| **架构版本** | {{ version }} (OB123/DB/FB组件化交付 + 语义对齐优先) |
 | **遵循规范** | IEC 61131-3, LSP-905 SCL编程规范, LSP-907 项目结构规范 |
 
 ## 2. 项目概述
@@ -75,8 +75,8 @@
 <!-- AUTO_PM:BEGIN plc-program-components -->
 | 序号 | 组件 | 类型 | 文件 | 核心职责 |
 |------|------|------|------|----------|
-| 1 | **OB1** | OB | `OB1/OB1.scl` | 主循环程序、FB 实例化与调用顺序管理 |
-| 2 | **GlobalVars** | DB | `DB1/GlobalVars.db` | 全局变量数据块、I/O 映射中心 |
+| 1 | **OB123**（块名 `{{ project_tag }}_Main`） | OB | `00_主程序/OB123.scl` | 主循环程序、FB 实例化与调用顺序管理 |
+| 2 | **GlobalVars_{{ project_tag }}** | DB | `DB1/GlobalVars.db` | 全局变量数据块、I/O 映射中心 |
 | 3 | **conveyor** | FB | `conveyor/` | 输送机控制功能块 |
 | 4 | **pickplace** | FB | `pickplace/` | 取放料机构控制功能块 |
 | 5 | **feeder** | FB | `feeder/` | 送料机构控制功能块 |
@@ -88,7 +88,7 @@
 
 ```
   ┌─────────────────────────────────────────────────────────────┐
-  │                  OB1 主循环扫描周期执行顺序                     │
+  │                  OB123 主循环扫描周期执行顺序                     │
   │                                                             │
   │  Step1: 初始化 (FirstScan)                                   │
   │  Step2: 外部设备交互处理                                      │

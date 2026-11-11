@@ -42,7 +42,7 @@ EXPECTED_TEMPLATE_FILES = [
     "01_需求与设计/13_软件方案/012_{pid}_需求规格说明书_REQ.md",
     "01_需求与设计/13_软件方案/{name}工艺流程图_V1.mmd",
     "02_PLC程序/PLC_ST/.plc.json",
-    "02_PLC程序/PLC_ST/00_主程序/OB1.scl",
+    "02_PLC程序/PLC_ST/00_主程序/OB123.scl",
     "02_PLC程序/PLC_ST/00_主程序/PRD/变更记录_CHG-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/接口文档_IFC-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/详细设计说明书_DSN-OB1.md",
@@ -346,7 +346,7 @@ def test_v11_the_plugin_test_catches_a_reset_that_does_not_write_the_outputs(tmp
 
 def test_v12_an_emptied_source_file_fails_the_cockpit_structure_check_although_the_plugin_reports_nothing(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    (project / "02_PLC程序" / "PLC_ST" / "00_主程序" / "OB1.scl").write_text("", encoding="utf-8")
+    (project / "02_PLC程序" / "PLC_ST" / "00_主程序" / "OB123.scl").write_text("", encoding="utf-8")
     result = _check(tmp_path, project)
     failed = [i for i in result.items if i.status == "fail"]
     assert [i.item for i in failed] == ["SCL 代码规范"]
@@ -389,10 +389,10 @@ def test_v14b_no_fb_instance_lives_in_the_global_data_block_and_main_calls_each_
     db = (project / "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db").read_text(encoding="utf-8-sig")
     assert re.findall(r"^\s*\w+\s*:\s*\"?FB_\w+", db, flags=re.M) == []
     assert re.search(r"^BEGIN\s*$", db, flags=re.M), "GlobalVars.db must have BEGIN before END_DATA_BLOCK"
-    ob1 = (project / "02_PLC程序/PLC_ST/00_主程序/OB1.scl").read_text(encoding="utf-8-sig")
-    calls = re.findall(r'^\s*"(DB_\w+)"\s*\(', ob1, flags=re.M)
-    assert sorted(calls) == ["DB_1001_Station1", "DB_2001_CommonAlarm", "DB_3001_ExternalInteraction"], calls
-    assert "GlobalVars.fb" not in ob1
+    main = (project / "02_PLC程序/PLC_ST/00_主程序/OB123.scl").read_text(encoding="utf-8-sig")
+    calls = re.findall(r'^\s*"(DB_\w+)"\s*\(', main, flags=re.M)
+    assert sorted(calls) == ["DB_1001_Station1_DJ2026901", "DB_2001_CommonAlarm_DJ2026901", "DB_3001_ExternalInteraction_DJ2026901"], calls
+    assert ".fb" not in main
 
 
 def test_v14c_every_generated_scl_and_db_source_starts_with_a_utf8_bom(tmp_path: Path) -> None:
@@ -442,7 +442,7 @@ def test_v16_the_generated_project_has_all_three_scheme_comparison_items_passing
 def test_v17_a_new_instance_in_the_code_that_the_scheme_document_does_not_list_is_warned_not_failed(tmp_path: Path) -> None:
     project = _generate(tmp_path)
     extra = project / "02_PLC程序/PLC_ST/00_全局数据/DB_1002_Station2.scl"
-    extra.write_text(chr(0xFEFF) + 'DATA_BLOCK "DB_1002_Station2"' + chr(10) + '"FB_1001_Station1"' + chr(10) + "BEGIN" + chr(10) + "END_DATA_BLOCK" + chr(10), encoding="utf-8")
+    extra.write_text(chr(0xFEFF) + 'DATA_BLOCK "DB_1002_Station2"' + chr(10) + '"FB_1001_Station1_DJ2026901"' + chr(10) + "BEGIN" + chr(10) + "END_DATA_BLOCK" + chr(10), encoding="utf-8")
     result = _check(tmp_path, project)
     item = next(i for i in result.items if i.item == "接口文档 INT ↔ 代码 [FB 实例]")
     assert item.status == "warn" and "DB_1002_Station2" in item.message, (item.status, item.message)
@@ -546,3 +546,57 @@ def test_a_missing_plugin_is_a_skip_normally_and_a_failure_when_required(monkeyp
     monkeypatch.setenv(REQUIRE_PLUGIN_ENV, "1")
     with pytest.raises(pytest.fail.Exception, match="no plugin here"):
         _missing_plugin("no plugin here")
+
+
+# ---- C1/C2 (user 2026-11-11): block names carry the project tag, the main program is OB123 named <tag>_Main ----------------------------------------------------------------------
+
+_DECLARATION = re.compile(r'^\s*(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK|ORGANIZATION_BLOCK|TYPE)\s+"?(\w+)"?', flags=re.M)
+
+
+def _declared_blocks(project: Path) -> dict[str, str]:
+    """Every block, data block, OB and type declared in the generated PLC sources, name -> kind."""
+    found: dict[str, str] = {}
+    for path in sorted((project / "02_PLC程序/PLC_ST").rglob("*")):
+        if path.suffix in {".scl", ".db"}:
+            for kind, name in _DECLARATION.findall(path.read_text(encoding="utf-8-sig")):
+                found[name] = kind
+    return found
+
+
+@pytest.mark.parametrize(("project_id", "tag"), [("DJ-2026-901", "DJ2026901"), ("SW-2027-123", "SW2027123")])
+def test_v18_every_generated_block_data_block_and_ob_name_carries_the_tag_of_its_own_project(tmp_path: Path, project_id: str, tag: str) -> None:
+    # LSP-905 §3.4-2 / §4.11-4: TIA overwrites a block of the same name on import, so FB, DB and OB names carry the project tag (rendered from project_id, never written out).
+    project = _generate(tmp_path, project_id=project_id)
+    blocks = _declared_blocks(project)
+    tagged = sorted(n for n, k in blocks.items() if k in {"FUNCTION_BLOCK", "DATA_BLOCK", "ORGANIZATION_BLOCK"})
+    assert tagged == sorted([
+        f"FB_1001_Station1_{tag}", f"FB_2001_CommonAlarm_AllStation_{tag}", f"FB_3001_ExternalInteraction_{tag}",
+        f"DB_1001_Station1_{tag}", f"DB_2001_CommonAlarm_{tag}", f"DB_3001_ExternalInteraction_{tag}", f"GlobalVars_{tag}", f"{tag}_Main",
+    ]), tagged
+    assert blocks[f"{tag}_Main"] == "ORGANIZATION_BLOCK"
+    # C5 (2026-11-11): the existing function keeps its number and name
+    assert [n for n, k in blocks.items() if k == "FUNCTION"] == ["FC_4001_ScaleAnalog"]
+    # 905 §3.3/§3.4: types carry no project tag by default (udt_suffix is empty)
+    types = sorted(n for n, k in blocks.items() if k == "TYPE")
+    assert types and all(n.startswith("ST_") and tag not in n for n in types), types
+    # every quoted or dotted reference to a block in the sources names a declared block, so nothing still points at an untagged name
+    sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (project / "02_PLC程序/PLC_ST").rglob("*") if p.suffix in {".scl", ".db", ".scltest"})
+    referenced = set(re.findall(r'"((?:FB|DB)_\w+)"', sources)) | set(re.findall(r"\b(GlobalVars\w*)\.(?!db\b)", sources))  # "GlobalVars.db" is the file name
+    assert referenced and referenced <= set(blocks), sorted(referenced - set(blocks))
+    # file names do not carry the tag (coordinator ruling d, 2026-11-11)
+    assert not [p for p in project.rglob("*") if tag in p.name]
+
+
+def test_v19_the_udt_suffix_is_switched_in_one_place_and_the_project_still_passes_the_check(tmp_path: Path) -> None:
+    # coordinator ruling b (2026-11-11): whether ST_ types carry the tag is one copier variable, so the choice can be reverted without touching the sources
+    destination = tmp_path / PID
+    TemplateService(str(TEMPLATES_DIR)).copy_template(
+        "plc-standard-project", str(destination), {"project_id": PID, "project_name": NAME, "udt_suffix": "_DJ2026901"}
+    )
+    types = sorted(n for n, k in _declared_blocks(destination).items() if k == "TYPE")
+    assert types and all(n.endswith("_DJ2026901") for n in types), types
+    sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (destination / "02_PLC程序/PLC_ST").rglob("*") if p.suffix in {".scl", ".db"})
+    used = set(re.findall(r":\s*(?:ARRAY\s*\[[^\]]*\]\s+OF\s+)?\"?(ST_\w+)", sources))
+    assert used <= set(types), sorted(used - set(types))  # D-245: every type a source uses is defined in the project itself
+    result = _check(tmp_path, destination)
+    assert [i.item for i in result.items if i.status == "fail"] == [], [(i.item, i.message) for i in result.items if i.status == "fail"]
