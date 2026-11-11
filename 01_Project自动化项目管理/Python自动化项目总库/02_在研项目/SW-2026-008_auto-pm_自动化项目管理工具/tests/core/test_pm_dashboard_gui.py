@@ -124,8 +124,8 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
             lowered = (button.text() + button.toolTip()).lower()
             assert not any(word in lowered for word in policy.PM_FORBIDDEN_WORDS), button.text()
     for button in _buttons(window):
-        # 流程图页、工具页自己的按钮由 test_cockpit_board_flow / _tools 按各自的清单清点；这里只数顶栏和上面五页
-        if button.objectName() in ("tab", "mode", "refresh") and not _in_flow_or_tools(window, button):
+        # 流程图页、工具页自己的按钮由 test_cockpit_board_flow / _tools 按各自的清单清点；这里只数侧栏（nav）、顶栏和上面五页
+        if button.objectName() in ("nav", "tab", "mode", "refresh") and not _in_flow_or_tools(window, button):
             seen.add(button.text())
     assert seen <= policy.PM_BUTTONS | tool_policy.NAV_BUTTONS, seen - policy.PM_BUTTONS - tool_policy.NAV_BUTTONS
     assert tool_policy.NAV_BUTTONS <= seen
