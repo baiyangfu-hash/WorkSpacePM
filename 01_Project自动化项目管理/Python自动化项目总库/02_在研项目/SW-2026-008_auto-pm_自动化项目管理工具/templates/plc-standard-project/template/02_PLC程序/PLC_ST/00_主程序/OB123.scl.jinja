@@ -13,21 +13,26 @@
 //   如果你的项目已有主程序, 也可以不导入本 OB, 只把下面三行调用复制进你自己的主程序.
 // ============================================================================
 ORGANIZATION_BLOCK "{{ project_tag }}_Main"
+{ S7_Optimized_Block := 'TRUE' }
+VERSION : 1.0
+
+VAR_TEMP
+END_VAR
 
 BEGIN
     // ============================================================================
     // 第1部分：外部设备交互 (ST_ExternalDevice{{ udt_suffix }})
     // ============================================================================
-    "DB_3001_ExternalInteraction_{{ project_tag }}"(io_stExternal := GlobalVars_{{ project_tag }}.stExternal);
+    "DB_3001_ExternalInteraction_{{ project_tag }}"(io_stExternal := "GlobalVars_{{ project_tag }}".stExternal);
 
     // ============================================================================
     // 第2部分：工位1 动作机构 (ST_Station1{{ udt_suffix }})
     // ============================================================================
-    "DB_1001_Station1_{{ project_tag }}"(io_stStation := GlobalVars_{{ project_tag }}.stStation1);
+    "DB_1001_Station1_{{ project_tag }}"(io_stStation := "GlobalVars_{{ project_tag }}".stStation1);
 
     // ============================================================================
     // 第3部分：公共报警与 OMAC 状态机 (ST_CommonAlarm{{ udt_suffix }})
     // ============================================================================
-    "DB_2001_CommonAlarm_{{ project_tag }}"(io_stGlobal := GlobalVars_{{ project_tag }}.stGlobal);
+    "DB_2001_CommonAlarm_{{ project_tag }}"(io_stGlobal := "GlobalVars_{{ project_tag }}".stGlobal);
 
 END_ORGANIZATION_BLOCK
