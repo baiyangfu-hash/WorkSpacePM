@@ -170,6 +170,8 @@ PLC源程序样例/
 /PLC_工单_Markdown_整理包/
 # 工作区运行备份、离线工具链与本地编辑器计划，不纳入 Git
 .auto-pm/backups/
+.auto-pm/archive/
+# ↑ D-251（TD-516）：部署/对账留的归档备份；不忽略的话 doctor 用 git ls-files --others --exclude-standard 会把它当成新改的变更单
 .auto-pm/toolchains/
 00_Infrastructure/auto_pm/.auto-pm/
 .zcode/
