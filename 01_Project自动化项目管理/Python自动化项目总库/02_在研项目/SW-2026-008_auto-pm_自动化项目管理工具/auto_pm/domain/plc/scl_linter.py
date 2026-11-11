@@ -2,8 +2,8 @@
 
 扫描 PLC 源码中的 .scl 文件（``.db`` / ``.udt`` 文件只查“数组下标下界从 1 起”这一条，TD-SW008-217），依据 Obsidian 《905_SCL编程规范_LSP.md》
 秒级检查变量作用域前缀 (i_/o_/io_/s_)、ARRAY 类型标识 (arr)、
-语法白名单 (严禁 GOTO/REPEAT/指针)、数组下标下界从 1 起以及状态机安全防护闭环
-(CASE 缺失 ELSE 防卡死分支)。
+语法白名单 (严禁 GOTO/REPEAT/指针)、数组下标下界从 1 起、做下标的静态变量初值不低于数组下界
+以及状态机安全防护闭环 (CASE 缺失 ELSE 防卡死分支)。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ class SclLinter:
     SOURCE_SUFFIXES = (".scl",)
     ARRAY_ONLY_SUFFIXES = (".db", ".udt")
     ARRAY_LOWER_BOUND_RULE = "LSP-905-ARRAY-LOWER-BOUND"
+    ARRAY_INDEX_INIT_RULE = "LSP-905-ARRAY-INDEX-INIT"
 
     @classmethod
     def is_lintable(cls, name: str | Path) -> bool:
@@ -65,6 +66,15 @@ class SclLinter:
     ARRAY_BOUNDS_PATTERN = re.compile(r"\bARRAY\s*\[([^\]]*)\]", re.IGNORECASE)
     ARRAY_UNCLOSED_PATTERN = re.compile(r"\bARRAY\s*\[[^\]]*$", re.IGNORECASE)
     ARRAY_LOWER_BOUND_PATTERN = re.compile(r"^\s*([+-]?\d+)\s*\.\.")
+    # 做下标的静态变量（TD-SW008-497）：本块声明的数组 名 : ARRAY[L..]、静态变量 名 : 类型 [:= 初值]、FOR 循环变量
+    ARRAY_DECLARATION_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*ARRAY\s*\[\s*([+-]?\d+)\s*\.\.", re.IGNORECASE)
+    STATIC_DECLARATION_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*)(?:\s*:=\s*([+-]?\d+))?")
+    STRUCT_FIELD_OPEN_PATTERN = re.compile(r":\s*STRUCT\b", re.IGNORECASE)
+    STRUCT_FIELD_CLOSE_PATTERN = re.compile(r"\bEND_STRUCT\b", re.IGNORECASE)
+    FOR_VARIABLE_PATTERN = re.compile(r"\bFOR\s+#?([A-Za-z_]\w*)\s*:=", re.IGNORECASE)
+    END_FOR_PATTERN = re.compile(r"\bEND_FOR\b", re.IGNORECASE)
+    PROGRAM_BLOCK_OPEN_PATTERN = re.compile(r"^\s*(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b", re.IGNORECASE)
+    PROGRAM_BLOCK_END_PATTERN = re.compile(r"^\s*END_(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b", re.IGNORECASE)
 
     # 折叠区段：siemens-lsp 只认 REGION 名称 ... END_REGION；带 # 的写法不被支持（LSP-905 §6.3）
     HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
@@ -114,6 +124,7 @@ class SclLinter:
         case_start_line = 0
         in_multiline_comment = False
         code_lines: list[str] = []
+        code_entries: list[tuple[int, str, str]] = []  # (行号, 去掉注释的代码, 原行) 给按块的下标初值检查用
         region_open_lines: list[int] = []
         array_pending: tuple[int, str] | None = None  # 下标没写完 `]` 就换行的 ARRAY：(起始行号, 已拼接文字)
         block_stack: list[tuple[str, int]] = []  # (IF/CASE/FOR/WHILE/REGION, 开头所在行)，REGION 与控制结构必须整段嵌套
@@ -154,6 +165,7 @@ class SclLinter:
             if not code_part:
                 continue
             code_lines.append(code_part)
+            code_entries.append((line_idx, code_part, stripped))
 
             # ------------------------------------------------------------------
             # 1. 语法白名单与错误预防校验 (LSP-905 §4 / LSP-906)
@@ -453,6 +465,8 @@ class SclLinter:
                 )
             )
 
+        cls._check_array_index_init(code_entries, report)
+
         # 结构完整性（LSP-905-STRUCT-*）
         opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
         ends = {kw: sum(1 for ln in code_lines if cls.STRUCT_END_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
@@ -542,6 +556,119 @@ class SclLinter:
                     )
                 )
             del block_stack[opener_index:]
+
+    @classmethod
+    def _check_array_index_init(cls, code_entries: list[tuple[int, str, str]], report: SclLintReport) -> None:
+        """下标变量停在 0 会越界（TD-SW008-497，LSP-905 §3.6 下界统一为 1）。
+
+        同一个程序块（FB/FC/OB）里：数组在本块变量段声明（VAR、VAR_OUTPUT、VAR_IN_OUT、VAR_TEMP），下界是字面整数 L 且 L ≠ 0；
+        下标恰好是一个本块 VAR 段的静态变量 v，写成 ``数组[v]``。下面三条有一条成立就不报：
+        (a) v 声明时有初值且初值 ≥ L；(b) 这次使用在 ``FOR v := … DO`` 的循环体里；
+        (c) 这次使用之前、同一个块里，有拿 v 做的大小比较（``<``、``>``、``<=``、``>=``，即范围检查）。
+
+        不查（按行的启发式检查，求不出就不报）：结构体或 UDT 里的数组（如 ``io_stAlarm.arrTrig[...]``，跨文件求不出下界）；
+        下界用常量名写的；下标是表达式（``v + 1``）或输入参数；数组声明跨行写的。
+        """
+        sections = {"VAR", "VAR_OUTPUT", "VAR_IN_OUT", "VAR_TEMP"}
+        in_block = False
+        section: str | None = None
+        struct_depth = 0
+        arrays: dict[str, int] = {}
+        statics: dict[str, int | None] = {}
+        for_stack: list[str] = []
+        compared: set[str] = set()
+
+        for line_idx, code_part, stripped in code_entries:
+            if cls.PROGRAM_BLOCK_OPEN_PATTERN.match(code_part):
+                in_block, section, struct_depth = True, None, 0
+                arrays, statics, for_stack, compared = {}, {}, [], set()
+                continue
+            if not in_block:
+                continue
+            if cls.PROGRAM_BLOCK_END_PATTERN.match(code_part):
+                in_block = False
+                continue
+            if cls.BLOCK_END_VAR.match(code_part):
+                section, struct_depth = None, 0
+                continue
+            for name, pattern in (
+                ("VAR_INPUT", cls.BLOCK_VAR_INPUT),
+                ("VAR_OUTPUT", cls.BLOCK_VAR_OUTPUT),
+                ("VAR_IN_OUT", cls.BLOCK_VAR_IN_OUT),
+                ("VAR_TEMP", cls.BLOCK_VAR_TEMP),
+                ("VAR_CONSTANT", cls.BLOCK_VAR_CONSTANT),
+                ("VAR", cls.BLOCK_VAR_STATIC),
+            ):
+                if pattern.match(code_part):
+                    section, struct_depth = name, 0
+                    break
+            else:
+                pattern = None
+            if pattern is not None:
+                continue
+            if section is not None:
+                # 变量段：只记本块顶层的声明，结构体里的字段不算
+                if struct_depth == 0:
+                    declared = cls.ARRAY_DECLARATION_PATTERN.match(code_part)
+                    if declared and section in sections:
+                        arrays[declared.group(1).lower()] = int(declared.group(2))
+                    elif section == "VAR":
+                        static = cls.STATIC_DECLARATION_PATTERN.match(code_part)
+                        if static and static.group(2).upper() not in ("ARRAY", "STRUCT"):
+                            statics[static.group(1).lower()] = int(static.group(3)) if static.group(3) else None
+                if cls.STRUCT_FIELD_OPEN_PATTERN.search(code_part):
+                    struct_depth += 1
+                if cls.STRUCT_FIELD_CLOSE_PATTERN.search(code_part) and struct_depth > 0:
+                    struct_depth -= 1
+                continue
+
+            # 代码段
+            text = cls.STRING_LITERAL_PATTERN.sub("''", code_part)
+            for_match = cls.FOR_VARIABLE_PATTERN.search(text)
+            if for_match:
+                for_stack.append(for_match.group(1).lower())
+            for array_name, lower in arrays.items():
+                if lower == 0:
+                    continue
+                use_pattern = re.compile(rf"(?<![\w.#])#?{re.escape(array_name)}\s*\[\s*#?([A-Za-z_]\w*)\s*\]", re.IGNORECASE)
+                for use in use_pattern.finditer(text):
+                    index = use.group(1).lower()
+                    if index not in statics:
+                        continue
+                    initial = statics[index]
+                    if initial is not None and initial >= lower:
+                        continue
+                    if index in for_stack:
+                        continue
+                    if index in compared or cls._compares(text[: use.start()], index):
+                        continue
+                    report.violations.append(
+                        SclViolation(
+                            line_number=line_idx,
+                            rule_id=cls.ARRAY_INDEX_INIT_RULE,
+                            severity="ERROR",
+                            message=(
+                                f"下标变量 {use.group(1)} 声明无初值（默认 0）"
+                                if initial is None
+                                else f"下标变量 {use.group(1)} 声明初值是 {initial}"
+                            )
+                            + f"，数组 {array_name} 下界是 {lower}：声明时给初值，或写之前做范围检查（TD-497）",
+                            code_snippet=stripped,
+                        )
+                    )
+            for name in statics:
+                if name not in compared and cls._compares(text, name):
+                    compared.add(name)
+            if cls.END_FOR_PATTERN.search(text) and for_stack:
+                for_stack.pop()
+
+    @staticmethod
+    def _compares(text: str, name: str) -> bool:
+        """``text`` 里有没有拿变量 ``name`` 做大小比较（``<``、``>``、``<=``、``>=``；``<>`` 和 ``=>`` 不算）。"""
+        var = rf"#?\b{re.escape(name)}\b"
+        left = re.search(rf"{var}\s*(?:<=|>=|<(?!>)|(?<!=)>)", text, re.IGNORECASE)
+        right = re.search(rf"(?:<=|>=|(?<![<=])>|<(?!>))\s*{var}", text, re.IGNORECASE)
+        return bool(left or right)
 
     @classmethod
     def _is_legacy_array_lower_bound(cls, file_path: str, code_part: str) -> bool:
