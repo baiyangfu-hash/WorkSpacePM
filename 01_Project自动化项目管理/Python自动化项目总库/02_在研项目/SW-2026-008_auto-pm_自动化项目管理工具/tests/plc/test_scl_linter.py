@@ -667,3 +667,112 @@ def test_the_project_check_item_fails_on_a_new_zero_based_array_in_a_db(tmp_path
     PlcChecker(str(tmp_path))._check_scl_code_compliance(str(project), result)
     (item,) = [i for i in result.items if i.item == "SCL 代码规范"]
     assert item.status == "pass"
+
+
+# ---------------------------------------------------------------------------
+# LSP-905-ARRAY-INDEX-INIT：做下标的静态变量不能停在默认 0（TD-SW008-497，CHG-SCPT-2026-638）
+# ---------------------------------------------------------------------------
+
+_INDEX_INIT_RULE = "LSP-905-ARRAY-INDEX-INIT"
+
+
+def _index_block(static_decl: str, body: str, array_decl: str = "q_iQueue : ARRAY[1..10] OF INT;") -> str:
+    return f"""
+FUNCTION_BLOCK FB_2001_Test
+VAR_INPUT
+    i_bTrig : BOOL;
+    i_iCode : INT;
+END_VAR
+VAR_OUTPUT
+    {array_decl}
+END_VAR
+VAR
+    {static_decl}
+    s_iK : INT;
+END_VAR
+BEGIN
+{body}
+END_FUNCTION_BLOCK
+"""
+
+
+def _index_hits(text: str) -> list[int]:
+    report = SclLinter.lint_text(text, file_path="FB_2001_Test.scl")
+    hits = [v for v in report.violations if v.rule_id == _INDEX_INIT_RULE]
+    assert all(v.severity == "ERROR" for v in hits)
+    return [v.line_number for v in hits]
+
+
+_BRANCH_ONLY_BODY = """    IF i_bTrig THEN
+        s_iTail := 1;
+    END_IF;
+    q_iQueue[s_iTail] := i_iCode;"""
+
+
+@pytest.mark.parametrize(
+    "static_decl",
+    ["s_iTail : INT;", "s_iTail : INT := 0;"],
+    ids=["no-initial-value", "initial-value-0"],
+)
+def test_static_index_without_initial_value_is_reported(static_decl: str) -> None:
+    text = _index_block(static_decl, _BRANCH_ONLY_BODY)
+    use_line = text.splitlines().index("    q_iQueue[s_iTail] := i_iCode;") + 1
+    assert _index_hits(text) == [use_line]
+    report = SclLinter.lint_text(text, file_path="FB_2001_Test.scl")
+    message = next(v.message for v in report.violations if v.rule_id == _INDEX_INIT_RULE)
+    assert "s_iTail" in message and "下界是 1" in message and "TD-497" in message
+
+
+@pytest.mark.parametrize(
+    ("static_decl", "body", "array_decl"),
+    [
+        ("s_iTail : INT := 1;", _BRANCH_ONLY_BODY, "q_iQueue : ARRAY[1..10] OF INT;"),
+        (
+            "s_iTail : INT;",
+            "    FOR s_iTail := 1 TO 10 DO\n        q_iQueue[s_iTail] := 0;\n    END_FOR;",
+            "q_iQueue : ARRAY[1..10] OF INT;",
+        ),
+        (
+            "s_iTail : INT;",
+            "    IF s_iTail < 1 OR s_iTail > 10 THEN\n        s_iTail := 1;\n    END_IF;\n    q_iQueue[s_iTail] := i_iCode;",
+            "q_iQueue : ARRAY[1..10] OF INT;",
+        ),
+        ("s_iTail : INT;", _BRANCH_ONLY_BODY, "q_iQueue : ARRAY[0..9] OF INT;"),
+        ("s_iTail : INT;", "    q_iQueue[1] := i_iCode;", "q_iQueue : ARRAY[1..10] OF INT;"),
+        (
+            "s_iTail : INT;",
+            "    io_stAlarm.q_iQueue[s_iTail] := i_iCode;",
+            "q_iOther : INT;",
+        ),
+    ],
+    ids=["initial-value-1", "for-loop-variable", "range-check-first", "lower-bound-0", "constant-index", "array-in-struct"],
+)
+def test_static_index_safe_forms_are_not_reported(static_decl: str, body: str, array_decl: str) -> None:
+    assert _index_hits(_index_block(static_decl, body, array_decl)) == []
+
+
+def test_static_index_rule_does_not_check_expressions_or_inputs() -> None:
+    body = "    q_iQueue[s_iTail + 1] := 0;\n    q_iQueue[i_iCode] := 0;"
+    assert _index_hits(_index_block("s_iTail : INT;", body)) == []
+
+
+def _common_alarm_template() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent.parent
+        / "templates/plc-standard-project/template/02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl.jinja"
+    )
+
+
+def test_common_alarm_template_passes_and_reverting_the_fix_is_reported() -> None:
+    """模板原样：新规则 0 条；把 #745 的修复改回旧写法（第 38 行去掉初值、第 208～210 行范围检查换成空行）：报第 211 行。"""
+    lines = _common_alarm_template().read_text(encoding="utf-8-sig").splitlines()
+    assert _index_hits("\n".join(lines)) == []
+
+    assert lines[37].strip().startswith("s_iQueueTailIndex") and ":= 1;" in lines[37]
+    assert lines[207].strip().startswith("IF s_iQueueTailIndex < 1")
+    assert lines[209].strip().startswith("END_IF")
+    assert lines[210].strip().startswith("q_iMESAlarmQueue[s_iQueueTailIndex]")
+    mutated = list(lines)
+    mutated[37] = "    s_iQueueTailIndex          : INT;"
+    mutated[207:210] = ["", "", ""]
+    assert _index_hits("\n".join(mutated)) == [211]

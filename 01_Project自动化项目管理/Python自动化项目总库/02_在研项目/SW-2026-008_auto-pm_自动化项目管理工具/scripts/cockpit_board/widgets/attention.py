@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 
 LISTED = 5  # 每类最多列几条
@@ -31,12 +32,25 @@ def summarize(reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
     return []
 
 
+def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
+    """没有未作废的范围卡、也没有 PROPOSED 的收件箱条目才算空。"""
+    if reader == "pending":
+        return not [row for row in data.get("cards") or [] if not row.get("superseded")]
+    if reader == "inbox":
+        return not [row for row in data.get("items") or [] if str(row.get("status", "")).upper() == "PROPOSED"]
+    return None
+
+
 class AttentionPage(c.ReadPage):
     def __init__(self) -> None:
+        empty_text, error_text = shell.page_texts()["attention"]
         super().__init__("attention", "要你出手", "现在有没有等你本人拍板的事", (
             ("所有项目合在一起看", "现在只读工程工位的默认项目；“决定”页已按项目读全", ""),
             ("规则、门禁、安全类的 PR 等你点", "要读 GitHub 的检查结果，还没接", ""),
-        ))
+        ), empty_text, error_text)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
+
+    def is_empty(self, reader: str, data: dict[str, Any]) -> bool | None:
+        return is_empty(reader, data)
