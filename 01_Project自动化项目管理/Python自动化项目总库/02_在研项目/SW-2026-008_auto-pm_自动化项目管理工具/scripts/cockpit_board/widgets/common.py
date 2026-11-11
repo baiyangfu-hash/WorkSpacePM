@@ -259,3 +259,44 @@ def kv(rows: list[tuple[str, str]]) -> QWidget:
         layout.addWidget(label(key, "muted", wrap=False), index, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(label(value), index, 1)
     return holder
+
+
+# ---------------------------------------------------------------- 骨架通用件（CHG-SCPT-2026-628 A）
+
+# 三态标签：读不到数的三种说法。汇总数没数据源时画面只许出现这三个字样之一，不许画 0 或绿。
+STATES = {"unchecked": "没检查", "offline": "断网未知", "unreadable": "读不懂"}
+RAW_LIMIT = 4000  # “原文”块最多显示这么多字，再多截断并写明截断了多少
+
+
+def state_tag(state: str, tip: str = "") -> QLabel:
+    """三态标签。state 只能是 STATES 里的键，写错直接报错，不悄悄画成别的。"""
+    if state not in STATES:
+        raise ValueError(f"state_tag: 不认识的状态 {state!r}")
+    item = label(STATES[state], "state", wrap=False, tip=tip)
+    item.setProperty("state", state)
+    return item
+
+
+def placeholder(title: str, reason: str, command: str = "") -> QFrame:
+    """统一占位卡：功能还没做的地方都用它，虚线框、没有按钮。command 写这一块以后要读的命令（只显示，不运行）。"""
+    frame, layout = card(dashed=True)
+    frame.setProperty("placeholder", "true")
+    layout.addWidget(label(title, "heading", wrap=False))
+    layout.addWidget(label("这一块还没做：" + reason, "muted"))
+    if command:
+        layout.addWidget(label("以后读：" + command, "mono"))
+    return frame
+
+
+def read_block(status: str, raw: str, state: str = "") -> QFrame:
+    """“读取状态 + 原文”块：上面一行写读得怎么样（state 给了就配三态标签），下面原样放命令输出（纯文本、可选中）。"""
+    frame, layout = inner("pre")
+    head = [label(status, "muted")]
+    if state:
+        head.insert(0, state_tag(state))
+    row = hrow(*head)
+    fill(row, head[-1])
+    layout.addWidget(row)
+    shown = raw if len(raw) <= RAW_LIMIT else raw[:RAW_LIMIT] + f"\n……（截断，后面还有 {len(raw) - RAW_LIMIT} 字）"
+    layout.addWidget(label(shown or "（没有输出）", "mono"))
+    return frame

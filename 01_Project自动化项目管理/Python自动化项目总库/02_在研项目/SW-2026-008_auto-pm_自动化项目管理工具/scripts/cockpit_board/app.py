@@ -1,4 +1,6 @@
-"""主窗口：顶栏（页面、模式、网络）、后台读取、把 viewmodel 交给各画面。
+"""主窗口：左侧栏（页面，三组）、顶栏（模式、网络、重新读取）、后台读取、把 viewmodel 交给各画面。
+
+侧栏分组、页面注册表、路由、范围标记在 shell.py（CHG-SCPT-2026-628 骨架 A）。
 
 读取只读：账本由 pm_dashboard 拷到临时目录后 mode=ro + query_only；老后台只在手动“重新读取”且
 老后台 snapshot() 只在 TD-105 合并后接入（见 LEGACY_ALLOWED，已打开）。工程工位的动作走 actions.py，在后台线程跑。
@@ -35,7 +37,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from cockpit_board import actions, flowgraph, theme  # noqa: E402
+from cockpit_board import actions, flowgraph, shell, theme  # noqa: E402
 from cockpit_board import viewmodel as vm
 from cockpit_board.decision_controller import DecisionController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
@@ -164,7 +166,20 @@ class CockpitWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         outer.addWidget(self._topbar())
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        self.sidebar = shell.Sidebar()
+        self.sidebar.navigate.connect(self.goto)
+        self.page_buttons = self.sidebar.buttons
+        body.addWidget(self.sidebar)
+        main = QVBoxLayout()
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        self.scope = c.label("", "scope", wrap=False)
+        main.addWidget(self.scope)
         self.stack = QStackedWidget()
+        self.router = shell.Router(self.stack)
         self.home = HomePage(self.open_project, self.copy_text)
         self.issues = IssuesPage(self.open_project)
         self.projects = ProjectsPage(self.open_project)
@@ -177,15 +192,20 @@ class CockpitWindow(QMainWindow):
         self.flow = FlowPage()
         self.tools = ToolsPage(options.root)
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
-        for page in (self.home, self.issues, self.projects, self.project, self.station, self.decisions.page, self.flow, self.tools):
-            self.stack.addWidget(page)
-        outer.addWidget(self.stack, 1)
+        for key, page in (("home", self.home), ("issues", self.issues), ("projects", self.projects), ("project", self.project),
+                          ("decisions", self.decisions.page), ("flow", self.flow), ("tools", self.tools)):
+            self.router.register(key, page)
+        self.stack.addWidget(self.station)  # 工程工位模式下“今天”换成这一页（goto 里换）
+        main.addWidget(self.stack, 1)
+        body.addLayout(main, 1)
+        outer.addLayout(body, 1)
         self.setCentralWidget(central)
 
         self.timer = QTimer(self)
         self.timer.setInterval(AUTO_REFRESH_MINUTES * 60 * 1000)
         self.timer.timeout.connect(self.auto_reload)
         self._legacy_this_round = False  # 本轮读完后要不要再接老后台：只有首次加载和手动“重新读取”才要
+        self.goto("home")  # 侧栏点亮“今天”，范围标记写上
 
     def _topbar(self) -> QFrame:
         bar = QFrame()
@@ -193,17 +213,7 @@ class CockpitWindow(QMainWindow):
         row = QHBoxLayout(bar)
         row.setContentsMargins(theme.SPACE * 2, theme.SPACE, theme.SPACE * 2, theme.SPACE)
         row.addWidget(c.label("驾驶舱", "title", wrap=False))
-        self.page_buttons: dict[str, object] = {}
-        group = QButtonGroup(self)
-        # 流程图、工具两页和今天 / 问题 / 全部项目 / 决定并排；“流程图”“工具”的文字在 tool_policy.NAV_BUTTONS 里
-        for key, text in (("home", "今天"), ("issues", "问题"), ("projects", "全部项目"), ("decisions", "决定"),
-                          ("flow", "流程图"), ("tools", "工具")):
-            item = c.button(text, "tab", text)
-            item.setCheckable(True)
-            item.clicked.connect(lambda _checked=False, k=key: self.goto(k))
-            group.addButton(item)
-            row.addWidget(item)
-            self.page_buttons[key] = item
+        # 页面按钮在左侧栏（shell.Sidebar，按 shell.PAGES 分三组）；顶栏只留模式、网络和重新读取
         row.addSpacing(theme.SPACE * 2)
         mode_group = QButtonGroup(self)
         self.mode_buttons = {}
@@ -236,12 +246,9 @@ class CockpitWindow(QMainWindow):
     # ------------------------------------------------ 导航
 
     def goto(self, key: str) -> None:
-        page = {"home": self.station if self.mode == "ws" else self.home, "issues": self.issues,
-                "projects": self.projects, "project": self.project, "decisions": self.decisions.page,
-                "flow": self.flow, "tools": self.tools}[key]
-        self.stack.setCurrentWidget(page)
-        for name, button in self.page_buttons.items():
-            button.setChecked(name == key)  # type: ignore[attr-defined]
+        self.router.show(key, self.station if key == "home" and self.mode == "ws" else None)
+        self.sidebar.select(key)
+        self.scope.setText(shell.scope_text(key) + (" · 工程工位" if key == "home" and self.mode == "ws" else ""))
         if key == "decisions":
             self._refresh_decisions()
 

@@ -1112,13 +1112,44 @@ def task_xml(command: str, arguments: str, workdir: str, user: str) -> str:
 """
 
 
+def _windows_account_name() -> str:
+    """``DOMAIN\\user`` of the account this process runs as, asked from Windows itself; "" when Windows will not say."""
+
+    try:
+        secur32 = ctypes.WinDLL("secur32", use_last_error=True)  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return ""
+    size = ctypes.c_ulong(512)
+    buffer = ctypes.create_unicode_buffer(size.value)
+    if not secur32.GetUserNameExW(2, buffer, ctypes.byref(size)):  # 2 = NameSamCompatible
+        return ""
+    return buffer.value.strip()
+
+
+def task_user() -> str:
+    """The account the scheduled task runs as (D-228).
+
+    Asked from Windows, not read from the environment: the gate hands its children a whitelisted environment, and a release whose
+    whitelist lacks USERNAME produced a task XML with an empty user, which Task Scheduler refuses.  The two variables are only the
+    fallback; with neither source there is no task to register, and saying so beats a schtasks error about malformed XML.
+    """
+
+    name = _windows_account_name() if IS_WINDOWS else ""
+    if not name:
+        user = os.environ.get("USERNAME", "").strip()
+        name = f"{os.environ.get('USERDOMAIN', '').strip()}\\{user}".lstrip("\\") if user else ""
+    if not name:
+        raise GateError("取不到当前登录用户（系统没有给出账户名，环境变量 USERNAME 也是空的），计划任务登记不了")
+    return name
+
+
 def _launch_windows(cfg: dict[str, Any], config_path: Path) -> None:
     py = Path(cfg["python"])
     pyw = py.with_name("pythonw.exe")
     command = str(pyw if pyw.exists() else py)
     args = subprocess.list2cmdline(["-B", str(Path(__file__).resolve()), "run", "--config", str(config_path),
                                     "--task-name", task_name(cfg)])
-    user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".lstrip("\\")
+    user = task_user()
     xml_path = Path(cfg["out_dir"]) / "long_gate_task.xml"
     xml_path.write_text(task_xml(command, args, cfg["out_dir"], user), encoding="utf-16")
     name = task_name(cfg)
