@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -561,7 +562,6 @@ def test_judge_with_a_worktree_notices_a_hidden_ignored_code_file(
 def test_default_runner_kills_a_group_that_overruns_and_reports_124(tmp_path: Path) -> None:
     """Counterexample: a hung group must not hang the gate; the exit is 124 and the log says it was killed."""
 
-    import sys
 
     log = tmp_path / "g.txt"
     code = gate.default_runner(
@@ -569,6 +569,89 @@ def test_default_runner_kills_a_group_that_overruns_and_reports_124(tmp_path: Pa
     )
     assert code == 124 and "killed after 1 s" in log.read_text(encoding="utf-8")
     assert gate.default_runner([sys.executable, "-c", "print('ok')"], tmp_path, {}, log, 30) == 0
+
+
+# ── D-235: a killed group says which cases it was in ─────────────────────────────
+
+
+def _note(folder: Path, name: str, started: float, node: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}{gate.PROGRESS_SUFFIX}").write_text(f"{started:.0f}\t{node}\n" if node else "", encoding="utf-8")
+
+
+def test_running_cases_lists_only_processes_inside_a_case_longest_first(tmp_path: Path) -> None:
+    _note(tmp_path, "gw0-11", 1000, "tests/core/test_a.py::test_slow")
+    _note(tmp_path, "gw1-12", 1090, "tests/core/test_b.py::test_quick[x-1]")
+    _note(tmp_path, "gw2-13", 0, "")  # between two cases
+    (tmp_path / "other.txt").write_text("999\ttests/core/test_c.py::test_not_a_note\n", encoding="utf-8")
+    assert gate.running_cases(tmp_path, now=1100) == [
+        "tests/core/test_a.py::test_slow (gw0, running for 100 s)",
+        "tests/core/test_b.py::test_quick[x-1] (gw1, running for 10 s)",
+    ]
+    assert gate.running_cases(tmp_path / "missing") == []
+
+
+def test_a_note_with_an_unreadable_time_is_still_listed(tmp_path: Path) -> None:
+    (tmp_path / f"main-1{gate.PROGRESS_SUFFIX}").write_text("soon\ttests/core/test_a.py::test_x\n", encoding="utf-8")
+    assert gate.running_cases(tmp_path, now=5) == ["tests/core/test_a.py::test_x (main, running for 0 s)"]
+
+
+def test_a_group_killed_for_overrunning_leaves_the_running_cases_in_its_log_and_in_the_reason(tmp_path: Path) -> None:
+    """The 11-10 round: ``core`` was killed at 180 minutes and the record could not say where it was stuck."""
+
+
+    progress = tmp_path / "g.running"
+    child = (
+        "import os, pathlib, time\n"
+        f"d = pathlib.Path(os.environ[{gate.PROGRESS_ENV!r}]); d.mkdir(parents=True, exist_ok=True)\n"
+        f"(d / ('gw3-' + str(os.getpid()) + {gate.PROGRESS_SUFFIX!r})).write_text(str(int(time.time())) + '\\ttests/core/test_stuck.py::test_never_returns\\n', encoding='utf-8')\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    log = tmp_path / "g.txt"
+    code = gate.default_runner([sys.executable, "-c", child], tmp_path, {**gate.child_environment(), gate.PROGRESS_ENV: str(progress)}, log, 5)
+    text = log.read_text(encoding="utf-8")
+    assert code == 124 and "killed after 5 s" in text
+    assert f"{gate.RUNNING_MARK} tests/core/test_stuck.py::test_never_returns (gw3, running for " in text
+    verdict, why = gate.judge_group(_group(), code, log)
+    assert verdict == "FAIL" and "退出码 124" in why and "被杀时在跑：tests/core/test_stuck.py::test_never_returns (gw3" in why
+
+
+def test_a_killed_group_with_no_note_says_so_instead_of_staying_silent(tmp_path: Path) -> None:
+
+    log = tmp_path / "g.txt"
+    env = {**gate.child_environment(), gate.PROGRESS_ENV: str(tmp_path / "empty")}
+    assert gate.default_runner([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, env, log, 1) == 124
+    assert gate.NO_NOTE_MARK in log.read_text(encoding="utf-8")
+    assert "没有用例登记为在跑" in gate.judge_group(_group(), 124, log)[1]
+
+
+def test_the_reason_of_exit_124_names_at_most_three_cases_and_counts_the_rest(tmp_path: Path) -> None:
+    lines = [f"{gate.KILLED_MARK} 9 s"] + [f"{gate.RUNNING_MARK} tests/t.py::test_{n} (gw{n}, running for {9 - n} s)" for n in range(5)]
+    why = gate.judge_group(_group(), 124, _log(tmp_path, "....\n" + "\n".join(lines) + "\n"))[1]
+    assert "test_0" in why and "test_2" in why and "test_3" not in why and "等 5 条" in why
+
+
+def test_an_ordinary_failure_or_an_old_log_gets_no_killed_note(tmp_path: Path) -> None:
+    assert gate.judge_group(_group(), 1, _log(tmp_path, f"{gate.RUNNING_MARK} x\n1 failed, 3 passed in 1.0s\n"))[1] == "退出码 1"
+    assert gate.judge_group(_group(), 124, _log(tmp_path, "....\n"))[1] == "退出码 124"
+
+
+def test_every_group_loads_the_progress_plugin_and_gets_its_own_fresh_progress_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    stale = tmp_path / f"core{gate.PROGRESS_SUFFIX}"
+    _note(stale, "gw0-1", 1, "tests/core/test_old.py::test_from_an_earlier_round")
+    recorder = _Recorder()
+    GateRunService(runner=recorder).run(repo, tmp_path)
+    folders = [env[gate.PROGRESS_ENV] for env in recorder.envs]
+    assert folders == [str(tmp_path / f"{g.name}{gate.PROGRESS_SUFFIX}") for g in GROUPS]
+    assert not stale.exists()  # an earlier round's notes are not this round's
+    for group in GROUPS:
+        argv = gate.group_argv(group, python="py", jobs=8)
+        assert argv[argv.index(gate.PROGRESS_PLUGIN) - 1] == "-p"
+    assert all(not key.upper().startswith("AUTO_PM_") for env in recorder.envs for key in env)  # D-108 still holds
 
 
 def test_a_git_that_fails_is_unknown_not_clean(tmp_path: Path) -> None:
@@ -717,3 +800,190 @@ def test_d207_a_roomy_machine_keeps_the_requested_workers(tmp_path: Path, monkey
     service.run(repo, tmp_path, jobs=8)
 
     assert service.job_notes == []
+
+
+# ── a lowered group gets the time it needs, or is not started; either way the record says so (D-235) ─────────
+
+
+class _Timed:
+    """A runner that passes every group and remembers the time limit and the environment each one was given."""
+
+    def __init__(self, exits: Mapping[str, int] | None = None) -> None:
+        self.exits = dict(exits or {})
+        self.timeouts: dict[str, int] = {}
+        self.envs: dict[str, Mapping[str, str]] = {}
+
+    def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int) -> int:
+        self.timeouts[log.stem], self.envs[log.stem] = timeout, dict(env)
+        code = self.exits.get(log.stem, 0)
+        log.write_text("" if code == 124 else _line(next(g for g in GROUPS if g.name == log.stem)), encoding="utf-8")
+        return code
+
+
+def test_d235_the_three_numbers_behind_the_job_cap_and_the_time_limit_are_pinned() -> None:
+    """Loosening any of these to get a round through is a change that has to be made here, in the open."""
+
+    assert gate.JOB_MEMORY_GIB == 2.0
+    assert gate.JOB_RESERVE_GIB == 3.0
+    assert gate.DEFAULT_TIMEOUT_SECONDS == 180 * 60
+    assert gate.memory_for_jobs(3) == 9 * 2**30
+
+
+@pytest.mark.parametrize(
+    ("requested", "used", "expected_minutes"),
+    [(3, 3, 180), (3, 1, 540), (3, 2, 270), (8, 3, 480), (4, 3, 240), (1, 1, 180), (3, 0, 180), (2, 3, 180)],
+)
+def test_d235_the_time_limit_grows_by_the_factor_the_workers_were_lowered_by(requested: int, used: int, expected_minutes: int) -> None:
+    assert gate.timeout_for_jobs(180 * 60, requested, used) == expected_minutes * 60
+
+
+def test_d235_the_stretched_limit_is_never_shorter_than_the_exact_ratio() -> None:
+    assert gate.timeout_for_jobs(100, 3, 2) == 150
+    assert gate.timeout_for_jobs(100, 7, 3) == 234  # 233.33 rounded up
+
+
+def test_d235_a_lowered_group_runs_with_the_stretched_limit_and_serial_groups_keep_theirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The local round on 0a9d2a7: three workers asked, one given, and the group still had the three-worker limit."""
+
+    repo = _clean_repo(monkeypatch)
+    runner = _Timed()
+    said: list[str] = []
+    service = GateRunService(runner=runner, available_memory=lambda: int(6.9 * 2**30), announce=said.append)  # (6.9 - 3) // 2 = 1
+
+    summary = service.run(repo, tmp_path, jobs=3, timeout_seconds=180 * 60)
+
+    parallel = {g.name for g in GROUPS if g.parallel}
+    assert parallel and parallel != {g.name for g in GROUPS}
+    for name, timeout in runner.timeouts.items():
+        assert timeout == (540 * 60 if name in parallel else 180 * 60), name
+    assert summary.verdict == "PASS"  # a lowered group that finishes in its stretched time is a pass with a note
+    assert len(said) == len(parallel) and service.preflight_warnings == []  # told when it happens, once per group
+    for name in parallel:
+        result = summary.results[name]
+        assert (result.jobs_requested, result.jobs_used, result.timeout_seconds) == (3, 1, 540 * 60)
+        assert result.available_memory_bytes == int(6.9 * 2**30)
+        for text in (result.why, next(line for line in said if line.startswith(f"组 {name}："))):
+            assert "--jobs 从 3 降到 1" in text and "6.9 GiB" in text and "超时放大到 540 分钟" in text
+        assert runner.envs[name][gate.NOTE_ENV] in result.why
+    for name in {g.name for g in GROUPS} - parallel:
+        result = summary.results[name]
+        assert (result.jobs_requested, result.jobs_used, result.timeout_seconds) == (3, 3, 180 * 60)
+        assert result.available_memory_bytes is None and result.why == "" and gate.NOTE_ENV not in runner.envs[name]
+
+
+def test_d235_the_record_on_disk_carries_the_four_facts_for_every_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    GateRunService(runner=_Timed(), available_memory=lambda: 7 * 2**30).run(repo, tmp_path, jobs=4, timeout_seconds=600)
+
+    data = json.loads((tmp_path / gate.SUMMARY_FILE).read_text(encoding="utf-8"))
+    for group in GROUPS:
+        entry = data["results"][group.name]
+        if group.parallel:
+            assert (entry["jobs_requested"], entry["jobs_used"], entry["available_memory_bytes"], entry["timeout_seconds"]) == (4, 2, 7 * 2**30, 1200)
+            assert "--jobs 从 4 降到 2" in entry["why"]
+        else:
+            assert (entry["jobs_requested"], entry["jobs_used"], entry["available_memory_bytes"], entry["timeout_seconds"]) == (4, 4, None, 600)
+
+
+def test_d235_a_lowered_group_that_still_overruns_names_the_lowering_as_part_of_the_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    name = next(g.name for g in GROUPS if g.parallel)
+    service = GateRunService(runner=_Timed({name: 124}), available_memory=lambda: 5 * 2**30)
+
+    summary = service.run(repo, tmp_path, jobs=3)
+
+    why = summary.results[name].why
+    assert summary.verdict == "FAIL" and "退出码 124" in why and "--jobs 从 3 降到 1" in why and "5.0 GiB" in why
+    assert any(name in reason and "降到 1" in reason for reason in summary.reasons)
+    assert service.preflight_warnings and "降到 1" in service.preflight_warnings[0]  # no announcer: the note waits for the CLI's list
+
+
+def test_d235_require_full_jobs_does_not_start_a_group_it_would_have_to_lower(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    runner = _Timed()
+    said: list[str] = []
+    service = GateRunService(runner=runner, available_memory=lambda: int(8.5 * 2**30), announce=said.append)
+
+    summary = service.run(repo, tmp_path, jobs=3, require_full_jobs=True)
+
+    first_parallel = next(g.name for g in GROUPS if g.parallel)
+    before = [g.name for g in GROUPS][: [g.name for g in GROUPS].index(first_parallel)]
+    assert list(runner.timeouts) == before  # nothing from the refused group on was started
+    assert list(summary.results) == [*before, first_parallel]
+    refused = summary.results[first_parallel]
+    assert refused.verdict == gate.REFUSED and refused.exit is None and refused.timeout_seconds is None
+    for text in (refused.why, said[-1], summary.reasons[0]):
+        assert "请求 --jobs 3" in text and "至少 9.0 GiB" in text and "只有 8.5 GiB" in text
+    assert summary.verdict == "FAIL" and not summary.complete
+    assert any("没有开跑" in reason and "--require-full-jobs" in reason for reason in summary.reasons)
+    assert not (tmp_path / f"{first_parallel}.txt").exists()
+
+    judged = GateRunService().judge_dir(tmp_path)  # the round read back from disk is refused too, never a pass
+    assert judged.verdict == "FAIL" and judged.results[first_parallel].verdict == gate.REFUSED
+    assert "至少 9.0 GiB" in judged.results[first_parallel].why
+
+
+def test_d235_require_full_jobs_changes_nothing_on_a_machine_with_room(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    runner = _Timed()
+    service = GateRunService(runner=runner, available_memory=lambda: 9 * 2**30)
+
+    summary = service.run(repo, tmp_path, jobs=3, timeout_seconds=180 * 60, require_full_jobs=True)
+
+    assert summary.verdict == "PASS" and service.job_notes == [] and set(runner.timeouts.values()) == {180 * 60}
+
+
+def test_d235_judge_dir_reads_back_a_lowered_round_with_the_same_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    ran = GateRunService(runner=_Timed(), available_memory=lambda: 5 * 2**30).run(repo, tmp_path, jobs=3)
+
+    judged = GateRunService().judge_dir(tmp_path)
+
+    assert judged.verdict == ran.verdict == "PASS"
+    for name, result in ran.results.items():
+        again = judged.results[name]
+        assert (again.why, again.jobs_requested, again.jobs_used, again.available_memory_bytes, again.timeout_seconds) == (
+            result.why, result.jobs_requested, result.jobs_used, result.available_memory_bytes, result.timeout_seconds
+        )  # fmt: skip
+
+
+def test_d235_judge_dir_judges_a_record_written_before_the_four_fields_as_it_did(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _clean_repo(monkeypatch)
+    GateRunService(runner=_Timed()).run(repo, tmp_path, jobs=3)
+    record = tmp_path / gate.SUMMARY_FILE
+    data = json.loads(record.read_text(encoding="utf-8"))
+    for entry in data["results"].values():
+        for key in ("jobs_requested", "jobs_used", "available_memory_bytes", "timeout_seconds"):
+            del entry[key]
+    record.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+
+    judged = GateRunService().judge_dir(tmp_path)
+
+    assert judged.verdict == "PASS" and judged.complete
+    for result in judged.results.values():
+        assert result.verdict == "PASS" and result.why == ""
+        assert (result.jobs_requested, result.jobs_used, result.available_memory_bytes, result.timeout_seconds) == (None, None, None, None)
+
+
+def test_d235_the_runner_writes_the_note_on_the_first_line_of_the_log_and_keeps_it_from_the_tests(tmp_path: Path) -> None:
+    log = tmp_path / "group.txt"
+    child = f"import os; print('note seen by the tests:', os.environ.get({gate.NOTE_ENV!r}))"
+    env = {**gate.child_environment(), gate.NOTE_ENV: "可用内存不足，--jobs 从 3 降到 1"}
+
+    assert gate.default_runner([sys.executable, "-c", child], tmp_path, env, log, 60) == 0
+
+    lines = log.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == f"{gate.NOTE_MARK} 可用内存不足，--jobs 从 3 降到 1"
+    assert lines[1] == "note seen by the tests: None"
+
+
+def test_d235_a_group_that_was_not_lowered_gets_a_log_with_no_note(tmp_path: Path) -> None:
+    log = tmp_path / "group.txt"
+
+    assert gate.default_runner([sys.executable, "-c", "print('hello')"], tmp_path, gate.child_environment(), log, 60) == 0
+
+    assert log.read_text(encoding="utf-8").splitlines() == ["hello"]
