@@ -1,0 +1,104 @@
+[
+  {
+    "project_id": "DJ-2026-000",
+    "name": "DJ-2026-000",
+    "path": "/work/WorkSpacePM/0100_PLC自动化/DJ-2026-000",
+    "stack": "plc",
+    "version": "2.0.0",
+    "description": "SysLib公共库FB测试套件 - 验证FB_1011/FB_1012/FB_1014等共享库功能块",
+    "source": "copier",
+    "phase": "developing",
+    "business_line": "DJ",
+    "project_type": "test_suite",
+    "equipment_type": "",
+    "plc_vendor": "",
+    "plc_model": "",
+    "extra": {
+      "_commit": "HEAD",
+      "_src_path": "templates/plc-standard-project",
+      "project_id": "DJ-2026-000",
+      "project_name": "DJ-2026-000",
+      "description": "SysLib公共库FB测试套件 - 验证FB_1011/FB_1012/FB_1014等共享库功能块",
+      "version": "2.0.0",
+      "project_type": "test_suite",
+      "asset_summary": {
+        "status": "not_applicable",
+        "asset_dir": "",
+        "asset_dir_exists": false,
+        "total_issues": 0,
+        "issue_messages": [
+          "test_suite 模式不要求工程资产目录"
+        ],
+        "io_points": {
+          "exists": false,
+          "valid": false,
+          "count": 0,
+          "issues": []
+        },
+        "program_blocks": {
+          "exists": false,
+          "valid": false,
+          "count": 0,
+          "issues": []
+        },
+        "communications": {
+          "exists": false,
+          "valid": false,
+          "count": 0,
+          "issues": []
+        }
+      }
+    },
+    "file_mtime": 1793661628.9864922
+  },
+  {
+    "project_id": "DJ-2026-005",
+    "name": "DJ-2026-005",
+    "path": "/work/WorkSpacePM/0100_PLC自动化/DJ-2026-005",
+    "stack": "plc",
+    "version": "V9.1.0",
+    "description": "边框缓存机 PLC 控制系统",
+    "source": "copier",
+    "phase": "developing",
+    "business_line": "DJ",
+    "project_type": "",
+    "equipment_type": "",
+    "plc_vendor": "",
+    "plc_model": "",
+    "extra": {
+      "_commit": "HEAD",
+      "_src_path": "templates/plc-standard-project",
+      "description": "边框缓存机 PLC 控制系统",
+      "project_id": "DJ-2026-005",
+      "project_name": "DJ-2026-005",
+      "stack": "plc",
+      "version": "V9.1.0",
+      "asset_summary": {
+        "status": "healthy",
+        "asset_dir": "/work/WorkSpacePM/0100_PLC自动化/DJ-2026-005/02_PLC程序/工程资产",
+        "asset_dir_exists": true,
+        "total_issues": 0,
+        "issue_messages": [],
+        "io_points": {
+          "exists": true,
+          "valid": true,
+          "count": 148,
+          "issues": []
+        },
+        "program_blocks": {
+          "exists": true,
+          "valid": true,
+          "count": 7,
+          "issues": []
+        },
+        "communications": {
+          "exists": true,
+          "valid": true,
+          "count": 5,
+          "issues": []
+        }
+      }
+    },
+    "file_mtime": 1793661629.184419
+  }
+]

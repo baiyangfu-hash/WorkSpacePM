@@ -9,6 +9,8 @@
     run_cli()          “决定”页的按钮：在控制根跑同一条 `main.py pm …` 命令，回执带命令和退出码（见 decisions.py）。
     resolve_github_token()  向本机已登录的 gh 要 GitHub 令牌（只在内存里用，不落盘、不进回执、不打印）。
     open_console()     批准口令已生效时，同一条命令在新的终端窗口里跑，口令由用户在那个窗口里输入。
+    run_read()         骨架页的只读命令：控制根跑 `main.py <只读命令>`，读 30 秒超时，结果按 classify_read() 归类。
+    write_snapshot()   把一次读取的原文存成“上次读取”快照（.auto-pm/cache/cockpit_board/，已被忽略）。
 
 永远没有：合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
 """
@@ -29,6 +31,8 @@ from pathlib import Path
 from typing import Any
 
 import github_collector as gh
+
+from cockpit_board import snapshot
 
 PROBE_TIMEOUT = 3
 CHECK_TIMEOUT = 600
@@ -498,3 +502,99 @@ def open_console(root: Path, label: str, args: Sequence[str], opener: Callable[.
     except OSError as error:
         return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
     return Receipt(_now_text(), label, shown, None, False, "已在新的终端窗口打开：在那里输入口令、看到结果后，回到这里点“重新读取”")
+
+
+# ---------------------------------------------------------------- 骨架页：只读命令运行器（CHG-SCPT-2026-628 骨架 B）
+#
+# 像 HMI 读 PLC：读不到时要分清“没接线（命令不存在）”“接了但报故障（退出码非 0）”“读超时”“通讯断（断网）”
+# “只回了握手没回数据（只有启动提示）”，各给一句话；读到了再交 readers.py 解析，解析不了才算“读不懂”。
+
+READ_TIMEOUT = 30  # 只读命令：30 秒
+WRITE_TIMEOUT = 120  # 写命令（骨架不起写命令，只给将来的页面留同一个口径）
+
+READ_TEXT = {
+    "ok": "读到了",
+    "missing_command": "本机发布版太旧：没有这条命令（等部署新版本后再看）",
+    "exit_nonzero": "命令报错",
+    "timeout": f"超过 {READ_TIMEOUT} 秒没读完（超时）",
+    "banner_only": "只有启动提示，没有结果",
+    "offline": "断网，读不到",
+    "spawn_failed": "命令没起来",
+}
+
+
+@dataclass(frozen=True)
+class ReadOutcome:
+    kind: str  # READ_TEXT 的键
+    command: str  # 给人看的整条命令
+    rc: int | None
+    stdout: str = ""
+    stderr: str = ""
+    detail: str = ""  # 报错的第一行（抹掉网址里的口令）
+
+    @property
+    def text(self) -> str:
+        base = READ_TEXT[self.kind]
+        if self.kind == "exit_nonzero":
+            base += f"（退出码 {self.rc}）"
+        return base + (f"：{self.detail}" if self.detail else "")
+
+
+def _first_error_line(stderr: str) -> str:
+    """优先取以 Error: 开头的那一行（click 的报错），没有就取最后一行非空文字；抹掉网址里的口令，最多 120 字。"""
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    chosen = next((line for line in lines if line.startswith("Error:")), lines[-1] if lines else "")
+    return _scrub(chosen)[:120]
+
+
+def classify_read(rc: int | None, stdout: str, stderr: str, *, timed_out: bool = False, error: str = "") -> str:
+    """一次只读命令的结果归到 READ_TEXT 的一种。只看退出码和输出文字，不看命令名。"""
+    if error:
+        return "spawn_failed"
+    if timed_out:
+        return "timeout"
+    lowered = (stderr or "").lower()
+    if "no such command" in lowered:
+        return "missing_command"
+    if rc not in (0, None):
+        network = dict(_PROBE_RULES)["network"]
+        return "offline" if any(needle in lowered for needle in network) else "exit_nonzero"
+    if not (stdout or "").strip():
+        return "banner_only"
+    return "ok"
+
+
+def run_read(root: Path, args: Sequence[str], runner: Callable[..., Any] = subprocess.run,
+             timeout: int = READ_TIMEOUT) -> ReadOutcome:
+    """在控制根跑一条只读命令。调用方必须放在后台线程（app.ActionRunner），界面线程不等它。"""
+    command = cli_command(root, args)
+    shown = subprocess.list2cmdline(command)
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    try:
+        result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", errors="replace",  # lenient-decode: 命令输出只用于显示和容错解析
+                        timeout=timeout, check=False, stdin=subprocess.DEVNULL, env=env, **quiet())
+    except subprocess.TimeoutExpired:
+        return ReadOutcome("timeout", shown, None)
+    except (OSError, subprocess.SubprocessError) as error:
+        detail = _scrub(f"{type(error).__name__}: {error}")[:120]
+        return ReadOutcome(classify_read(None, "", "", error=detail), shown, None, detail=detail)
+    out, err = str(result.stdout or ""), str(result.stderr or "")
+    kind = classify_read(int(result.returncode), out, err)
+    detail = _first_error_line(err) if kind in ("missing_command", "exit_nonzero", "offline") else ""
+    return ReadOutcome(kind, shown, int(result.returncode), out, err, detail)
+
+
+def write_snapshot(root: Path, key: str, outcome: ReadOutcome, saved_at: datetime) -> Path | None:
+    """只存读到了的那次（kind 为 ok）；先写同目录临时文件再整体换名，读的人不会读到半份。写不了返回 None，不让界面挂。"""
+    if outcome.kind != "ok":
+        return None
+    target = snapshot.path_for(root, key)
+    text = snapshot.encode(key, saved_at, outcome.kind, outcome.stdout, outcome.stderr)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(target.name + ".tmp")
+        temp.write_text(text, encoding="utf-8")
+        os.replace(temp, target)
+    except OSError:
+        return None
+    return target

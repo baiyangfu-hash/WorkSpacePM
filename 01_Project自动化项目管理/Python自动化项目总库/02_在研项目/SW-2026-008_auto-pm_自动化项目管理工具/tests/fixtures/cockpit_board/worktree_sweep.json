@@ -1,0 +1,26 @@
+{
+  "applied": false,
+  "fetch_warning": "",
+  "items": [
+    {
+      "target": "claude/628a-gui-shell",
+      "category": "gone-branch",
+      "remove": true,
+      "reason": "远程已删且已并进 main，删本地分支"
+    },
+    {
+      "target": "claude/chg627-long-run-ratio",
+      "category": "gone-branch",
+      "remove": true,
+      "reason": "远程已删且已并进 main，删本地分支"
+    },
+    {
+      "target": "claude/claims-d39",
+      "category": "gone-branch",
+      "remove": true,
+      "reason": "远程已删且已并进 main，删本地分支"
+    }
+  ],
+  "done": [],
+  "failed": []
+}

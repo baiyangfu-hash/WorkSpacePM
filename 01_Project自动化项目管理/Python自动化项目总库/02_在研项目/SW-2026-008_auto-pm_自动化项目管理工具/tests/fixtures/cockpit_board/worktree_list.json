@@ -1,0 +1,19 @@
+[
+  {
+    "name": "claude-fc1e6b",
+    "path": "/work/.auto-pm/worktrees/claude-fc1e6b",
+    "kind": "agent",
+    "registered": true,
+    "broken": "",
+    "branch": "claude/628b-gui-data",
+    "checked": false,
+    "dirty": null,
+    "unpushed": null,
+    "merged": null,
+    "untouched": null,
+    "locked": false,
+    "size_bytes": null,
+    "idle_days": 0,
+    "stale": false
+  }
+]
