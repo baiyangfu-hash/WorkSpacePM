@@ -1,6 +1,8 @@
 """主窗口：左侧栏（页面，三组）、顶栏（模式、网络、重新读取）、后台读取、把 viewmodel 交给各画面。
 
 侧栏分组、页面注册表、路由、范围标记在 shell.py（CHG-SCPT-2026-628 骨架 A）。
+骨架 D 的 7 个新页：读哪条命令以 flow/pages.json 为准，打开那页（或点“重新读取”）时在后台线程读，
+读到了存一份“上次读取”快照，没读到就亮快照并写明是几分钟前的（read_page）。
 
 读取只读：账本由 pm_dashboard 拷到临时目录后 mode=ro + query_only；老后台只在手动“重新读取”且
 老后台 snapshot() 只在 TD-105 合并后接入（见 LEGACY_ALLOWED，已打开）。工程工位的动作走 actions.py，在后台线程跑。
@@ -37,17 +39,24 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from cockpit_board import actions, flowgraph, shell, theme  # noqa: E402
+from cockpit_board import actions, flowgraph, readers, shell, snapshot, theme  # noqa: E402
 from cockpit_board import viewmodel as vm
 from cockpit_board.decision_controller import DecisionController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
+from cockpit_board.widgets.attention import AttentionPage  # noqa: E402
+from cockpit_board.widgets.commands import CommandsPage  # noqa: E402
 from cockpit_board.widgets.flow import FlowPage  # noqa: E402
 from cockpit_board.widgets.home import HomePage  # noqa: E402
 from cockpit_board.widgets.issues import IssuesPage  # noqa: E402
 from cockpit_board.widgets.project_page import ProjectPage  # noqa: E402
 from cockpit_board.widgets.projects import ProjectsPage  # noqa: E402
+from cockpit_board.widgets.prs import PrsPage  # noqa: E402
+from cockpit_board.widgets.release import ReleasePage  # noqa: E402
+from cockpit_board.widgets.spine import SpinePage  # noqa: E402
 from cockpit_board.widgets.station import StationPage  # noqa: E402
+from cockpit_board.widgets.tasks import TasksPage  # noqa: E402
 from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
+from cockpit_board.widgets.worktrees import WorktreesPage  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
@@ -129,6 +138,40 @@ def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
     return snapshot
 
 
+def read_page(root: Path, reads: tuple[shell.PageRead, ...], project_id: str, runner: Callable[..., Any] | None,
+              now: datetime | None) -> list[c.ReadResult]:
+    """在后台线程里把一页要读的命令挨个读完。读到且读得懂就存快照；没读到就取上次的快照（写明几分钟前）。
+
+    子进程和写文件都在 actions 里（run_read、write_snapshot）；这里只排顺序、配解析器。任何意外都变成一句“没读”，不让线程悄悄死掉。
+    """
+    results: list[c.ReadResult] = []
+    when = now or datetime.now(UTC)
+    for read in reads:
+        argv = read.argv(project_id)
+        shown = "main.py " + " ".join(argv)
+        if read.needs_project and not project_id:
+            results.append(c.ReadResult(read.reader, shown, skipped="没有受管项目可读（工程工位默认项目是空的）"))
+            continue
+        try:
+            outcome = actions.run_read(root, argv, runner) if runner else actions.run_read(root, argv)
+            try:
+                key: str | None = snapshot.key_for(read.reader, project_id if read.needs_project else "")
+            except ValueError:
+                key = None  # 项目号里有怪字符：不存快照，照样显示这次的结果
+            if outcome.kind == "ok":
+                parsed = readers.parse(read.reader, outcome.stdout)
+                if parsed.ok and key:
+                    actions.write_snapshot(root, key, outcome, when)
+                results.append(c.ReadResult(read.reader, shown, outcome, parsed))
+                continue
+            last = snapshot.load(root, key) if key else None
+            parsed_last = readers.parse(read.reader, last.stdout) if last is not None else None
+            results.append(c.ReadResult(read.reader, shown, outcome, parsed_last, snapshot.age_text(last, when) if last else ""))
+        except Exception as error:  # noqa: BLE001 - 后台读出任何错都交回页面写明，不让“正在读”卡死
+            results.append(c.ReadResult(read.reader, shown, skipped=f"读的时候出错：{type(error).__name__}: {error}"))
+    return results
+
+
 def load_board(options: argparse.Namespace, use_legacy: bool) -> pd.Board:
     now = options.now or datetime.now(UTC)
     board = pd.build_board(
@@ -192,8 +235,17 @@ class CockpitWindow(QMainWindow):
         self.flow = FlowPage()
         self.tools = ToolsPage(options.root)
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
+        # 骨架 D：4 个读命令的页 + PR 与审计（用窗口的 GitHub 采集）+ 两个只读数据文件的页
+        self.attention, self.tasks, self.worktrees, self.release = AttentionPage(), TasksPage(), WorktreesPage(), ReleasePage()
+        self.prs, self.spine, self.commands = PrsPage(), SpinePage(), CommandsPage()
+        self.read_pages: dict[str, c.ReadPage] = {p.key: p for p in (self.attention, self.tasks, self.worktrees, self.release)}
+        self.page_reads = shell.page_reads()
+        self._reading_pages: set[str] = set()
+        self.current = "home"
         for key, page in (("home", self.home), ("issues", self.issues), ("projects", self.projects), ("project", self.project),
-                          ("decisions", self.decisions.page), ("flow", self.flow), ("tools", self.tools)):
+                          ("decisions", self.decisions.page), ("flow", self.flow), ("tools", self.tools),
+                          ("attention", self.attention), ("tasks", self.tasks), ("worktrees", self.worktrees),
+                          ("release", self.release), ("prs", self.prs), ("spine", self.spine), ("commands", self.commands)):
             self.router.register(key, page)
         self.stack.addWidget(self.station)  # 工程工位模式下“今天”换成这一页（goto 里换）
         main.addWidget(self.stack, 1)
@@ -246,11 +298,34 @@ class CockpitWindow(QMainWindow):
     # ------------------------------------------------ 导航
 
     def goto(self, key: str) -> None:
+        self.current = key
         self.router.show(key, self.station if key == "home" and self.mode == "ws" else None)
         self.sidebar.select(key)
         self.scope.setText(shell.scope_text(key) + (" · 工程工位" if key == "home" and self.mode == "ws" else ""))
         if key == "decisions":
             self._refresh_decisions()
+        if key in self.read_pages:
+            self._refresh_reads(key)
+
+    def _refresh_reads(self, key: str) -> None:
+        """骨架页：把 flow/pages.json 里这一页的只读命令放到后台线程读；上一轮没读完就不叠新的一轮。"""
+        reads = self.page_reads.get(key, ())
+        if key in self._reading_pages or not reads:
+            return
+        self._reading_pages.add(key)
+        pid = self.options.station_project
+        scope = f"项目：{pid or '（没有）'}" if any(r.needs_project for r in reads) else "范围：本机控制根"
+        self.read_pages[key].project_line.setText(scope + " · 正在读……")
+        runner = getattr(self.options, "read_runner", None)  # 测试注入；None 用真的子进程
+        job = partial(lambda k, s, *a: (k, s, read_page(*a)), key, scope, self.options.root, reads, pid, runner, self.options.now)
+        thread = ActionRunner(job, self)
+        thread.done.connect(self._on_reads)
+        self._track(thread)
+
+    def _on_reads(self, payload: tuple[str, str, list[c.ReadResult]]) -> None:
+        key, scope, results = payload
+        self._reading_pages.discard(key)
+        self.read_pages[key].show_results(scope, results)
 
     def _refresh_decisions(self) -> None:
         """把看板里的卡和要读只读命令的项目交给“决定”页：有开着的卡的项目，加上今天页上最热的几个（可能有待批准的范围卡）。"""
@@ -305,6 +380,8 @@ class CockpitWindow(QMainWindow):
         self.refresh_button.setEnabled(False)
         self.status.setText("正在读取……")
         self._start(use_legacy=False)
+        if self.current in self.read_pages:  # 正开着骨架页：连它的命令一起重读
+            self._refresh_reads(self.current)
         if not self.options.no_net:
             self.probe()
         if not self.options.no_github:
@@ -381,6 +458,7 @@ class CockpitWindow(QMainWindow):
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
         self._feed_flow_and_tools(board)
+        self.prs.show_github(self.github, bool(self.options.no_github))
         if self.stack.currentWidget() is self.project and self.project.vm is not None:
             self.open_project(self.project.vm.card.project_id)
         if self.stack.currentWidget() in (self.home, self.station):
@@ -526,7 +604,8 @@ def main(argv: list[str] | None = None) -> int:
         window.show_board(load_board(options, use_legacy=False))
         window.resize(1360, 1600)
         target = Path(options.screenshot)
-        for key, name in (("home", "项目经理"), ("issues", "问题"), ("projects", "全部项目"), ("flow", "流程图"), ("tools", "工具")):
+        for key, name in (("home", "项目经理"), ("issues", "问题"), ("projects", "全部项目"), ("flow", "流程图"), ("tools", "工具"),
+                          ("prs", "PR与审计"), ("spine", "脊柱图"), ("commands", "命令与契约")):
             window.goto(key)
             app.processEvents()
             window.grab().save(str(target.with_name(f"{target.stem}_{name}{target.suffix}")))

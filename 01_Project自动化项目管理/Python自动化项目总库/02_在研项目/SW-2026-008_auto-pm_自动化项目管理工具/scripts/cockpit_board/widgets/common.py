@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from cockpit_board import theme
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
@@ -300,3 +302,115 @@ def read_block(status: str, raw: str, state: str = "") -> QFrame:
     shown = raw if len(raw) <= RAW_LIMIT else raw[:RAW_LIMIT] + f"\n……（截断，后面还有 {len(raw) - RAW_LIMIT} 字）"
     layout.addWidget(label(shown or "（没有输出）", "mono"))
     return frame
+
+
+# ---------------------------------------------------------------- 骨架页底板（CHG-SCPT-2026-628 D）
+#
+# 新页每读一条只读命令，就交来一份 ReadResult；页面按它画“读取状态 + 读出来的要点 + 原文”。
+# 像 HMI 上一个通讯点：先看通讯状态灯，再看数值，最后才是原始报文。
+
+
+@dataclass(frozen=True)
+class ReadResult:
+    reader: str  # readers.READERS 的键
+    command: str  # 给人看的命令，如 main.py pm missions --pid SW-2026-008
+    outcome: Any = None  # actions.ReadOutcome；None = 还没读
+    parsed: Any = None  # readers.Parsed：这次读到了就是这次的，没读到但有快照就是快照的
+    last_note: str = ""  # 用了快照时写“上次读取：几分钟前”
+    skipped: str = ""  # 没去读的原因（如没有受管项目）
+
+
+def read_state(result: ReadResult) -> tuple[str, str]:
+    """（三态标签的键或空串, 一句读取状态）。空串＝读到了且读得懂，其余都配三态标签之一，不画成读到了。"""
+    if result.skipped:
+        return "unchecked", "没读：" + result.skipped
+    outcome = result.outcome
+    if outcome is None:
+        return "unchecked", "还没读：打开本页或点“重新读取”时读"
+    if outcome.kind == "ok":
+        if result.parsed is not None and result.parsed.ok:
+            return "", "读到了"
+        note = result.parsed.note if result.parsed is not None else ""
+        return "unreadable", "命令有输出，但不是认得的格式" + (f"：{note}" if note else "")
+    state = {"offline": "offline", "banner_only": "unreadable"}.get(outcome.kind, "unchecked")
+    status = outcome.text
+    if result.last_note and result.parsed is not None and result.parsed.ok:
+        status += f"；下面的要点是{result.last_note}的结果"
+    return state, status
+
+
+def state_line(state: str, status: str) -> QWidget:
+    """一行“三态标签 + 一句话”；state 为空串就只有那句话（读到了）。"""
+    head: list[QWidget] = [label(status, "muted")]
+    if state:
+        head.insert(0, state_tag(state))
+    row = hrow(*head)
+    fill(row, head[-1])
+    return row
+
+
+def shows_values(result: ReadResult) -> bool:
+    """要点（数目、名字）只在读得懂时画：这次读到的，或这次没读到但有能读懂的快照（状态行写明是上次的）。"""
+    return result.parsed is not None and result.parsed.ok and (result.outcome is not None or bool(result.last_note))
+
+
+class ReadPage(QWidget):
+    """骨架页：顶上标题和一句话，中间每条命令一块（状态、要点、原文），底下是还没做的功能占位卡。
+
+    子类只写 summary()：把 readers 解析出的 data 变成几行“名字 → 值”。不起子进程、不写文件，
+    命令由 app 在后台线程跑完后调用 show_results()。
+    """
+
+    def __init__(self, key: str, title: str, question: str, todo: Sequence[tuple[str, str, str]] = ()) -> None:
+        super().__init__()
+        self.key = key
+        self.setObjectName("page")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll, body = page()
+        outer.addWidget(scroll)
+        body.addWidget(section(title, question))
+        self.project_line = label("", "muted")
+        body.addWidget(self.project_line)
+        holder = QWidget()
+        self.reads = QVBoxLayout(holder)
+        self.reads.setContentsMargins(0, 0, 0, 0)
+        self.reads.setSpacing(theme.SPACE)
+        body.addWidget(holder)
+        for name, reason, command in todo:
+            body.addWidget(placeholder(name, reason, command))
+        self.results: list[ReadResult] = []
+
+    def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
+        return []
+
+    def show_results(self, scope: str, results: Sequence[ReadResult]) -> None:
+        self.results = list(results)
+        self.project_line.setText(scope)
+        clear(self.reads)
+        for result in results:
+            frame, layout = card()
+            layout.addWidget(label(result.command, "heading"))
+            state, status = read_state(result)
+            if shows_values(result):
+                rows = self.summary(result.reader, result.parsed.data)
+                if rows:
+                    layout.addWidget(kv(rows))
+            outcome = result.outcome
+            raw = "" if outcome is None else (outcome.stdout if outcome.kind == "ok" else (outcome.stderr or outcome.stdout))
+            layout.addWidget(read_block(status, raw, state))
+            self.reads.addWidget(frame)
+
+
+def count_text(rows: Sequence[Any], unit: str) -> str:
+    """读到了才数：列表本身是真数据，空列表就是“没有”，写“没有”而不是 0。"""
+    return f"{len(rows)} {unit}" if rows else "没有"
+
+
+def flag_text(value: Any, yes: str, no: str) -> str:
+    """命令的 true / false / null 三态：null（命令自己说没查）一律写“没检查”，不当成“没有”。"""
+    if value is None:
+        return STATES["unchecked"]
+    if isinstance(value, bool):
+        return yes if value else no
+    return f"{yes} {value}" if value else no
