@@ -54,6 +54,29 @@ def test_a_running_process_is_alive_and_a_killed_one_is_proven_dead(child: subpr
     assert judge_process(fingerprint, process_probe.observe(child.pid), local_host_id=host) is ProcessVerdict.PROVEN_DEAD
 
 
+def test_windows_command_lines_come_from_the_kernel_snapshot_without_a_child_process(
+    child: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-234: the deploy preflight's process list no longer asks PowerShell, whose start-up depends on the caller's environment."""
+
+    def no_child(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the process list started a child process")
+
+    monkeypatch.setattr(subprocess, "run", no_child)
+    monkeypatch.setattr(subprocess, "Popen", no_child)
+    rows, why = process_probe.windows_command_lines()
+
+    if sys.platform != "win32":
+        assert rows is None and sys.platform in why
+        return
+    assert rows is not None, why
+    assert why == ""
+    by_pid = {pid: (parent, line) for pid, parent, line in rows}
+    assert by_pid[child.pid][0] == os.getpid()
+    assert "time.sleep(120)" in by_pid[child.pid][1]
+    assert by_pid[os.getpid()][1].strip()
+
+
 def test_a_fingerprint_from_another_host_is_unknown(child: subprocess.Popen[bytes]) -> None:
     fingerprint = process_probe.fingerprint(child.pid)
     if fingerprint is None:
