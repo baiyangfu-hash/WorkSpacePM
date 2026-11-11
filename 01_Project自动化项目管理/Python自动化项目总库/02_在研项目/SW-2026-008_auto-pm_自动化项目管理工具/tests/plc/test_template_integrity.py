@@ -86,3 +86,21 @@ def test_slot_files_and_shared_db_fragment_are_in_place() -> None:
         assert slot.read_text(encoding="utf-8") == f'{{% set slot = {n} %}}{{% include "_includes/DB_1001_Station.scl.jinja" %}}'
     assert not list(station_dir.glob("{{ db_slot_9 }}*"))
     assert not list((root / "template" / "02_PLC程序" / "PLC_ST" / "00_全局数据").glob("DB_*"))
+
+
+def test_import_steps_keep_the_manual_renumber_to_ob123(tmp_path: Path) -> None:
+    """源文件里写不了块号（TIA V19 实测），导入步骤必须保留“手工改成 OB123”这一步（CHG-SCPT-2026-636）"""
+    templates_dir = Path(__file__).resolve().parent.parent.parent / "templates"
+    target_proj = tmp_path / "DJ-2026-997_ObNumber"
+    data = {"project_id": "DJ-2026-997", "project_name": "改号机", "description": "改号", "version": "V1.0.0"}
+    TemplateService(str(templates_dir)).copy_template("plc-standard-project", str(target_proj), data)
+    plc_dir = target_proj / "02_PLC程序"
+    arc = (plc_dir / "程序文档" / "程序架构文档_ARC.md").read_text(encoding="utf-8")
+    section = arc.split("## 7.4 导入 TIA 的顺序", 1)[1].split("\n## ", 1)[0]
+    assert "_Main` 的块属性窗口" in section
+    assert "改成 123" in section and "“手动”" in section
+    assert "源文件里写不了块号（TIA V19 实测）" in section
+    assert section.index("改成 123") < section.index("全部重建")
+    ob = (plc_dir / "PLC_ST" / "00_主程序" / "OB123.scl").read_text(encoding="utf-8-sig")
+    header = ob.split("ORGANIZATION_BLOCK", 1)[0]
+    assert "必须在 TIA 里手工改成 OB123" in header
