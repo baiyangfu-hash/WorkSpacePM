@@ -110,11 +110,11 @@ class HomePage(QWidget):
                 lay.addWidget(c.label(f"还有 {total - len(vm.decisions)} 件排在后面，前面定完再给你。", "small"))
         else:
             frame, inner = c.card(dashed=True)
-            inner.addWidget(c.label("账本、变更记录、PR 签字里没有要你定的事。", "muted"))
+            inner.addWidget(c.label("账本（含等批准的范围卡、等确认的收件箱条目）、变更记录、PR 签字里没有要你定的事。", "muted"))
             lay.addWidget(frame)
         lay.addWidget(
             c.label(
-                "只覆盖三类：账本里等你的卡、变更记录里待批的、PR 上等你签字的。"
+                "只覆盖三类：账本里等你的卡（含等批准的范围卡、等确认的收件箱条目）、变更记录里待批的、PR 上等你签字的。"
                 "线程里的待办（回“合并”、确认 .trae/、答问）这里算不出，由协调者汇报。",
                 "small",
             )

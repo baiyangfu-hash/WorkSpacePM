@@ -343,6 +343,21 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                     "02_业务变更记录.md 状态栏", _date(c.raised) or _date(c.status[2:].strip()),
                 )
             )
+    for pending in project.asks:  # 还没有 Mission 的“等你拍板”：口径同 pm pending / pm inbox list 的 PROPOSED（CHG-SCPT-2026-639）
+        if pending.kind == "scope":
+            issues.append(
+                Issue(
+                    "hint", pid, "批准范围", f"{pending.ref} {pending.subject}", USER,
+                    f"账本 planning_scope_cards 第 {pending.revision} 版，未批准（同 pm pending）", pending.since,
+                )
+            )
+        elif pending.kind == "inbox":
+            issues.append(
+                Issue(
+                    "hint", pid, "核对需求", f"{pending.ref} {pending.subject}", USER,
+                    "账本 intake_items.status = PROPOSED（同 pm inbox list）", pending.since,
+                )
+            )
     for card in project.cards:
         if card.status.startswith("待批"):
             issues.append(

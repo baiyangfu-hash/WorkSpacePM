@@ -12,6 +12,7 @@ GitHub（PR、门禁、安全签字、审计）走 scripts/github_collector.py�
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -60,7 +61,8 @@ from cockpit_board.widgets.worktrees import WorktreesPage  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
-DECISION_PROJECT_LIMIT = 12  # “决定”页一次最多读这么多个项目的待批准卡和收件箱
+DECISION_PROJECT_LIMIT = 12  # “决定”页、“要你出手”页一次最多读这么多个项目的待批准卡和收件箱
+ACTIVE_RELEASE_RELATIVE = Path("00_Infrastructure") / "auto_pm" / "active_release.json"
 # TD-105（Windows 禁写锁）已于 PR #82 合并：先快读出第一版，再在后台接老驾驶舱后台 snapshot() 的措辞（只读）。
 # 只在首次加载和手动“重新读取”时接，10 分钟定时刷新不接（auto_reload）。--no-legacy 可关；老后台出任何问题都退回只读账本数据，不让窗口挂。
 LEGACY_ALLOWED = True
@@ -136,6 +138,41 @@ def load_github(options: argparse.Namespace) -> gh.Snapshot | None:
     if cache is not None and token is not None and cache.refused:
         snapshot.login_refused = True  # 页面上写“登录被拒，暂用游客读取，重启后重试”
     return snapshot
+
+
+def ask_project_ids(board: pd.Board | None, station_project: str, limit: int = DECISION_PROJECT_LIMIT) -> list[str]:
+    """“要你出手”“决定”两页读哪些项目（CHG-SCPT-2026-639，口径统一）：工程工位默认项目，加上账本里有等批准范围卡或
+    等确认收件箱条目的项目，加上有开着的卡的项目；去重，最多 limit 个。"""
+    wanted = [station_project] if station_project else []
+    if board is not None:
+        wanted += [p.project_id for p in board.projects if getattr(p, "asks", None)]
+        wanted += [p.project_id for p in board.projects if any(m.column != "已关" for m in p.missions)]
+    return list(dict.fromkeys(pid for pid in wanted if pid))[:limit]
+
+
+def effective_release(root: Path) -> str:
+    """身份条“生效版本”：读 active_release.json 的 release_id；读不到返回空串（界面显示“—”）。"""
+    try:
+        value = json.loads((root / ACTIVE_RELEASE_RELATIVE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(value.get("release_id") or "") if isinstance(value, dict) else ""
+
+
+def fill_identity(options: argparse.Namespace, runner: Callable[..., Any] | None = None) -> None:
+    """命令行没给身份条的“源码”“生效版本”时自己补（bat 不传这两个参数）；命令行给了的以命令行为准。"""
+    if not options.source_version:
+        options.source_version = actions.source_version(options.root, runner) if runner else actions.source_version(options.root)
+    if not options.effective_version:
+        options.effective_version = effective_release(options.root)
+
+
+def read_pages(root: Path, reads: tuple[shell.PageRead, ...], project_ids: list[str], runner: Callable[..., Any] | None,
+               now: datetime | None) -> list[c.ReadResult]:
+    """同一页的只读命令按项目挨个读，结果按项目依次排；没有项目时照旧读一次（写明“没有受管项目可读”）。"""
+    if not project_ids:
+        return read_page(root, reads, "", runner, now)
+    return [result for pid in project_ids for result in read_page(root, reads, pid, runner, now)]
 
 
 def read_page(root: Path, reads: tuple[shell.PageRead, ...], project_id: str, runner: Callable[..., Any] | None,
@@ -314,10 +351,11 @@ class CockpitWindow(QMainWindow):
             return
         self._reading_pages.add(key)
         pid = self.options.station_project
-        scope = f"项目：{pid or '（没有）'}" if any(r.needs_project for r in reads) else "范围：本机控制根"
+        pids = ask_project_ids(self.board, pid) if key == "attention" else ([pid] if pid else [])
+        scope = f"项目：{'、'.join(pids) or '（没有）'}" if any(r.needs_project for r in reads) else "范围：本机控制根"
         self.read_pages[key].project_line.setText(scope + " · 正在读……")
         runner = getattr(self.options, "read_runner", None)  # 测试注入；None 用真的子进程
-        job = partial(lambda k, s, *a: (k, s, read_page(*a)), key, scope, self.options.root, reads, pid, runner, self.options.now)
+        job = partial(lambda k, s, *a: (k, s, read_pages(*a)), key, scope, self.options.root, reads, pids, runner, self.options.now)
         thread = ActionRunner(job, self)
         thread.done.connect(self._on_reads)
         self._track(thread)
@@ -334,6 +372,7 @@ class CockpitWindow(QMainWindow):
         wanted = [p.project_id for p in self.board.projects if any(m.column != "已关" or m.state == "ACCEPTED" for m in p.missions)]
         if self.home_vm is not None:
             wanted += [p.project_id for p in self.home_vm.hot]
+        wanted += [p.project_id for p in self.board.projects if getattr(p, "asks", None)]  # 只有等批准范围卡、还没有卡的项目也要读（CHG-SCPT-2026-639）
         project_ids = list(dict.fromkeys(wanted))[:DECISION_PROJECT_LIMIT]
         missions = [m for p in self.board.projects for m in p.missions]
         self.decisions.refresh(project_ids, missions)
@@ -595,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     app.setStyleSheet(theme.build_qss(theme.DARK if _dark_mode(app) else theme.LIGHT))
+    fill_identity(options)
     window = CockpitWindow(options)
     if not options.station_project:
         options.station_project = next(

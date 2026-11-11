@@ -1,6 +1,7 @@
 """“要你出手”页（CHG-SCPT-2026-628 骨架 D）：等你批准的范围卡、等你确认的收件箱条目。
 
-读 `pm pending --project-id <项目>` 和 `pm inbox list --project-id <项目>`。只读：批准、确认在“决定”页做
+读 `pm pending --project-id <项目>` 和 `pm inbox list --project-id <项目>`；读哪些项目见 app.ask_project_ids（工程工位默认项目、
+账本里有等批准范围卡或等确认收件箱条目的项目、有开着的卡的项目，最多 12 个；有等批准范围卡的项目“决定”页也会读）。只读：批准、确认在“决定”页做
 （要口令的由你本人在终端做），这里只告诉你“有几件、是什么”。
 """
 
@@ -45,7 +46,6 @@ class AttentionPage(c.ReadPage):
     def __init__(self) -> None:
         empty_text, error_text = shell.page_texts()["attention"]
         super().__init__("attention", "要你出手", "现在有没有等你本人拍板的事", (
-            ("所有项目合在一起看", "现在只读工程工位的默认项目；“决定”页已按项目读全", ""),
             ("规则、门禁、安全类的 PR 等你点", "要读 GitHub 的检查结果，还没接", ""),
         ), empty_text, error_text)
 

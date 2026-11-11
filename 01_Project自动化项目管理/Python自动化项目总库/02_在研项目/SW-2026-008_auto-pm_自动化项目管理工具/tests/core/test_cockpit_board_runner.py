@@ -148,3 +148,67 @@ def test_slow_read_runs_off_the_ui_thread(qapp: Any, tmp_path: Path) -> None:
     assert runner.wait(5000)
     qapp.processEvents()
     assert len(results) == 1 and results[0].kind == "ok"
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-639：检查用启动看板的 Python、身份条自己补版本
+
+
+def test_run_check_uses_the_python_that_started_the_board(tmp_path: Path) -> None:
+    runner = _fake(0, "ok")
+    actions.run_check(tmp_path, tmp_path / "w", "DJ-2026-009", "plc_check", runner=runner)
+    command = runner.calls[0]["command"]
+    assert command[0] == sys.executable and command[1] == "-B" and command[2] == str(tmp_path / "main.py")
+    assert "python" not in command  # 不靠 PATH 上的 python（D-293）
+
+
+def test_no_bare_python_left_in_the_board_package() -> None:
+    package = SCRIPTS / "cockpit_board"
+    hits = [str(p) for p in package.rglob("*.py") if '"python"' in p.read_text(encoding="utf-8")]
+    assert hits == []
+
+
+def test_source_version_reads_the_short_head_without_prompting(tmp_path: Path) -> None:
+    runner = _fake(0, "7f09b8f\n")
+    assert actions.source_version(tmp_path, runner=runner) == "7f09b8f"
+    call = runner.calls[0]
+    assert call["command"] == ["git", "-C", str(tmp_path), "rev-parse", "--short", "HEAD"]
+    assert call["timeout"] == actions.PROBE_TIMEOUT and call["check"] is False
+    assert call["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [_fake(128, "", "fatal: not a git repository"), _fake(raises=subprocess.TimeoutExpired("git", 1)), _fake(raises=OSError("no git"))],
+)
+def test_source_version_failure_is_an_empty_string(tmp_path: Path, runner: Any) -> None:
+    assert actions.source_version(tmp_path, runner=runner) == ""
+
+
+def _identity_options(root: Path, source: str = "", effective: str = "") -> SimpleNamespace:
+    return SimpleNamespace(root=root, source_version=source, effective_version=effective)
+
+
+def test_fill_identity_fills_both_versions_when_the_bat_passes_none(tmp_path: Path) -> None:
+    from cockpit_board import app
+
+    release = tmp_path / app.ACTIVE_RELEASE_RELATIVE
+    release.parent.mkdir(parents=True)
+    release.write_text('{"release_id": "1.3.3-d2b9ebe"}', encoding="utf-8")
+    options = _identity_options(tmp_path)
+    app.fill_identity(options, runner=_fake(0, "abc1234\n"))
+    assert (options.source_version, options.effective_version) == ("abc1234", "1.3.3-d2b9ebe")
+
+
+def test_fill_identity_leaves_blank_when_unreadable_and_never_overrides_the_command_line(tmp_path: Path) -> None:
+    from cockpit_board import app
+
+    options = _identity_options(tmp_path)
+    app.fill_identity(options, runner=_fake(128, "", "fatal"))
+    assert (options.source_version, options.effective_version) == ("", "")  # 界面显示“—”，不编值
+    (tmp_path / app.ACTIVE_RELEASE_RELATIVE).parent.mkdir(parents=True)
+    (tmp_path / app.ACTIVE_RELEASE_RELATIVE).write_text("not json", encoding="utf-8")
+    assert app.effective_release(tmp_path) == ""
+    given = _identity_options(tmp_path, "given-src", "given-rel")
+    runner = _fake(0, "zzz\n")
+    app.fill_identity(given, runner=runner)
+    assert (given.source_version, given.effective_version) == ("given-src", "given-rel") and runner.calls == []
