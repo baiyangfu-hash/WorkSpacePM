@@ -161,6 +161,22 @@ class Attention:
 
 
 @dataclass
+class PendingAsk:
+    """账本里等用户本人拍板、但还没有 Mission 的事：等批准的范围卡（kind="scope"）、等确认的收件箱条目（kind="inbox"）。
+
+    口径与 `pm pending`（ContinuityStore.list_pending_planning_scope_cards）和 `pm inbox list` 里 status=PROPOSED 的一致，
+    tests/core/test_cockpit_board.py 的契约测试逐项比对（CHG-SCPT-2026-639）。
+    """
+
+    project_id: str
+    kind: str
+    ref: str  # 范围卡：request_id；收件箱：item_id
+    subject: str  # 范围卡：目标；收件箱：标题
+    since: datetime | None
+    revision: int = 0  # 只有范围卡有
+
+
+@dataclass
 class LegacyCard:
     """老驾驶舱后台 PmCockpitService.snapshot() 给这个项目的状态卡（利旧，只读）。"""
 
@@ -189,6 +205,7 @@ class Project:
     last_commit: datetime | None = None
     attention: list[Attention] = field(default_factory=list)
     legacy: LegacyCard | None = None
+    asks: list[PendingAsk] = field(default_factory=list)
 
 
 @dataclass
@@ -343,6 +360,67 @@ def read_ledger_copy(
     _name, connect = choose_ledger_reader(reader)
     with connect(root or db_path.parent.parent, db_path) as connection:  # type: ignore[attr-defined]
         return read_ledger(connection, now)
+
+
+def read_board_ledger(
+    db_path: Path, now: datetime, root: Path | None = None, reader: str = "copy"
+) -> tuple[list[MissionInfo], list[Attention], list[PendingAsk]]:
+    """build_board 用：同一个只读连接里读卡、遗留和等你拍板的事，账本只打开一次（与原来的连接次数相同）。"""
+    _name, connect = choose_ledger_reader(reader)
+    with connect(root or db_path.parent.parent, db_path) as connection:  # type: ignore[attr-defined]
+        missions, attention = read_ledger(connection, now)
+        return missions, attention, read_pending_asks(connection)
+
+
+def read_pending_asks_copy(db_path: Path, root: Path | None = None, reader: str = "copy") -> list[PendingAsk]:
+    """按选定读法打开账本，读出等批准的范围卡和等确认的收件箱条目（只读）。"""
+    _name, connect = choose_ledger_reader(reader)
+    with connect(root or db_path.parent.parent, db_path) as connection:  # type: ignore[attr-defined]
+        return read_pending_asks(connection)
+
+
+def read_pending_asks(connection: sqlite3.Connection) -> list[PendingAsk]:
+    """等批准的范围卡：每个请求最新一版、还没有 decision 绑定的（SQL 照 ContinuityStore.list_pending_planning_scope_cards）；
+    等确认的收件箱条目：intake_items 里 status=PROPOSED 的。表不存在就当没有，不建表、不写库。"""
+    tables = _tables(connection)
+    asks: list[PendingAsk] = []
+    if {"planning_scope_cards", "planning_drafts", "planning_draft_decision_bindings"} <= tables:
+        for row in connection.execute(
+            """SELECT c.request_id, c.revision, c.created_at, d.subject_project_id, d.objective
+            FROM planning_scope_cards c
+            JOIN planning_drafts d ON d.request_id = c.request_id
+            WHERE c.revision = (SELECT MAX(revision) FROM planning_scope_cards WHERE request_id = c.request_id)
+            AND NOT EXISTS (SELECT 1 FROM planning_draft_decision_bindings b WHERE b.request_id = c.request_id)
+            ORDER BY c.created_at, c.request_id"""
+        ):
+            asks.append(
+                PendingAsk(
+                    project_id=row["subject_project_id"],
+                    kind="scope",
+                    ref=row["request_id"],
+                    subject=_short(row["objective"] or "（没写目标）", 60),
+                    since=parse_time(row["created_at"]),
+                    revision=int(row["revision"]),
+                )
+            )
+    if "intake_items" in tables:
+        for row in connection.execute(
+            "SELECT item_id, project_id, item_json, created_at FROM intake_items WHERE status = 'PROPOSED' ORDER BY project_id, seq"
+        ):
+            try:
+                title = str(json.loads(row["item_json"]).get("title") or "")
+            except (ValueError, AttributeError):
+                title = ""
+            asks.append(
+                PendingAsk(
+                    project_id=row["project_id"],
+                    kind="inbox",
+                    ref=row["item_id"],
+                    subject=_short(title or "（没写标题）", 60),
+                    since=parse_time(row["created_at"]),
+                )
+            )
+    return asks
 
 
 def read_ledger(
@@ -766,7 +844,7 @@ def build_board(
     ledger_note = "没找到账本，只显示文件夹里的记录"
     if db_path is not None and db_path.is_file():
         reader_name, _connect = choose_ledger_reader(ledger_reader, root, db_path)
-        missions, attention = read_ledger_copy(db_path, now, root, reader_name)
+        missions, attention, asks = read_board_ledger(db_path, now, root, reader_name)
         ledger_note = f"账本只读：{db_path.name}（{LEDGER_READER_LABEL[reader_name]}）"
         for mission in missions:
             project = by_id.get(mission.project_id)
@@ -778,6 +856,13 @@ def build_board(
         for item in attention:
             if item.project_id in by_id:
                 by_id[item.project_id].attention.append(item)
+        for ask in asks:
+            project = by_id.get(ask.project_id)
+            if project is None:
+                project = Project(ask.project_id, "", "", True, False)
+                by_id[ask.project_id] = project
+                projects.append(project)
+            project.asks.append(ask)
     for project in projects:
         if project.root:
             project_root = root / project.root

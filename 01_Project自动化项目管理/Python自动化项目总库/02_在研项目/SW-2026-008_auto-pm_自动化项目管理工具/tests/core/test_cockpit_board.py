@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import subprocess
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 from tests.core import test_pm_dashboard as base
+from tests.core.test_pm_run_e2e import PROJECT_ID
 
 pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
@@ -716,3 +718,107 @@ def test_a_pr_whose_checks_could_not_be_read_is_named_not_counted_as_green(tmp_p
     home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
     assert not any("门禁红" in i.title for i in vm.all_issues(home))
     assert len(home.issue_notes) == 1 and "#475" in home.issue_notes[0] and "#476" not in home.issue_notes[0]
+
+
+# ---------------------------------------------------------------- 等批准的范围卡、等确认的收件箱条目（CHG-SCPT-2026-639）
+
+
+def _intake(store: Any, request_id: str, project: str, title: str) -> Any:
+    from auto_pm.contracts.intake import Disposition, IntakeClassification, IntakeKind, TriageTicket
+
+    ticket = TriageTicket(
+        original_words=title, affects="x", duplicate_check="x", evidence=("file:README.md",),
+        disposition=Disposition.INBOX_WAIT, rationale="x", alternatives=("x",), cost_risk="x",
+    )
+    item, _created = store.add_item(
+        request_id=request_id, project_id=project, title=title,
+        classification=IntakeClassification(kind=IntakeKind.BUG, domain="SCPT"), ticket=ticket, proposed_by="p",
+    )
+    return item
+
+
+def _asks_env(tmp_path: Path) -> Any:
+    """真账本：一张等批准的卡、一张改过两版的卡、一张已批准的卡、一条等确认和一条已确认的收件箱条目。"""
+    from auto_pm.contracts.intake import IntakeStatus
+    from auto_pm.infrastructure.intake_store import IntakeStore
+    from tests.core import test_pm_pending_scope_card as cards
+
+    env = cards._env(tmp_path)
+    env.draft("REQ-ASK-001", objective="等批准的一张")
+    env.submit("REQ-ASK-001")
+    env.draft("REQ-ASK-002", objective="改过两版的一张")
+    env.submit("REQ-ASK-002")
+    env.submit("REQ-ASK-002", risks=("r2",))
+    env.draft("REQ-ASK-003", objective="已批准的一张")
+    env.approve("REQ-ASK-003", env.submit("REQ-ASK-003").card.plan_hash)
+    intake = IntakeStore(env.root)
+    _intake(intake, "REQ-IN-001", PROJECT_ID, "需求一")
+    done = _intake(intake, "REQ-IN-002", PROJECT_ID, "需求二")
+    intake.decide_item(
+        done.item_id, status=IntakeStatus.CONFIRMED, ticket_hash=done.ticket_hash,
+        decided_by="fubai", decision_ref="user-confirmation:test-639-01",
+    )
+    return env
+
+
+def test_pending_asks_match_pm_pending_and_inbox_proposed(tmp_path: Path) -> None:
+    """契约：看板读到的和 `pm pending`、`pm inbox list` 里 PROPOSED 的逐项一致；读完账本字节不变。"""
+    from auto_pm.contracts.intake import IntakeStatus
+    from auto_pm.infrastructure.intake_store import IntakeStore
+
+    env = _asks_env(tmp_path)
+    before = env.settled_sha()
+    asks = pd.read_pending_asks_copy(env.db, env.root)
+    assert env.settled_sha() == before
+
+    pending = env.store.list_pending_planning_scope_cards(PROJECT_ID)
+    scope = [a for a in asks if a.kind == "scope"]
+    assert [(a.ref, a.revision) for a in scope] == [(p.card.request_id, p.revision) for p in pending]
+    assert [a.ref for a in scope] == ["REQ-ASK-001", "REQ-ASK-002"] and scope[1].revision == 2
+    proposed = IntakeStore(env.root).list_items(PROJECT_ID, (IntakeStatus.PROPOSED,))
+    inbox = [a for a in asks if a.kind == "inbox"]
+    assert [a.ref for a in inbox] == [i.item_id for i in proposed] and [a.subject for a in inbox] == ["需求一"]
+    assert {a.project_id for a in asks} == {PROJECT_ID}
+    assert all(a.since is not None for a in asks)
+
+
+def test_pending_asks_reach_the_home_page_decisions(tmp_path: Path) -> None:
+
+    env = _asks_env(tmp_path)
+    board = pd.build_board(env.root, env.db, NOW, use_git=False, use_legacy=False)
+    project = next(p for p in board.projects if p.project_id == PROJECT_ID)
+    assert sorted(a.ref for a in project.asks if a.kind == "scope") == ["REQ-ASK-001", "REQ-ASK-002"]
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = next(c for c in [*home.hot, *home.rest] if c.project_id == PROJECT_ID)
+    whys = {d.why: d for d in card.decisions}
+    asked = [whys[w] for w in whys if w.startswith(("REQ-ASK-", "INBOX-"))]
+    assert sorted(d.ask for d in asked) == ["批准范围", "批准范围", "核对需求"], list(whys)
+    assert sum(d.why.endswith("需求一") for d in asked) == 1
+    assert not any("REQ-ASK-003" in w or "需求二" in w for w in whys)
+    assert all(d.reply and d.basis and d.since is not None for d in asked)
+    # 首页“要你出手”的总数算上它们（首页只摆前 pd.MAX_DECISIONS 件）
+    assert home.decisions_total >= len(asked) + 1
+
+
+def test_pending_asks_of_an_unregistered_project_are_not_dropped(tmp_path: Path) -> None:
+    from tests.core import test_pm_pending_scope_card as cards
+
+    env = _asks_env(tmp_path)
+    cards._add_project(env.root, "SW-OTHER-639")
+    env.draft("REQ-ASK-OTHER", project="SW-OTHER-639", objective="别的项目的一张")
+    env.submit("REQ-ASK-OTHER")
+    registry = env.root / pd.REGISTRY_RELATIVE
+    payload = json.loads(registry.read_text(encoding="utf-8"))
+    payload["projects"] = [p for p in payload["projects"] if p["project_id"] != "SW-OTHER-639"]
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+    board = pd.build_board(env.root, env.db, NOW, use_git=False, use_legacy=False)
+    other = next(p for p in board.projects if p.project_id == "SW-OTHER-639")
+    assert [a.ref for a in other.asks] == ["REQ-ASK-OTHER"]
+
+
+def test_pending_asks_without_the_tables_are_empty_and_create_nothing(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    before = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert pd.read_pending_asks_copy(db, root) == []
+    after = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert before == after and "intake_items" not in after

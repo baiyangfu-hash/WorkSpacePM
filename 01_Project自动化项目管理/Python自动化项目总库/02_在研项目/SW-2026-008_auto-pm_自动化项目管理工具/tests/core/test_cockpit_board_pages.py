@@ -504,3 +504,77 @@ def test_data_pages_use_the_pages_json_error_text(qapp: QApplication, tmp_path: 
     bad = tmp_path / "bad.json"
     bad.write_text("{不是 JSON", encoding="utf-8")
     assert TEXTS[key][1] in _texts(make(bad))
+
+
+# ---- CHG-SCPT-2026-639：“要你出手”“决定”两页读哪些项目 ------------------------------------------------------
+
+
+ASK_TABLES = """
+CREATE TABLE planning_drafts (request_id TEXT PRIMARY KEY, subject_project_id TEXT, objective TEXT);
+CREATE TABLE planning_scope_cards (request_id TEXT, revision INTEGER, created_at TEXT);
+CREATE TABLE planning_draft_decision_bindings (request_id TEXT PRIMARY KEY);
+"""
+
+
+def _with_pending_card(db: Path, project: str, request_id: str = "REQ-ASK-PAGES") -> None:
+    """在假账本里放一张等批准的范围卡（只建看板读的几列），它所在的项目没有任何 Mission。"""
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.executescript(ASK_TABLES)
+        conn.execute("INSERT INTO planning_drafts VALUES (?, ?, ?)", (request_id, project, "只有范围卡的项目"))
+        conn.execute("INSERT INTO planning_scope_cards VALUES (?, 1, ?)", (request_id, NOW.isoformat()))
+
+
+def test_read_pages_reads_every_project_in_turn(tmp_path: Path) -> None:
+    seen: list[list[str]] = []
+    reads = shell.page_reads()["attention"]
+    results = app.read_pages(tmp_path, reads, ["DJ-2026-101", "SW-2026-008"], _runner("ok", seen), NOW)
+    assert len(results) == 2 * len(reads) and all(c.read_state(r)[0] == "" for r in results)
+    asked = [command[3:] for command in seen]
+    for pid in ("DJ-2026-101", "SW-2026-008"):
+        assert ["pm", "pending", "--project-id", pid] in asked and ["pm", "inbox", "list", "--project-id", pid] in asked
+    # 没有项目时照旧读一次，写明没读
+    seen.clear()
+    assert all(r.skipped for r in app.read_pages(tmp_path, reads, [], _runner("ok", seen), NOW)) and seen == []
+
+
+def test_ask_project_ids_station_then_asks_then_open_cards(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    _with_pending_card(db, "SW-2026-008")
+    board = base.pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    assert app.ask_project_ids(board, "DJ-2026-101") == ["DJ-2026-101", "SW-2026-008"]
+    assert app.ask_project_ids(board, "") == ["SW-2026-008", "DJ-2026-101"]  # 默认项目是空的也找得到
+    assert app.ask_project_ids(board, "SW-2026-008") == ["SW-2026-008", "DJ-2026-101"]  # 去重
+    assert app.ask_project_ids(board, "DJ-2026-101", limit=1) == ["DJ-2026-101"]
+    assert app.ask_project_ids(None, "") == []
+
+
+@pytest.mark.parametrize("station", ["DJ-2026-101", ""])
+def test_attention_page_reads_the_project_that_has_the_card(qapp: QApplication, tmp_path: Path, station: str) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    _with_pending_card(db, "SW-2026-008")
+    seen: list[list[str]] = []
+    window = gui_tests._window(qapp, root, db, read_runner=_runner("ok", seen))
+    window._refresh_decisions = lambda: None
+    window.options.station_project = station
+    window.sidebar.buttons["attention"].click()
+    _wait(qapp, window)
+    asked = [command[3:] for command in seen]
+    assert ["pm", "pending", "--project-id", "SW-2026-008"] in asked
+    assert ["pm", "inbox", "list", "--project-id", "DJ-2026-101"] in asked  # 有开着的卡的项目也读
+    line = window.read_pages["attention"].project_line.text()
+    assert "SW-2026-008" in line and "DJ-2026-101" in line
+    window.close()
+
+
+def test_decisions_page_reads_a_project_that_only_has_a_pending_card(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    _with_pending_card(db, "SW-2026-008")
+    window = gui_tests._window(qapp, root, db, read_runner=_runner("ok"))
+    asked: list[list[str]] = []
+    window.decisions.refresh = lambda project_ids, _missions: asked.append(list(project_ids))
+    window._refresh_decisions()
+    assert asked and "SW-2026-008" in asked[-1] and "DJ-2026-101" in asked[-1]
+    window.close()

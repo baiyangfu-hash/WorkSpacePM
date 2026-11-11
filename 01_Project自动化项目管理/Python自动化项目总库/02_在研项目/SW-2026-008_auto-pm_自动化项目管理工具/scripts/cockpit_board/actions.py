@@ -2,7 +2,8 @@
 
     probe_origin()     后台对 origin 跑 git ls-remote，3 秒超时；超时、网络不通、认证失败、地址错误、没有 origin 分别写明；不访问别的外网。
     probe_online()     同上，只给“在线与否”（非 0 退出码、超时都算 False）。
-    run_check()        跑 plc check / plc docs check / docs sync --dry-run，返回回执（命令 + 退出码）。
+    source_version()   身份条“源码”一格：本地 git rev-parse --short HEAD，3 秒超时，失败返回空串。
+    run_check()        跑 plc check / plc docs check / docs sync --dry-run（用启动看板的同一个 Python），返回回执（命令 + 退出码）。
     bc_next_id()       按 02_业务变更记录.md 里同年月用过的最大序号给下一个 BC 编号（每月从 000 起）。
     bc_preview()       按目标表头（11 栏）和用户填的表单生成整行，不写；没填好就拒绝。
     bc_append()        只往表末追加一行；写前读一遍、写后校验除最后一行外字节不变。
@@ -273,6 +274,21 @@ def probe_online(root: Path, runner: Callable[..., Any] = subprocess.run) -> boo
     return probe_origin(root, runner).online
 
 
+def source_version(root: Path, runner: Callable[..., Any] = subprocess.run) -> str:
+    """身份条“源码”一格：控制根当前提交的短号（本地 git，不联网）。超时、出错、退出码非零都返回空串，界面显示“—”。"""
+    try:
+        result = runner(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            cwd=str(root), capture_output=True, encoding="utf-8", timeout=PROBE_TIMEOUT, check=False,
+            env={**no_prompt_env(), "LC_ALL": "C", "LANGUAGE": "C"}, **quiet(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
 CHECKS = {
     "plc_check": ("plc check", ["plc", "check"]),
     "docs_check": ("plc docs check", ["plc", "docs", "check"]),
@@ -282,7 +298,7 @@ CHECKS = {
 
 def run_check(root: Path, worktree: Path, project_id: str, key: str, runner: Callable[..., Any] = subprocess.run) -> Receipt:
     label, args = CHECKS[key]
-    command = ["python", "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
+    command = [sys.executable, "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
     shown = " ".join(command)
     try:
         result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", timeout=CHECK_TIMEOUT, check=False, **quiet())

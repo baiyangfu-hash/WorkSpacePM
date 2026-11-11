@@ -100,7 +100,7 @@
 
 | 页 | 侧栏组 | 读什么 | 文件 |
 |---|---|---|---|
-| 要你出手 | 日常 | `pm pending --project-id <项目>`、`pm inbox list --project-id <项目>` | `widgets/attention.py` |
+| 要你出手 | 日常 | 对每个项目读 `pm pending --project-id <项目>`、`pm inbox list --project-id <项目>`（读哪些项目见下） | `widgets/attention.py` |
 | 任务 | 受管项目 | `pm missions --pid <项目>`、`pm orient <项目> --json` | `widgets/tasks.py` |
 | PR 与审计 | 驾驶舱 | 不起命令：用窗口已有的 GitHub 采集（`github_collector.py`） | `widgets/prs.py` |
 | 工作树与分支 | 驾驶舱 | `worktree list --json`、`worktree sweep --json --no-fetch`（只列不清） | `widgets/worktrees.py` |
@@ -108,7 +108,10 @@
 | 脊柱图 | 驾驶舱 | 不起命令：`flow/spine.json` | `widgets/spine.py` |
 | 命令与契约 | 驾驶舱 | 不起命令：`flow/commands_map.json` | `widgets/commands.py` |
 
-`<项目>` 现在取工程工位的默认项目（`--station-project`，默认第一个客户项目）；没有项目时那几条命令不读，写“没读：没有受管项目”。
+`<项目>` 取工程工位的默认项目（`--station-project`，默认第一个客户项目）；没有项目时那几条命令不读，写“没读：没有受管项目”。
+“要你出手”页例外（CHG-SCPT-2026-639）：读 `app.ask_project_ids` 给的一组项目，包括默认项目、账本里有等批准范围卡或等确认收件箱条目的项目、有开着的卡的项目，最多 12 个。“今天”页的“要你出手”也把这两样算进去：`pm_dashboard.read_pending_asks` 只读账本，口径同 `pm pending` 和 `pm inbox list` 里状态为 PROPOSED 的，有契约测试对照。“决定”页要读的项目也加上有这两样的项目。
+
+身份条“源码”“生效版本”两格：命令行没给 `--source-version`、`--effective-version` 时（bat 不传），启动时自己补。源码取 `actions.source_version()`，即本地 `git rev-parse --short HEAD`，3 秒超时；生效版本取 `00_Infrastructure/auto_pm/active_release.json` 的 `release_id`。取不到显示“—”。
 
 读取状态只有这几种画法（`widgets/common.read_state`）：
 
