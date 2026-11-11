@@ -236,6 +236,35 @@ if sys.platform == "win32":
         finally:
             _KERNEL32.CloseHandle(snapshot)
 
+    def _windows_command_lines() -> tuple[list[tuple[int, int, str]] | None, str]:
+        table = _windows_process_table()
+        if table is None:
+            return None, f"CreateToolhelp32Snapshot 失败（系统错误 {ctypes.get_last_error()}）"
+        rows: list[tuple[int, int, str]] = []
+        for pid, entry in table.items():
+            line = ""
+            handle = _KERNEL32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid) if pid else None
+            if handle:  # a process this user may not open (another account's, a protected one) keeps an empty line, as the system's own tools show it
+                try:
+                    line = _windows_command_line(handle) or ""
+                finally:
+                    _KERNEL32.CloseHandle(handle)
+            rows.append((pid, entry.parent_pid, line))
+        return (rows, "") if rows else (None, "进程快照是空的")
+
+
+def windows_command_lines() -> tuple[list[tuple[int, int, str]] | None, str]:
+    """(pid, parent pid, command line) of every process on a Windows host, read from the kernel's own process snapshot (D-234).
+
+    No child process is started, so the answer does not depend on PowerShell, on its module search or on which environment variables
+    the caller was given; it takes milliseconds.  ``(None, reason)`` when the snapshot cannot be taken or the host is not Windows.
+    """
+
+    if sys.platform == "win32":
+        return _windows_command_lines()
+    else:
+        return None, f"只在 Windows 上可用（本机是 {sys.platform}）"
+
 
 _PROC_ROOT = Path("/proc")
 _HIDEPID_OFF = frozenset({"0", "off"})

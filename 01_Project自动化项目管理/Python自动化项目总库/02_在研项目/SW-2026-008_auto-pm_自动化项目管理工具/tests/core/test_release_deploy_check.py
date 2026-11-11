@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,7 @@ class Repo:
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
     made = Repo(tmp_path)
     monkeypatch.setattr(rdc, "check_release_consistency", lambda _root: {"status": "ok", "failures": [], "warnings": []})
-    monkeypatch.setattr(rdc, "_list_processes", lambda: [(1, 0, "init")])  # other test workers are not a real deployment in flight
+    monkeypatch.setattr(rdc, "_list_processes", lambda: ([(1, 0, "init")], ""))  # other test workers are not a real deployment in flight
     return made
 
 
@@ -272,7 +273,7 @@ def test_status_reports_pointers_installed_releases_and_the_last_receipt(repo: R
 
 def test_a_running_test_or_cockpit_process_blocks_the_deploy(repo: Repo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows = [(1, 0, "init"), (4242, 1, "python -m pytest tests/core"), (4243, 1, "/usr/bin/python3 main.py gui")]
-    monkeypatch.setattr(rdc, "_list_processes", lambda: rows)
+    monkeypatch.setattr(rdc, "_list_processes", lambda: (rows, ""))
 
     report = _happy(repo, tmp_path)
 
@@ -288,17 +289,53 @@ def test_this_command_and_its_ancestors_are_not_busy_processes() -> None:
 
 
 def test_a_process_list_that_cannot_be_read_is_unverified_not_ok(repo: Repo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rdc, "_list_processes", lambda: None)
+    monkeypatch.setattr(rdc, "_list_processes", lambda: (None, "ps 超过 30 秒没返回"))
 
     report = _happy(repo, tmp_path)
 
-    assert not report.ok and _by_name(report)["没有测试或驾驶舱进程在跑"].status == rdc.UNVERIFIED
+    busy = _by_name(report)["没有测试或驾驶舱进程在跑"]
+    assert not report.ok and busy.status == rdc.UNVERIFIED
+    assert "ps 超过 30 秒没返回" in busy.detail  # D-234: the reason travels with the verdict
 
 
 def test_the_real_process_list_is_readable_here() -> None:
-    rows = rdc._list_processes()
+    rows, why = rdc._list_processes()
 
-    assert rows is not None and any(pid == os.getpid() for pid, _parent, _line in rows)
+    assert rows is not None, why
+    mine = [line for pid, _parent, line in rows if pid == os.getpid()]
+    assert len(mine) == 1 and mine[0].strip(), f"this process is not in the list with its command line: {mine!r}"
+    assert rdc._runs_python(mine[0]), mine[0]  # the line is good enough for the check that reads it
+
+
+def test_the_process_list_does_not_start_powershell_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-234: inside the gate's white-listed environment the PowerShell query took 20 to 27 of its 30 seconds; the list is read in-process now."""
+
+    def no_child(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the process list started a child process")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(rdc, "windows_command_lines", lambda: ([(7, 1, "python.exe -m pytest")], ""))
+    monkeypatch.setattr(subprocess, "run", no_child)
+
+    assert rdc._list_processes() == ([(7, 1, "python.exe -m pytest")], "")
+
+
+def test_a_ps_that_fails_says_why(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")  # ps is the non-Windows way; the answers below are scripted, no ps is started
+
+    def timed_out(*_a: object, **_k: object) -> object:
+        raise subprocess.TimeoutExpired("ps", 30)
+
+    monkeypatch.setattr(subprocess, "run", timed_out)
+    assert rdc._list_processes() == (None, "ps 超过 30 秒没返回")
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess(["ps"], 3, "", "ps: boom\n"))
+    rows, why = rdc._list_processes()
+    assert rows is None and "退出码 3" in why and "ps: boom" in why
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess(["ps"], 0, "junk\n", ""))
+    rows, why = rdc._list_processes()
+    assert rows is None and "没有一行进程" in why
 
 
 def test_a_shell_wrapper_that_merely_mentions_python_and_pytest_is_not_a_busy_process() -> None:

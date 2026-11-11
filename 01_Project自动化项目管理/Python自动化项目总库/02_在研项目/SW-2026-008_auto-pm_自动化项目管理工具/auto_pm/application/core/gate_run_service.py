@@ -21,8 +21,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -40,6 +42,21 @@ SUMMARY_FILE = "gate_summary.json"
 DEFAULT_TIMEOUT_SECONDS = 3 * 3600
 LOG_TAIL_BYTES = 64 * 1024
 MAX_SKIPPED = 40  # the deployment run had at most 15 skipped in one group
+
+# D-235: every test process notes the case it is in (``tests/tools/gate_progress.py``), so a group killed for overrunning can say where it
+# was.  The plugin is named on the command line; the directory travels in this variable, which the gate sets itself for each group.
+PROGRESS_PLUGIN = "tests.tools.gate_progress"
+PROGRESS_ENV = "GATE_RUN_PROGRESS_DIR"
+PROGRESS_SUFFIX = ".running"
+KILLED_MARK = "[gate run] killed after"
+RUNNING_MARK = "[gate run] running when killed:"
+NO_NOTE_MARK = "[gate run] no case was noted as running when killed"
+MAX_RUNNING_SHOWN = 16
+# D-235: when the gate lowers a group's workers it says so on the first line of the group's log.  The sentence travels to the runner in
+# this variable, which the runner takes out again before it starts the tests.
+NOTE_ENV = "GATE_RUN_NOTE"
+NOTE_MARK = "[gate run] note:"
+REFUSED = "REFUSED"
 
 # Variables a test child may inherit.  Everything else is dropped, so a new cockpit variable can never leak in by default.
 ENV_ALLOW = frozenset(
@@ -164,7 +181,7 @@ def group_argv(group: GateGroup, *, python: str, jobs: int) -> list[str]:
     argv = [python, "-B", "-m", "pytest", *group.targets]
     argv += [f"--ignore={path}" for path in group.ignore]
     argv += [f"--deselect={node}" for node in group.deselect]
-    argv += ["-p", "no:cacheprovider", "--no-cov", "-q"]
+    argv += ["-p", "no:cacheprovider", "-p", PROGRESS_PLUGIN, "--no-cov", "-q"]
     if group.parallel and jobs > 1:
         argv += ["-n", str(jobs), "--dist", "loadfile"]
     return argv
@@ -235,7 +252,7 @@ def judge_group(group: GateGroup, exit_code: int | None, log: Path) -> tuple[str
         hint = (
             "（4/5：用法错误或一个用例都没收集到，通常是目录不对）" if exit_code in (4, 5) else ""
         )
-        return "FAIL", f"退出码 {exit_code}{hint}"
+        return "FAIL", f"退出码 {exit_code}{hint}{_killed_note(log) if exit_code == 124 else ''}"
     counts = pytest_counts(log)
     if counts is None and _says_no_tests(log):
         return "FAIL", "一个用例都没跑（no tests ran）"
@@ -259,6 +276,55 @@ def judge_group(group: GateGroup, exit_code: int | None, log: Path) -> tuple[str
     return "PASS", ""
 
 
+def running_cases(progress_dir: Path, now: float | None = None) -> list[str]:
+    """One line per test process that was inside a case: ``<node id> (<worker>, running for <n> s)``, longest first (D-235)."""
+
+    now = time.time() if now is None else now
+    found: list[tuple[float, str]] = []
+    try:
+        notes = sorted(progress_dir.glob(f"*{PROGRESS_SUFFIX}"))
+    except OSError:
+        return []
+    for note in notes:
+        try:
+            text = note.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: a damaged node id is still shown; nothing is judged from it
+        except OSError:
+            continue
+        started, _, node = text.partition("\t")
+        if not node.strip():
+            continue  # between two cases
+        try:
+            seconds = max(now - float(started), 0.0)
+        except ValueError:
+            seconds = 0.0
+        worker = note.name[: -len(PROGRESS_SUFFIX)].rsplit("-", 1)[0]
+        found.append((seconds, f"{node.strip()} ({worker}, running for {seconds:.0f} s)"))
+    return [line for _seconds, line in sorted(found, key=lambda pair: (-pair[0], pair[1]))]
+
+
+def _killed_note(log: Path) -> str:
+    """What the log says the group was doing when the gate killed it, for the verdict's reason (D-235); empty when it says nothing."""
+
+    try:
+        with log.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(handle.tell() - LOG_TAIL_BYTES, 0))
+            tail = handle.read()
+    except OSError:
+        return ""
+    text = tail.decode("utf-8", errors="replace")  # lenient-decode: only quoted into the reason; the exit code already decided the verdict
+    lines = text.splitlines()
+    running = [line[len(RUNNING_MARK) :].strip() for line in lines if line.startswith(RUNNING_MARK)]
+    if running:
+        more = f" 等 {len(running)} 条" if len(running) > 3 else ""
+        return "（超时被杀；被杀时在跑：" + "；".join(running[:3]) + more + "）"
+    if any(line.startswith(NO_NOTE_MARK) for line in lines):
+        return "（超时被杀；被杀时没有用例登记为在跑，可能卡在收集、夹具收尾或进程退出）"
+    if any(line.startswith(KILLED_MARK) for line in lines):
+        return "（超时被杀）"
+    return ""
+
+
 def sha256_file(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -274,14 +340,22 @@ Runner = Callable[[Sequence[str], Path, Mapping[str, str], Path, int], int]
 def default_runner(
     argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int
 ) -> int:
-    """Run one group with its output in ``log``; 124 on timeout (what ``timeout`` returns)."""
+    """Run one group with its output in ``log``; 124 on timeout (what ``timeout`` returns).
 
+    On a timeout the log also gets the cases that were running (D-235), read from the directory in ``env[PROGRESS_ENV]`` before anything
+    else is done, so the record of a killed group says where it was stuck.
+    """
+
+    child_env = {key: value for key, value in env.items() if key != NOTE_ENV}
     with log.open("wb") as handle:
+        if env.get(NOTE_ENV):
+            handle.write(f"{NOTE_MARK} {env[NOTE_ENV]}\n".encode())
+            handle.flush()
         try:
             return subprocess.run(  # noqa: S603 - argv is built from the group table
                 list(argv),
                 cwd=cwd,
-                env=dict(env),
+                env=child_env,
                 stdin=subprocess.DEVNULL,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
@@ -289,7 +363,15 @@ def default_runner(
                 check=False,
             ).returncode
         except subprocess.TimeoutExpired:
-            handle.write(f"\n[gate run] killed after {timeout} s\n".encode())
+            folder = env.get(PROGRESS_ENV, "")
+            running = running_cases(Path(folder)) if folder else []
+            lines = [f"{KILLED_MARK} {timeout} s"]
+            lines += [f"{RUNNING_MARK} {line}" for line in running[:MAX_RUNNING_SHOWN]]
+            if len(running) > MAX_RUNNING_SHOWN:
+                lines.append(f"[gate run] ... and {len(running) - MAX_RUNNING_SHOWN} more")
+            if not running:
+                lines.append(f"{NO_NOTE_MARK} ({'no progress directory' if not folder else folder})")
+            handle.write(("\n" + "\n".join(lines) + "\n").encode("utf-8"))
             return 124
 
 
@@ -306,6 +388,11 @@ class GroupResult:
     exit_file: int | None = None
     started: str = ""
     finished: str = ""
+    # D-235: what the group asked for and what it got.  ``None`` in a record written before these fields existed.
+    jobs_requested: int | None = None
+    jobs_used: int | None = None
+    available_memory_bytes: int | None = None
+    timeout_seconds: int | None = None
 
 
 @dataclass
@@ -462,6 +549,44 @@ def jobs_for_memory(requested: int, available_bytes: int | None) -> int:
     return max(1, min(requested, fits))
 
 
+def memory_for_jobs(jobs: int) -> int:
+    """Bytes of available physical memory that carry ``jobs`` workers: the reserve plus one share for each."""
+
+    return int((JOB_RESERVE_GIB + JOB_MEMORY_GIB * jobs) * 2**30)
+
+
+def timeout_for_jobs(timeout_seconds: int, requested: int, used: int) -> int:
+    """The group's time limit stretched by the factor its workers were lowered by (D-235); unchanged when nothing was lowered.
+
+    A parallel group given a third of its workers needs about three times as long.  Keeping the full-speed limit made the gate run a
+    group it could not finish for three hours and then call it a timeout (local round on 0a9d2a7, core at one worker instead of three).
+    """
+
+    if used <= 0 or used >= requested:
+        return timeout_seconds
+    return -(-timeout_seconds * requested // used)
+
+
+def _gib(value: int | None) -> str:
+    return "读不出" if value is None else f"{value / 2**30:.1f} GiB"
+
+
+def jobs_note(result: GroupResult) -> str:
+    """One sentence for a group whose workers were lowered; empty for a group that got what it asked for or a record without the fields."""
+
+    if result.jobs_requested is None or result.jobs_used is None or result.jobs_used >= result.jobs_requested:
+        return ""
+    if result.verdict == REFUSED or result.timeout_seconds is None:
+        return (
+            f"可用内存不足，没有开跑：请求 --jobs {result.jobs_requested}，需要可用物理内存至少 {_gib(memory_for_jobs(result.jobs_requested))}，"
+            f"当时只有 {_gib(result.available_memory_bytes)}（只够 {result.jobs_used} 路）"
+        )
+    return (
+        f"可用内存不足，--jobs 从 {result.jobs_requested} 降到 {result.jobs_used}（当时可用物理内存 {_gib(result.available_memory_bytes)}），"
+        f"本组超时放大到 {result.timeout_seconds // 60} 分钟"
+    )
+
+
 def _available_memory() -> int | None:
     snapshot = memory_preflight.read_commit()
     return None if snapshot is None else snapshot.available
@@ -475,6 +600,7 @@ class GateRunService:
         python: str = sys.executable,
         preflight: Callable[[str, Path], tuple[list[str], list[str]]] | None = None,
         available_memory: Callable[[], int | None] | None = None,
+        announce: Callable[[str], None] | None = None,
     ) -> None:
         self._runner = runner
         self._python = python
@@ -482,6 +608,7 @@ class GateRunService:
         self.preflight_warnings: list[str] = []
         self._available_memory = available_memory or _available_memory  # looked up now, so a test can replace the module function
         self.job_notes: list[str] = []
+        self.announce = announce  # told at once when a group's workers are lowered; without it the note waits in ``preflight_warnings``
 
     def select(self, only: Sequence[str] = ()) -> tuple[GateGroup, ...]:
         known = {g.name: g for g in GROUPS}
@@ -512,7 +639,15 @@ class GateRunService:
         only: Sequence[str] = (),
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         base_env: Mapping[str, str] | None = None,
+        require_full_jobs: bool = False,
     ) -> GateSummary:
+        """Run the selected groups in order.
+
+        A parallel group gets as many workers as the available physical memory carries (D-207).  When that is fewer than ``jobs`` the
+        group's time limit grows by the same factor and the record says so (D-235); with ``require_full_jobs`` the group is not started
+        at all and the round stops there, which is what a round that is to count as release evidence asks for.
+        """
+
         worktree = worktree.resolve()
         if not (worktree / ".git").exists():
             raise GateRunError(f"{worktree} 不是 Git 工作树")
@@ -536,15 +671,30 @@ class GateRunService:
             groups_run=[g.name for g in selected],
         )
         for group in selected:
-            group_jobs = jobs_for_memory(jobs, self._available_memory()) if group.parallel else jobs
-            if group_jobs < jobs:
-                note = f"组 {group.name}：可用内存不足，--jobs 从 {jobs} 降到 {group_jobs}"
-                self.job_notes.append(note)
-                self.preflight_warnings.append(note)  # the CLI prints this list in its ``finally``
+            available = self._available_memory() if group.parallel else None
+            group_jobs = jobs_for_memory(jobs, available) if group.parallel else jobs
             argv = group_argv(group, python=self._python, jobs=group_jobs)
-            result = GroupResult(group.name, argv, str(project), started=_now())
+            result = GroupResult(
+                group.name, argv, str(project), started=_now(),
+                jobs_requested=jobs, jobs_used=group_jobs, available_memory_bytes=available,
+            )  # fmt: skip
+            if group_jobs < jobs and require_full_jobs:
+                result.verdict, result.finished = REFUSED, result.started
+                result.why = jobs_note(result)
+                self._say(f"组 {group.name}：{result.why}")
+                summary.results[group.name] = result
+                summary.reasons.append(f"组 {group.name} 没有开跑，后面的组也没有跑（--require-full-jobs）：{result.why}")
+                self._write(out_dir, summary)
+                break
+            result.timeout_seconds = timeout_for_jobs(timeout_seconds, jobs, group_jobs)
+            note = jobs_note(result)
+            if note:
+                self._say(f"组 {group.name}：{note}")
             log = out_dir / f"{group.name}.txt"
-            result.exit = self._runner(argv, project, env, log, timeout_seconds)
+            progress = out_dir / f"{group.name}{PROGRESS_SUFFIX}"
+            shutil.rmtree(progress, ignore_errors=True)  # notes of an earlier round in the same directory are not this round's
+            group_env = {**env, PROGRESS_ENV: str(progress), **({NOTE_ENV: note} if note else {})}
+            result.exit = self._runner(argv, project, group_env, log, result.timeout_seconds)
             result.finished = _now()
             (out_dir / f"{group.name}.exit").write_text(f"{result.exit}\n", encoding="utf-8")
             result.exit_file = result.exit
@@ -565,6 +715,13 @@ class GateRunService:
         self._finalize(summary)
         self._write(out_dir, summary)
         return summary
+
+    def _say(self, note: str) -> None:
+        self.job_notes.append(note)
+        if self.announce is not None:
+            self.announce(note)
+        else:
+            self.preflight_warnings.append(note)  # the CLI prints this list in its ``finally``
 
     def judge_dir(
         self, out_dir: Path, *, expect_sha256: str = "", worktree: Path | None = None
@@ -609,10 +766,16 @@ class GateRunService:
                 )
         for name, entry in dict(data.get("results", {})).items():
             result = GroupResult(
-                name, list(entry.get("argv", [])), str(entry.get("cwd", "")), exit=entry.get("exit")
-            )
+                name, list(entry.get("argv", [])), str(entry.get("cwd", "")), exit=entry.get("exit"),
+                jobs_requested=_int_or_none(entry.get("jobs_requested")), jobs_used=_int_or_none(entry.get("jobs_used")),
+                available_memory_bytes=_int_or_none(entry.get("available_memory_bytes")),
+                timeout_seconds=_int_or_none(entry.get("timeout_seconds")),
+            )  # fmt: skip
             if name not in groups:
                 result.verdict, result.why = "FAIL", "记录里的组不在官方清单里"
+            elif entry.get("verdict") == REFUSED:
+                result.verdict = REFUSED  # never started: there is no log and no exit file to judge, and it is not a pass
+                result.why = jobs_note(result) or "没有开跑"
             else:
                 self._judge(result, groups[name], out_dir / f"{name}.txt")
                 self._cross_check(result, out_dir, entry)
@@ -644,6 +807,9 @@ class GateRunService:
     @staticmethod
     def _judge(result: GroupResult, group: GateGroup, log: Path) -> None:
         result.verdict, result.why = judge_group(group, result.exit, log)
+        note = jobs_note(result)
+        if note:  # a lowered group says so whatever its verdict: a timeout then names its cause, a pass names its handicap
+            result.why = f"{result.why}；{note}" if result.why else note
         result.counts = pytest_counts(log)
         result.log_sha256 = sha256_file(log)
 
@@ -681,6 +847,10 @@ class GateRunService:
         tmp = out_dir / f"{SUMMARY_FILE}.tmp"
         tmp.write_text(text, encoding="utf-8", newline="\n")
         os.replace(tmp, out_dir / SUMMARY_FILE)
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if type(value) is int else None
 
 
 def _now() -> str:

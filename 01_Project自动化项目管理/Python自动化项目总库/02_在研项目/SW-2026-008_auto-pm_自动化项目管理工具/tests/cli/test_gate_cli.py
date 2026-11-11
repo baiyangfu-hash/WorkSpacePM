@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from auto_pm.ui.cli.__main__ import cli
 
@@ -81,3 +83,75 @@ def test_d168_gate_run_and_precheck_arm_the_memory_gate_before_the_heavy_work(mo
     CliRunner().invoke(cli, ["gate", "precheck", "--worktree", str(tmp_path)])
 
     assert order == ["arm:long-gate", "run", "arm:full-tests", "precheck"]
+
+
+
+def _gate_run_with_low_memory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *extra: str) -> tuple[Result, dict[str, int]]:
+    """``gate run --jobs 3`` over a stand-in tree on a machine whose memory carries one worker; the runner records each group's time limit."""
+
+    from auto_pm.application.core import gate_run_service as service_module
+    from auto_pm.ui.cli import gate as gate_module
+
+    timeouts: dict[str, int] = {}
+
+    def runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int) -> int:
+        group = next(g for g in service_module.GROUPS if g.name == log.stem)
+        timeouts[log.stem] = timeout
+        log.write_text(
+            f"{group.min_cases + 5} passed{f', {group.deselected} deselected' if group.deselected else ''} in 4.20s\n", encoding="utf-8"
+        )
+        return 0
+
+    def service(**kwargs: Any) -> Any:
+        return service_module.GateRunService(
+            runner=runner, available_memory=lambda: 5 * 2**30, preflight=lambda _python, _worktree: ([], []), **kwargs
+        )
+
+    clean = service_module.TreeState(commit="c" * 40, dirty=False, ignored_code=())
+    monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": None)
+    monkeypatch.setattr(gate_module, "arm_for_heavy_job", lambda _label: None)
+    monkeypatch.setattr(gate_module, "GateRunService", service)
+    monkeypatch.setattr(service_module, "tree_state", lambda _worktree, _project: clean)
+    monkeypatch.setattr(service_module, "project_dir_in", lambda worktree: worktree)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "tests").mkdir()
+    result = CliRunner().invoke(cli, ["gate", "run", "--worktree", str(tmp_path), "--out", str(tmp_path / "out"), "--jobs", "3", *extra])
+    return result, timeouts
+
+
+def test_d235_gate_run_says_at_once_that_a_group_was_lowered_and_how_long_it_may_now_take(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from auto_pm.application.core.gate_run_service import GROUPS
+
+    result, timeouts = _gate_run_with_low_memory(monkeypatch, tmp_path)
+
+    parallel = [g.name for g in GROUPS if g.parallel]
+    assert result.exit_code == 0, result.output
+    assert {timeouts[name] for name in parallel} == {540 * 60}  # three workers asked, one given: three times the 180 minutes
+    assert {timeouts[name] for name in timeouts if name not in parallel} == {180 * 60}
+    for name in parallel:
+        assert f"⚠ 组 {name}：可用内存不足，--jobs 从 3 降到 1（当时可用物理内存 5.0 GiB），本组超时放大到 540 分钟" in result.output
+    record = json.loads((tmp_path / "out" / "gate_summary.json").read_text(encoding="utf-8"))
+    assert record["results"][parallel[0]]["timeout_seconds"] == 540 * 60
+
+
+def test_d235_gate_run_with_require_full_jobs_stops_with_exit_one_and_says_what_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exit 1 (a round that is not a pass), not 2 (could not start): earlier serial groups may already have run."""
+
+    from auto_pm.application.core.gate_run_service import GROUPS
+
+    result, timeouts = _gate_run_with_low_memory(monkeypatch, tmp_path, "--require-full-jobs")
+
+    names = [g.name for g in GROUPS]
+    refused = next(g.name for g in GROUPS if g.parallel)
+    assert result.exit_code == 1, result.output
+    assert list(timeouts) == names[: names.index(refused)]
+    assert f"REFUSED {refused}" in result.output
+    assert "请求 --jobs 3，需要可用物理内存至少 9.0 GiB，当时只有 5.0 GiB" in result.output
+    assert "总判定 FAIL" in result.output and "--require-full-jobs" in result.output
+    record = json.loads((tmp_path / "out" / "gate_summary.json").read_text(encoding="utf-8"))
+    assert record["verdict"] == "FAIL" and record["results"][refused]["verdict"] == "REFUSED"
+    assert set(record["results"]) == set(names[: names.index(refused) + 1])  # later groups are absent, not shown as anything
