@@ -1,0 +1,17 @@
+{
+  "schema_version": "pm-missions.v1",
+  "subject_project_id": "SW-2026-008",
+  "open_count": 1,
+  "active": [
+    {
+      "mission_id": "MIS-SW-2026-008-0001",
+      "title": "合成样本：GUI 骨架",
+      "state": "ACTIVE",
+      "root_work_id": "WRK-1",
+      "updated_at": "2026-11-11T13:00:00+00:00"
+    }
+  ],
+  "waiting": [],
+  "parked": [],
+  "closed": []
+}
