@@ -67,6 +67,79 @@ jobs:
           path: ${{ runner.temp }}/gate-out/${{ matrix.group }}
           if-no-files-found: warn
 
+  # CHG-SCPT-2026-626: the Siemens language service plugin, really run (V09~V11 and friends).
+  # The plugin is downloaded at run time from the official VS Code Marketplace at a pinned version, its command line is checked against a
+  # pinned SHA256 before use, and it lives only in $RUNNER_TEMP of this one job: never committed, never cached, never uploaded, gone with
+  # the runner.  Only this job sets AUTO_PM_SIEMENS_LSP; the eleven groups above keep the "no plugin" default of tests/conftest.py.
+  plugin:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      LSP_PUBLISHER: dynamicengineering
+      LSP_EXTENSION: dynamic-siemens-language-support
+      LSP_VERSION: "2.17.2"
+      LSP_EXE_SHA256: "690f0c692350956416d6b2768f48a1daa119dd6c5b55c6b25bb6fa19f4951985"  # the user's installed 2.17.2, read on the laptop 11-10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Long paths
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip install --no-deps -r 00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pip check
+
+      - name: Download the plugin from the Marketplace and check its hash
+        run: |
+          set -euo pipefail
+          base="https://marketplace.visualstudio.com/_apis/public/gallery/publishers/$LSP_PUBLISHER/vsextensions/$LSP_EXTENSION/$LSP_VERSION/vspackage"
+          dest="$RUNNER_TEMP/siemens-lsp"
+          mkdir -p "$dest"
+          # one universal package (its .vsixmanifest has no TargetPlatform), so no targetPlatform query
+          curl -fsSL --compressed --retry 3 -o "$dest/plugin.vsix" "$base"
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$dest/plugin.vsix" "$dest/unpacked"
+          exe="$dest/unpacked/extension/out/go/windows-amd64/siemens-lsp.exe"
+          test -f "$exe" || { echo "siemens-lsp.exe not found in the package"; exit 1; }
+          # hashlib: Git-Bash's own hash tool prefixes the digest with a backslash when the path has backslashes
+          actual=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c "import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())" "$exe" | tr -d '\r')
+          echo "siemens-lsp.exe sha256: $actual"
+          if [ "$actual" != "$LSP_EXE_SHA256" ]; then
+            echo "::error::siemens-lsp.exe hash $actual is not the pinned $LSP_EXE_SHA256; the plugin is not used"
+            exit 1
+          fi
+          echo "AUTO_PM_SIEMENS_LSP=$(cygpath -w "$exe")" >> "$GITHUB_ENV"
+
+      - name: Plugin tests (a skip counts as a failure)
+        working-directory: ${{ env.PROJ }}
+        env:
+          AUTO_PM_REQUIRE_SIEMENS_LSP: "1"
+        run: |
+          go version || echo "no Go toolchain on PATH"  # the plugin's test runner builds Go; record which one the runner had
+          "$RUNNER_TEMP/venv/Scripts/python.exe" -m pytest -q -vv -p no:cacheprovider --no-cov -rs \
+            --basetemp "$RUNNER_TEMP/plugin-tests" tests/e2e/test_pmf_template_plc.py -k "plugin"
+
+      - name: Plugin test raw output when it failed (diagnosis only, nothing is kept)
+        if: failure()
+        run: |
+          # the cockpit keeps only the first panic line; print the plugin's whole output for the V09 project
+          for dir in "$RUNNER_TEMP"/plugin-tests/test_v09_*/*/02_PLC程序/PLC_ST; do
+            [ -d "$dir" ] || continue
+            echo "== $dir"
+            (cd "$dir" && "$(cygpath -u "$AUTO_PM_SIEMENS_LSP")" test . 2>&1 | tail -n 200) || true
+          done
+
   verdict:
     needs: group
     if: always()

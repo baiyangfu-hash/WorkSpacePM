@@ -97,7 +97,14 @@ def plan_command(worktree: Path, jobs: int, only: str) -> None:
 )
 @click.option("--jobs", default=8, show_default=True, help="并行组的 xdist 进程数")
 @click.option("--only", default="", help="只跑这些组（逗号分隔）；少于全部组时总判定最多是 PARTIAL")
-@click.option("--timeout-minutes", default=180, show_default=True, help="每组的超时")
+@click.option(
+    "--timeout-minutes", default=180, show_default=True, help="每组的超时；并行组因可用内存不足被降低并发时，该组超时按降低的倍数放大并当场提示"
+)
+@click.option(
+    "--require-full-jobs",
+    is_flag=True,
+    help="可用内存带不动 --jobs 时不降并发：该组不开跑、整轮停止，总判定不是 PASS，并写明需要多少、现在多少（要当切换依据的一轮用它）",
+)
 @click.option(
     "--candidate-release",
     default="",
@@ -106,15 +113,17 @@ def plan_command(worktree: Path, jobs: int, only: str) -> None:
 )
 @click.pass_context
 def run_command(
-    ctx: click.Context, worktree: Path, out_dir: Path, jobs: int, only: str, timeout_minutes: int, candidate_release: str
-) -> None:
+    ctx: click.Context, worktree: Path, out_dir: Path, jobs: int, only: str, timeout_minutes: int, require_full_jobs: bool,
+    candidate_release: str,
+) -> None:  # fmt: skip
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
     require_runtime_identity_for_workspace(ctx, candidate_release)
     arm_for_heavy_job("long-gate")  # D-168: the full regression (eleven pytest groups, hours) is the heavy job the memory gate protects; never raises
     service = GateRunService()
+    service.announce = lambda note: click.echo(f"⚠ {note}", err=True)  # D-235: said when it happens, not after the round (set after construction, so a stand-in service class needs no constructor arguments)
     try:
         summary = service.run(
-            worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60
+            worktree, out_dir, jobs=jobs, only=_only(only), timeout_seconds=timeout_minutes * 60, require_full_jobs=require_full_jobs
         )
     except GateRunError as error:
         click.echo(f"无法开始: {error}", err=True)

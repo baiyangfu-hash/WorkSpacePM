@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from auto_pm.application.core.release_consistency import check_release_consistency
+from auto_pm.infrastructure.process_probe import windows_command_lines
 
 PROJECT_DIR = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
 CONTAINER = Path("00_Infrastructure") / "auto_pm"
@@ -229,27 +230,36 @@ def _check_audit(path: Path | None, commit: str, gate_path: Path | None, report:
         report.add(name, PASS, f"{line['run']} {path.name}")
 
 
-def _list_processes() -> list[tuple[int, int, str]] | None:
-    """(pid, parent pid, command line) of every running process, from the operating system's own tools; ``None`` when it cannot be listed."""
+def _list_processes() -> tuple[list[tuple[int, int, str]] | None, str]:
+    """(pid, parent pid, command line) of every running process, and why not when it cannot be listed: ``(None, reason)``.
 
+    Windows reads the kernel's process snapshot in-process (D-234: the PowerShell query it replaces took 20 to 27 seconds of its 30
+    inside the gate's white-listed environment); elsewhere ``ps`` is asked.
+    """
+
+    if sys.platform == "win32":
+        return windows_command_lines()
+    else:
+        return _ps_processes()
+
+
+def _ps_processes() -> tuple[list[tuple[int, int, str]] | None, str]:
+    command = ["ps", "-eo", "pid=,ppid=,args="]
     try:
-        if sys.platform == "win32":
-            script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
-            command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
-        else:
-            command = ["ps", "-eo", "pid=,ppid=,args="]
         done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",  # lenient-decode: 进程命令行只用来匹配关键字
                               timeout=PROCESS_LIST_TIMEOUT_SECONDS, check=False)  # noqa: S603 - fixed argv, no shell
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except subprocess.TimeoutExpired:
+        return None, f"ps 超过 {PROCESS_LIST_TIMEOUT_SECONDS} 秒没返回"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"ps 起不来：{type(exc).__name__}: {exc}"
     if done.returncode != 0:
-        return None
+        return None, f"ps 退出码 {done.returncode}：{(done.stderr or '').strip()[:200] or '没有错误输出'}"
     rows: list[tuple[int, int, str]] = []
     for raw in done.stdout.splitlines():
-        parts = raw.strip().split("|", 2) if sys.platform == "win32" else raw.strip().split(None, 2)
+        parts = raw.strip().split(None, 2)
         if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
             rows.append((int(parts[0]), int(parts[1]), parts[2] if len(parts) > 2 else ""))
-    return rows or None
+    return (rows, "") if rows else (None, f"ps 的输出里没有一行进程（共 {len(done.stdout.splitlines())} 行）")
 
 
 _PYTHON_EXE = re.compile(r"python(\d+(\.\d+)*)?w?(\.exe)?", re.IGNORECASE)
@@ -284,9 +294,9 @@ def _check_busy(root: Path, report: Preflight) -> None:
     if (root / HEAVY_GATES_MARKER).exists():
         report.add("没有重型门禁在跑", FAIL, f"{HEAVY_GATES_MARKER.as_posix()} 存在")
         return
-    rows = _list_processes()
+    rows, why = _list_processes()
     if rows is None:
-        report.add("没有测试或驾驶舱进程在跑", UNVERIFIED, "系统进程列表读不出来，没法确认")
+        report.add("没有测试或驾驶舱进程在跑", UNVERIFIED, f"系统进程列表读不出来，没法确认（{why}）")
         return
     busy = _busy_processes(rows)
     report.add("没有测试或驾驶舱进程在跑", FAIL if busy else PASS, f"在跑的进程：{','.join(busy[:5])}" if busy else "无")
