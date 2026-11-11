@@ -252,10 +252,13 @@ def test_window_and_screenshot_never_write_the_workspace(qapp: QApplication, tmp
     assert gui.main([*argv, "--screenshot", str(shots / "看板.png")]) == 0
     assert _files(root) == before  # 账本哈希、修改时间都不变，旁边也不多出 -shm / -wal
     assert sorted(path.name for path in shots.iterdir()) == [
+        "看板_PR与审计.png",  # 骨架 D 加的三页不起命令，可以离屏截（读命令的四页要真账本，不截）
         "看板_全部项目.png",
+        "看板_命令与契约.png",
         "看板_工具.png",
         "看板_工程工位.png",
         "看板_流程图.png",
+        "看板_脊柱图.png",
         "看板_问题.png",
         "看板_项目经理.png",
     ]

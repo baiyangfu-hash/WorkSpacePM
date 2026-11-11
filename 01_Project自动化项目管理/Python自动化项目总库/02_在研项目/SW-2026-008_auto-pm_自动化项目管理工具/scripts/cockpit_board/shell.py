@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -39,11 +41,44 @@ PAGES: tuple[PageSpec, ...] = (
     PageSpec("home", "今天", "日常", "今天要看的：受阻、有风险、要你决定的"),
     PageSpec("issues", "问题", "日常", "所有项目的受阻、风险、提醒，一张表"),
     PageSpec("decisions", "决定", "日常", "待你批准、验收的卡；每个按钮背后是同一条 main.py 命令"),
+    PageSpec("attention", "要你出手", "日常", "等你本人拍板的范围卡和收件箱条目，只读"),
     PageSpec("projects", "全部项目", "受管项目", "受管的全部项目"),
     PageSpec("project", "项目详情", "受管项目", nav=False),
+    PageSpec("tasks", "任务", "受管项目", "一个项目的四栏卡和进门定位，只读"),
     PageSpec("flow", "流程图", "驾驶舱", "看一张卡在状态流程里走到了哪一步"),
     PageSpec("tools", "工具", "驾驶舱", "变更单、决策、变量表的只读查询和预览"),
+    PageSpec("prs", "PR 与审计", "驾驶舱", "开着的 PR 和审计结论，读窗口已有的 GitHub 采集"),
+    PageSpec("worktrees", "工作树与分支", "驾驶舱", "每个工位的分支和改动，可清理的只列出不动"),
+    PageSpec("release", "发版", "驾驶舱", "长任务（门禁等）在跑什么、跑完没有，只读"),
+    PageSpec("spine", "脊柱图", "驾驶舱", "一张卡从进门到收口的十步"),
+    PageSpec("commands", "命令与契约", "驾驶舱", "每条命令界面能不能碰、谁能按"),
 )
+
+# 骨架页读哪些命令：真源是 flow/pages.json（契约测试对过：只读 read 类命令、不带写开关、读法已登记）。
+PAGES_JSON = Path(__file__).resolve().parent / "flow" / "pages.json"
+PID = "<PID>"  # pages.json 参数里的占位：换成要读的项目号
+
+
+@dataclass(frozen=True)
+class PageRead:
+    command: str  # 如 "pm missions"
+    args: tuple[str, ...]  # 可能含 PID 占位
+    reader: str  # readers.READERS 的键
+
+    @property
+    def needs_project(self) -> bool:
+        return PID in self.args
+
+    def argv(self, project_id: str) -> list[str]:
+        """拼成交给 main.py 的参数；命令名按空格拆开（如 pm inbox list）。"""
+        return [*self.command.split(), *(project_id if word == PID else word for word in self.args)]
+
+
+def page_reads(path: Path = PAGES_JSON) -> dict[str, tuple[PageRead, ...]]:
+    """页键 → 这一页要读的命令。文件读不出直接报错：它是随源码走的契约文件，坏了是代码问题，不是数据问题。"""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {page["key"]: tuple(PageRead(r["command"], tuple(r["args"]), r["reader"]) for r in page["reads"])
+            for page in data["pages"]}
 
 
 def spec(key: str) -> PageSpec:

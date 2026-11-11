@@ -27,7 +27,10 @@
 | `policy.py` | 按钮白名单、永不加的词、禁用词 | **加按钮先改这里**，再改页面；永远不加：合并、删除、切换发布、代签、绕过钩子、启动 agent |
 | `viewmodel.py` | 纯判定：把账本和文件夹读出的 `pm_dashboard.Board` 变成各页要显示的数据 | 无界面代码，可以直接单测 |
 | `actions.py` | **整个包里唯一允许起子进程、写文件的地方** | 新动作加在这里，回执（命令 + 退出码）统一用 `Receipt` |
-| `widgets/` | 各页的控件：`decisions` 决定页、`home` 今天、`issues` 问题、`projects` 全部项目、`project_page` 项目页六页签、`station` 工程工位、`delivery` GitHub 块、`common` 小零件 | 只画，不判定；长文字行用 `common.fill`，行里不要再放弹簧 |
+| `widgets/` | 各页的控件：`decisions` 决定页、`home` 今天、`issues` 问题、`projects` 全部项目、`project_page` 项目页六页签、`station` 工程工位、`delivery` GitHub 块、`common` 小零件；骨架 D 的 7 个新页见第 7 节 | 只画，不判定；长文字行用 `common.fill`，行里不要再放弹簧 |
+| `shell.py` | 侧栏三组、页面注册表 `PAGES`、路由、范围标记；`page_reads()` 读 `flow/pages.json` | 加一页先在这里登记一行 |
+| `readers.py` / `snapshot.py` | 只读命令输出的纯解析 / “上次读取”快照的读取和新鲜度 | 纯函数，不起子进程、不写文件 |
+| `flow/` | `commands_map.json` 命令分类、`pages.json` 每页读哪条命令、`spine.json` 脊柱十步、`graphs.json` 流程图 | 改了要过 `tests/core/test_cockpit_board_contracts.py` |
 | `app.py` | 主窗口、后台线程、两个开关常量 | 见下 |
 | `../pm_dashboard.py` | 只读账本和项目文件夹（先拷到临时目录再 `mode=ro` 读） | 账本只读，绝不写 |
 | `../github_collector.py` | 只 GET 的 GitHub 采集（PR、门禁、安全签字、审计） | 读不到就显示“未知”，不显示绿 |
@@ -88,3 +91,32 @@
 - 改完必须：跑上面“测试”一行、离屏截图自己看一遍（改布局的话）、`ruff check`。
 - 新增按钮三步走：`policy.py` 加白名单 → `actions.py` 加动作（或调现成命令）→ 页面里画按钮；缺哪步测试会红。
 - 账本、WBS、台账只由账本主机上的主执行写；界面读账本永远只读。
+
+## 7. 骨架页（CHG-SCPT-2026-628 骨架 D）
+
+7 个新页都只读，页面上没有按钮（侧栏按钮除外）。读哪条命令以 `flow/pages.json` 为准，打开那页或点“重新读取”时
+在后台线程读（`app.read_page`），读到且读得懂就存一份“上次读取”快照到 `<控制根>/.auto-pm/cache/cockpit_board/`；
+没读到时亮快照并写明是几分钟前的。每条命令一块：读取状态（三态标签）→ 要点 → 原文。
+
+| 页 | 侧栏组 | 读什么 | 文件 |
+|---|---|---|---|
+| 要你出手 | 日常 | `pm pending --project-id <项目>`、`pm inbox list --project-id <项目>` | `widgets/attention.py` |
+| 任务 | 受管项目 | `pm missions --pid <项目>`、`pm orient <项目> --json` | `widgets/tasks.py` |
+| PR 与审计 | 驾驶舱 | 不起命令：用窗口已有的 GitHub 采集（`github_collector.py`） | `widgets/prs.py` |
+| 工作树与分支 | 驾驶舱 | `worktree list --json`、`worktree sweep --json --no-fetch`（只列不清） | `widgets/worktrees.py` |
+| 发版 | 驾驶舱 | `long-run status` | `widgets/release.py` |
+| 脊柱图 | 驾驶舱 | 不起命令：`flow/spine.json` | `widgets/spine.py` |
+| 命令与契约 | 驾驶舱 | 不起命令：`flow/commands_map.json` | `widgets/commands.py` |
+
+`<项目>` 现在取工程工位的默认项目（`--station-project`，默认第一个客户项目）；没有项目时那几条命令不读，写“没读：没有受管项目”。
+
+读取状态只有这几种画法（`widgets/common.read_state`）：
+
+| 命令结果 | 标签 | 要点 |
+|---|---|---|
+| 读到了、读得懂 | 不配标签，写“读到了” | 画 |
+| 有输出但不是认得的格式；只有启动提示 | 读不懂 | 不画 |
+| 断网 | 断网未知 | 有快照画快照的，并写明几分钟前 |
+| 命令不存在（本机发布版太旧）、退出码非 0、超时、没起来、还没读、没项目 | 没检查 | 同上 |
+
+**怎么补一页**：照 `PAGE_TEMPLATE.md` 一步步做（声明命令 → 解析 → 画 → 测试 → 截图）。

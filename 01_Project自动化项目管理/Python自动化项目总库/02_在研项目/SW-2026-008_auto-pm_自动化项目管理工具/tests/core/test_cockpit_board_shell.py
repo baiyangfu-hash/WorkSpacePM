@@ -89,6 +89,7 @@ def test_every_page_is_reachable_from_the_sidebar_with_its_scope(qapp: QApplicat
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = gui_tests._window(qapp, root, db)
     window._refresh_decisions = lambda: None  # 决定页读命令的接线在 test_pm_dashboard_gui 里测
+    window._refresh_reads = lambda _key: None  # 骨架页读命令的接线在 test_cockpit_board_pages 里测
     assert window.page_buttons is window.sidebar.buttons
     for key, button in window.sidebar.buttons.items():
         button.click()
