@@ -27,6 +27,6 @@ domain: plc
 | `q_bUpstreamDone` | BOOL | VAR_OUTPUT | 本次进料交握事务完成脉冲 |
 | `q_bDownstreamDone` | BOOL | VAR_OUTPUT | 本次出料交握事务完成脉冲 |
 | `q_bComAlarm` | BOOL | VAR_OUTPUT | 外部通讯中断综合报警 |
-| `io_stExternal` | ST_ExternalDevice{{ udt_suffix }} | VAR_IN_OUT | 外部设备交互全量数据结构体 |
+| `io_stExternal` | ST_3001_ExternalDevice{{ udt_suffix }} | VAR_IN_OUT | 外部设备交互全量数据结构体 |
 | i_bResetCmd | BOOL | VAR_INPUT | 故障复位指令 |
 | q_wErrorCode | WORD | VAR_OUTPUT | 故障诊断字 |

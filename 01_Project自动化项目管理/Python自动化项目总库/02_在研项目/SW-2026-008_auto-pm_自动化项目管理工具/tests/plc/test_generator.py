@@ -9,6 +9,7 @@ from auto_pm.domain.plc.generator import (
     ProcessMatrixParser,
     ProcessMatrixStep,
     SclGenerator,
+    udt_type_name,
 )
 
 
@@ -70,7 +71,7 @@ def test_scl_generator_renders_valid_code(tmp_path: Path) -> None:
 
     # 验证结构体整块传递与规范特征
     assert 'FUNCTION_BLOCK "FB_1002_SingleLayerConveyor_DJ2026_005"' in content
-    assert "io_stStation : ST_DJ2026_005;" in content
+    assert "io_stStation : ST_1002_DJ2026_005;" in content  # 独占结构体带所属 FB 编号（LSP-905 V1.7.0）
     assert "io_stStation.stActuators.bMotorFwd := TRUE;" in content
     assert "CASE s_iStep OF" in content
     assert "ELSE // 安全防死锁分支" in content
@@ -99,5 +100,17 @@ def test_scl_generator_generates_module_with_udt(tmp_path: Path) -> None:
 
     assert fb_file.exists()
     assert udt_file.exists()
-    assert "TYPE ST_Station1 :" in udt_file.read_text(encoding="utf-8")
-    assert "ST_Station1_Control" in udt_file.read_text(encoding="utf-8")
+    # 独占结构体带所属 FB 编号（LSP-905 V1.7.0 §3.3 第 3 条，CHG-SCPT-2026-635）
+    assert udt_file.name == "ST_1001_Station1.scl"
+    udt_text = udt_file.read_text(encoding="utf-8")
+    assert "TYPE ST_1001_Station1 :" in udt_text
+    assert "ST_1001_Station1_Control" in udt_text
+    assert "ST_Station1" not in udt_text
+    fb_text = fb_file.read_text(encoding="utf-8")
+    assert "io_stStation : ST_1001_Station1;" in fb_text
+    assert 'FUNCTION_BLOCK "FB_1001_Station1_Station1"' in fb_text  # FB 名不受影响
+
+
+def test_udt_type_name_falls_back_without_fb_number() -> None:
+    matrix = ProcessMatrix(fb_number="FB_X", fb_name="Lift", station_name="Lift1", steps=[])
+    assert udt_type_name(matrix) == "ST_Lift1"

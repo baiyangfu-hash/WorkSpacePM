@@ -52,19 +52,23 @@
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stGlobal | ST_CommonAlarm{{ udt_suffix }} | 全局控制与报警数据 |
-| stExternal | ST_ExternalDevice{{ udt_suffix }} | 外部设备交互信号 |
-| stStation1 | ST_Station1{{ udt_suffix }} | 工位1全局交互结构体 |
+| stGlobal | ST_2001_CommonAlarm{{ udt_suffix }} | 全局控制与报警数据 |
+| stExternal | ST_3001_ExternalDevice{{ udt_suffix }} | 外部设备交互信号 |
+{%- for station in station_instances %}
+| st{{ station }} | ST_1001_Station1{{ udt_suffix }} | {{ station }} 全局交互结构体 |
+{%- endfor %}
 
 FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB 里声明 FB 实例，见 LSP-905 §4.11-1），每个 FB 有自己的背景数据块：
 
 | 背景数据块 | FB 类型 | 说明 |
 |---|---|---|
 | DB_3001_ExternalInteraction_{{ project_tag }} | FB_3001_ExternalInteraction_{{ project_tag }} | 外部设备交互背景数据块 |
-| DB_1001_Station1_{{ project_tag }} | FB_1001_Station1_{{ project_tag }} | 工位1背景数据块 |
+{%- for station in station_instances %}
+| DB_1001_{{ station }}_{{ project_tag }} | FB_1001_Station1_{{ project_tag }} | {{ station }} 背景数据块 |
+{%- endfor %}
 | DB_2001_CommonAlarm_{{ project_tag }} | FB_2001_CommonAlarm_AllStation_{{ project_tag }} | 公共报警背景数据块 |
 
-### ST_UpstreamDocking{{ udt_suffix }}（结构体）
+### ST_3001_UpstreamDocking{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -82,7 +86,7 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bUpstreamComFault | BOOL | 上游通讯心跳超时故障 (12s) |
 | iInfeedStep | INT | 进料握手当前步序 0~8 |
 
-### ST_DownstreamDocking{{ udt_suffix }}（结构体）
+### ST_3001_DownstreamDocking{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -100,17 +104,17 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bDownstreamComFault | BOOL | 下游通讯心跳超时故障 (12s) |
 | iOutfeedStep | INT | 出料握手当前步序 0~8 |
 
-### ST_ExternalDevice{{ udt_suffix }}（结构体）
+### ST_3001_ExternalDevice{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stUpstream | ST_UpstreamDocking{{ udt_suffix }} | 上游设备对接信号 |
-| stDownstream | ST_DownstreamDocking{{ udt_suffix }} | 下游设备对接信号 |
+| stUpstream | ST_3001_UpstreamDocking{{ udt_suffix }} | 上游设备对接信号 |
+| stDownstream | ST_3001_DownstreamDocking{{ udt_suffix }} | 下游设备对接信号 |
 | bEmergencyStop | BOOL | 外部总线急停 (1=正常, 0=急停) |
 | bSafetyDoorOK | BOOL | 外部安全门锁信号 |
 | bAnyComFault | BOOL | 外部通讯综合故障 |
 
-### ST_Station1_Control{{ udt_suffix }}（结构体）
+### ST_1001_Station1_Control{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -120,7 +124,7 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bPause | BOOL | 暂停 |
 | bSingleStepMode | BOOL | 单步模式 |
 
-### ST_Station1_Status{{ udt_suffix }}（结构体）
+### ST_1001_Station1_Status{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -132,7 +136,7 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bWaitMaterial | BOOL | 等待来料 |
 | bProcessing | BOOL | 加工中 |
 
-### ST_Station1_Config{{ udt_suffix }}（结构体）
+### ST_1001_Station1_Config{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -140,7 +144,7 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | dCylTimeoutMs | DINT | 气缸动作超时时间 (ms, 默认 5000) |
 | dProcessTimeMs | DINT | 工艺加工延时时间 (ms, 默认 2000) |
 
-### ST_Station1_Sensors{{ udt_suffix }}（结构体）
+### ST_1001_Station1_Sensors{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -151,7 +155,7 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bCyl2Retracted | BOOL | 顶升气缸缩回到位 |
 | bCyl2Extended | BOOL | 顶升气缸伸出到位 |
 
-### ST_Station1_Actuators{{ udt_suffix }}（结构体）
+### ST_1001_Station1_Actuators{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -161,17 +165,17 @@ FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB
 | bCyl2Extend | BOOL | 顶升气缸伸出 |
 | bCyl2Retract | BOOL | 顶升气缸缩回 |
 
-### ST_Station1{{ udt_suffix }}（结构体）
+### ST_1001_Station1{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| stControl | ST_Station1_Control{{ udt_suffix }} | 控制指令子结构 |
-| stStatus | ST_Station1_Status{{ udt_suffix }} | 状态反馈子结构 |
-| stConfig | ST_Station1_Config{{ udt_suffix }} | 配置参数子结构 |
-| stSensors | ST_Station1_Sensors{{ udt_suffix }} | 传感器输入子结构 |
-| stActuators | ST_Station1_Actuators{{ udt_suffix }} | 执行器输出子结构 |
+| stControl | ST_1001_Station1_Control{{ udt_suffix }} | 控制指令子结构 |
+| stStatus | ST_1001_Station1_Status{{ udt_suffix }} | 状态反馈子结构 |
+| stConfig | ST_1001_Station1_Config{{ udt_suffix }} | 配置参数子结构 |
+| stSensors | ST_1001_Station1_Sensors{{ udt_suffix }} | 传感器输入子结构 |
+| stActuators | ST_1001_Station1_Actuators{{ udt_suffix }} | 执行器输出子结构 |
 
-### ST_CommonAlarm{{ udt_suffix }}（结构体）
+### ST_2001_CommonAlarm{{ udt_suffix }}（结构体）
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -196,9 +200,11 @@ FB 实例不声明在 GlobalVars_{{ project_tag }} 里，每个 FB 一个背景�
 
 | 实例名（背景数据块） | FB类型 | 声明位置 | 说明 |
 |--------|--------|----------|------|
-| `DB_3001_ExternalInteraction_{{ project_tag }}` | FB_3001_ExternalInteraction_{{ project_tag }} | `00_全局数据/DB_3001_ExternalInteraction.scl` | 外部设备交互实例 |
-| `DB_1001_Station1_{{ project_tag }}` | FB_1001_Station1_{{ project_tag }} | `00_全局数据/DB_1001_Station1.scl` | 工位1实例 |
-| `DB_2001_CommonAlarm_{{ project_tag }}` | FB_2001_CommonAlarm_AllStation_{{ project_tag }} | `00_全局数据/DB_2001_CommonAlarm.scl` | 公共报警实例 |
+| `DB_3001_ExternalInteraction_{{ project_tag }}` | FB_3001_ExternalInteraction_{{ project_tag }} | `01_外部设备交互/DB_3001_ExternalInteraction.scl` | 外部设备交互实例 |
+{%- for station in station_instances %}
+| `DB_1001_{{ station }}_{{ project_tag }}` | FB_1001_Station1_{{ project_tag }} | `02_工位1_动作机构/DB_1001_{{ station }}.scl` | {{ station }} 实例 |
+{%- endfor %}
+| `DB_2001_CommonAlarm_{{ project_tag }}` | FB_2001_CommonAlarm_AllStation_{{ project_tag }} | `05_公共报警/DB_2001_CommonAlarm.scl` | 公共报警实例 |
 
 ## 5. M/D 区规划
 
