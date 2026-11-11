@@ -674,7 +674,7 @@
       "title": "Siemens Language Support插件使用指南",
       "number": "908",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/908_Siemens_Language_Support_使用指南_TOOL.md",
-      "version": "V1.0.0",
+      "version": "V1.0.1",
       "type_prefix": "TOOL",
       "domain": "plc",
       "lifecycle": "stable",

@@ -1,7 +1,7 @@
 ---
 spec_id: TOOL-908
 title: "Siemens Language Support插件使用指南"
-version: "V1.0.0"
+version: "V1.0.1"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/908_Siemens_Language_Support_使用指南_TOOL.md"
@@ -78,6 +78,8 @@ tags: ["Siemens", "LSP", "工具", "使用指南"]
 | `.udt` | User Data Type | 用户自定义类型 |
 | `.db` | Data Block | 数据块 |
 | `.awl` | AWL Language | AWL 语言文件 |
+
+注：上表只是 VS Code 插件按扩展名认文件类型的对照表，**不是 TIA 导入规则**。TIA V19 实测：DB 和结构体（UDT）用 `.scl` 源文件都能导入（DJ-2026-011 的 DB 文件是 `.scl`；2026-11-11 驾驶舱 3 工位样例 10 个结构体用 `.scl`，全部重建 0 错误）。
 
 ---
 
@@ -388,6 +390,6 @@ DJ-2026-005_边框缓存机/
 
 ---
 
-**文档版本**: V1.0  
+**文档版本**: V1.0.1  
 **创建日期**: 2026-04-28  
 **适用项目**: DJ-2026-005 边框缓存机
