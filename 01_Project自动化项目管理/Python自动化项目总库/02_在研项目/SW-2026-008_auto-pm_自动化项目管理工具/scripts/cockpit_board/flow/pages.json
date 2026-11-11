@@ -1,0 +1,128 @@
+{
+  "schema_version": "cockpit-pages.v1",
+  "note": "骨架 7 个新页各读哪条命令（CHG-SCPT-2026-628 骨架 C；页面本身在骨架 D 做）。reads 里的命令必须是 commands_map.json 里的 read 类，参数里不许出现该命令的 write_flags；reader 必须是 readers.READERS 里登记的读法。<PID> 由页面换成当前项目编号。空态、错态文案按三态标签：没检查／断网未知／读不懂，读不到绝不显示 0 或绿。",
+  "pages": [
+    {
+      "key": "tasks",
+      "title": "任务",
+      "group": "受管项目",
+      "reads": [
+        {
+          "command": "pm missions",
+          "args": [
+            "--pid",
+            "<PID>"
+          ],
+          "reader": "missions"
+        },
+        {
+          "command": "pm orient",
+          "args": [
+            "<PID>",
+            "--json"
+          ],
+          "reader": "orient"
+        }
+      ],
+      "data_files": [
+        "spine.json"
+      ],
+      "empty_text": "这个项目没有开着的卡",
+      "error_text": "读任务失败，原样显示命令输出"
+    },
+    {
+      "key": "prs",
+      "title": "PR 与审计",
+      "group": "驾驶舱",
+      "reads": [],
+      "github": true,
+      "empty_text": "没有开着的 PR",
+      "error_text": "断网未知：不用旧数据冒充"
+    },
+    {
+      "key": "worktrees",
+      "title": "工作树与分支",
+      "group": "驾驶舱",
+      "reads": [
+        {
+          "command": "worktree list",
+          "args": [
+            "--json"
+          ],
+          "reader": "worktree_list"
+        },
+        {
+          "command": "worktree sweep",
+          "args": [
+            "--json",
+            "--no-fetch"
+          ],
+          "reader": "worktree_sweep"
+        }
+      ],
+      "empty_text": "没有工位",
+      "error_text": "读工位失败，原样显示命令输出"
+    },
+    {
+      "key": "release",
+      "title": "发版",
+      "group": "驾驶舱",
+      "reads": [
+        {
+          "command": "long-run status",
+          "args": [],
+          "reader": "long_run"
+        }
+      ],
+      "empty_text": "没有在跑的长任务",
+      "error_text": "读长任务状态失败，原样显示命令输出"
+    },
+    {
+      "key": "spine",
+      "title": "脊柱图",
+      "group": "驾驶舱",
+      "reads": [],
+      "data_files": [
+        "spine.json"
+      ],
+      "empty_text": "没有选中的卡",
+      "error_text": "spine.json 读不懂"
+    },
+    {
+      "key": "commands",
+      "title": "命令与契约",
+      "group": "驾驶舱",
+      "reads": [],
+      "data_files": [
+        "commands_map.json"
+      ],
+      "empty_text": "",
+      "error_text": "commands_map.json 读不懂"
+    },
+    {
+      "key": "attention",
+      "title": "要你出手",
+      "group": "日常",
+      "reads": [
+        {
+          "command": "pm pending",
+          "args": [
+            "--project-id",
+            "<PID>"
+          ],
+          "reader": "pending"
+        },
+        {
+          "command": "pm inbox list",
+          "args": [
+            "--project-id",
+            "<PID>"
+          ],
+          "reader": "inbox"
+        }
+      ],
+      "empty_text": "现在没有要你出手的事",
+      "error_text": "读待办失败，原样显示命令输出"
+    }
+  ]
+}

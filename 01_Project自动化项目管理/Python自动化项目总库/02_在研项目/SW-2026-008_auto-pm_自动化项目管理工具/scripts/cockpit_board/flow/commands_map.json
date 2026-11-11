@@ -1,0 +1,721 @@
+{
+  "schema_version": "cockpit-commands.v1",
+  "note": "驾驶舱命令行全部叶子命令的分类（CHG-SCPT-2026-628 骨架 C）。read=只读，界面可以随时跑；write=会写文件、账本或远程，界面只能经白名单按钮且先预览；user_only=只听用户本人（口令、用户原话或用户同意），agent 不能代跑；never=界面里不放。拿不准的一律归 write。新增命令没分类，tests/core/test_cockpit_board_contracts.py 就红。",
+  "classes": [
+    "read",
+    "write",
+    "user_only",
+    "never"
+  ],
+  "counts": {
+    "never": 12,
+    "read": 68,
+    "user_only": 21,
+    "write": 118
+  },
+  "commands": {
+    "change create": {
+      "class": "write"
+    },
+    "change edit": {
+      "class": "write"
+    },
+    "change list": {
+      "class": "read"
+    },
+    "change show": {
+      "class": "read"
+    },
+    "change transition": {
+      "class": "write"
+    },
+    "change verify": {
+      "class": "write"
+    },
+    "claim add-paths": {
+      "class": "write"
+    },
+    "claim list": {
+      "class": "read"
+    },
+    "claim number": {
+      "class": "write"
+    },
+    "claim open": {
+      "class": "write"
+    },
+    "claim reclaim": {
+      "class": "user_only",
+      "note": "收回别人的占位只凭用户一句话（D-101 第 1 条）"
+    },
+    "claim release": {
+      "class": "write"
+    },
+    "claim renew": {
+      "class": "write"
+    },
+    "clean": {
+      "class": "write"
+    },
+    "constraint check": {
+      "class": "read"
+    },
+    "constraint guard": {
+      "class": "write"
+    },
+    "constraint heal": {
+      "class": "write"
+    },
+    "constraint list": {
+      "class": "read"
+    },
+    "constraint verify": {
+      "class": "write"
+    },
+    "context resolve": {
+      "class": "read"
+    },
+    "continuity backup": {
+      "class": "write"
+    },
+    "continuity checkpoint create": {
+      "class": "write"
+    },
+    "continuity dispatch prepare": {
+      "class": "write"
+    },
+    "continuity handoff accept": {
+      "class": "write"
+    },
+    "continuity handoff create": {
+      "class": "write"
+    },
+    "continuity lease extend-hold": {
+      "class": "user_only",
+      "note": "只有用户能提高租约总时长上限"
+    },
+    "continuity lease record-holder": {
+      "class": "write"
+    },
+    "continuity lease renew": {
+      "class": "write"
+    },
+    "continuity lease run-with-renewal": {
+      "class": "never",
+      "note": "给长命令包续租用的，界面不跑长命令"
+    },
+    "continuity list-backups": {
+      "class": "read"
+    },
+    "continuity mission create": {
+      "class": "write"
+    },
+    "continuity mission show": {
+      "class": "read"
+    },
+    "continuity mission transition": {
+      "class": "never",
+      "note": "AGENTS.md 阶段 3：不得单独推 Mission 状态，收口走 pm close"
+    },
+    "continuity orchestration report-finding": {
+      "class": "write"
+    },
+    "continuity orchestration report-repair": {
+      "class": "write"
+    },
+    "continuity recovery plan": {
+      "class": "read"
+    },
+    "continuity restore-backup": {
+      "class": "user_only",
+      "note": "用备份替换在用账本"
+    },
+    "continuity run fence-legacy-terminal": {
+      "class": "write"
+    },
+    "continuity run fence-terminal-lease": {
+      "class": "write"
+    },
+    "continuity run legacy-terminal-evidence": {
+      "class": "read"
+    },
+    "continuity run reclaim": {
+      "class": "write"
+    },
+    "continuity run reconcile-terminal-lease": {
+      "class": "write"
+    },
+    "continuity run revoke-unstarted": {
+      "class": "write"
+    },
+    "continuity run settle-expired": {
+      "class": "write"
+    },
+    "continuity run start": {
+      "class": "write"
+    },
+    "continuity run transition": {
+      "class": "never",
+      "note": "AGENTS.md 阶段 3：不得单独推 Run 状态"
+    },
+    "continuity verify-backup": {
+      "class": "read"
+    },
+    "continuity work adjudicate": {
+      "class": "write"
+    },
+    "continuity work adjudication-evidence": {
+      "class": "read"
+    },
+    "continuity work authorize": {
+      "class": "write"
+    },
+    "continuity work create": {
+      "class": "write"
+    },
+    "continuity work relate": {
+      "class": "write"
+    },
+    "continuity work transition": {
+      "class": "never",
+      "note": "AGENTS.md 阶段 3：不得单独推 Work 状态"
+    },
+    "decision create": {
+      "class": "user_only",
+      "note": "开了批准口令时要用户本人输入口令"
+    },
+    "decision list": {
+      "class": "read"
+    },
+    "decision show": {
+      "class": "read"
+    },
+    "delivery archive clean": {
+      "class": "write"
+    },
+    "delivery archive list": {
+      "class": "read"
+    },
+    "delivery build": {
+      "class": "write"
+    },
+    "delivery package": {
+      "class": "write"
+    },
+    "delivery status": {
+      "class": "read"
+    },
+    "doc check": {
+      "class": "read"
+    },
+    "doc inject": {
+      "class": "write"
+    },
+    "doc refresh": {
+      "class": "write"
+    },
+    "doc sync": {
+      "class": "write"
+    },
+    "doctor": {
+      "class": "read"
+    },
+    "dogfood inspect": {
+      "class": "read"
+    },
+    "dogfood prepare": {
+      "class": "write"
+    },
+    "dogfood review": {
+      "class": "write"
+    },
+    "gate judge": {
+      "class": "read"
+    },
+    "gate plan": {
+      "class": "read"
+    },
+    "gate precheck": {
+      "class": "write"
+    },
+    "gate run": {
+      "class": "write"
+    },
+    "git-hook commit-msg": {
+      "class": "never",
+      "note": "由 git 钩子调用"
+    },
+    "git-hook install": {
+      "class": "write"
+    },
+    "git-hook pre-commit": {
+      "class": "never",
+      "note": "由 git 钩子调用"
+    },
+    "git-hook preflight": {
+      "class": "never",
+      "note": "由提交流程调用"
+    },
+    "git-hook release-gate": {
+      "class": "never",
+      "note": "由发布流程调用"
+    },
+    "gui": {
+      "class": "write"
+    },
+    "handoff claim": {
+      "class": "write"
+    },
+    "handoff close": {
+      "class": "write"
+    },
+    "handoff create": {
+      "class": "write"
+    },
+    "handoff fail": {
+      "class": "write"
+    },
+    "handoff failures": {
+      "class": "read"
+    },
+    "handoff heartbeat": {
+      "class": "write"
+    },
+    "handoff list": {
+      "class": "read"
+    },
+    "handoff preflight": {
+      "class": "read"
+    },
+    "handoff queue": {
+      "class": "read"
+    },
+    "handoff requeue": {
+      "class": "write"
+    },
+    "handoff result-submit": {
+      "class": "write"
+    },
+    "handoff saga compensate": {
+      "class": "write"
+    },
+    "handoff saga resume": {
+      "class": "write"
+    },
+    "handoff saga status": {
+      "class": "read"
+    },
+    "handoff show": {
+      "class": "read"
+    },
+    "handoff start": {
+      "class": "write"
+    },
+    "handoff timeout": {
+      "class": "write"
+    },
+    "implementation-card approve": {
+      "class": "user_only",
+      "note": "挂上用户的外部批准"
+    },
+    "implementation-card by-change": {
+      "class": "read"
+    },
+    "implementation-card create": {
+      "class": "write"
+    },
+    "implementation-card dispatch": {
+      "class": "write"
+    },
+    "implementation-card precheck": {
+      "class": "write"
+    },
+    "implementation-card validate": {
+      "class": "read"
+    },
+    "implementation-card verify": {
+      "class": "write"
+    },
+    "ledger reconcile": {
+      "class": "write"
+    },
+    "long-run start": {
+      "class": "write"
+    },
+    "long-run status": {
+      "class": "read"
+    },
+    "long-run stop": {
+      "class": "write"
+    },
+    "plc check": {
+      "class": "read",
+      "write_flags": [
+        "--fix"
+      ],
+      "note": "默认只读；--fix 会改项目文件。退出码 1 表示有失败项，不是命令坏了。"
+    },
+    "plc docs check": {
+      "class": "read"
+    },
+    "plc docs confirm": {
+      "class": "write"
+    },
+    "plc docs plan": {
+      "class": "write"
+    },
+    "plc docs sync": {
+      "class": "write"
+    },
+    "plc ingest": {
+      "class": "write"
+    },
+    "plc init": {
+      "class": "write"
+    },
+    "plc promote": {
+      "class": "write"
+    },
+    "plc repair": {
+      "class": "write"
+    },
+    "plc standardize": {
+      "class": "write"
+    },
+    "pm accept": {
+      "class": "user_only",
+      "note": "验收；开了批准口令时要用户本人输入口令"
+    },
+    "pm acceptance-scan": {
+      "class": "read"
+    },
+    "pm approve": {
+      "class": "user_only",
+      "note": "批准范围；开了批准口令时要用户本人输入口令"
+    },
+    "pm approver-pin init": {
+      "class": "user_only",
+      "note": "只限用户本人设置或更换批准口令"
+    },
+    "pm approver-pin status": {
+      "class": "read"
+    },
+    "pm close": {
+      "class": "write"
+    },
+    "pm confirm-start": {
+      "class": "user_only",
+      "note": "用户的唯一开工确认"
+    },
+    "pm context": {
+      "class": "write"
+    },
+    "pm control-root-status": {
+      "class": "read"
+    },
+    "pm drafts": {
+      "class": "read"
+    },
+    "pm execute": {
+      "class": "never",
+      "note": "前台阻塞执行 Saga，不放进界面"
+    },
+    "pm handoff": {
+      "class": "write"
+    },
+    "pm inbox add": {
+      "class": "write"
+    },
+    "pm inbox confirm": {
+      "class": "user_only",
+      "note": "记录用户对分诊单的确认，须引用用户原话"
+    },
+    "pm inbox list": {
+      "class": "read"
+    },
+    "pm inbox reject": {
+      "class": "user_only",
+      "note": "记录用户对分诊单的驳回，须引用用户原话"
+    },
+    "pm inbox show": {
+      "class": "read"
+    },
+    "pm missions": {
+      "class": "read"
+    },
+    "pm orient": {
+      "class": "read"
+    },
+    "pm park": {
+      "class": "user_only",
+      "note": "带凭据搁卡要用户原话（WS-002 第 1 条）"
+    },
+    "pm pending": {
+      "class": "read"
+    },
+    "pm plan": {
+      "class": "write"
+    },
+    "pm recover": {
+      "class": "write"
+    },
+    "pm recover-status": {
+      "class": "read"
+    },
+    "pm resume": {
+      "class": "read"
+    },
+    "pm retire": {
+      "class": "write"
+    },
+    "pm sign-risk": {
+      "class": "user_only",
+      "note": "只限用户本人在交互终端签署接受风险；agent 会话一律拒绝"
+    },
+    "pm state-backup pull": {
+      "class": "write"
+    },
+    "pm state-backup push": {
+      "class": "write"
+    },
+    "pm state-backup status": {
+      "class": "read"
+    },
+    "pm switch": {
+      "class": "user_only",
+      "note": "插急活只听用户（WS-002 第 1 条）"
+    },
+    "pm takeover": {
+      "class": "write"
+    },
+    "pm triage": {
+      "class": "read"
+    },
+    "pm unpark": {
+      "class": "user_only",
+      "note": "拿回搁着的卡只听用户（WS-002 第 1 条）"
+    },
+    "pm verify": {
+      "class": "write"
+    },
+    "pm workflow": {
+      "class": "never",
+      "note": "已隔离的旧技能名，只保留可发现性"
+    },
+    "pm-session archive": {
+      "class": "write"
+    },
+    "pm-session check": {
+      "class": "read"
+    },
+    "pm-session view": {
+      "class": "read",
+      "write_flags": [
+        "--output",
+        "-o"
+      ]
+    },
+    "pr open": {
+      "class": "write"
+    },
+    "pr ready": {
+      "class": "read"
+    },
+    "pr settle-scan": {
+      "class": "read"
+    },
+    "project create": {
+      "class": "write"
+    },
+    "project delete": {
+      "class": "user_only",
+      "note": "破坏性操作，只听用户本人"
+    },
+    "project edit": {
+      "class": "write"
+    },
+    "project hooks install": {
+      "class": "write"
+    },
+    "project hooks status": {
+      "class": "read"
+    },
+    "project hooks uninstall": {
+      "class": "write"
+    },
+    "project import": {
+      "class": "write"
+    },
+    "project list": {
+      "class": "read"
+    },
+    "project recycle-list": {
+      "class": "read"
+    },
+    "project register": {
+      "class": "write"
+    },
+    "project retrofit": {
+      "class": "write"
+    },
+    "project show": {
+      "class": "read"
+    },
+    "project snapshot": {
+      "class": "write"
+    },
+    "prototype archive": {
+      "class": "write"
+    },
+    "prototype bundle": {
+      "class": "write"
+    },
+    "prototype check": {
+      "class": "write"
+    },
+    "prototype init": {
+      "class": "write"
+    },
+    "python check": {
+      "class": "write"
+    },
+    "python init": {
+      "class": "write"
+    },
+    "python repair": {
+      "class": "write"
+    },
+    "release deploy": {
+      "class": "user_only",
+      "note": "切换发布要用户同意（切换规矩）"
+    },
+    "release rollback": {
+      "class": "user_only",
+      "note": "退回发布版本要用户同意"
+    },
+    "release status": {
+      "class": "read",
+      "note": "只读，核对指针与发布记录。"
+    },
+    "release trial": {
+      "class": "write"
+    },
+    "role check": {
+      "class": "read"
+    },
+    "role list": {
+      "class": "read"
+    },
+    "spec check": {
+      "class": "write"
+    },
+    "spec frontmatter": {
+      "class": "write"
+    },
+    "spec index": {
+      "class": "write"
+    },
+    "spec lint": {
+      "class": "write"
+    },
+    "spec report": {
+      "class": "write"
+    },
+    "spec sync": {
+      "class": "write"
+    },
+    "template list": {
+      "class": "read"
+    },
+    "template update": {
+      "class": "write"
+    },
+    "vartable batch-parse": {
+      "class": "write"
+    },
+    "vartable convert": {
+      "class": "write"
+    },
+    "vartable detect-encoding": {
+      "class": "read"
+    },
+    "vartable detect-format": {
+      "class": "read"
+    },
+    "vartable list-encodings": {
+      "class": "read"
+    },
+    "vartable list-formats": {
+      "class": "read"
+    },
+    "vartable parse": {
+      "class": "read"
+    },
+    "workflow accept": {
+      "class": "user_only",
+      "note": "pm accept 的旧名"
+    },
+    "workflow approve": {
+      "class": "user_only",
+      "note": "pm approve 的旧名"
+    },
+    "workflow confirm-start": {
+      "class": "user_only",
+      "note": "pm confirm-start 的旧名"
+    },
+    "workflow context": {
+      "class": "write"
+    },
+    "workflow execute": {
+      "class": "never",
+      "note": "pm execute 的旧名"
+    },
+    "workflow history": {
+      "class": "read"
+    },
+    "workflow list": {
+      "class": "read"
+    },
+    "workflow plan": {
+      "class": "write"
+    },
+    "workflow resume": {
+      "class": "read"
+    },
+    "workflow run": {
+      "class": "write"
+    },
+    "workflow status": {
+      "class": "read"
+    },
+    "worktree close": {
+      "class": "write"
+    },
+    "worktree heartbeat": {
+      "class": "never",
+      "note": "由 Claude Code 钩子调用"
+    },
+    "worktree list": {
+      "class": "read"
+    },
+    "worktree open": {
+      "class": "write"
+    },
+    "worktree reclaim": {
+      "class": "write"
+    },
+    "worktree release": {
+      "class": "write"
+    },
+    "worktree sweep": {
+      "class": "read",
+      "write_flags": [
+        "--apply"
+      ],
+      "note": "默认只列不删；不带 --no-fetch 时会 git fetch（只更新远程跟踪分支）。界面调用要带 --no-fetch。"
+    },
+    "worktree who": {
+      "class": "write"
+    }
+  }
+}
