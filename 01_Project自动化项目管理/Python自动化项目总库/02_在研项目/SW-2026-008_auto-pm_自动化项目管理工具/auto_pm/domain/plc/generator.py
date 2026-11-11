@@ -150,6 +150,21 @@ class ProcessMatrixParser:
         return matrix
 
 
+def udt_type_name(matrix: ProcessMatrix) -> str:
+    """工站结构体类型名：独占结构体带所属 FB 的 4 位编号（LSP-905 V1.7.0 §3.3 第 3 条）。
+
+    FB_1001 + Station1 → ST_1001_Station1；fb_number 里取不到 4 位编号时退回 ST_<工站名>。
+    """
+    match = re.search(r"(\d{4})", matrix.fb_number)
+    return f"ST_{match.group(1)}_{matrix.station_name}" if match else f"ST_{matrix.station_name}"
+
+
+def _apply_udt_name(text: str, matrix: ProcessMatrix) -> str:
+    """把模板渲染出的 ST_<工站名>（含 ST_<工站名>_Control 等子类型）换成带 FB 编号的名字。"""
+    pattern = re.compile(r"(?<![A-Za-z0-9_])ST_" + re.escape(matrix.station_name) + r"(?![A-Za-z0-9])")
+    return pattern.sub(udt_type_name(matrix), text)
+
+
 class SclGenerator:
     """Siemens SCL 离线渲染生成器 (支持结构体整块传递与 UDT 同步生成)"""
 
@@ -164,7 +179,7 @@ class SclGenerator:
     def render_scl(self, matrix: ProcessMatrix) -> str:
         """根据工艺矩阵数据渲染生成 SCL 代码字符串"""
         template = self.env.get_template("scl_state_machine.scl.j2")
-        return template.render(
+        return _apply_udt_name(template.render(
             fb_number=matrix.fb_number,
             fb_name=matrix.fb_name,
             station_name=matrix.station_name,
@@ -174,17 +189,17 @@ class SclGenerator:
             statics=matrix.statics,
             steps=matrix.steps,
             generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        )
+        ), matrix)
 
     def render_udt(self, matrix: ProcessMatrix) -> str:
-        """根据工艺矩阵数据渲染生成 ST_<Station> UDT 结构体定义"""
+        """根据工艺矩阵数据渲染生成 ST_<FB编号>_<Station> UDT 结构体定义"""
         template = self.env.get_template("scl_udt.scl.j2")
-        return template.render(
+        return _apply_udt_name(template.render(
             fb_number=matrix.fb_number,
             fb_name=matrix.fb_name,
             station_name=matrix.station_name,
             generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        )
+        ), matrix)
 
     def generate_to_file(self, matrix: ProcessMatrix, output_path: Path | str) -> Path:
         """渲染 SCL 并直接保存到本地文件"""
@@ -202,7 +217,7 @@ class SclGenerator:
         target_dir.mkdir(parents=True, exist_ok=True)
 
         fb_file = target_dir / f"{matrix.fb_number}_{matrix.fb_name}_{matrix.station_name}.scl"
-        udt_file = target_dir / f"ST_{matrix.station_name}.scl"
+        udt_file = target_dir / f"{udt_type_name(matrix)}.scl"
 
         fb_file.write_text(self.render_scl(matrix), encoding="utf-8")
         udt_file.write_text(self.render_udt(matrix), encoding="utf-8")

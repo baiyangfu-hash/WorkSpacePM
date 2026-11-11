@@ -10,7 +10,8 @@
 // 块名与编号 (LSP-905 §3.4/§4.11):
 //   块名带项目标记 {{ project_tag }}, 不叫 Main/OB1, 导入时不会覆盖你项目里已有的同名块.
 //   程序循环 OB 用 123 及以上; TIA 从源生成块时自己分配块号, 导入后可在 TIA 里改号.
-//   如果你的项目已有主程序, 也可以不导入本 OB, 只把下面三行调用复制进你自己的主程序.
+//   如果你的项目已有主程序, 也可以不导入本 OB, 只把下面几行调用复制进你自己的主程序.
+//   每个工位一行调用, 工位清单在建项目时由 project create --station 给出 (CHG-SCPT-2026-635).
 // ============================================================================
 ORGANIZATION_BLOCK "{{ project_tag }}_Main"
 { S7_Optimized_Block := 'TRUE' }
@@ -21,17 +22,19 @@ END_VAR
 
 BEGIN
     // ============================================================================
-    // 第1部分：外部设备交互 (ST_ExternalDevice{{ udt_suffix }})
+    // 第1部分：外部设备交互 (ST_3001_ExternalDevice{{ udt_suffix }})
     // ============================================================================
     "DB_3001_ExternalInteraction_{{ project_tag }}"(io_stExternal := "GlobalVars_{{ project_tag }}".stExternal);
 
     // ============================================================================
-    // 第2部分：工位1 动作机构 (ST_Station1{{ udt_suffix }})
+    // 第2部分：工位动作机构 (ST_1001_Station1{{ udt_suffix }}), 每个工位一个背景 DB
     // ============================================================================
-    "DB_1001_Station1_{{ project_tag }}"(io_stStation := "GlobalVars_{{ project_tag }}".stStation1);
+{%- for station in station_instances %}
+    "DB_1001_{{ station }}_{{ project_tag }}"(io_stStation := "GlobalVars_{{ project_tag }}".st{{ station }});
+{%- endfor %}
 
     // ============================================================================
-    // 第3部分：公共报警与 OMAC 状态机 (ST_CommonAlarm{{ udt_suffix }})
+    // 第3部分：公共报警与 OMAC 状态机 (ST_2001_CommonAlarm{{ udt_suffix }})
     // ============================================================================
     "DB_2001_CommonAlarm_{{ project_tag }}"(io_stGlobal := "GlobalVars_{{ project_tag }}".stGlobal);
 

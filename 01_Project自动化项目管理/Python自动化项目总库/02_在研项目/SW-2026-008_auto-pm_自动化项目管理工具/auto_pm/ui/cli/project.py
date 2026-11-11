@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
+from typing import Any
 
 import click
 from rich.console import Console
@@ -204,6 +206,23 @@ def cmd_list(
     console.print(table)
 
 
+
+_STATION_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+MAX_STATIONS = 8  # 模板里背景 DB 槽位文件只有 8 个（templates/plc-standard-project/copier.yml）
+
+
+def _station_list_error(stations: tuple[str, ...]) -> str:
+    """工位清单不合规时返回原因，合规返回空串。"""
+    if len(stations) > MAX_STATIONS:
+        return f"--station 最多 {MAX_STATIONS} 个，给了 {len(stations)} 个"
+    if len(set(stations)) != len(stations):
+        return "--station 里有重复的工位名"
+    bad = [name for name in stations if not _STATION_NAME.match(name)]
+    if bad:
+        return f"工位名不合规（要英文字母开头，只用字母和数字）: {'、'.join(bad)}"
+    return ""
+
+
 @project_group.command(name="create")
 @click.option("--stack", type=click.Choice(["plc", "python"]), required=True, help="技术栈")
 @click.option("--id", "project_id", required=False, default=None, help="项目编号（如 DJ-2026-010），与 --auto-id 互斥")
@@ -256,6 +275,12 @@ def cmd_list(
     help="项目存放目录（默认: 工作区分类目录；相对路径按你敲命令时所在的目录算，不能在发布目录里）",
 )
 @click.option("--base-project", "base_project", default=None, help="溯源父项目（例如用于改造类项目时传入原项目编号）")
+@click.option(
+    "--station",
+    "stations",
+    multiple=True,
+    help="工位名（可重复，最多 8 个，如 --station Station1 --station Station2）；只对 PLC 标准项目有效，不写就是只有 Station1",
+)
 @click.option("--dry-run", is_flag=True, help="仅预览，不实际创建")
 @click.pass_context
 def cmd_create(
@@ -274,10 +299,21 @@ def cmd_create(
     plc_model: str | None,
     dest_dir: str | None,
     base_project: str | None,
+    stations: tuple[str, ...],
     dry_run: bool,
 ) -> None:
     """创建新项目（调用 Copier 模板生成骨架）"""
     app_ctx: AppContext = ctx.obj
+
+    # 工位实例清单（CHG-SCPT-2026-635）：每个工位一个背景 DB，共用 FB_1001；规则与模板 copier.yml 的校验一致
+    if stations:
+        if stack != "plc" or mode != "standard-project":
+            console.print("[red]错误: --station 只能用于 --stack plc --mode standard-project[/red]")
+            ctx.exit(1)
+        station_error = _station_list_error(stations)
+        if station_error:
+            console.print(f"[red]错误: {station_error}[/red]")
+            ctx.exit(1)
 
     # 互斥校验：--id 和 --auto-id 不能同时使用
     if project_id and auto_id:
@@ -365,6 +401,8 @@ def cmd_create(
         console.print(f"  设备类型: {equipment_type or '-'}")
         console.print(f"  PLC 品牌: {plc_vendor or '-'}")
         console.print(f"  PLC 型号: {plc_model or '-'}")
+        if stations:
+            console.print(f"  工位: {'、'.join(stations)}")
         if library_name:
             console.print(f"  库名称: {library_name}")
         return
@@ -385,7 +423,7 @@ def cmd_create(
     tpl_svc = TemplateService(app_ctx.templates_dir)
     # V0.2.1-P1-3: data 字典增加 stack/mode/business_line 字段
     # V0.2.1-P1-4: shared-library 模式增加 library_name 字段
-    data: dict[str, str] = {
+    data: dict[str, Any] = {
         "project_id": project_id,
         "project_name": project_name,
         "description": description or project_name,
@@ -407,6 +445,8 @@ def cmd_create(
     ):
         if value:
             data[key] = value
+    if stations:
+        data["station_instances"] = list(stations)
 
     try:
         # 确保目标根目录存在

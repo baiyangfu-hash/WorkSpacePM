@@ -37,6 +37,58 @@ udt_suffix:
   default: ""
   when: false
 
+# 工位实例清单（CHG-SCPT-2026-635）：每个工位共用 FB_1001_Station1，各有一个背景 DB、一个 GlobalVars 成员、一行 OB123 调用。
+# 由 `project create --station <名字>`（可重复）传入；不传就是只有 Station1，生成结果和以前一样。最多 8 个（槽位文件只有 8 个）。
+# 名字：英文字母开头，只用字母和数字，不能重复（它会出现在块名、文件名和变量名 st<名字> 里）。
+station_instances:
+  type: yaml
+  default: "[Station1]"
+  when: false
+  validator: >-
+    {% if station_instances is string or station_instances is mapping or station_instances | length < 1 or station_instances | length > 8 %}
+    station_instances 必须是 1～8 个工位名的列表
+    {% elif station_instances | unique | list | length != station_instances | length %}
+    station_instances 里有重复的工位名
+    {% else %}{% for name in station_instances %}{% if not (name is string and name | regex_search('^[A-Za-z][A-Za-z0-9]*$')) %}
+    工位名 {{ name }} 不合规：要英文字母开头，只用字母和数字
+    {% endif %}{% endfor %}{% endif %}
+
+# 背景 DB 槽位文件名（一个背景 DB 一个文件）：工位 FB 文件夹里的 {{ db_slot_N }}.jinja 用它们当文件名，
+# 清单不够长时为空，copier 就跳过那个文件。判断写在这里而不写进文件名，是为了让文件名短：
+# 判断写进文件名时完整路径在 Windows 上会超过 260 个字符。DB 内容只有一份：_includes/DB_1001_Station.scl.jinja。
+db_slot_1:
+  type: str
+  default: "DB_1001_{{ station_instances[0] }}.scl"
+  when: false
+db_slot_2:
+  type: str
+  default: "{% if station_instances[1] is defined %}DB_1001_{{ station_instances[1] }}.scl{% endif %}"
+  when: false
+db_slot_3:
+  type: str
+  default: "{% if station_instances[2] is defined %}DB_1001_{{ station_instances[2] }}.scl{% endif %}"
+  when: false
+db_slot_4:
+  type: str
+  default: "{% if station_instances[3] is defined %}DB_1001_{{ station_instances[3] }}.scl{% endif %}"
+  when: false
+db_slot_5:
+  type: str
+  default: "{% if station_instances[4] is defined %}DB_1001_{{ station_instances[4] }}.scl{% endif %}"
+  when: false
+db_slot_6:
+  type: str
+  default: "{% if station_instances[5] is defined %}DB_1001_{{ station_instances[5] }}.scl{% endif %}"
+  when: false
+db_slot_7:
+  type: str
+  default: "{% if station_instances[6] is defined %}DB_1001_{{ station_instances[6] }}.scl{% endif %}"
+  when: false
+db_slot_8:
+  type: str
+  default: "{% if station_instances[7] is defined %}DB_1001_{{ station_instances[7] }}.scl{% endif %}"
+  when: false
+
 # V0.2.1-P1-3: 记录技术栈元数据（非交互，由 CLI 传入）
 stack:
   type: str

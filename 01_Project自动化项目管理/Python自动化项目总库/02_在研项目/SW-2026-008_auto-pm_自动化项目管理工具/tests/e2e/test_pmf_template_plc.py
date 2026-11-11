@@ -46,9 +46,6 @@ EXPECTED_TEMPLATE_FILES = [
     "02_PLC程序/PLC_ST/00_主程序/PRD/变更记录_CHG-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/接口文档_IFC-OB1.md",
     "02_PLC程序/PLC_ST/00_主程序/PRD/详细设计说明书_DSN-OB1.md",
-    "02_PLC程序/PLC_ST/00_全局数据/DB_1001_Station1.scl",
-    "02_PLC程序/PLC_ST/00_全局数据/DB_2001_CommonAlarm.scl",
-    "02_PLC程序/PLC_ST/00_全局数据/DB_3001_ExternalInteraction.scl",
     "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
     "02_PLC程序/PLC_ST/00_全局数据/PRD/变更记录_CHG-GlobalVars.md",
     "02_PLC程序/PLC_ST/00_全局数据/PRD/接口文档_IFC-GlobalVars.md",
@@ -63,19 +60,22 @@ EXPECTED_TEMPLATE_FILES = [
     "02_PLC程序/PLC_ST/01_外部设备交互/PRD/变更记录_CHG-FB3001-ExternalInteraction.md",
     "02_PLC程序/PLC_ST/01_外部设备交互/PRD/接口文档_IFC-FB3001-ExternalInteraction.md",
     "02_PLC程序/PLC_ST/01_外部设备交互/PRD/详细设计说明书_DSN-FB3001-ExternalInteraction.md",
-    "02_PLC程序/PLC_ST/01_外部设备交互/ST_ExternalDevice.scl",
+    "02_PLC程序/PLC_ST/01_外部设备交互/DB_3001_ExternalInteraction.scl",
+    "02_PLC程序/PLC_ST/01_外部设备交互/ST_3001_ExternalDevice.scl",
     "02_PLC程序/PLC_ST/02_工位1_动作机构/FB_1001_Station1.scl",
     "02_PLC程序/PLC_ST/02_工位1_动作机构/PRD/使用说明_UM-FB1001-Station1.md",
     "02_PLC程序/PLC_ST/02_工位1_动作机构/PRD/变更记录_CHG-FB1001-Station1.md",
     "02_PLC程序/PLC_ST/02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md",
     "02_PLC程序/PLC_ST/02_工位1_动作机构/PRD/详细设计说明书_DSN-FB1001-Station1.md",
-    "02_PLC程序/PLC_ST/02_工位1_动作机构/ST_Station1.scl",
+    "02_PLC程序/PLC_ST/02_工位1_动作机构/DB_1001_Station1.scl",
+    "02_PLC程序/PLC_ST/02_工位1_动作机构/ST_1001_Station1.scl",
     "02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl",
     "02_PLC程序/PLC_ST/05_公共报警/PRD/使用说明_UM-FB2001-CommonAlarm.md",
     "02_PLC程序/PLC_ST/05_公共报警/PRD/变更记录_CHG-FB2001-CommonAlarm.md",
     "02_PLC程序/PLC_ST/05_公共报警/PRD/接口文档_IFC-FB2001-CommonAlarm.md",
     "02_PLC程序/PLC_ST/05_公共报警/PRD/详细设计说明书_DSN-FB2001-CommonAlarm.md",
-    "02_PLC程序/PLC_ST/05_公共报警/ST_CommonAlarm.scl",
+    "02_PLC程序/PLC_ST/05_公共报警/DB_2001_CommonAlarm.scl",
+    "02_PLC程序/PLC_ST/05_公共报警/ST_2001_CommonAlarm.scl",
     "02_PLC程序/PLC_ST/06_公共函数/FC_4001_ScaleAnalog.scl",
     "02_PLC程序/PLC_ST/06_公共函数/PRD/使用说明_UM-FC4001-ScaleAnalog.md",
     "02_PLC程序/PLC_ST/06_公共函数/PRD/变更记录_CHG-FC4001-ScaleAnalog.md",
@@ -369,10 +369,10 @@ def test_v13_the_root_prd_directory_is_no_longer_generated_and_the_program_schem
 
 def test_v14_the_program_scheme_interface_document_lists_exactly_the_instance_data_blocks_of_the_project(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    data = project / "02_PLC程序/PLC_ST/00_全局数据"
+    plc_st = project / "02_PLC程序/PLC_ST"  # 背景 DB 和各自的 FB 同文件夹（CHG-SCPT-2026-635）
     declared = sorted(
         (m.group(2), m.group(1))
-        for p in data.glob("DB_*.scl")
+        for p in plc_st.glob("*/DB_*.scl")
         for m in [re.search(r'^DATA_BLOCK "(DB_\w+)"\s*\n"(FB_\w+)"\s*\nBEGIN\s*\nEND_DATA_BLOCK', p.read_text(encoding="utf-8-sig"), flags=re.M)]
         if m
     )
@@ -441,7 +441,7 @@ def test_v16_the_generated_project_has_all_three_scheme_comparison_items_passing
 
 def test_v17_a_new_instance_in_the_code_that_the_scheme_document_does_not_list_is_warned_not_failed(tmp_path: Path) -> None:
     project = _generate(tmp_path)
-    extra = project / "02_PLC程序/PLC_ST/00_全局数据/DB_1002_Station2.scl"
+    extra = project / "02_PLC程序/PLC_ST/02_工位1_动作机构/DB_1002_Station2.scl"
     extra.write_text(chr(0xFEFF) + 'DATA_BLOCK "DB_1002_Station2"' + chr(10) + '"FB_1001_Station1_DJ2026901"' + chr(10) + "BEGIN" + chr(10) + "END_DATA_BLOCK" + chr(10), encoding="utf-8")
     result = _check(tmp_path, project)
     item = next(i for i in result.items if i.item == "接口文档 INT ↔ 代码 [FB 实例]")

@@ -285,6 +285,59 @@ def test_project_create_single_machine_generates_week2_template_assets(
     assert plc_json["libraries"] == ["../../../01_SharedLibraries/SysLib"]
 
 
+
+def test_project_create_station_option_generates_one_instance_db_per_station(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--station 可重复：每个工位一个背景 DB、一个 GlobalVars 成员、一行 OB123 调用（CHG-SCPT-2026-635）"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
+    dest_dir = tmp_path / "0100_项目"
+    args = ["-w", str(tmp_path), "project", "create", "--stack", "plc", "--id", "DJ-2026-023", "--name", "三工位",
+            "--dest-dir", str(dest_dir)]
+    for station in ("Station1", "Station2", "Station3"):
+        args += ["--station", station]
+    result = cli_runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    plc = dest_dir / "DJ-2026-023_三工位" / "02_PLC程序" / "PLC_ST"
+    station_dir = plc / "02_工位1_动作机构"
+    assert sorted(p.name for p in station_dir.glob("DB_1001_*.scl")) == [
+        "DB_1001_Station1.scl", "DB_1001_Station2.scl", "DB_1001_Station3.scl"]
+    global_vars = (plc / "00_全局数据" / "GlobalVars.db").read_text(encoding="utf-8")
+    ob = (plc / "00_主程序" / "OB123.scl").read_text(encoding="utf-8")
+    for station in ("Station1", "Station2", "Station3"):
+        assert f"st{station}" in global_vars
+        assert f'"DB_1001_{station}_DJ2026023"(io_stStation := "GlobalVars_DJ2026023".st{station});' in ob
+
+
+@pytest.mark.parametrize(
+    ("stations", "message"),
+    [
+        (["S1", "S1"], "重复"),
+        (["1Station"], "不合规"),
+        (["Station-2"], "不合规"),
+        ([f"S{i}" for i in range(9)], "最多 8 个"),
+    ],
+)
+def test_project_create_rejects_bad_station_lists(
+    cli_runner: CliRunner, tmp_path: Path, stations: list[str], message: str
+) -> None:
+    args = ["-w", str(tmp_path), "project", "create", "--stack", "plc", "--id", "DJ-2026-024", "--name", "坏工位",
+            "--dry-run"]
+    for station in stations:
+        args += ["--station", station]
+    result = cli_runner.invoke(cli, args)
+    assert result.exit_code == 1
+    assert message in result.output
+
+
+def test_project_create_station_option_is_plc_standard_only(cli_runner: CliRunner, tmp_path: Path) -> None:
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "project", "create", "--stack", "python", "--id", "SW-2026-099",
+                                     "--name", "工具", "--station", "Station1", "--dry-run"])
+    assert result.exit_code == 1
+    assert "--station 只能用于" in result.output
+
 def test_project_create_python_chinese_name_uses_id_package_in_research_directory(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
