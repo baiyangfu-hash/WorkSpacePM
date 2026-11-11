@@ -483,6 +483,91 @@ def test_task_xml_runs_on_battery_at_normal_priority_without_trigger() -> None:
     assert "中文" in get("t:Actions/t:Exec/t:Arguments")
 
 
+def _no_user_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("USERNAME", "USERDOMAIN", "USER", "LOGNAME"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_d228_the_task_user_comes_from_the_system_when_the_environment_has_no_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: "PC\\fubai")
+    assert mod.task_user() == "PC\\fubai"
+
+
+def test_d228_the_system_answer_wins_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    monkeypatch.setenv("USERDOMAIN", "STALE")
+    monkeypatch.setenv("USERNAME", "someone-else")
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: "PC\\fubai")
+    assert mod.task_user() == "PC\\fubai"
+
+
+@pytest.mark.parametrize(("domain", "expected"), [("PC", "PC\\fubai"), ("", "fubai")])
+def test_d228_the_environment_is_only_the_fallback(monkeypatch: pytest.MonkeyPatch, domain: str, expected: str) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    monkeypatch.setenv("USERNAME", "fubai")
+    if domain:
+        monkeypatch.setenv("USERDOMAIN", domain)
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: "")
+    assert mod.task_user() == expected
+
+
+def test_d228_no_user_from_either_source_is_refused_before_any_task_is_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    monkeypatch.setenv("USERDOMAIN", "PC")  # a domain alone is not a user: the old code wrote "PC\\" into the task
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: "")
+    started: list[list[str]] = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda argv, **_k: started.append(list(argv)))
+    cfg = {"name": "drill", "python": sys.executable, "out_dir": str(tmp_path)}
+    with pytest.raises(mod.GateError, match="取不到当前登录用户"):
+        mod._launch_windows(cfg, tmp_path / "g.json")
+    assert started == [] and not (tmp_path / "long_gate_task.xml").exists()
+
+
+def test_d228_the_registered_task_carries_the_system_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: "PC\\fubai")
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    cfg = {"name": "drill", "python": sys.executable, "out_dir": str(tmp_path)}
+    mod._launch_windows(cfg, tmp_path / "g.json")
+    root = ET.fromstring((tmp_path / "long_gate_task.xml").read_text(encoding="utf-16").split("?>", 1)[1])
+    node = root.find("t:Principals/t:Principal/t:UserId", {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"})
+    assert node is not None and node.text == "PC\\fubai"
+    assert [argv[:2] for argv in calls] == [["schtasks", "/Create"], ["schtasks", "/Run"]]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="asks the real Windows API who is logged on")
+def test_d228_windows_names_the_account_with_an_empty_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    name = mod.task_user()
+    assert "\\" in name and name.rsplit("\\", 1)[1]
+
+
+def test_d228_off_windows_the_system_is_not_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    _no_user_in_env(monkeypatch)
+    monkeypatch.setenv("USERNAME", "fubai")
+    monkeypatch.setattr(mod, "IS_WINDOWS", False)
+    monkeypatch.setattr(mod, "_windows_account_name", lambda: pytest.fail("asked Windows on another system"))
+    assert mod.task_user() == "fubai"
+
+
 def test_config_validation_rejects_relative_out_dir(tmp_path: Path) -> None:
     mod = _module()
     p = tmp_path / "c.json"

@@ -25,5 +25,10 @@ PM_FORBIDDEN_WORDS = ("codex", "执行", "开始", "开工", "合并", "删除",
 # 工程工位允许“批准范围”“开工”“提交”三个灰按钮存在，其余禁用词同上。
 STATION_FORBIDDEN_WORDS = ("codex", "合并", "删除", "切换", "no-verify", "签字", "全量门禁")
 
-# 汇总数没有数据源时不得渲染为 0；画面只能显示这几个字样之一。
-UNCHECKED_TEXTS = ("没检查", "断网未知")
+# 汇总数没有数据源时不得渲染为 0；画面只能显示这几个字样之一（三态标签，widgets/common.STATES）。
+# “读不懂”：命令跑了、有输出，但不是认得的格式（骨架 A 加，CHG-SCPT-2026-628）。
+UNCHECKED_TEXTS = ("没检查", "断网未知", "读不懂")
+
+# 侧栏的页面按钮（shell.PAGES 里 nav=True 的那些）文字只能取自这里和 tool_policy.NAV_BUTTONS；
+# 侧栏分组标题是标签不是按钮。加新页先在这里或 tool_policy 加字，再在 shell.PAGES 登记。
+SIDEBAR_GROUPS = ("日常", "受管项目", "驾驶舱")

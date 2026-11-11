@@ -1,0 +1,20 @@
+# CST-CHG-002: 双轨变更通道规范
+#
+# 区分 Quick Track（轻量通道）与 Full Track（完整通道）：
+# 1. 缺陷修复(DEF)、优化(OPT)、文档(DOCU)、配置(CFG)且范围为 LOCAL/MODULE 走 Quick Track
+# 2. 需求新建(REQ)、紧急变更(EMRG)、跨系统/跨领域影响 SYSTEM/CROSS/SAFE 或修改技能/约束规则走 Full Track
+
+id: "CST-CHG-002"
+name: "双轨变更通道分类规范"
+description: "根据变更性质、影响范围与改动路径自动分流 Quick Track 与 Full Track 通道"
+type: workflow
+severity: warning
+scope:
+  patterns:
+    - "00_项目管理/04_变更管理/01_变更单/**/*.md"
+    - "04_监控/01_变更管理/01_变更单/**/*.md"
+rules:
+  - type: "dual_track_classification"
+    description: "局部小改动推荐 Quick Track，核心/架构改动强制走 Full Track"
+    cli_command: "auto-pm change create --pid <PID> --domain <DOMAIN> --nature <NATURE> --scope <SCOPE>"
+auto_fix: false

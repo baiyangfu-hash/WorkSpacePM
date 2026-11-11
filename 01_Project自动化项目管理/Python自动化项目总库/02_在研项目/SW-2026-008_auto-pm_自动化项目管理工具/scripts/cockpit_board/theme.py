@@ -14,9 +14,14 @@ MONO_STACK = ("Consolas", "Menlo", "SF Mono", "DejaVu Sans Mono")
 FONT_SIZE_PT = 10
 FONT_SIZE_TITLE_PT = 15
 FONT_SIZE_SMALL_PT = 9
+FONT_SIZE_SECTION_PT = 11
+# 令牌 v2（CHG-SCPT-2026-628 骨架 A）：字号只用这四级，画面代码用名字取，不写数字。
+FONT_LADDER_PT = {"small": FONT_SIZE_SMALL_PT, "body": FONT_SIZE_PT, "section": FONT_SIZE_SECTION_PT,
+                  "title": FONT_SIZE_TITLE_PT}
 
 SPACE = 8  # 基本间距，其余都是它的倍数
 RADIUS = 6
+SIDEBAR_WIDTH = SPACE * 22  # 侧栏宽度（176 像素），1366×768 下右边还能放下整页
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ class Tokens:
     ok_soft: str
     na: str  # 没检查 / 无数据（灰）
     na_soft: str
+    side: str  # 侧栏底（令牌 v2）
 
 
 LIGHT = Tokens(
@@ -64,6 +70,7 @@ LIGHT = Tokens(
     ok_soft="#e5f2e8",
     na="#8b93a0",
     na_soft="#eef0f3",
+    side="#e9ebef",
 )
 
 DARK = Tokens(
@@ -87,7 +94,11 @@ DARK = Tokens(
     ok_soft="#1f3326",
     na="#7c8491",
     na_soft="#262a31",
+    side="#1b1e23",
 )
+
+# 三态标签（没检查 / 断网未知 / 读不懂）的语义色：前两种是灰（不知道），读不懂是风险色（读到了但看不懂，要人看）。
+STATE_SEV = {"unchecked": "na", "offline": "na", "unreadable": "risk"}
 
 # 语义名 -> (主色字段, 浅底字段)。严重度、健康、检查结果都只用这五种语义色。
 SEMANTIC = {
@@ -115,6 +126,10 @@ def build_qss(t: Tokens) -> str:
             f'QFrame#bar[sev="{name}"] {{ background: {soft_c}; border: 1px solid {main_c}; }}\n'
             f'QLabel#check[sev="{name}"] {{ color: {main_c}; }}\n'
         )
+    states = "".join(
+        f'QLabel#state[state="{key}"] {{ background: {getattr(t, SEMANTIC[sev][1])}; color: {getattr(t, SEMANTIC[sev][0])}; }}\n'
+        for key, sev in STATE_SEV.items()
+    )
     return f"""
 QMainWindow, QWidget#page, QScrollArea, QScrollArea > QWidget > QWidget {{ background: {t.bg}; }}
 QWidget {{ color: {t.fg}; font-family: {font_css(FONT_STACK)}; font-size: {FONT_SIZE_PT}pt; }}
@@ -136,6 +151,16 @@ QFrame#bar {{ border-radius: {RADIUS}px; }}
 QFrame#idbar {{ background: {t.card}; border: 1px solid {t.line}; border-radius: {RADIUS}px; }}
 QFrame#idbar[warn="true"] {{ background: {t.risk_soft}; border-color: {t.risk}; }}
 QFrame#topbar {{ background: {t.bg}; border-bottom: 1px solid {t.line}; }}
+QFrame#sidebar {{ background: {t.side}; border-right: 1px solid {t.line}; }}
+QLabel#navgroup {{ color: {t.fg3}; font-size: {FONT_SIZE_SMALL_PT}pt; font-weight: 600;
+    padding: {SPACE}px {SPACE}px {SPACE // 2}px {SPACE}px; }}
+QPushButton#nav {{ border: none; background: transparent; color: {t.fg2}; text-align: left;
+    padding: 5px {SPACE + 4}px; border-radius: {RADIUS}px; }}
+QPushButton#nav:hover {{ background: {t.card2}; }}
+QPushButton#nav:checked {{ background: {t.accent_soft}; color: {t.accent}; font-weight: 600; }}
+QLabel#scope {{ color: {t.fg3}; font-size: {FONT_SIZE_SMALL_PT}pt; padding: {SPACE // 2}px {SPACE * 2}px 0 {SPACE * 2}px; }}
+QLabel#heading {{ font-size: {FONT_SIZE_SECTION_PT}pt; font-weight: 600; }}
+QLabel#state {{ border-radius: 4px; padding: 1px 7px; font-size: {FONT_SIZE_SMALL_PT}pt; }}
 QPushButton {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: {RADIUS}px;
     padding: 4px 11px; }}
 QPushButton:hover {{ background: {t.card2}; }}
@@ -156,8 +181,7 @@ QPlainTextEdit#tool_output {{ background: {t.card2}; border: 1px solid {t.line};
     font-family: {font_css(MONO_STACK)}; }}
 QFrame#pre {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: 4px; }}
 QToolTip {{ background: {t.card}; color: {t.fg}; border: 1px solid {t.line2}; }}
-{"".join(sem)}
-"""
+{"".join(sem)}{states}"""
 
 
 def token_names() -> list[str]:

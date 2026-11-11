@@ -124,8 +124,8 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
             lowered = (button.text() + button.toolTip()).lower()
             assert not any(word in lowered for word in policy.PM_FORBIDDEN_WORDS), button.text()
     for button in _buttons(window):
-        # 流程图页、工具页自己的按钮由 test_cockpit_board_flow / _tools 按各自的清单清点；这里只数顶栏和上面五页
-        if button.objectName() in ("tab", "mode", "refresh") and not _in_flow_or_tools(window, button):
+        # 流程图页、工具页自己的按钮由 test_cockpit_board_flow / _tools 按各自的清单清点；这里只数侧栏（nav）、顶栏和上面五页
+        if button.objectName() in ("nav", "tab", "mode", "refresh") and not _in_flow_or_tools(window, button):
             seen.add(button.text())
     assert seen <= policy.PM_BUTTONS | tool_policy.NAV_BUTTONS, seen - policy.PM_BUTTONS - tool_policy.NAV_BUTTONS
     assert tool_policy.NAV_BUTTONS <= seen
@@ -488,11 +488,14 @@ def test_process_and_file_writes_live_only_in_actions() -> None:
             assert "subprocess" not in source, path.name
         if path.name not in ("actions.py", "app.py"):
             assert not re.search(WRITES, source), path.name
-    # 唯一的写文件：actions.py 追加一行 BC（带预览）；app.py 只在启动出错时写系统临时目录
+    # 写文件只有三处：actions.py 追加一行 BC（带预览）、actions.write_snapshot 存“上次读取”快照（只写
+    # .auto-pm/cache/cockpit_board/，CHG-SCPT-2026-628 骨架 B）；app.py 只在启动出错时写系统临时目录
     app_source = sources[PACKAGE / "app.py"]
     assert app_source.count("write_text(") == 1
     assert "tempfile.gettempdir()" in app_source.split("def _crash_report", 1)[1]
-    assert len(re.findall(WRITES, sources[PACKAGE / "actions.py"])) == 1
+    actions_source = sources[PACKAGE / "actions.py"]
+    assert len(re.findall(WRITES, actions_source)) == 2
+    assert len(re.findall(WRITES, actions_source.split("def write_snapshot", 1)[1])) == 1  # 快照那一处在 write_snapshot 里
     assert len(re.findall(WRITES, app_source)) == 1
 
 
