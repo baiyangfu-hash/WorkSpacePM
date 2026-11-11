@@ -1,0 +1,15 @@
+{
+  "tasks": [
+    {
+      "name": "gate-full",
+      "state": "RUNNING",
+      "exit_code": null,
+      "started_at": "2026-11-11T12:00:00+00:00"
+    },
+    {
+      "name": "old",
+      "state": "UNREADABLE",
+      "error": "status.json 读不出"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "project_path": "/work/WorkSpacePM/0100_PLC自动化/DJ-2026-000",
+  "project_type": "test-suite",
+  "items": [
+    {
+      "item": ".plc.json",
+      "status": "pass",
+      "message": "配置完整: name=DJ-2026-000, version=2.0.0"
+    },
+    {
+      "item": ".plc.json libraries[../01_SharedLibraries/SysLib]",
+      "status": "pass",
+      "message": "库路径有效，关键文件 5/5"
+    },
+    {
+      "item": "PM_SESSION",
+      "status": "pass",
+      "message": "PM_SESSION_DJ-2026-000.md 存在"
+    },
+    {
+      "item": "PM_SESSION 行数",
+      "status": "pass",
+      "message": "119 行（阈值: 150 行）"
+    },
+    {
+      "item": "PRD 目录",
+      "status": "pass",
+      "message": "PRD/ 目录存在"
+    },
+    {
+      "item": "PRD/需求分析文档_REQ.md",
+      "status": "pass",
+      "message": "存在"
+    },
+    {
+      "item": "PRD/接口文档_INT.md",
+      "status": "pass",
+      "message": "存在"
+    },
+    {
+      "item": "PRD/详细设计说明书_DSN.md",
+      "status": "pass",
+      "message": "存在"
+    },
+    {
+      "item": "PRD/技术方案文档_TEC.md",
+      "status": "pass",
+      "message": "存在"
+    },
+    {
+      "item": "目录唯一性与冲突排查",
+      "status": "pass",
+      "message": "同级阶段目录序号唯一，无冲突"
+    },
+    {
+      "item": "Spec Snapshot",
+      "status": "warn",
+      "message": "PROJ-016: V1.0.0 → V1.2.0 (次版本漂移); LSP-905: V1.0.2 → V1.6.0 (次版本漂移)"
+    },
+    {
+      "item": "SCL 代码规范",
+      "status": "fail",
+      "message": "发现 11 个规范错误（如: FB100/FB_ValveControl.scl:28 输入变量 'AutoManual' 缺失 'i_' 前缀（如 i_bStart）; FB100/FB_ValveControl.scl:33 输入变量 'OpenCmd' 缺失 'i_' 前缀（如 i_bStart）; FB100/FB_ValveControl.scl:34 输入变量 'CloseCmd' 缺失 'i_' 前缀（如 i_bStart））"
+    },
+    {
+      "item": "文档一致性 [数据块 GlobalVars]",
+      "status": "warn",
+      "message": "缺文档 1（如：GlobalVars：缺少变量定义文档（期望 程序文档/PLC变量定义文档_VAR.md））；运行 plc docs check 查看全部，plc docs sync 自动补全"
+    },
+    {
+      "item": "文档一致性 [功能块 FB_ValveControl]",
+      "status": "warn",
+      "message": "缺文档 1（如：FB_ValveControl：缺少接口文档（期望 FB100/PRD/接口文档_IFC-*.md））；运行 plc docs check 查看全部，plc docs sync 自动补全"
+    },
+    {
+      "item": "文档一致性 [功能块 FB_TimerTest]",
+      "status": "warn",
+      "message": "缺文档 1（如：FB_TimerTest：缺少接口文档（期望 TimerTest/PRD/接口文档_IFC-*.md））；运行 plc docs check 查看全部，plc docs sync 自动补全"
+    },
+    {
+      "item": "变量定义文档存在性",
+      "status": "fail",
+      "message": "缺少变量定义文档（期望 程序文档/PLC变量定义文档_VAR.md），1 个数据块/结构体/组织块（GlobalVars）无处核对；运行 plc docs sync 生成草稿，审核后运行 plc docs confirm"
+    },
+    {
+      "item": "接口文档 INT ↔ 代码 [FB 实例]",
+      "status": "warn",
+      "message": "方案级接口文档里没有 FB 实例表（需要含“FB 类型名”和“实例名”列的表格），无法对照代码里的 1 个 FB 实例"
+    },
+    {
+      "item": "Siemens 语言服务 check",
+      "status": "warn",
+      "message": "未验证：本机未找到 Dynamic Siemens Language Support 插件命令行，语言服务这一层没有执行（交付阶段门禁按失败处理）"
+    }
+  ],
+  "pass_count": 10,
+  "warn_count": 6,
+  "fail_count": 2,
+  "not_applicable": false,
+  "not_applicable_reason": ""
+}

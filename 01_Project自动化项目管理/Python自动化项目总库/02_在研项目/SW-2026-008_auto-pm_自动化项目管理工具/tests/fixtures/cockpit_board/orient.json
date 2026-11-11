@@ -1,0 +1,115 @@
+{
+  "schema_version": "continuity-resume.v2",
+  "context": {
+    "schema_version": "workspace-context.v2",
+    "workspace_root": "/work/WorkSpacePM",
+    "control_root": "/work/WorkSpacePM",
+    "execution_root": "/work/WorkSpacePM",
+    "candidate_commit": "",
+    "resolution_source": "explicit",
+    "subject_project_id": "SW-2026-008",
+    "subject": {
+      "project_id": "SW-2026-008",
+      "name": "auto-pm",
+      "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+      "stack": "python",
+      "phase": "developing",
+      "source": "copier"
+    },
+    "control_project_id": "SYS-2026-001",
+    "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
+    "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
+    "runtime_root": "00_Infrastructure/auto_pm",
+    "release_id": "1.3.3-57aaa68",
+    "configured_release_id": "1.3.3-57aaa68",
+    "effective_release_id": "",
+    "runtime_load_path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py",
+    "runtime_fallback_reason": "loaded_package_outside_runtime_releases",
+    "read_set": [
+      {
+        "path": "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+        "sha256": "3a118ecfcd138c807e7a6f71b7d1749910a0742061faf7270348da0a2092b50c"
+      },
+      {
+        "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/.copier-answers.yml",
+        "sha256": "023fb1060ac0e1bc59386eea0989556e8d8b39d8040848913f9b6ba28bd41cec"
+      },
+      {
+        "path": "00_Infrastructure/auto_pm/active_release.json",
+        "sha256": "7532ca761d0035af8e9cd2a2d46a80cadd8ff19288927ab38ac9fdf733caeda3"
+      },
+      {
+        "path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py",
+        "sha256": "5053c4b6b40d38c7b21c55036a744a59136b488688b0a9c82adb66801296162d"
+      }
+    ],
+    "evidence_id": "CTX-CCE8FBC141C4CDE8",
+    "conflicts": [
+      "RUNTIME_IDENTITY_UNVERIFIED"
+    ]
+  },
+  "mission": null,
+  "work": null,
+  "work_candidates": [],
+  "mission_candidates": [],
+  "run": null,
+  "run_candidates": [],
+  "checkpoint": null,
+  "lease": null,
+  "conflicts": [
+    "RUNTIME_IDENTITY_UNVERIFIED"
+  ],
+  "hold_warnings": [],
+  "residue": [],
+  "exit_hints": [
+    "RUNTIME_IDENTITY_UNVERIFIED: 出口共 1 步，谁能做=user；完整命令清单：python main.py continuity recovery plan --pid <项目编号> --state RUNTIME_IDENTITY_UNVERIFIED"
+  ],
+  "next_legal_action": "",
+  "read_set": [
+    "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/.copier-answers.yml"
+  ],
+  "intake": {
+    "schema_version": "intake-summary.v1",
+    "awaiting_confirmation": 0,
+    "confirmed_waiting": 0,
+    "queue": []
+  },
+  "evidence_id": "RESUME-EFE47AAC152F1A6E",
+  "query": {
+    "schema_version": "continuity-query.v1",
+    "control_root": "/work/WorkSpacePM",
+    "execution_root": "/work/WorkSpacePM",
+    "candidate_commit": "",
+    "configured_release_id": "1.3.3-57aaa68",
+    "effective_release_id": "",
+    "runtime_load_path": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/__init__.py",
+    "runtime_fallback_reason": "loaded_package_outside_runtime_releases",
+    "producer_load_path": "/work/WorkSpacePM/01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/application/core/continuity_query_service.py",
+    "producer_sha256": "28e6907d99b9c70356d034637ac5bdd66448af3de177fd77dcfc325ab6939903",
+    "capabilities": {
+      "contract_version": "runtime-capabilities.v2",
+      "parking_supported": true,
+      "preemption_supported": false,
+      "actions": [
+        {
+          "action": "PARK",
+          "status": "SUPPORTED",
+          "reason": "pm park 记断点放下手上的卡；放进“搁着”须带用户原话位置（--approval-evidence-ref），不带只能放进“等你”"
+        },
+        {
+          "action": "RESUME_PARKED",
+          "status": "SUPPORTED",
+          "reason": "pm unpark / pm switch 凭断点拿回搁着的卡；拿回哪张只听用户的（--approval-evidence-ref）"
+        },
+        {
+          "action": "PREEMPT",
+          "status": "UNSUPPORTED",
+          "reason": "运行中插队不支持：不抢正在写的钥匙；插急活请先 pm park 记断点放下手上的卡，再 pm switch；查询本身不是执行授权"
+        }
+      ]
+    },
+    "requested_action": null,
+    "evidence_id": "QUERY-B27338E377B728E2"
+  }
+}
