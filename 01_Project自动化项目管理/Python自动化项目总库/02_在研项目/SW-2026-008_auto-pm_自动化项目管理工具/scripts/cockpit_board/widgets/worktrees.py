@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 
 LISTED = 12
@@ -44,11 +45,22 @@ def summarize(reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
     return []
 
 
+def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
+    """工位列表是空的才算空；清理清单不参与判空（“没有可清理的”不代表“没有工位”）。"""
+    if reader == "worktree_list":
+        return not data.get("stations")
+    return None
+
+
 class WorktreesPage(c.ReadPage):
     def __init__(self) -> None:
+        empty_text, error_text = shell.page_texts()["worktrees"]
         super().__init__("worktrees", "工作树与分支", "每个 AI 的工位干不干净、哪些可以收", (
             ("收工位、清理", "会删东西，骨架不放按钮；在控制根终端里跑 main.py worktree close / sweep --apply", ""),
-        ))
+        ), empty_text, error_text)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
+
+    def is_empty(self, reader: str, data: dict[str, Any]) -> bool | None:
+        return is_empty(reader, data)
