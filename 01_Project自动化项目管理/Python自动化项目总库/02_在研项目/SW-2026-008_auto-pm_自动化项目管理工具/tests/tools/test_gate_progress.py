@@ -28,11 +28,14 @@ def test_second_case_replaces_the_note():
 """
 
 
+# D-248: with ``-c os.devnull`` and no ``--confcutdir`` pytest walks every parent of the case,
+# from the drive root down, listing the system Temp folder on the way; a temp folder another
+# process deletes meanwhile then fails collection. ``--confcutdir`` stops the walk at the case.
 def _run(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     case = tmp_path / "case" / "test_noted.py"
     case.parent.mkdir()
     case.write_text(CASE, encoding="utf-8")
-    argv = [sys.executable, "-B", "-m", "pytest", str(case), "--rootdir", str(case.parent), "-c", os.devnull,
+    argv = [sys.executable, "-B", "-m", "pytest", str(case), "--rootdir", str(case.parent), "--confcutdir", str(case.parent), "-c", os.devnull,
             "-p", "no:cacheprovider", "-p", gate.PROGRESS_PLUGIN, "-q"]  # fmt: skip
     return subprocess.run(argv, cwd=PROJECT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False)
 
@@ -65,7 +68,7 @@ def test_a_directory_that_cannot_be_written_never_fails_a_case(tmp_path: Path) -
     case = tmp_path / "ok" / "test_ok.py"
     case.parent.mkdir()
     case.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
-    argv = [sys.executable, "-B", "-m", "pytest", str(case), "--rootdir", str(case.parent), "-c", os.devnull,
+    argv = [sys.executable, "-B", "-m", "pytest", str(case), "--rootdir", str(case.parent), "--confcutdir", str(case.parent), "-c", os.devnull,
             "-p", "no:cacheprovider", "-p", gate.PROGRESS_PLUGIN, "-q"]  # fmt: skip
     env = {**gate.child_environment(), gate.PROGRESS_ENV: str(blocker / "under-a-file")}
     done = subprocess.run(argv, cwd=PROJECT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False)
