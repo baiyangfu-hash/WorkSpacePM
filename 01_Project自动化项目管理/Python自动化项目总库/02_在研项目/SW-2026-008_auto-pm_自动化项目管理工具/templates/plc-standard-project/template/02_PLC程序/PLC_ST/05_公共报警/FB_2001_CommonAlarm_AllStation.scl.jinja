@@ -1,12 +1,12 @@
 ﻿(* ================================================================= *)
-(*  功能块名称:FB_2001_CommonAlarm_AllStation                        *)
+(*  功能块名称:FB_2001_CommonAlarm_AllStation_{{ project_tag }}                        *)
 (*  功能描述:公共报警管理功能块 - 汇总所有工站报警信息                *)
 (*  版本号:V3.0.0 (结构体整块传递架构)                               *)
 (* ================================================================= *)
-FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation
+FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation_{{ project_tag }}
 
 VAR_IN_OUT
-    io_stGlobal                : ST_CommonAlarm; // 公共报警工站全量数据结构体
+    io_stGlobal                : ST_CommonAlarm{{ udt_suffix }}; // 公共报警工站全量数据结构体
 END_VAR
 
 VAR

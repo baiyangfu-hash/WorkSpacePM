@@ -1,6 +1,6 @@
-﻿FUNCTION_BLOCK FB_3001_ExternalInteraction
+﻿FUNCTION_BLOCK FB_3001_ExternalInteraction_{{ project_tag }}
 (* ==============================================================================
- * FB_3001_ExternalInteraction - 通用外部设备交握与心跳监视功能块
+ * FB_3001_ExternalInteraction_{{ project_tag }} - 通用外部设备交握与心跳监视功能块
  * 项目: {{ project_id }} {{ project_name }}
  * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
  * ============================================================================== *)
@@ -24,7 +24,7 @@ VAR_OUTPUT
 END_VAR
 
 VAR_IN_OUT
-    io_stExternal       : ST_ExternalDevice;  // 外部设备交互全量数据结构体
+    io_stExternal       : ST_ExternalDevice{{ udt_suffix }};  // 外部设备交互全量数据结构体
 END_VAR
 
 VAR

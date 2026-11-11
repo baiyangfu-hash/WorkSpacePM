@@ -1,11 +1,11 @@
-# FB_2001_CommonAlarm_AllStation 详细设计说明书
+# FB_2001_CommonAlarm_AllStation_{{ project_tag }} 详细设计说明书
 
 ## 1. 文档基础信息
 
 | 属性 | 值 |
 |------|-----|
 | **文档标题** | 公共报警管理功能块详细设计说明书 |
-| **适用FB** | FB_2001_CommonAlarm_AllStation |
+| **适用FB** | FB_2001_CommonAlarm_AllStation_{{ project_tag }} |
 | **文档版本** | V9.1.0 |
 | **编制日期** | 2026-05-18 |
 | **编制人** | Trae |
@@ -27,7 +27,7 @@
 
 ### 3.1 核心功能
 
-FB_2001_CommonAlarm_AllStation 是一个**纯逻辑功能块**，作为边框缓存机的**全局报警管理中心**：
+FB_2001_CommonAlarm_AllStation_{{ project_tag }} 是一个**纯逻辑功能块**，作为边框缓存机的**全局报警管理中心**：
 
 - **全工站报警汇聚**: 接收~25个BOOL分类报警输入，覆盖安全/输送/取放料/送料/外部五类报警源
 - **内置优先级扫描**: 按49类报警码优先级从高到低扫描BOOL输入，直接计算最高优先级报警码(INT)
@@ -41,7 +41,7 @@ FB_2001_CommonAlarm_AllStation 是一个**纯逻辑功能块**，作为边框缓
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│               FB_2001_CommonAlarm_AllStation (纯逻辑块)                   │
+│               FB_2001_CommonAlarm_AllStation_{{ project_tag }} (纯逻辑块)                   │
 │                                                                          │
 │    输入 (VAR_INPUT) — 5类~25个BOOL:                                       │
 │    ├─ 系统/安全 (9+8+4=21个):                                            │
@@ -106,7 +106,7 @@ FB_2001_CommonAlarm_AllStation 是一个**纯逻辑功能块**，作为边框缓
 │  Step3: FB_1003_PickPlace             ──取放料机构                       │
 │  Step4: FB_1004_GlueMachineFeeder     ──打胶机送料                       │
 │                          ↓                                               │
-│  Step5: "DB_2001_CommonAlarm"(背景DB, FB_2001_CommonAlarm_AllStation)    │
+│  Step5: "DB_2001_CommonAlarm_{{ project_tag }}"(背景DB, FB_2001_CommonAlarm_AllStation_{{ project_tag }})    │
 │         各工站/外部/系统BOOL ──→ 扫描 ──→ 报警码 + 指示灯/蜂鸣器          │
 │                          ↓                                               │
 │  Step6: IO输出映射 (报警灯/蜂鸣器 → Y24~Y27/Y50)                         │

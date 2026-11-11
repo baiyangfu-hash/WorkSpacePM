@@ -1,7 +1,7 @@
-# FB_1001_Station1 使用说明书
+# FB_1001_Station1_{{ project_tag }} 使用说明书
 
 > **项目编号**: {{ project_id }}  
-> **功能块**: `FB_1001_Station1`  
+> **功能块**: `FB_1001_Station1_{{ project_tag }}`  
 > **模块名称**: 工位1 动作机构控制  
 > **版本号**: {{ version }}  
 > **编制人**: {{ author }}  
@@ -12,17 +12,17 @@
 
 ## 1. 实例化与调用方法
 
-实例放在自己的背景数据块 `00_全局数据/DB_1001_Station1.scl`（不放进 `GlobalVars`，LSP-905 §4.11-1）：
+实例放在自己的背景数据块 `00_全局数据/DB_1001_Station1.scl`（不放进 `GlobalVars_{{ project_tag }}`，LSP-905 §4.11-1）：
 ```scl
-DATA_BLOCK "DB_1001_Station1"
-"FB_1001_Station1"
+DATA_BLOCK "DB_1001_Station1_{{ project_tag }}"
+"FB_1001_Station1_{{ project_tag }}"
 BEGIN
 END_DATA_BLOCK
 ```
 
-在 `OB1.scl` 中进行周期调度（`VAR_IN_OUT` 直接读写 `GlobalVars.stStation1`，不需要写回）：
+在 `OB123.scl` 中进行周期调度（`VAR_IN_OUT` 直接读写 `GlobalVars_{{ project_tag }}.stStation1`，不需要写回）：
 ```scl
-"DB_1001_Station1"(io_stStation := GlobalVars.stStation1);
+"DB_1001_Station1_{{ project_tag }}"(io_stStation := GlobalVars_{{ project_tag }}.stStation1);
 ```
 
 ---
