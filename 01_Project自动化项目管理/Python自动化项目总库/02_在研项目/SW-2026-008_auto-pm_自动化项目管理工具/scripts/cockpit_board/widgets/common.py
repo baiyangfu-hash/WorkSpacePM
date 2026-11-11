@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -349,6 +349,29 @@ def state_line(state: str, status: str) -> QWidget:
     return row
 
 
+# 页面顶上一行总状态（CHG-SCPT-2026-637）：像 HMI 画面顶上的一行总状态。几条命令里最差的那个三态排在前面。
+STATE_ORDER = ("offline", "unreadable", "unchecked")
+
+
+def page_status(results: Sequence[ReadResult], is_empty: Callable[[str, dict[str, Any]], bool | None]) -> tuple[str, str]:
+    """（"error", 最差三态） / （"empty", ""） / （"", ""）。纯函数，测试直接调。
+
+    - 有任何一条没读到（三态之一，含用快照顶上的）→ 错态，配最差的三态：断网未知 > 读不懂 > 没检查。快照是旧数据，不能让整页显示成“没事”。
+    - 全部读到，参与判空的命令（is_empty 返回 True/False 的）都空、且至少有一条参与 → 空态，不配标签。
+      is_empty 返回 None 的命令不参与判空（如进门定位、清理清单：它们“没有东西”不代表这一页没事）。
+    - 其余不画。
+    """
+    states = [read_state(result)[0] for result in results]
+    bad = {state for state in states if state}
+    if bad:
+        return "error", next(state for state in STATE_ORDER if state in bad)
+    votes = [is_empty(result.reader, result.parsed.data) for result in results]
+    judged = [vote for vote in votes if vote is not None]
+    if judged and all(judged):
+        return "empty", ""
+    return "", ""
+
+
 def shows_values(result: ReadResult) -> bool:
     """要点（数目、名字）只在读得懂时画：这次读到的，或这次没读到但有能读懂的快照（状态行写明是上次的）。"""
     return result.parsed is not None and result.parsed.ok and (result.outcome is not None or bool(result.last_note))
@@ -357,13 +380,25 @@ def shows_values(result: ReadResult) -> bool:
 class ReadPage(QWidget):
     """骨架页：顶上标题和一句话，中间每条命令一块（状态、要点、原文），底下是还没做的功能占位卡。
 
-    子类只写 summary()：把 readers 解析出的 data 变成几行“名字 → 值”。不起子进程、不写文件，
-    命令由 app 在后台线程跑完后调用 show_results()。
+    子类写 summary()：把 readers 解析出的 data 变成几行“名字 → 值”；写 is_empty()：这条命令读到的算不算“空”。
+    不起子进程、不写文件，命令由 app 在后台线程跑完后调用 show_results()。
+    empty_text、error_text 取自 flow/pages.json（shell.page_texts），画在各条命令的块上面一行（page_status）。
     """
 
-    def __init__(self, key: str, title: str, question: str, todo: Sequence[tuple[str, str, str]] = ()) -> None:
+    def __init__(
+        self,
+        key: str,
+        title: str,
+        question: str,
+        todo: Sequence[tuple[str, str, str]] = (),
+        empty_text: str = "",
+        error_text: str = "",
+    ) -> None:
         super().__init__()
         self.key = key
+        self.empty_text = empty_text
+        self.error_text = error_text
+        self.status: tuple[str, str] = ("", "")
         self.setObjectName("page")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -372,6 +407,10 @@ class ReadPage(QWidget):
         body.addWidget(section(title, question))
         self.project_line = label("", "muted")
         body.addWidget(self.project_line)
+        top = QWidget()  # 顶上一行总状态单独一格，不混进下面各条命令的块
+        self.top = QVBoxLayout(top)
+        self.top.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(top)
         holder = QWidget()
         self.reads = QVBoxLayout(holder)
         self.reads.setContentsMargins(0, 0, 0, 0)
@@ -384,10 +423,21 @@ class ReadPage(QWidget):
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return []
 
+    def is_empty(self, reader: str, data: dict[str, Any]) -> bool | None:
+        """这条命令读到的是不是“空”；None＝这条命令不参与判空。默认不参与。"""
+        return None
+
     def show_results(self, scope: str, results: Sequence[ReadResult]) -> None:
         self.results = list(results)
         self.project_line.setText(scope)
         clear(self.reads)
+        clear(self.top)
+        self.status = page_status(results, self.is_empty)
+        kind, state = self.status
+        if kind == "error" and self.error_text:
+            self.top.addWidget(page_line(state, self.error_text))
+        elif kind == "empty" and self.empty_text:
+            self.top.addWidget(page_line("", self.empty_text))
         for result in results:
             frame, layout = card()
             layout.addWidget(label(result.command, "heading"))
@@ -400,6 +450,14 @@ class ReadPage(QWidget):
             raw = "" if outcome is None else (outcome.stdout if outcome.kind == "ok" else (outcome.stderr or outcome.stdout))
             layout.addWidget(read_block(status, raw, state))
             self.reads.addWidget(frame)
+
+
+def page_line(state: str, text: str) -> QFrame:
+    """页面顶上那一行总状态：一张卡里一行“三态标签 + 文案”（空态不配标签）。"""
+    frame, layout = card()
+    frame.setProperty("pagestatus", "true")
+    layout.addWidget(state_line(state, text))
+    return frame
 
 
 def count_text(rows: Sequence[Any], unit: str) -> str:

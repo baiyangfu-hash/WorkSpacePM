@@ -69,7 +69,7 @@ class SpinePage(QWidget):
         data = load(path)
         self.data = data
         if data is None:
-            body.addWidget(c.state_line("unreadable", "flow/spine.json 读不出或不是认得的格式"))
+            body.addWidget(c.state_line("unreadable", shell.page_texts()["spine"][1]))
         else:
             for title, rows in step_rows(data):
                 frame, layout = c.card()

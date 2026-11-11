@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 
 COLUMNS = (("active", "在干"), ("waiting", "等你"), ("parked", "搁着"), ("closed", "已关"))
@@ -42,12 +43,23 @@ def summarize(reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
     return []
 
 
+def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
+    """在干、等你、搁着三栏都空才算空（已关的不算）；进门定位不参与判空。"""
+    if reader == "missions":
+        return not any(data.get(key) for key, _ in COLUMNS if key != "closed")
+    return None
+
+
 class TasksPage(c.ReadPage):
     def __init__(self) -> None:
+        empty_text, error_text = shell.page_texts()["tasks"]
         super().__init__("tasks", "任务", "这个项目手上有几张卡、哪张在干、卡在哪", (
             ("每张卡走到脊柱第几步", "要按卡对照 flow/spine.json 的十步，还没做", "main.py pm orient <项目> --json"),
             ("换项目看", "现在只读工程工位的默认项目（--station-project）", ""),
-        ))
+        ), empty_text, error_text)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
+
+    def is_empty(self, reader: str, data: dict[str, Any]) -> bool | None:
+        return is_empty(reader, data)
