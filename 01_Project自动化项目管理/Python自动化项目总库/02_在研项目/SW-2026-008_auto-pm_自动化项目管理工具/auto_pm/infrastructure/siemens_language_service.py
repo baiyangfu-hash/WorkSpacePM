@@ -1,6 +1,8 @@
 """auto_pm.infrastructure.siemens_language_service - 调用 Dynamic Siemens Language Support 插件自带的命令行（M3-PLUGIN）。
 
-只在本机调用用户已安装的插件命令行 ``siemens-lsp``（``check`` 诊断、``test`` 运行 ``.scltest``），不复制、不分发、不放进仓库或 CI；
+调用插件命令行 ``siemens-lsp``（``check`` 诊断、``test`` 运行 ``.scltest``）：本机用用户已安装的插件；不复制、不分发、不放进仓库。
+CI 只有一处（CHG-SCPT-2026-626，用户 11-10 决定）：gate-full 的 ``plugin`` 作业在运行时从官方 VS Code 市场按钉住的版本下载，先核对命令行的
+SHA256，只放在那台临时机器的 ``$RUNNER_TEMP``，不缓存、不上传、不提交，随机器销毁（守卫测试 ``tests/e2e/test_pmf_template_plc.py``）。
 用户为非商业使用并尊重其著作权。找不到命令行时返回 ``available=False`` 的结果——调用方必须把它当作“未验证”，而不是通过。
 
 定位顺序：环境变量 ``AUTO_PM_SIEMENS_LSP``（指向可执行文件）→ ``~/.vscode/extensions`` 下版本号最高的
