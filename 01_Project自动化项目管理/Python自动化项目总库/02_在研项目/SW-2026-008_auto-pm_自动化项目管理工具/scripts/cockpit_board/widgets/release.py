@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 
 STATE_ZH = {"STARTING": "正在起", "RUNNING": "在跑", "DONE": "跑完", "FAILED": "跑完没过或没跑起来", "STOPPED": "被停了", "UNREADABLE": "读不懂"}
@@ -31,12 +32,23 @@ def summarize(reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
     return []
 
 
+def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
+    """没有 STARTING 或 RUNNING 的长任务就算空（跑完的照样列在下面）。"""
+    if reader == "long_run":
+        return not [row for row in data.get("tasks") or [] if str(row.get("state") or "") in ("STARTING", "RUNNING")]
+    return None
+
+
 class ReleasePage(c.ReadPage):
     def __init__(self) -> None:
+        empty_text, error_text = shell.page_texts()["release"]
         super().__init__("release", "发版", "门禁跑到哪了、能不能准备发版", (
             ("本机生效发布版和候选包", "要读 active_release.json 和 doctor，还没接", "main.py doctor"),
             ("连续两轮完整门禁的对照", "M4 的判据，还没做", ""),
-        ))
+        ), empty_text, error_text)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
+
+    def is_empty(self, reader: str, data: dict[str, Any]) -> bool | None:
+        return is_empty(reader, data)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -60,6 +61,8 @@ class PrsPage(QWidget):
         self.box = QVBoxLayout(holder)
         self.box.setContentsMargins(0, 0, 0, 0)
         body.addWidget(holder)
+        self.empty_text, self.error_text = shell.page_texts()["prs"]
+        self.status: tuple[str, str] = ("", "")
         body.addWidget(c.placeholder("每个 PR 的检查、审计逐条对照", "采集里已有这些字段，还没排版", ""))
         self.show_github(None, disabled=False)
 
@@ -67,6 +70,15 @@ class PrsPage(QWidget):
         c.clear(self.box)
         state, status = github_state(snapshot, disabled)
         self.state = state
+        # 顶上一行总状态（CHG-SCPT-2026-637）：读到且 0 个 PR → 空态；断网 → 错态；其他读不到的照旧只写下面那句说明
+        if snapshot is not None and snapshot.fresh and not list(snapshot.pulls):
+            self.status = ("empty", "")
+            self.box.addWidget(c.page_line("", self.empty_text))
+        elif state == "offline":
+            self.status = ("error", "offline")
+            self.box.addWidget(c.page_line("offline", self.error_text))
+        else:
+            self.status = ("", "")
         frame, layout = c.card()
         layout.addWidget(c.state_line(state, status))
         # 只有这次真读到了才列；缓存和从没读到过都不列，免得旧数据冒充现在、或画成“没有 PR”

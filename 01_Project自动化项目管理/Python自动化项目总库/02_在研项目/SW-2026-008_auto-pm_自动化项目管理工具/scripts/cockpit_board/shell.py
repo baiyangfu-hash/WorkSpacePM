@@ -81,6 +81,12 @@ def page_reads(path: Path = PAGES_JSON) -> dict[str, tuple[PageRead, ...]]:
             for page in data["pages"]}
 
 
+def page_texts(path: Path = PAGES_JSON) -> dict[str, tuple[str, str]]:
+    """页键 → （空态文案, 错态文案）。和 page_reads 同一个来源，文件坏了同样直接报错。"""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {page["key"]: (str(page["empty_text"]), str(page["error_text"])) for page in data["pages"]}
+
+
 def spec(key: str) -> PageSpec:
     for item in PAGES:
         if item.key == key:

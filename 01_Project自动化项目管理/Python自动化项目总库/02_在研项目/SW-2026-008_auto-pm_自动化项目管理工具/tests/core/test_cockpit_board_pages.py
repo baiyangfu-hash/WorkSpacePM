@@ -373,3 +373,134 @@ def test_new_pages_have_no_buttons(qapp: QApplication, tmp_path: Path) -> None:
         _wait(qapp, window)
         assert not window.router.pages[key].findChildren(QAbstractButton), key
     window.close()
+
+
+# ---- 顶上一行总状态：空态、错态文案（CHG-SCPT-2026-637）------------------------------------------
+
+TEXTS = shell.page_texts()  # 文案从 pages.json 读，不在测试里写死
+PAGE_CLASSES: dict[str, Callable[[], c.ReadPage]] = {
+    "tasks": tasks.TasksPage, "attention": attention.AttentionPage,
+    "worktrees": worktrees.WorktreesPage, "release": release.ReleasePage,
+}
+# 每页“读到且空”的数据（读法 → 数据）；没列的读法用正常样本
+EMPTY_DATA: dict[str, dict[str, Any]] = {
+    "missions": {"active": [], "waiting": [], "parked": [], "closed": [{"mission_id": "M-1", "title": "旧卡"}]},
+    "pending": {"cards": [{"objective": "旧的", "superseded": True, "card": {}}]},
+    "inbox": {"items": [{"item_id": "IN-2", "title": "已确认", "status": "CONFIRMED"}]},
+    "worktree_list": {"stations": []},
+    "long_run": {"tasks": [{"name": "old", "state": "DONE", "exit_code": 0}]},
+}
+FULL_DATA: dict[str, dict[str, Any]] = {
+    "missions": {"active": [{"mission_id": "M-2", "title": "在干的卡"}], "waiting": [], "parked": [], "closed": []},
+    "pending": {"cards": [{"objective": "改报警", "card": {"request_id": "REQ-9"}}]},
+    "inbox": {"items": [{"item_id": "IN-1", "title": "换传感器", "status": "PROPOSED"}]},
+    "worktree_list": {"stations": [{"name": "trae", "branch": "trae/1", "checked": False}]},
+    "long_run": {"tasks": [{"name": "gate-full", "state": "RUNNING"}]},
+}
+
+
+class _Parsed:
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.ok, self.data, self.note = True, data, ""
+
+
+def _ok(reader: str, data: dict[str, Any] | None) -> c.ReadResult:
+    outcome = _outcome("ok", reader)
+    parsed: Any = _Parsed(data) if data is not None else readers.parse(reader, outcome.stdout)
+    return c.ReadResult(reader, "x", outcome, parsed)
+
+
+def _results(key: str, fill: dict[str, dict[str, Any]], broken: str = "", mode: str = "offline") -> list[c.ReadResult]:
+    out = []
+    for read in shell.page_reads()[key]:
+        if read.reader == broken:
+            outcome = _outcome(mode, read.reader)
+            parsed = readers.parse(read.reader, outcome.stdout) if mode == "garbage" else None
+            out.append(c.ReadResult(read.reader, "x", outcome, parsed))
+        else:
+            out.append(_ok(read.reader, fill.get(read.reader)))
+    return out
+
+
+def _top(page: QWidget) -> list[str]:
+    """顶上那一行总状态的字（没有就是空列表）。"""
+    for frame in page.findChildren(QWidget):
+        if frame.property("pagestatus") == "true":
+            return _texts(frame)
+    return []
+
+
+@pytest.mark.parametrize("key", READ_PAGE_KEYS)
+def test_read_page_top_line_empty_full_and_errors(qapp: QApplication, key: str) -> None:
+    empty_text, error_text = TEXTS[key]
+    page = PAGE_CLASSES[key]()
+    page.show_results("x", _results(key, EMPTY_DATA))
+    assert page.status == ("empty", "") and _top(page) == [empty_text]  # 空态不配三态标签
+    page.show_results("x", _results(key, FULL_DATA))
+    assert page.status == ("", "") and _top(page) == []
+    first = shell.page_reads()[key][0].reader
+    for mode, state in (("offline", "offline"), ("missing", "unchecked"), ("garbage", "unreadable")):
+        page.show_results("x", _results(key, EMPTY_DATA, broken=first, mode=mode))
+        assert page.status == ("error", state), mode
+        assert _top(page) == [c.STATES[state], error_text], mode
+
+
+@pytest.mark.parametrize(("key", "reader"), [("tasks", "orient"), ("worktrees", "worktree_sweep")])
+def test_commands_that_do_not_judge_empty_still_raise_the_error_line(qapp: QApplication, key: str, reader: str) -> None:
+    """进门定位、清理清单不参与判空（读法 A），但它们读不到时照样算没读到，顶上画错态。"""
+    page = PAGE_CLASSES[key]()
+    page.show_results("x", _results(key, EMPTY_DATA))
+    assert page.status == ("empty", "")  # 它们读到了也不挡空态
+    page.show_results("x", _results(key, EMPTY_DATA, broken=reader, mode="offline"))
+    assert page.status == ("error", "offline")
+    assert _top(page) == [c.STATES["offline"], TEXTS[key][1]]
+
+
+def test_snapshot_fallback_draws_the_error_line_not_the_empty_line(qapp: QApplication, tmp_path: Path) -> None:
+    reads = shell.page_reads()["release"]
+    app.read_page(tmp_path, reads, "", _runner("ok"), NOW)
+    later = app.read_page(tmp_path, reads, "", _runner("offline"), NOW + timedelta(minutes=5))
+    assert c.shows_values(later[0])  # 有快照
+    page = release.ReleasePage()
+    page.show_results("x", later)
+    assert page.status == ("error", "offline")
+    assert TEXTS["release"][0] not in _texts(page)
+    assert _top(page) == [c.STATES["offline"], TEXTS["release"][1]]
+
+
+def test_page_status_order_offline_then_unreadable_then_unchecked() -> None:
+    def res(mode: str) -> c.ReadResult:
+        outcome = _outcome(mode)
+        return c.ReadResult("missions", "x", outcome, readers.parse("missions", outcome.stdout) if mode == "garbage" else None)
+
+    def never(_reader: str, _data: dict[str, Any]) -> bool | None:
+        return None
+
+    assert c.page_status([res("missing"), res("garbage"), res("offline")], never) == ("error", "offline")
+    assert c.page_status([res("missing"), res("garbage")], never) == ("error", "unreadable")
+    assert c.page_status([res("missing"), c.ReadResult("missions", "x", skipped="没项目")], never) == ("error", "unchecked")
+    assert c.page_status([_ok("missions", None)], never) == ("", "")  # 没有一条参与判空：不画空态
+    assert c.page_status([], never) == ("", "")
+
+
+def test_prs_page_top_line(qapp: QApplication) -> None:
+    empty_text, error_text = TEXTS["prs"]
+    page = prs.PrsPage()
+    page.show_github(_snapshot("ok", pulls=0), disabled=False)
+    assert page.status == ("empty", "") and _top(page) == [empty_text]
+    page.show_github(_snapshot("offline"), disabled=False)
+    assert page.status == ("error", "offline") and _top(page) == [c.STATES["offline"], error_text]
+    page.show_github(_snapshot("offline", from_cache=True), disabled=False)
+    assert _top(page) == [c.STATES["offline"], error_text]
+    assert "#758" not in _texts(page)  # 有缓存照样不列 PR
+    page.show_github(_snapshot("ok"), disabled=False)
+    assert page.status == ("", "") and _top(page) == []
+    page.show_github(None, disabled=True)
+    assert page.status == ("", "") and _top(page) == []  # 其他读不到的保持原来的说明
+
+
+@pytest.mark.parametrize(("make", "key"), [(spine.SpinePage, "spine"), (commands.CommandsPage, "commands")])
+def test_data_pages_use_the_pages_json_error_text(qapp: QApplication, tmp_path: Path, make: Callable[[Path], QWidget], key: str) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("{不是 JSON", encoding="utf-8")
+    assert TEXTS[key][1] in _texts(make(bad))

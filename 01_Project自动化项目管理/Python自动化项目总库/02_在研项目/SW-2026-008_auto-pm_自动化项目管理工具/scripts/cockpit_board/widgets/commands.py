@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -56,7 +57,7 @@ class CommandsPage(QWidget):
         data = load(path)
         self.data = data
         if data is None:
-            body.addWidget(c.state_line("unreadable", "flow/commands_map.json 读不出或不是认得的格式"))
+            body.addWidget(c.state_line("unreadable", shell.page_texts()["commands"][1]))
             return
         groups = grouped(data)
         body.addWidget(c.kv([(CLASS_ZH[key], f"{len(groups[key])} 条 · {CLASS_TIP[key]}") for key in CLASS_ZH]))
