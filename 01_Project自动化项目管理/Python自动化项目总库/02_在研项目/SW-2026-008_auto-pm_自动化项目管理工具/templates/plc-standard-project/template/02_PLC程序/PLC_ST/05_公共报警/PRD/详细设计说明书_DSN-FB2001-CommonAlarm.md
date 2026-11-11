@@ -106,7 +106,7 @@ FB_2001_CommonAlarm_AllStation 是一个**纯逻辑功能块**，作为边框缓
 │  Step3: FB_1003_PickPlace             ──取放料机构                       │
 │  Step4: FB_1004_GlueMachineFeeder     ──打胶机送料                       │
 │                          ↓                                               │
-│  Step5: fbCommonAlarm(FB_2001_CommonAlarm_AllStation)                    │
+│  Step5: "DB_2001_CommonAlarm"(背景DB, FB_2001_CommonAlarm_AllStation)    │
 │         各工站/外部/系统BOOL ──→ 扫描 ──→ 报警码 + 指示灯/蜂鸣器          │
 │                          ↓                                               │
 │  Step6: IO输出映射 (报警灯/蜂鸣器 → Y24~Y27/Y50)                         │

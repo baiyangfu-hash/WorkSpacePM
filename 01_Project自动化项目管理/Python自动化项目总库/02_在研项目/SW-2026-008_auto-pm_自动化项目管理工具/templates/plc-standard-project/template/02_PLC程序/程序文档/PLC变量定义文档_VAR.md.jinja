@@ -33,7 +33,7 @@
 | `i` | INT | 整数 | `iAlarmCode` |
 | `r` | REAL | 浮点数 | `rSpeed` |
 | `t` | TIME | 时间 | `tDebounce` |
-| `fb` | FB实例 | 功能块实例 | `fbConveyor` |
+| `DB_` | 背景数据块 | 功能块实例（每个 FB 一个背景数据块） | `DB_1001_Station1` |
 
 ### 2.2 信号方向前缀
 
@@ -56,9 +56,14 @@
 | stExternal | ST_ExternalDevice | 外部设备交互信号 |
 | stStation1 | ST_Station1 | 工位1全局交互结构体 |
 | astServoAxis | ARRAY[1..4] OF ST_ServoAxis | 伺服轴数组 |
-| fbExternalDevice | FB_3001_ExternalInteraction | 外部设备交互功能块实例 |
-| fbStation1 | FB_1001_Station1 | 工位1功能块实例 |
-| fbCommonAlarm | FB_2001_CommonAlarm_AllStation | 公共报警功能块实例 |
+
+FB 实例不放在 GlobalVars 里（TIA V19 不接受全局 DB 里声明 FB 实例，见 LSP-905 §4.11-1），每个 FB 有自己的背景数据块：
+
+| 背景数据块 | FB 类型 | 说明 |
+|---|---|---|
+| DB_3001_ExternalInteraction | FB_3001_ExternalInteraction | 外部设备交互背景数据块 |
+| DB_1001_Station1 | FB_1001_Station1 | 工位1背景数据块 |
+| DB_2001_CommonAlarm | FB_2001_CommonAlarm_AllStation | 公共报警背景数据块 |
 
 ### ST_UpstreamDocking（结构体）
 
@@ -188,13 +193,13 @@
 
 ## 4. 功能块实例
 
-| 实例名 | FB类型 | 声明位置 | 说明 |
+FB 实例不声明在 GlobalVars 里，每个 FB 一个背景数据块，由 OB1 按工艺顺序调用（LSP-905 §4.11-1）。
+
+| 实例名（背景数据块） | FB类型 | 声明位置 | 说明 |
 |--------|--------|----------|------|
-| `fbConveyor` | FB_1002_SingleLayerConveyor | GlobalVars | 输送机实例 |
-| `fbPickPlace` | FB_1003_PickPlace | GlobalVars | 取放料实例 |
-| `fbFeeder` | FB_1004_GlueMachineFeeder | GlobalVars | 送料实例 |
-| `fbExternal` | FB_ExternalDeviceInteraction | GlobalVars | 外部设备交互实例 |
-| `fbCommonAlarm` | FB_2001_CommonAlarm | GlobalVars | 公共报警实例 |
+| `DB_3001_ExternalInteraction` | FB_3001_ExternalInteraction | `00_全局数据/DB_3001_ExternalInteraction.scl` | 外部设备交互实例 |
+| `DB_1001_Station1` | FB_1001_Station1 | `00_全局数据/DB_1001_Station1.scl` | 工位1实例 |
+| `DB_2001_CommonAlarm` | FB_2001_CommonAlarm_AllStation | `00_全局数据/DB_2001_CommonAlarm.scl` | 公共报警实例 |
 
 ## 5. M/D 区规划
 

@@ -63,7 +63,7 @@ def test_st07_the_shipped_template_and_shared_library_sources_have_no_structure_
     files = list(root.rglob("*.scl"))
     assert files, "the template ships static .scl files"
     for path in files:
-        assert _rules(path.read_text(encoding="utf-8")) == [], path.name
+        assert _rules(path.read_text(encoding="utf-8-sig")) == [], path.name
 
 
 def test_d21_a_utf8_file_with_a_bom_is_read_like_one_without(tmp_path: Path) -> None:

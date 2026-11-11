@@ -103,16 +103,16 @@ FB_ExternalDeviceInteraction → 4×FB_1002(L1→L4) + 汇总 → FB_1003_PickPl
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 5: 四层输送机展开调用 + 汇总                            │
 │                                                              │
-│ fbConveyor_L1(i_iLayerIndex:=1, ...)                         │
+│ "DB_1002_Conveyor_L1"(i_iLayerIndex:=1, ...)               │
 │   → stConveyor.q_aLayerRunning[1] / q_aLayerAlarmCode[1]    │
 │                                                              │
-│ fbConveyor_L2(i_iLayerIndex:=2, ...)                         │
+│ "DB_1002_Conveyor_L2"(i_iLayerIndex:=2, ...)               │
 │   → stConveyor.q_aLayerRunning[2] / q_aLayerAlarmCode[2]    │
 │                                                              │
-│ fbConveyor_L3(i_iLayerIndex:=3, ...)                         │
+│ "DB_1002_Conveyor_L3"(i_iLayerIndex:=3, ...)               │
 │   → stConveyor.q_aLayerRunning[3] / q_aLayerAlarmCode[3]    │
 │                                                              │
-│ fbConveyor_L4(i_iLayerIndex:=4, ...)                         │
+│ "DB_1002_Conveyor_L4"(i_iLayerIndex:=4, ...)               │
 │   → stConveyor.q_aLayerRunning[4] / q_aLayerAlarmCode[4]    │
 │                                                              │
 │ 汇总:                                                        │
@@ -143,9 +143,10 @@ M200 := NOT X16 AND X14 AND X15 AND Y13;
 
 IF NOT M200 THEN
     // 安全条件不满足，停止所有工站
-    fbConveyor4Layer.i_bEnable := FALSE;
-    fbPickPlace.i_bEnable := FALSE;
-    fbGlueMachineFeeder.i_bEnable := FALSE;
+    // 各工站 FB 经自己的背景数据块调用（FB 实例不放在 GlobalVars 里），这里把使能输入置 FALSE
+    "DB_1001_Conveyor4Layer".i_bEnable := FALSE;
+    "DB_1003_PickPlace".i_bEnable := FALSE;
+    "DB_1004_GlueMachineFeeder".i_bEnable := FALSE;
 END_IF;
 ```
 

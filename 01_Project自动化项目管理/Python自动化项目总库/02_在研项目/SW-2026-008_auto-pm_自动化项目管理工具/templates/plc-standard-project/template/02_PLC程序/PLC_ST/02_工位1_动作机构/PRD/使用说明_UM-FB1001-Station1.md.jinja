@@ -12,15 +12,17 @@
 
 ## 1. 实例化与调用方法
 
-在 `GlobalVars.db` 中声明实例：
+实例放在自己的背景数据块 `00_全局数据/DB_1001_Station1.scl`（不放进 `GlobalVars`，LSP-905 §4.11-1）：
 ```scl
-fbStation1 : FB_1001_Station1;
+DATA_BLOCK "DB_1001_Station1"
+"FB_1001_Station1"
+BEGIN
+END_DATA_BLOCK
 ```
 
-在 `OB1.scl` 中进行周期调度：
+在 `OB1.scl` 中进行周期调度（`VAR_IN_OUT` 直接读写 `GlobalVars.stStation1`，不需要写回）：
 ```scl
-GlobalVars.fbStation1(io_stStation := GlobalVars.stStation1);
-GlobalVars.stStation1 := GlobalVars.fbStation1.io_stStation;
+"DB_1001_Station1"(io_stStation := GlobalVars.stStation1);
 ```
 
 ---

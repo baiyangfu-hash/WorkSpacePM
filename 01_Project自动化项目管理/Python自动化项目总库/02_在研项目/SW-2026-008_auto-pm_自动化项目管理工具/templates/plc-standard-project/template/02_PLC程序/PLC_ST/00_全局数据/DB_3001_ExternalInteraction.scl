@@ -1,0 +1,10 @@
+﻿// ============================================================================
+// DB_3001_ExternalInteraction: FB_3001_ExternalInteraction 的背景数据块 (外部设备交互)
+// 说明: 背景 DB 不写变量, 变量来自 FB; 由 OB1 单实例调用 "DB_3001_ExternalInteraction"(...).
+//       TIA 全局 DB 里不能放 FB 实例 (LSP-905 §4.11), 所以每个 FB 用自己的背景 DB.
+// ============================================================================
+
+DATA_BLOCK "DB_3001_ExternalInteraction"
+"FB_3001_ExternalInteraction"
+BEGIN
+END_DATA_BLOCK

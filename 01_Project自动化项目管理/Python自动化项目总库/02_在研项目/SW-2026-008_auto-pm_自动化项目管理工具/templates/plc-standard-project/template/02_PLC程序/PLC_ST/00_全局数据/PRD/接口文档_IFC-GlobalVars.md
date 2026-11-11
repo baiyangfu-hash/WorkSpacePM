@@ -7,7 +7,7 @@
 | **功能描述** | 边框缓存机PLC控制系统全局变量数据交换中心 |
 | **当前版本** | V7.1.1 |
 | **编译日期** | 2026-05-20 |
-| **总变量数** | ~220+个 (5个STRUCT结构 + astServoAxis[3] + 7个FB实例) |
+| **总变量数** | ~220+个 (5个STRUCT结构 + astServoAxis[3]；FB 实例不在本块，各在自己的背景数据块) |
 | **符合规范** | LSP-905_SCL编程规范 |
 
 ### V7.1.1 变更 (2026-05-20) - TC11 Bug修复
@@ -83,15 +83,8 @@ DATA_BLOCK GlobalVars
 │   ├── 控制(1): Reset
 │   └── 输出(10): CurrentAlarmCode/GlobalAlarmWord/AlarmCount/MesQueue[10]/NewAlarmPulse/Lights/Buzzer
 │
-└── FB实例(7)
-    ├── fbExternalDevice  : FB_ExternalDeviceInteraction
-    ├── fbConveyor_L1     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
-    ├── fbConveyor_L2     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
-    ├── fbConveyor_L3     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
-    ├── fbConveyor_L4     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
-    ├── fbPickPlace       : FB_1003_PickPlace_BufferFraming
-    ├── fbGlueFeeder      : FB_1004_GlueMachineFeeder_BufferFraming
-    └── fbCommonAlarm     : FB_2001_CommonAlarm_AllStation
+└── （FB 实例不放在本全局数据块里：TIA 全局 DB 不能声明 FB 实例，LSP-905 §4.11-1；
+     每个 FB 有自己的背景数据块 DB_*.scl，由 OB1 调用）
 END_DATA_BLOCK
 ```
 

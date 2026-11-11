@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称:FB_2001_CommonAlarm_AllStation                        *)
 (*  功能描述:公共报警管理功能块 - 汇总所有工站报警信息                *)
 (*  版本号:V3.0.0 (结构体整块传递架构)                               *)
@@ -35,7 +35,7 @@ VAR
     s_bPickPlaceAlarmActive    : BOOL;
     s_bFeederAlarmActive       : BOOL;
     s_iMinAlarmCode            : INT;
-    s_iQueueTailIndex          : INT;
+    s_iQueueTailIndex          : INT := 1;   // 队尾下标: 队列从 1 起, 声明处给初值, 首周期不复位也不越界 (D-232)
     s_bAlarmExistsInQueue      : BOOL;
     s_iQueueScanIndex          : INT;
     s_iAlarmCount              : INT;
@@ -49,6 +49,7 @@ VAR CONSTANT
     ALM_WORD_ZERO  : WORD := 0;     // 报警字零值
 END_VAR
 
+BEGIN
 (* ==================== 结构体解包 (输入映射) ==================== *)
 i_iConveyorAlarm               := io_stGlobal.i_iConveyorAlarm;
 i_iPickPlaceAlarm              := io_stGlobal.i_iPickPlaceAlarm;
@@ -203,6 +204,10 @@ q_bNewAlarmFlag := s_bNewAlarmDetected AND q_bAnyAlarmActive;
     
     (* 如果报警码不存在于队列中,则加入队列 *)
     IF NOT s_bAlarmExistsInQueue THEN
+        (* 写入前再保护一次下标范围, 防止下标被意外改写后越界 *)
+        IF s_iQueueTailIndex < 1 OR s_iQueueTailIndex > QUEUE_SIZE THEN
+            s_iQueueTailIndex := 1;
+        END_IF;
         q_iMESAlarmQueue[s_iQueueTailIndex] := q_iCurrentAlarmCode;
         s_iQueueTailIndex := s_iQueueTailIndex + 1;
         
@@ -215,29 +220,6 @@ q_bNewAlarmFlag := s_bNewAlarmDetected AND q_bAnyAlarmActive;
         END_IF;
     END_IF;
 END_IF;
-	    s_bAlarmExistsInQueue := FALSE;
-    
-    (* 检查报警码是否已存在于队列中(去重) *)
-    FOR s_iQueueScanIndex := 1 TO QUEUE_SIZE DO
-        IF q_iMESAlarmQueue[s_iQueueScanIndex] = q_iCurrentAlarmCode THEN
-            s_bAlarmExistsInQueue := TRUE;
-            EXIT;
-        END_IF;
-    END_FOR;
-    
-    (* 如果报警码不存在于队列中,则加入队列 *)
-    IF NOT s_bAlarmExistsInQueue THEN
-        q_iMESAlarmQueue[s_iQueueTailIndex] := q_iCurrentAlarmCode;
-        s_iQueueTailIndex := s_iQueueTailIndex + 1;
-        
-        (* 循环队列处理 *)
-        IF s_iQueueTailIndex > QUEUE_SIZE THEN
-            s_iQueueTailIndex := 1;
-            s_bQueueFull := TRUE;
-        ELSE
-            s_bQueueFull := FALSE;
-        END_IF;
-    END_IF;
 
 
 (* -------------------------------------------------------------------------- *)
