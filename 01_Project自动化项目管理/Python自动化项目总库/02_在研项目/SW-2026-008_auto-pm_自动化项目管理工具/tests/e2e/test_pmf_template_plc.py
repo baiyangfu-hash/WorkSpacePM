@@ -597,6 +597,6 @@ def test_v19_the_udt_suffix_is_switched_in_one_place_and_the_project_still_passe
     assert types and all(n.endswith("_DJ2026901") for n in types), types
     sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (destination / "02_PLC程序/PLC_ST").rglob("*") if p.suffix in {".scl", ".db"})
     used = set(re.findall(r":\s*(?:ARRAY\s*\[[^\]]*\]\s+OF\s+)?\"?(ST_\w+)", sources))
-    assert used - {"ST_ServoAxis"} <= set(types), sorted(used - set(types))
+    assert used <= set(types), sorted(used - set(types))  # D-245: every type a source uses is defined in the project itself
     result = _check(tmp_path, destination)
     assert [i.item for i in result.items if i.status == "fail"] == [], [(i.item, i.message) for i in result.items if i.status == "fail"]

@@ -10,7 +10,6 @@
 //   - stGlobal:     全局控制信号和系统状态 (来自 FB_2001_CommonAlarm_AllStation_{{ project_tag }} / OMAC 状态机)
 //   - stExternal:   外部设备交互信号 (ST_ExternalDevice{{ udt_suffix }})
 //   - stStation1:   工位1 动作机构控制与状态 (ST_Station1{{ udt_suffix }})
-//   - astServoAxis: 伺服驱动轴数组 (ST_ServoAxis - PLCopen MC Part 1)
 // ============================================================================
 
 DATA_BLOCK GlobalVars_{{ project_tag }}
@@ -31,10 +30,9 @@ VAR
     // =========================================================================
     stStation1      : ST_Station1{{ udt_suffix }};  // 工位1全局交互结构体
 
-    // =========================================================================
-    // 第四部分: 伺服轴数组 (STD-840 / PLCopen 伺服定位)
-    // =========================================================================
-    astServoAxis    : ARRAY[1..4] OF ST_ServoAxis;  // 伺服轴数组
+    // 伺服轴不放在模板里 (D-245): 模板没有伺服 FB, 轴结构体 ST_ServoAxis 在 SysLib 里,
+    // 只导入本项目的源文件时 TIA 找不到它. 要用伺服轴时, 先导入 SysLib/types/ST_ServoAxis.scl,
+    // 再在这里声明伺服轴数组 astServoAxis (元素类型 ST_ServoAxis).
 
     // 功能块实例不放在本全局 DB 里 (TIA 全局 DB 不能放 FB 实例, LSP-905 §4.11):
     // 每个功能块有自己的背景 DB, 见本目录 DB_3001/DB_1001/DB_2001_*.scl

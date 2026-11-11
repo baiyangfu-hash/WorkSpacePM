@@ -55,7 +55,6 @@
 | stGlobal | ST_CommonAlarm{{ udt_suffix }} | 全局控制与报警数据 |
 | stExternal | ST_ExternalDevice{{ udt_suffix }} | 外部设备交互信号 |
 | stStation1 | ST_Station1{{ udt_suffix }} | 工位1全局交互结构体 |
-| astServoAxis | ARRAY[1..4] OF ST_ServoAxis | 伺服轴数组 |
 
 FB 实例不放在 GlobalVars_{{ project_tag }} 里（TIA V19 不接受全局 DB 里声明 FB 实例，见 LSP-905 §4.11-1），每个 FB 有自己的背景数据块：
 
