@@ -40,6 +40,7 @@ udt_suffix:
 # 工位实例清单（CHG-SCPT-2026-635）：每个工位共用 FB_1001_Station1，各有一个背景 DB、一个 GlobalVars 成员、一行 OB123 调用。
 # 由 `project create --station <名字>`（可重复）传入；不传就是只有 Station1，生成结果和以前一样。最多 8 个（槽位文件只有 8 个）。
 # 名字：英文字母开头，只用字母和数字，不能重复（它会出现在块名、文件名和变量名 st<名字> 里）。
+# 清单写进 .copier-answers.yml（TD-SW008-525）；`when: false` 的题 copier 更新时不读旧答案，所以 template update 自己读回来用 data 传。
 station_instances:
   type: yaml
   default: "[Station1]"

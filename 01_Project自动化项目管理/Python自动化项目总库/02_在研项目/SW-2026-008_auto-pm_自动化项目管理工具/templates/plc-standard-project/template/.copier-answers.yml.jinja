@@ -10,3 +10,5 @@ project_type: {{ project_type }}
 equipment_type: {{ equipment_type }}
 plc_vendor: {{ plc_vendor }}
 plc_model: {{ plc_model }}
+# 工位清单（TD-SW008-525）：模板更新时由驾驶舱读回来再传给 copier，不记下来就会退回只有 Station1
+station_instances: {{ station_instances | tojson }}
