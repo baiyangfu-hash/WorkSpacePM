@@ -244,23 +244,30 @@ class _LegacyPlcCheckerCore:
         total_errors = 0
         total_warnings = 0
         error_messages: list[str] = []
+        errors: list[str] = []  # 逐条明细“文件:行 说明”，文字和 --json 都全部列出（TD-SW008-573）
+        warnings: list[str] = []
 
-        for scl_file in scl_files:
+        for scl_file in sorted(scl_files):
             report = SclLinter.lint_file(scl_file)
             total_errors += report.errors_count
             total_warnings += report.warnings_count
-            rel_name = os.path.relpath(scl_file, project_path)
+            rel_name = os.path.relpath(scl_file, project_path).replace("\\", "/")
             for v in report.violations:
-                if v.severity == "ERROR" and len(error_messages) < 3:
-                    error_messages.append(f"{rel_name}:{v.line_number} {v.message}")
+                line = f"{rel_name}:{v.line_number} {v.message}"
+                if v.severity == "ERROR":
+                    errors.append(line)
+                    if len(error_messages) < 3:
+                        error_messages.append(line)
+                else:
+                    warnings.append(f"{line}（建议）")
 
         if total_errors > 0:
             msg = f"发现 {total_errors} 个规范错误"
             if error_messages:
                 msg += f"（如: {'; '.join(error_messages)}）"
-            result.add("SCL 代码规范", "fail", msg)
+            result.add("SCL 代码规范", "fail", msg, errors + warnings)
         elif total_warnings > 0:
-            result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
+            result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议（逐条见明细）", warnings)
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
 

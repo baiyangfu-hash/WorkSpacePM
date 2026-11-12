@@ -543,12 +543,23 @@ def _print_check_detail(result: CheckResult) -> None:
         table.add_row(item.item, status_str, item.message)
 
     console.print(table)
+    _print_item_details(result)
     console.print(
         f"\nPass={result.pass_count} "
         f"Warn={result.warn_count} "
         f"Fail={result.fail_count} "
         f"-> {_verdict(result)}"
     )
+
+
+def _print_item_details(result: CheckResult) -> None:
+    """没通过的检查项有逐条明细的，表格下面逐条列出（“文件:行 说明”，一条一行，不截断；TD-SW008-573）。"""
+    for item in result.items:
+        if item.status == "pass" or not item.details:
+            continue
+        console.print(f"\n{item.item}（{item.status.upper()}）逐条 {len(item.details)} 条：", markup=False)
+        for line in item.details:
+            console.print(f"  - {line}", markup=False, soft_wrap=True)
 
 
 def _verdict(result: CheckResult) -> str:

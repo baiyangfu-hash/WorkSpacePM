@@ -27,6 +27,8 @@ class CheckItem(BaseModel):
     item: str = Field(..., description="检查项名称")
     status: CheckStatus = Field(..., description="状态: pass/warn/fail")
     message: str = Field("", description="详细说明")
+    # 逐条明细（“文件:行 说明”），汇总只给个数时由这里逐条列出（TD-SW008-573）；没有明细的检查项为空
+    details: list[str] = Field(default_factory=list, description="逐条明细")
 
     model_config = ConfigDict()
 
@@ -48,9 +50,9 @@ class CheckResult(BaseModel):
 
     model_config = ConfigDict()
 
-    def add(self, item: str, status: str, message: str) -> None:
-        """添加一条检查项并更新计数"""
-        self.items.append(CheckItem(item=item, status=status, message=message))
+    def add(self, item: str, status: str, message: str, details: list[str] | None = None) -> None:
+        """添加一条检查项并更新计数；details 是逐条明细（文件:行 说明），可省"""
+        self.items.append(CheckItem(item=item, status=status, message=message, details=list(details or [])))
         if status == "pass":
             self.pass_count += 1
         elif status == "warn":
