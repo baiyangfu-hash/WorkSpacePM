@@ -877,6 +877,39 @@ def test_b1_01_a_draft_without_work_is_not_waiting_for_you(tmp_path: Path) -> No
     assert not any("没开起来的草稿" in d.why for d in home.decisions)
 
 
+def _with_approval(decision: str, expires_days: float) -> tuple[str, ...]:
+    """给造出来的卡补授权（批准编号 DEC-B1-OK、到期时间）和一条批准记录（批准编号 decision）。"""
+    expires = (NOW + timedelta(days=expires_days)).isoformat()
+    return (
+        "ALTER TABLE mission_items ADD COLUMN authority_json TEXT",
+        f"UPDATE mission_items SET authority_json = '{{\"decision_id\": \"DEC-B1-OK\", \"expires_at\": \"{expires}\"}}'",
+        "CREATE TABLE planning_draft_decision_bindings (request_id TEXT PRIMARY KEY, decision_id TEXT, change_id TEXT, "
+        "plan_hash TEXT, approver TEXT, approval_evidence_ref TEXT, created_at TEXT)",
+        f"INSERT INTO planning_draft_decision_bindings VALUES ('REQ-B1', '{decision}', 'CHG-B1', 'h', 'fubai', 'e', 'x')",
+    )
+
+
+def test_b1_01b_an_approved_draft_without_work_still_waits_for_you(tmp_path: Path) -> None:
+    """D-328 审计裁定②：有有效批准记录、还没有工作项的草稿＝已批准、等开工，照常进“要你出手”、照常报“等你超过 N 天”。"""
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "批了还没开工", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL", "DELETE FROM execution_leases", *_with_approval("DEC-B1-OK", 20))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert [i.title for i in card.issues if "批了还没开工" in i.detail] == [
+        f"等你超过 {pd.WAITING_RED_DAYS} 天：已批准，还没开工"
+    ]
+    assert any("批了还没开工" in d.why for d in home.decisions)
+
+
+@pytest.mark.parametrize(("decision", "expires_days"), [("DEC-OTHER", 20), ("DEC-B1-OK", -1)])
+def test_b1_01c_a_missing_or_expired_approval_counts_as_none(tmp_path: Path, decision: str, expires_days: float) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "批准查不到或过期", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL", "DELETE FROM execution_leases", *_with_approval(decision, expires_days))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert [i.title for i in _card(home).issues if "批准查不到或过期" in i.detail] == ["草稿，没有工作项，也没有批准记录"]
+    assert not any("批准查不到或过期" in d.why for d in home.decisions)
+
+
 def test_b1_02_a_draft_with_work_still_waits_for_you(tmp_path: Path) -> None:
     board = _board(tmp_path, [("DJ-2026-101", "DRAFT", "真等你的草稿", 6)])
     card = _card(vm.home_vm(board, OFFSET, online=None, use_git=False))

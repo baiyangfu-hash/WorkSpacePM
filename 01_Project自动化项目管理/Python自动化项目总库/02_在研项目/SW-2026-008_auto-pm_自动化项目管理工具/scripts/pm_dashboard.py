@@ -122,6 +122,9 @@ class MissionInfo:
     # 卡下面的工作项（账本 mission_items.root_work_id）和它的状态；没有工作项时两个都是空串（D-327、D-328）。
     work_id: str = ""
     work_state: str = ""
+    # 这张卡有没有有效的用户批准记录（D-328 审计裁定②）：卡授权里写的批准编号（decision_id）在账本批准绑定表里查得到，
+    # 且授权没过期。只按 decision_id 查，不按 mission_id、不拼 request_id。老账本没有这张表或卡没有授权字段，一律算没有。
+    approved: bool = False
 
     @property
     def column(self) -> str:
@@ -261,6 +264,31 @@ def open_ledger_read_only(db_path: Path) -> sqlite3.Connection:
 def _tables(connection: sqlite3.Connection) -> set[str]:
     rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     return {row[0] for row in rows}
+
+
+def _approved(authority_json: str | None, approvals: set[str], now: datetime) -> bool:
+    """卡授权里的批准编号在批准记录里查得到、授权到期时间没过，才算有有效批准。读不懂、没写、过期都算没有。"""
+    try:
+        authority = json.loads(authority_json or "{}")
+        decision = authority.get("decision_id")
+        expires = parse_time(authority.get("expires_at"))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    if not (isinstance(decision, str) and decision in approvals):
+        return False
+    return expires is None or expires > now
+
+
+def waiting_ask(mission: MissionInfo) -> str:
+    """“等你”一栏要你做什么。已批准、还没开工（草稿，没有工作项，有有效批准记录）的单独说，不写“核对需求”。"""
+    if mission.state == "DRAFT" and not mission.work_id and mission.approved:
+        return "已批准，还没开工"
+    return WAITING_ASK.get(mission.state, "看一眼")
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    """表里有哪些列（老账本、精简账本可能缺列，缺了就当没有那项信息）。table 只传本文件里写死的表名。"""
+    return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
 
 
 def _short(text: str, limit: int) -> str:
@@ -443,9 +471,15 @@ def read_ledger(
         ):
             closures[row["mission_id"]] = (row["change_id"], row["state"])
 
+    approvals: set[str] = set()
+    if "planning_draft_decision_bindings" in tables and "decision_id" in _columns(connection, "planning_draft_decision_bindings"):
+        approvals = {str(r[0]) for r in connection.execute("SELECT decision_id FROM planning_draft_decision_bindings")}
+    has_authority = "authority_json" in _columns(connection, "mission_items")
+    authority_column = "authority_json" if has_authority else "'' AS authority_json"
+
     for row in connection.execute(
-        "SELECT mission_id, subject_project_id, title, state, root_work_id, updated_at "
-        "FROM mission_items"
+        "SELECT mission_id, subject_project_id, title, state, root_work_id, updated_at, "
+        f"{authority_column} FROM mission_items"
     ):
         change_id, closure_state = closures.get(row["mission_id"], ("", ""))
         mission = MissionInfo(
@@ -457,6 +491,7 @@ def read_ledger(
             change_id=change_id,
             closure_state=closure_state,
             work_id=row["root_work_id"] or "",
+            approved=_approved(row["authority_json"], approvals, now),
         )
         if mission.work_id and "work_items" in tables:
             work = connection.execute(
@@ -792,7 +827,7 @@ def collect_decisions(
         covered = False
         for mission in project.missions:
             if mission.column == "等你":
-                ask = WAITING_ASK.get(mission.state, "看一眼")
+                ask = waiting_ask(mission)
                 if legacy_ask and legacy is not None and legacy.mission_id == mission.mission_id:
                     ask, covered = legacy_ask, True
                 decisions.append(
