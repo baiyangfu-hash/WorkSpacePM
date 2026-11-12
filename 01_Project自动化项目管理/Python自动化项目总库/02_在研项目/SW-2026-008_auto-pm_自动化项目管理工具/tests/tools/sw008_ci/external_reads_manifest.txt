@@ -36,6 +36,8 @@ tests/infrastructure/test_shell_script_exec_bit.py
 tests/plc/test_cycle_plan.py
 tests/plc/test_milestones.py
 tests/plc/test_scl_linter.py
+tests/plc/test_scl_output_readback.py
+tests/plc/test_scl_syntax_lite.py
 tests/tools/test_gate_full_verdict_job.py
 tests/vartable/test_communications_parser.py
 tests/vartable/test_io_points_parser.py
