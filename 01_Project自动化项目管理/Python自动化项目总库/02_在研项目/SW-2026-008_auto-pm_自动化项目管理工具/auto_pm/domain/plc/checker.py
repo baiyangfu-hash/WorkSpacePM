@@ -44,6 +44,9 @@ from auto_pm.plc.scl_linter import SclLinter
 
 log = logging.getLogger(__name__)
 
+# 不依赖西门子插件的轻量语法层（TD-SW008-560 方案②）：控制结构闭合、本块变量已声明，命中算失败
+SCL_SYNTAX_ITEM = "SCL 轻量语法（不依赖插件）"
+
 # SysLib 关键文件清单（相对路径），用于 libraries 路径深度校验
 _KEY_FILES = [
     "timer/FB_TON.scl",
@@ -246,19 +249,25 @@ class _LegacyPlcCheckerCore:
         error_messages: list[str] = []
         errors: list[str] = []  # 逐条明细“文件:行 说明”，文字和 --json 都全部列出（TD-SW008-573）
         warnings: list[str] = []
+        syntax_hits: list[str] = []  # 不依赖插件的轻量语法层（TD-560 方案②）单独成一项，全部按“文件:行”列出
+        syntax_files = 0
 
         for scl_file in sorted(scl_files):
             report = SclLinter.lint_file(scl_file)
-            total_errors += report.errors_count
-            total_warnings += report.warnings_count
             rel_name = os.path.relpath(scl_file, project_path).replace("\\", "/")
+            if scl_file.lower().endswith(SclLinter.SOURCE_SUFFIXES):
+                syntax_files += 1
             for v in report.violations:
                 line = f"{rel_name}:{v.line_number} {v.message}"
-                if v.severity == "ERROR":
+                if v.rule_id in SclLinter.SYNTAX_RULES:
+                    syntax_hits.append(line)
+                elif v.severity == "ERROR":
+                    total_errors += 1
                     errors.append(line)
                     if len(error_messages) < 3:
                         error_messages.append(line)
                 else:
+                    total_warnings += 1
                     warnings.append(f"{line}（建议）")
 
         if total_errors > 0:
@@ -270,6 +279,20 @@ class _LegacyPlcCheckerCore:
             result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议（逐条见明细）", warnings)
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+
+        if syntax_files:
+            if syntax_hits:
+                result.add(
+                    SCL_SYNTAX_ITEM, "fail",
+                    f"控制结构没闭合或变量没声明 {len(syntax_hits)} 处（不依赖西门子插件的轻量检查，逐条见明细）",
+                    syntax_hits,
+                )
+            else:
+                result.add(
+                    SCL_SYNTAX_ITEM, "pass",
+                    f"{syntax_files} 个 .scl 文件的 IF/CASE/FOR/WHILE/REPEAT 都闭合、#变量都在本块声明过"
+                    "（不依赖西门子插件的轻量检查；类型错不查，归插件）",
+                )
 
     def _check_language_service(self, project_path: str, result: CheckResult) -> None:
         """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。

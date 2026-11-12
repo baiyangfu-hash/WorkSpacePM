@@ -338,7 +338,8 @@ def test_hash_region_is_rejected_as_unsupported_by_the_lsp() -> None:
 
 
 def test_hash_prefixed_variable_that_only_starts_with_region_is_not_a_region() -> None:
-    assert _region_rules("    #region_x := 1;") == []
+    # 只看 REGION 规则：这里的 #region_x 没在块里声明，轻量语法层会另报“变量没声明”（TD-560 方案②），与本条无关
+    assert [r for r in _region_rules("    #region_x := 1;") if r.startswith("LSP-905-REGION")] == []
 
 
 def test_unbalanced_region_is_rejected() -> None:

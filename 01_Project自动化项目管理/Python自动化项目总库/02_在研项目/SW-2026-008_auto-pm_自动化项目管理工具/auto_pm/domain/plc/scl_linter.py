@@ -49,6 +49,11 @@ class SclLinter:
     ARRAY_ONLY_SUFFIXES = (".db", ".udt")
     ARRAY_LOWER_BOUND_RULE = "LSP-905-ARRAY-LOWER-BOUND"
     ARRAY_INDEX_INIT_RULE = "LSP-905-ARRAY-INDEX-INIT"
+    # 不依赖西门子插件的轻量语法层（TD-SW008-560 方案②，D-295）：只查控制结构闭合、本块变量是否声明。
+    # 编号另起 SCL-SYN-，不冒用 LSP-905（LSP-905 规范本身没改）；类型错不查（要类型推导，归插件）。
+    SYNTAX_UNCLOSED_RULE = "SCL-SYN-UNCLOSED"
+    SYNTAX_UNDECLARED_RULE = "SCL-SYN-UNDECLARED"
+    SYNTAX_RULES = (SYNTAX_UNCLOSED_RULE, SYNTAX_UNDECLARED_RULE)
 
     @classmethod
     def is_lintable(cls, name: str | Path) -> bool:
@@ -84,6 +89,16 @@ class SclLinter:
     REGION_NAME_FORBIDDEN_PATTERN = re.compile(r";|:=")
     # 控制结构的开头/结尾记号（END_IF 等里的 IF 前面是下划线，\b 不会误认；ELSIF 同理）
     STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
+    QUOTED_NAME_PATTERN = re.compile(r'"[^"]*"')
+    # 本块变量的用法：#名字（16#FF、T#5s、DINT#1 这类字面量 # 前面紧挨字母数字，不算）
+    LOCAL_USE_PATTERN = re.compile(r"(?<![\w#.\"])#([A-Za-z_]\w*)")
+    # 变量段里的声明：名字 [, 名字…] [{属性}] [AT 名字] : 类型（名字可带双引号）
+    DECLARED_NAMES_PATTERN = re.compile(
+        r'^\s*("?[A-Za-z_]\w*"?(?:\s*,\s*"?[A-Za-z_]\w*"?)*)\s*(?:\{[^}]*\}\s*)?(?:AT\s+\S+\s*)?:(?!=)', re.IGNORECASE
+    )
+    PROGRAM_BLOCK_NAME_PATTERN = re.compile(
+        r'^\s*(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE
+    )
     BLOCK_TOKEN_PATTERN = re.compile(r"\b(END_)?(IF|CASE|FOR|WHILE|REPEAT)\b", re.IGNORECASE)
 
     # 结构完整性：每个源文件至少有一个程序块或类型声明，且每个声明都有配对的 END_*（插件命令行对空文件与乱码单文件也报 0 诊断，由这里补）
@@ -455,6 +470,19 @@ class SclLinter:
                         )
                     in_case_block = False
 
+        # 控制结构没闭合（TD-560 方案②）：IF/CASE/FOR/WHILE/REPEAT 到文件末尾还开着
+        for kind, at in block_stack:
+            if kind != "REGION":
+                report.violations.append(
+                    SclViolation(
+                        line_number=at,
+                        rule_id=cls.SYNTAX_UNCLOSED_RULE,
+                        severity="ERROR",
+                        message=f"{kind} 没有对应的 END_{kind}（控制结构没闭合）",
+                        code_snippet=cls._line_text(lines, at),
+                    )
+                )
+
         for open_line in region_open_lines:
             report.violations.append(
                 SclViolation(
@@ -466,6 +494,7 @@ class SclLinter:
             )
 
         cls._check_array_index_init(code_entries, report)
+        cls._check_undeclared_locals(code_entries, report)
 
         # 结构完整性（LSP-905-STRUCT-*）
         opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
@@ -531,11 +560,22 @@ class SclLinter:
         block_stack: list[tuple[str, int]],
         report: SclLintReport,
     ) -> None:
-        if not block_stack or block_stack[-1][0] == kind:
-            if block_stack:
-                block_stack.pop()
+        if block_stack and block_stack[-1][0] == kind:
+            block_stack.pop()
             return
         positions = [i for i, (name, _) in enumerate(block_stack) if name == kind]
+        if not positions:
+            if kind != "REGION":  # END_REGION 多出来的由 LSP-905-REGION-UNBALANCED 报
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id=cls.SYNTAX_UNCLOSED_RULE,
+                        severity="ERROR",
+                        message=f"END_{kind} 前面没有对应的 {kind}（控制结构没闭合）",
+                        code_snippet=stripped,
+                    )
+                )
+            return
         if positions:
             # 栈顶不是要关的那个：中间夹着没关的东西，REGION 与控制结构交叉
             opener_index = positions[-1]
@@ -555,6 +595,18 @@ class SclLinter:
                         code_snippet=stripped,
                     )
                 )
+            else:
+                # 控制结构互相交叉（如 FOR … END_IF）：夹在中间、没关就被跳过的那些算没闭合（TD-560 方案②）
+                for name, at in crossing:
+                    report.violations.append(
+                        SclViolation(
+                            line_number=at,
+                            rule_id=cls.SYNTAX_UNCLOSED_RULE,
+                            severity="ERROR",
+                            message=f"{name} 没有对应的 END_{name}：第 {line_idx} 行的 END_{kind} 先到了（控制结构没闭合）",
+                            code_snippet=stripped,
+                        )
+                    )
             del block_stack[opener_index:]
 
     @classmethod
@@ -661,6 +713,73 @@ class SclLinter:
                     compared.add(name)
             if cls.END_FOR_PATTERN.search(text) and for_stack:
                 for_stack.pop()
+
+    @classmethod
+    def _check_undeclared_locals(cls, code_entries: list[tuple[int, str, str]], report: SclLintReport) -> None:
+        """块里用到的 ``#名字`` 必须在本块的变量段（VAR_INPUT/OUTPUT/IN_OUT/VAR/VAR_TEMP/VAR CONSTANT）里声明过（TD-560 方案②）。
+
+        只看 ``#`` 后面的第一个名字（``#st.a``、``#arr[i]`` 只查 ``st``、``arr``）；字符串、双引号名字、REGION 名称里的不算；
+        FC 的返回值用块名赋值，块名本身算声明过。全局变量（``"DB".x``）不带 ``#``，不查。
+        """
+        in_block = False
+        section: str | None = None
+        declared: set[str] = set()
+        uses: list[tuple[int, str, str]] = []
+
+        def flush() -> None:
+            seen: set[tuple[int, str]] = set()
+            for line_idx, name, stripped in uses:
+                if name.lower() in declared or (line_idx, name.lower()) in seen:
+                    continue
+                seen.add((line_idx, name.lower()))
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id=cls.SYNTAX_UNDECLARED_RULE,
+                        severity="ERROR",
+                        message=f"#{name} 在本块的变量段里没有声明（变量没声明）",
+                        code_snippet=stripped,
+                    )
+                )
+
+        for line_idx, code_part, stripped in code_entries:
+            opened = cls.PROGRAM_BLOCK_NAME_PATTERN.match(code_part)
+            if opened or cls.PROGRAM_BLOCK_OPEN_PATTERN.match(code_part):
+                if in_block:
+                    flush()
+                in_block, section, uses = True, None, []
+                declared = {opened.group(1).lower()} if opened else set()
+                continue
+            if not in_block:
+                continue
+            if cls.PROGRAM_BLOCK_END_PATTERN.match(code_part):
+                flush()
+                in_block, uses = False, []
+                continue
+            if cls.BLOCK_END_VAR.match(code_part):
+                section = None
+                continue
+            if any(
+                pattern.match(code_part)
+                for pattern in (cls.BLOCK_VAR_INPUT, cls.BLOCK_VAR_OUTPUT, cls.BLOCK_VAR_IN_OUT, cls.BLOCK_VAR_TEMP, cls.BLOCK_VAR_STATIC)
+            ):
+                section = "VAR"
+                continue
+            if section is not None:
+                names = cls.DECLARED_NAMES_PATTERN.match(code_part)
+                if names:
+                    declared.update(n.strip().strip('"').lower() for n in names.group(1).split(","))
+                continue
+            if cls.REGION_OPEN_PATTERN.match(code_part) or cls.REGION_CLOSE_PATTERN.match(code_part):
+                continue
+            text = cls.QUOTED_NAME_PATTERN.sub('""', cls.STRING_LITERAL_PATTERN.sub("''", code_part))
+            uses.extend((line_idx, m.group(1), stripped) for m in cls.LOCAL_USE_PATTERN.finditer(text))
+        if in_block:
+            flush()
+
+    @staticmethod
+    def _line_text(lines: list[str], line_number: int) -> str:
+        return lines[line_number - 1].strip() if 0 < line_number <= len(lines) else ""
 
     @staticmethod
     def _compares(text: str, name: str) -> bool:
