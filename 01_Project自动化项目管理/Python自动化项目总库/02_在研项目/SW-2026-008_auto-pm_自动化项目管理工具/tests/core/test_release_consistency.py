@@ -410,3 +410,21 @@ def test_the_doctor_command_exits_nonzero_on_a_contradiction(
     result = CliRunner().invoke(doctor_command, ["-w", str(records)])
     assert result.exit_code == 1, result.output
     assert "发布记录自相矛盾" in result.output
+
+
+def test_td576_many_unannotated_releases_are_one_line_naming_each(records: Path) -> None:
+    names = [f"1.0.{index}-{index:07x}" for index in range(12)]
+
+    def add(d: dict[str, Any]) -> None:
+        for name in names:
+            d["releases"][name] = {"source_commit": OLD_SHA}
+
+    _mutate(records, "deployment_manifest.json", add)
+    for name in names:
+        _write(records / BASE / "releases" / name / "release_meta.json", {"release_id": name, "source_commit": OLD_SHA})
+
+    result = check_release_consistency(str(records))
+
+    notes = [item for item in result["warnings"] if "没有在 release_annotations.json 里标注" in item]
+    assert notes == [f"12 个版本没有在 release_annotations.json 里标注（回退资格没有书面依据）：{'、'.join(sorted(names))}"]
+    assert len(result["warnings"]) == len(set(result["warnings"])), "no line is said twice"

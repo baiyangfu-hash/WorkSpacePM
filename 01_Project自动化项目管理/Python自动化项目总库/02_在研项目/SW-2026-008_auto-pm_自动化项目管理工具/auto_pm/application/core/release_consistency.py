@@ -181,19 +181,19 @@ def check_release_consistency(root: str) -> dict[str, Any]:
     for release in sorted(set(releases) - on_disk):
         failures.append(f"deployment_manifest.json 登记了 {release}，但 releases/ 下没有它的目录")
 
+    unannotated: list[str] = []
+    short_only: list[str] = []
     for release, record in sorted(releases.items()):
         if not isinstance(record, dict):
             failures.append(f"deployment_manifest.json：{release} 的记录不是对象")
             continue
         entry = annotated.get(release)
         if entry is None:
-            warnings.append(
-                f"{release} 没有在 release_annotations.json 里标注（回退资格没有书面依据）"
-            )
+            unannotated.append(release)
         value = _text(record.get("source_commit"))
         _resolve_commit(release, "deployment_manifest.json", value, entry, failures)
         if value and not _FULL_SHA.match(value) and entry is None:
-            warnings.append(f"{release} 在 manifest 里只写了短提交号 {value}，也没有标注可展开")
+            short_only.append(f"{release}（{value}）")
         meta = (
             _load(folder / release / "release_meta.json", failures) if release in on_disk else None
         )
@@ -210,6 +210,19 @@ def check_release_consistency(root: str) -> dict[str, Any]:
                 failures.append(
                     f"releases/{release}/release_meta.json 的 release_id 是 {meta.get('release_id')}，与目录名不一致"
                 )
+
+    # One line per kind of note, naming every release it applies to, instead of the same sentence once per release
+    # (TD-SW008-576: a dozen copies of one sentence buried the rest of the doctor row).
+    if unannotated:
+        warnings.append(
+            f"{unannotated[0]} 没有在 release_annotations.json 里标注（回退资格没有书面依据）"
+            if len(unannotated) == 1
+            else f"{len(unannotated)} 个版本没有在 release_annotations.json 里标注（回退资格没有书面依据）：{'、'.join(unannotated)}"
+        )
+    if short_only:
+        warnings.append(
+            f"{'、'.join(short_only)} 在 manifest 里只写了短提交号，也没有标注可展开"
+        )
 
     for name, pointer in pointers.items():
         if pointer is None:
@@ -228,8 +241,15 @@ def check_release_consistency(root: str) -> dict[str, Any]:
             )
 
     _check_against_git(root, releases, pointers, failures, warnings)
+    failures, warnings = _unique(failures), _unique(warnings)
     status = "fail" if failures else ("warn" if warnings else "ok")
     return {"status": status, "failures": failures, "warnings": warnings}
+
+
+def _unique(lines: list[str]) -> list[str]:
+    """The same line said twice is said once, in the order first seen."""
+
+    return list(dict.fromkeys(lines))
 
 
 def _check_against_git(

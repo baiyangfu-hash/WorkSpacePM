@@ -379,6 +379,47 @@ def run_doctor_check(workspace_root: str | None = None, *, pre_release: bool = F
     }
 
 
+def doctor_verdict(res: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """What made ``all_passed`` false, and what is only worth a look; each item names its table row (TD-SW008-518, TD-SW008-576).
+
+    The first list holds exactly the terms of ``all_passed``; the second the rows that showed a warning or could not be
+    checked.  The last line of ``doctor`` is built from these two, so it never says "依赖" when a stray file was the cause,
+    and never says "一切正常" while a row shows a warning.
+    """
+
+    blocking: list[str] = []
+    if not res["python_ok"]:
+        blocking.append(f"Python 版本（{res['python_version']}，要求 >= 3.11）")
+    missing = [dep for dep, ok in res["dependencies"].items() if not ok]
+    if missing:
+        blocking.append("缺依赖：" + "、".join(missing))
+    if not res["git_found"]:
+        blocking.append("Git 仓库（未检测到 .git）")
+    if not res["sanitation_pure"]:
+        blocking.append(f"工作空间纯净度守卫（{res['sanitation_issues']} 个游离文件）")
+    rows = (
+        ("release_pointers", "发布指针与本机部署"),
+        ("release_consistency", "发布记录互相核对"),
+        ("change_status", "变更单状态与流转记录"),
+        ("worktree_floor", "工位目录数"),
+    )
+    for key, name in rows:
+        if res[key]["status"] == "fail":
+            blocking.append(name)
+    attention: list[str] = []
+    if res["venv_base"]["status"] == "warn":
+        attention.append("虚拟环境底层 Python")
+    if res["release_consistency"]["status"] == "warn":
+        attention.append(f"发布记录互相核对（{len(res['release_consistency']['warnings'])} 条提示）")
+    if res["change_status"]["status"] not in ("ok", "fail"):
+        attention.append("变更单状态与流转记录（未核对）")
+    if res["worktree_floor"]["status"] == "warn":
+        attention.append("工位目录数")
+    if not res["gh_installed"] or not res["gh_logged_in"]:
+        attention.append("GitHub 命令行 gh（" + ("未安装" if not res["gh_installed"] else "未登录") + "）")
+    return blocking, attention
+
+
 @click.command("doctor")
 @click.option("-w", "--workspace", type=CallerPath(exists=True), help="工作空间根目录")
 @click.option("--pre-release", "pre_release", is_flag=True, help="发版前置检查：工位目录超过 7 个判为失败（默认只提示）")
@@ -476,7 +517,12 @@ def doctor_command(workspace: str | None, pre_release: bool) -> None:
         console.print("\n[bold red]工位目录太多，先回收再发版（删除只认用户亲口说“收”）。[/bold red]\n")
         raise SystemExit(1)
 
-    if res["all_passed"]:
+    blocking, attention = doctor_verdict(res)
+    if blocking:
+        console.print(f"\n[bold yellow]⚠️ 没通过：{'；'.join(blocking)}。按表里对应行的说明处理。[/bold yellow]")
+    if attention:
+        console.print(f"\n[yellow]ℹ 要留意（不挡路）：{'；'.join(attention)}。[/yellow]")
+    if not blocking and not attention:
         console.print("\n[bold green]🎉 恭喜！当前环境一切正常，可顺畅运行与开发 auto-pm！[/bold green]\n")
     else:
-        console.print("\n[bold yellow]⚠️ 注意：存在非标准或缺失依赖，请参考表项修复建议。[/bold yellow]\n")
+        console.print()
