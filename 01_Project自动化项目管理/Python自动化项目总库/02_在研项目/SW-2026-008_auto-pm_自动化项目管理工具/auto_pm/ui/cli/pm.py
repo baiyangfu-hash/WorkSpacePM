@@ -135,6 +135,8 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True
     """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
 
     Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
+    The view is this clone's last fetch, so every line says so and points to ``claim list``, which fetches: a claim
+    released or reclaimed since then must not read as held here while ``claim list`` calls it free (TD-SW008-578).
     """
 
     try:
@@ -148,11 +150,17 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True
         result.append({**claim.as_json(), "overlaps_scope": list(clash)})
         if not echo:
             continue
-        text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
+        text = f"本机上次抓到的占位里，有人领着 {claim.label()}（到期 {claim.expires_at}），要改：{'、'.join(claim.paths)}"
         if clash:
             click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
         else:
             click.echo(f"ℹ️ [领卡占位] {text}", err=True)
+    if echo and active:
+        click.echo(
+            "ℹ️ [领卡占位] 以上是本机上次抓取的记录（这条提示不联网），之后可能已放下或被收回；"
+            "以 `main.py claim list`（联网）为准",
+            err=True,
+        )
     return result
 
 

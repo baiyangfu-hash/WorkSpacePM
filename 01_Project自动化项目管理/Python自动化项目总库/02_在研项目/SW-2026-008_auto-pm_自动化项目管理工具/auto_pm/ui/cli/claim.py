@@ -151,11 +151,14 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
 def release_claim(ctx: click.Context, card: str, owner: str) -> None:
     """放下自己的占位：推一个提交把它标成已放下，不删分支（云端也能用）；PR 合并后或用户说放弃时用。"""
     try:
-        _service(ctx).release(card, owner=_owner(owner))
+        written = _service(ctx).release(card, owner=_owner(owner))
     except ClaimError as error:
         _fail(error)
         return
-    click.echo(f"已放下卡 {card}")
+    if written:
+        click.echo(f"已放下卡 {card}（远程已记为 released）")
+    else:
+        click.echo(f"卡 {card} 早就放下或被收回了，这次什么都没写")
 
 
 @claim_group.command(name="renew")
@@ -203,4 +206,7 @@ def reclaim_claim(ctx: click.Context, card: str, reason: str, approval_evidence_
     except ClaimError as error:
         _fail(error)
         return
-    click.echo(f"卡 {card} 的占位已收回（现状态：{claim.status}）")
+    if claim.written:
+        click.echo(f"卡 {card} 的占位已收回（远程已记为 {claim.status}）")
+    else:
+        click.echo(f"卡 {card} 的占位早就是 {claim.status}，这次什么都没写")
