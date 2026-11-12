@@ -54,6 +54,8 @@ class SclLinter:
     SYNTAX_UNCLOSED_RULE = "SCL-SYN-UNCLOSED"
     SYNTAX_UNDECLARED_RULE = "SCL-SYN-UNDECLARED"
     SYNTAX_RULES = (SYNTAX_UNCLOSED_RULE, SYNTAX_UNDECLARED_RULE)
+    # 块里读自己的输出引脚（TD-SW008-316，D-50）：TIA 报“参数无法初始化”。第一阶段对所有工程一律只报警告
+    OUTPUT_READBACK_RULE = "SCL-OUT-READBACK"
 
     @classmethod
     def is_lintable(cls, name: str | Path) -> bool:
@@ -96,6 +98,9 @@ class SclLinter:
     DECLARED_NAMES_PATTERN = re.compile(
         r'^\s*("?[A-Za-z_]\w*"?(?:\s*,\s*"?[A-Za-z_]\w*"?)*)\s*(?:\{[^}]*\}\s*)?(?:AT\s+\S+\s*)?:(?!=)', re.IGNORECASE
     )
+    # 输出引脚这一次出现是“写”：后面跟（成员/下标）再跟 :=，或前面紧挨着调用里的 =>
+    OUTPUT_WRITE_AFTER_PATTERN = re.compile(r"(?:\s*\.\s*\w+|\s*\[[^\]]*\])*\s*:=")
+    OUTPUT_WRITE_BEFORE_PATTERN = re.compile(r"=>\s*$")
     PROGRAM_BLOCK_NAME_PATTERN = re.compile(
         r'^\s*(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE
     )
@@ -495,6 +500,7 @@ class SclLinter:
 
         cls._check_array_index_init(code_entries, report)
         cls._check_undeclared_locals(code_entries, report)
+        cls._check_output_readback(code_entries, report)
 
         # 结构完整性（LSP-905-STRUCT-*）
         opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
@@ -776,6 +782,60 @@ class SclLinter:
             uses.extend((line_idx, m.group(1), stripped) for m in cls.LOCAL_USE_PATTERN.finditer(text))
         if in_block:
             flush()
+
+    @classmethod
+    def _check_output_readback(cls, code_entries: list[tuple[int, str, str]], report: SclLintReport) -> None:
+        """FB/FC 的代码里读了本块 VAR_OUTPUT 里的引脚（TD-316）：只报警告。
+
+        写不算读：``#q_x := …``、``#q_st.a := …``、``#q_arr[i] := …``，以及调用里的 ``Q => #q_x``。
+        其余出现（赋值右边、条件、调用的输入参数、下标里）都算读，一行一个引脚只报一次。
+        """
+        in_block = False
+        section: str | None = None
+        outputs: set[str] = set()
+        for line_idx, code_part, stripped in code_entries:
+            if cls.PROGRAM_BLOCK_OPEN_PATTERN.match(code_part):
+                in_block, section, outputs = True, None, set()
+                continue
+            if not in_block:
+                continue
+            if cls.PROGRAM_BLOCK_END_PATTERN.match(code_part):
+                in_block = False
+                continue
+            if cls.BLOCK_END_VAR.match(code_part):
+                section = None
+                continue
+            if cls.BLOCK_VAR_OUTPUT.match(code_part):
+                section = "VAR_OUTPUT"
+                continue
+            if any(p.match(code_part) for p in (cls.BLOCK_VAR_INPUT, cls.BLOCK_VAR_IN_OUT, cls.BLOCK_VAR_TEMP, cls.BLOCK_VAR_STATIC)):
+                section = "OTHER"
+                continue
+            if section is not None:
+                names = cls.DECLARED_NAMES_PATTERN.match(code_part) if section == "VAR_OUTPUT" else None
+                if names:
+                    outputs.update(n.strip().strip('"').lower() for n in names.group(1).split(","))
+                continue
+            if not outputs or cls.REGION_OPEN_PATTERN.match(code_part) or cls.REGION_CLOSE_PATTERN.match(code_part):
+                continue
+            text = cls.QUOTED_NAME_PATTERN.sub('""', cls.STRING_LITERAL_PATTERN.sub("''", code_part))
+            reported: set[str] = set()
+            for use in cls.LOCAL_USE_PATTERN.finditer(text):
+                name = use.group(1).lower()
+                if name not in outputs or name in reported:
+                    continue
+                if cls.OUTPUT_WRITE_AFTER_PATTERN.match(text, use.end()) or cls.OUTPUT_WRITE_BEFORE_PATTERN.search(text[: use.start()]):
+                    continue
+                reported.add(name)
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id=cls.OUTPUT_READBACK_RULE,
+                        severity="WARNING",
+                        message=f"块里读了自己的输出引脚 #{use.group(1)}（TIA 会报“参数无法初始化”）：先算到静态变量 s_…，再把它赋给输出",
+                        code_snippet=stripped,
+                    )
+                )
 
     @staticmethod
     def _line_text(lines: list[str], line_number: int) -> str:

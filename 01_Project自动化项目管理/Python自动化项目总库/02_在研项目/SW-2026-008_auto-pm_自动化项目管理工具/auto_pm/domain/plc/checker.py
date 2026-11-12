@@ -46,6 +46,8 @@ log = logging.getLogger(__name__)
 
 # 不依赖西门子插件的轻量语法层（TD-SW008-560 方案②）：控制结构闭合、本块变量已声明，命中算失败
 SCL_SYNTAX_ITEM = "SCL 轻量语法（不依赖插件）"
+# 块里读自己的输出引脚（TD-SW008-316）：第一阶段对所有工程一律只报警告，不改退出码
+SCL_OUTPUT_READBACK_ITEM = "SCL 读自己的输出引脚"
 
 # SysLib 关键文件清单（相对路径），用于 libraries 路径深度校验
 _KEY_FILES = [
@@ -250,6 +252,7 @@ class _LegacyPlcCheckerCore:
         errors: list[str] = []  # 逐条明细“文件:行 说明”，文字和 --json 都全部列出（TD-SW008-573）
         warnings: list[str] = []
         syntax_hits: list[str] = []  # 不依赖插件的轻量语法层（TD-560 方案②）单独成一项，全部按“文件:行”列出
+        readback_hits: list[str] = []  # 读自己的输出引脚（TD-316）单独成一项，只报警告
         syntax_files = 0
 
         for scl_file in sorted(scl_files):
@@ -261,6 +264,8 @@ class _LegacyPlcCheckerCore:
                 line = f"{rel_name}:{v.line_number} {v.message}"
                 if v.rule_id in SclLinter.SYNTAX_RULES:
                     syntax_hits.append(line)
+                elif v.rule_id == SclLinter.OUTPUT_READBACK_RULE:
+                    readback_hits.append(line)
                 elif v.severity == "ERROR":
                     total_errors += 1
                     errors.append(line)
@@ -293,6 +298,14 @@ class _LegacyPlcCheckerCore:
                     f"{syntax_files} 个 .scl 文件的 IF/CASE/FOR/WHILE/REPEAT 都闭合、#变量都在本块声明过"
                     "（不依赖西门子插件的轻量检查；类型错不查，归插件）",
                 )
+            if readback_hits:
+                result.add(
+                    SCL_OUTPUT_READBACK_ITEM, "warn",
+                    f"块里读了自己的输出引脚 {len(readback_hits)} 处（第一阶段只报警告，逐条见明细）",
+                    readback_hits,
+                )
+            else:
+                result.add(SCL_OUTPUT_READBACK_ITEM, "pass", "块里没有读自己的输出引脚")
 
     def _check_language_service(self, project_path: str, result: CheckResult) -> None:
         """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。
