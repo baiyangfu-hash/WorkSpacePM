@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from cockpit_board import shell
@@ -39,9 +41,16 @@ def pull_rows(snapshot: Any) -> list[tuple[str, str]]:
     return rows
 
 
-def audit_rows(snapshot: Any) -> list[tuple[str, str]]:
+def audit_rows(snapshot: Any, dirs: Sequence[Path] = ()) -> list[tuple[str, str]]:
+    """审计报告几份、读的是哪些目录、最新一份是哪份（D-317：写明读了哪里，别让人以为“没有新审计”）。"""
     audits = list(snapshot.audits)
     rows = [("审计报告", c.count_text(audits, "份"))]
+    if dirs:
+        rows.append(("读的目录", "、".join(str(d) for d in dirs)
+                     + "；只认这些目录里“编号_*.md”的报告，写在别处的（如共享库）这里看不到，可启动时加 --reviews-dir"))
+    if audits:
+        newest = max(audits, key=lambda a: (a.number, a.file))
+        rows.append(("编号最大的一份", newest.file))
     for audit in audits[:LISTED]:
         target = f"PR #{audit.pr}" if audit.pr else audit.file
         rows.append((target, f"{VERDICT_ZH.get(audit.verdict, audit.verdict)} · {audit.summary}"))
@@ -63,6 +72,7 @@ class PrsPage(QWidget):
         body.addWidget(holder)
         self.empty_text, self.error_text = shell.page_texts()["prs"]
         self.status: tuple[str, str] = ("", "")
+        self.reviews_dirs: list[Path] = []  # 窗口启动时填 options.reviews_dirs（<root>/reviews 加 --reviews-dir 给的）
         body.addWidget(c.placeholder("每个 PR 的检查、审计逐条对照", "采集里已有这些字段，还没排版", ""))
         self.show_github(None, disabled=False)
 
@@ -84,5 +94,5 @@ class PrsPage(QWidget):
         # 只有这次真读到了才列；缓存和从没读到过都不列，免得旧数据冒充现在、或画成“没有 PR”
         if snapshot is not None and snapshot.fresh:
             layout.addWidget(c.kv(pull_rows(snapshot)))
-            layout.addWidget(c.kv(audit_rows(snapshot)))
+            layout.addWidget(c.kv(audit_rows(snapshot, self.reviews_dirs)))
         self.box.addWidget(frame)

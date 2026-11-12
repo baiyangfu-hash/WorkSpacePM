@@ -14,6 +14,7 @@
 | 用户双击打开 | `00_Infrastructure/auto_pm/environment/双击打开驾驶舱看板.bat` | 找到本目录上一级的 `pm_dashboard_gui.py`，不在 `releases/` 里，不走发布切换 |
 | 命令行打开 | `python -B <源码>/scripts/pm_dashboard_gui.py --root <控制根>` | `--no-legacy` 不接老后台；`--no-net` 当离线；`--examples` 叠加示例卡 |
 | 云端无屏幕自查（离屏截图） | `QT_QPA_PLATFORM=offscreen python scripts/pm_dashboard_gui.py --root <根> --screenshot <前缀>.png` | 每页存一张 PNG，文件名 = 前缀 + `_页名`。agent 改完界面必须自己截图看一遍 |
+| 冒烟（挨页点检） | `QT_QPA_PLATFORM=offscreen python -B scripts/cockpit_board/smoke.py --root <控制根> [--out <截图目录>]`（其余参数同看板，如 `--no-net --no-github`） | 照双击启动的路子开窗口，侧栏每页加工程工位挨个切过去：有报错、`--wait` 秒内没读完、页面一个字都没有，就记“没过”并写原因。退出码 0 全过 / 1 有没过 / 2 窗口没开起来。不点按钮、不写账本；测试 `tests/core/test_cockpit_board_smoke.py` |
 | 测试 | `QT_QPA_PLATFORM=offscreen pytest tests/core/test_cockpit_board.py tests/core/test_cockpit_board_widgets.py tests/core/test_pm_dashboard_gui.py tests/core/test_pm_dashboard.py` | 全绿才算数；测试里有按钮白名单、永不加的词、不写工作空间等硬卡点 |
 
 `main.py gui`（不带参数）打开的是**另一套**界面“老板驾驶舱”（QML），`main.py gui --advanced` 是“专业工作台”（QML）。
@@ -97,6 +98,8 @@
 7 个新页都只读，页面上没有按钮（侧栏按钮除外）。读哪条命令以 `flow/pages.json` 为准，打开那页或点“重新读取”时
 在后台线程读（`app.read_page`），读到且读得懂就存一份“上次读取”快照到 `<控制根>/.auto-pm/cache/cockpit_board/`；
 没读到时亮快照并写明是几分钟前的。每条命令一块：读取状态（三态标签）→ 要点 → 原文。
+这次读到、读懂了、要点也列出来了时，原文收起成一行“原文 N 行已收起”（D-316）；没读到、读不懂、用快照时原文照贴。
+PR 与审计页的审计报告写明读了哪些目录（`<控制根>/reviews` 加 `--reviews-dir` 给的）和编号最大的一份（D-317），写在别处的报告看板读不到。
 
 | 页 | 侧栏组 | 读什么 | 文件 |
 |---|---|---|---|

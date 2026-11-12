@@ -167,6 +167,11 @@ def fill_identity(options: argparse.Namespace, runner: Callable[..., Any] | None
         options.effective_version = effective_release(options.root)
 
 
+def default_station_project(root: Path) -> str:
+    """工程工位默认项目：登记过的第一个客户项目（不是工具项目）；没有就空串。冒烟脚本 smoke.py 也用它。"""
+    return next((p.project_id for p in pd.discover_projects(root, pd.DEFAULT_TOOL_PROJECTS) if not p.tool and p.registered), "")
+
+
 def read_pages(root: Path, reads: tuple[shell.PageRead, ...], project_ids: list[str], runner: Callable[..., Any] | None,
                now: datetime | None) -> list[c.ReadResult]:
     """同一页的只读命令按项目挨个读，结果按项目依次排；没有项目时照旧读一次（写明“没有受管项目可读”）。"""
@@ -497,6 +502,7 @@ class CockpitWindow(QMainWindow):
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
         self._feed_flow_and_tools(board)
+        self.prs.reviews_dirs = list(getattr(self.options, "reviews_dirs", []))
         self.prs.show_github(self.github, bool(self.options.no_github))
         if self.stack.currentWidget() is self.project and self.project.vm is not None:
             self.open_project(self.project.vm.card.project_id)
@@ -637,8 +643,7 @@ def main(argv: list[str] | None = None) -> int:
     fill_identity(options)
     window = CockpitWindow(options)
     if not options.station_project:
-        options.station_project = next(
-            (p.project_id for p in pd.discover_projects(options.root, pd.DEFAULT_TOOL_PROJECTS) if not p.tool and p.registered), "")
+        options.station_project = default_station_project(options.root)
     if options.screenshot:
         window.github = load_github(options)
         window.show_board(load_board(options, use_legacy=False))

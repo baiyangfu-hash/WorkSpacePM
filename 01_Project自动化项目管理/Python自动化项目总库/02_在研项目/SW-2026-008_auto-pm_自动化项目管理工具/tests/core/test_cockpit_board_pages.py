@@ -578,3 +578,65 @@ def test_decisions_page_reads_a_project_that_only_has_a_pending_card(qapp: QAppl
     window._refresh_decisions()
     assert asked and "SW-2026-008" in asked[-1] and "DJ-2026-101" in asked[-1]
     window.close()
+
+
+# ---- D-316：读懂了就收起原文；D-317：写明审计读了哪些目录 ----------------------------------------------
+
+
+def test_raw_json_is_folded_when_the_summary_is_shown(qapp: QApplication) -> None:
+    page = attention.AttentionPage()
+    results = []
+    for read in shell.page_reads()["attention"]:
+        outcome = _outcome("ok", read.reader)
+        results.append(c.ReadResult(read.reader, "x", outcome, readers.parse(read.reader, outcome.stdout)))
+    page.show_results("项目：SW-2026-008", results)
+    texts = _texts(page)
+    assert not any('"schema_version"' in t for t in texts)  # 原始 JSON 不再铺在页面上
+    folded = [t for t in texts if t.startswith("原文 ") and "已收起" in t]
+    assert len(folded) == len(results)
+    assert folded[0] == f"原文 {len(results[0].outcome.stdout.splitlines())} 行已收起，要点见上；要看全文，在命令行运行上面这条命令"
+
+
+@pytest.mark.parametrize("mode", ["garbage", "missing", "offline"])
+def test_raw_text_stays_when_the_read_failed(qapp: QApplication, mode: str) -> None:
+    page = tasks.TasksPage()
+    read = shell.page_reads()["tasks"][0]
+    outcome = _outcome(mode, read.reader)
+    parsed = readers.parse(read.reader, outcome.stdout) if mode == "garbage" else None
+    page.show_results("项目：SW-2026-008", [c.ReadResult(read.reader, "x", outcome, parsed)])
+    texts = _texts(page)
+    assert not any("已收起" in t for t in texts)
+    assert any((outcome.stdout or outcome.stderr).strip()[:20] in t for t in texts)  # 排查要看原文
+
+
+def test_snapshot_values_keep_the_raw_text(qapp: QApplication) -> None:
+    """用的是上次的快照（这次没读到）：要点照列，原文照贴，不收起，免得旧数据显得像这次读到的。"""
+    page = tasks.TasksPage()
+    read = shell.page_reads()["tasks"][0]
+    good = _outcome("ok", read.reader)
+    offline = _outcome("offline", read.reader)
+    page.show_results("项目：SW-2026-008", [c.ReadResult(read.reader, "x", offline, readers.parse(read.reader, good.stdout),
+                                                         last_note="上次读取：5 分钟前")])
+    assert not any("已收起" in t for t in _texts(page))
+
+
+def test_prs_page_names_the_audit_folders_it_read(qapp: QApplication, tmp_path: Path) -> None:
+    audit = gh.Audit(27, "27_review_and_fix_audit_tool.md", "pass", "通过")
+    snapshot = gh.Snapshot("o/r", "ok", NOW, NOW, audits=[gh.Audit(18, "18_audit_pr3_envport.md", "pass", "通过"), audit])
+    rows = dict(prs.audit_rows(snapshot, [tmp_path / "reviews"]))
+    assert rows["审计报告"] == "2 份" and rows["编号最大的一份"] == "27_review_and_fix_audit_tool.md"
+    assert str(tmp_path / "reviews") in rows["读的目录"] and "--reviews-dir" in rows["读的目录"]
+    assert "读的目录" not in dict(prs.audit_rows(snapshot))  # 没给目录就不写这一行
+    assert dict(prs.audit_rows(gh.Snapshot("o/r", "ok", NOW, NOW)))["审计报告"] == "没有"
+    page = prs.PrsPage()
+    page.reviews_dirs = [tmp_path / "reviews"]
+    page.show_github(snapshot, disabled=False)
+    assert any("--reviews-dir" in t for t in _texts(page))
+
+
+def test_the_window_hands_its_review_folders_to_the_prs_page(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    extra = tmp_path / "shared_reviews"
+    window = gui_tests._window(qapp, root, db, read_runner=_runner("ok"), reviews_dirs=[root / "reviews", extra])
+    assert window.prs.reviews_dirs == [root / "reviews", extra]
+    window.close()
