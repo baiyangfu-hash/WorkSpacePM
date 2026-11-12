@@ -959,6 +959,12 @@ _PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
     help="指定业务线（默认从项目编号前缀推断）",
 )
 @click.option(
+    "--stack",
+    type=click.Choice(["plc", "python"]),
+    default=None,
+    help="技术栈（默认按目录内容识别：有 .plc.json 是 plc，有 pyproject/setup 或 .py 文件是 python）",
+)
+@click.option(
     "--approval-evidence-ref",
     default="",
     help="--force 覆盖时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
@@ -970,18 +976,43 @@ def cmd_import(
     move: bool,
     force: bool,
     business_line: str | None,
+    stack: str | None,
     approval_evidence_ref: str,
 ) -> None:
-    """导入外部项目目录到工作空间的 02_在研项目/ 下"""
+    """导入外部项目目录：Python 项目放到 project create --stack python 的同一个目录，其余放 02_在研项目/
+
+    复制时不带源仓库的 .git（原仓库的历史和远端留在源目录）；--move 会连 .git 一起搬，并提示。
+    """
     app_ctx: AppContext = ctx.obj
     source_path = os.path.abspath(path)
     dirname = os.path.basename(source_path)
-    dest_path = os.path.join(app_ctx.workspace_root, _PROJECTS_SUBDIR, dirname)
+
+    # TD-SW008-563：先认技术栈；--stack 和目录内容对不上时拒绝，不猜
+    detected = ProjectService(app_ctx.workspace_root).detect_stack(source_path)
+    if stack is not None and detected != "unknown" and stack != detected:
+        console.print(f"[red]错误: 指定了 --stack {stack}，但目录内容看起来是 {detected} 项目[/red]")
+        ctx.exit(1)
+    stack = stack or detected
+    # TD-SW008-564：Python 项目和 project create --stack python 落在同一个目录
+    if stack == "python":
+        try:
+            dest_root = resolve_project_destination(app_ctx.workspace_root, "python")
+        except ProjectDestinationError as error:
+            console.print(f"[red]错误: {error}[/red]")
+            ctx.exit(1)
+    else:
+        dest_root = os.path.join(app_ctx.workspace_root, _PROJECTS_SUBDIR)
+    dest_path = os.path.join(dest_root, dirname)
 
     # 先校验、后落盘（D2）：指定了业务线时，编号前缀必须在白名单；放在任何复制、移动、覆盖之前
     if business_line is not None:
         try:
-            _, notice = resolve_business_line(ProjectService._extract_id_from_dirname(source_path), business_line)
+            _, notice = resolve_business_line(
+                ProjectService._extract_id_from_dirname(source_path),
+                business_line,
+                # TD-SW008-570：import 没有 --auto-id，不能让人去用它
+                remedy="或把目录改名成“编号_名称”（如 SW-2026-901_工具名）再导入",
+            )
         except InvalidBusinessLineError as e:
             console.print(f"[red]错误: {e}[/red]")
             ctx.exit(1)
@@ -1037,13 +1068,24 @@ def cmd_import(
 
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
+    has_git = os.path.exists(os.path.join(source_path, ".git"))
     try:
         if move:
             shutil.move(source_path, dest_path)
             console.print(f"[green]项目已移动: {dest_path}[/green]")
+            if has_git:
+                console.print(
+                    "[yellow]注意: 源目录的 .git 也一起搬进来了，在工作区里提交时会变成嵌入仓库。"
+                    "要保留原仓库的历史和远端，改用复制（不加 --move）；不需要就删掉项目里的 .git。[/yellow]"
+                )
         else:
-            shutil.copytree(source_path, dest_path)
+            # TD-SW008-565：不复制 .git，免得在工作区里变成嵌入仓库、和原远端断开
+            shutil.copytree(source_path, dest_path, ignore=shutil.ignore_patterns(".git"))
             console.print(f"[green]项目已复制: {dest_path}[/green]")
+            if has_git:
+                console.print(
+                    f"[yellow]提示: 没有复制源仓库的 .git；原仓库的历史和远端还在 {source_path}[/yellow]"
+                )
     except OSError as e:
         console.print(f"[red]导入失败: {e}[/red]")
         ctx.exit(1)
@@ -1051,7 +1093,7 @@ def cmd_import(
     # 导入后补全 .copier-answers.yml（如果仍缺少）
     svc = ProjectService(app_ctx.workspace_root)
     try:
-        svc.retrofit_project_by_path(dest_path)
+        svc.retrofit_project_by_path(dest_path, stack_hint=stack if stack != "unknown" else None)
         console.print("[green].copier-answers.yml 已补全[/green]")
     except FileExistsError:
         pass  # 已有 .copier-answers.yml，正常
@@ -1061,6 +1103,7 @@ def cmd_import(
     project_id = ProjectService._extract_id_from_dirname(dest_path)
 
     console.print(f"  项目编号: {project_id}")
+    console.print(f"  技术栈: {stack}")
     console.print(f"  导入路径: {dest_path}")
 
     # 同步到 DB 缓存（如果 DB 已存在）

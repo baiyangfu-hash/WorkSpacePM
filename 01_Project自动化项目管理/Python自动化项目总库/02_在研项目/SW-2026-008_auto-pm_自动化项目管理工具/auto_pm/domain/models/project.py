@@ -57,7 +57,11 @@ def project_id_prefix(project_id: str) -> str:
     return project_id.split("-", 1)[0] if "-" in project_id else ""
 
 
-def resolve_business_line(project_id: str, explicit: str | None = None) -> tuple[str, str]:
+#: 编号不合法时给的出路。默认是 project create 的写法；别的入口（如 project import 没有 --auto-id）传自己的（TD-SW008-570）
+AUTO_ID_REMEDY = "或用 --auto-id 让系统按业务线生成"
+
+
+def resolve_business_line(project_id: str, explicit: str | None = None, remedy: str = AUTO_ID_REMEDY) -> tuple[str, str]:
     """决定新项目的业务线，返回 (业务线, 提示)；不合法直接抛 InvalidBusinessLineError。
 
     规矩（D2）：先校验、后落盘——编号前缀不在白名单就拒绝，不能把 ``ZZ`` 之类原样写进项目元数据，
@@ -69,7 +73,7 @@ def resolve_business_line(project_id: str, explicit: str | None = None) -> tuple
     if prefix not in _VALID_BUSINESS_LINES:
         raise InvalidBusinessLineError(
             f"项目编号 {project_id!r} 的前缀 {prefix!r} 不是合法业务线（{allowed}）；"
-            "请改用 SW-年份-序号 这类编号，或用 --auto-id 让系统按业务线生成"
+            f"请改用 SW-年份-序号 这类编号，{remedy}"
         )
     if explicit is None:
         return prefix, ""

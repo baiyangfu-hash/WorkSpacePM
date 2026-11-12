@@ -519,6 +519,35 @@ class ProjectScanner:
         )
         info.extra = extra
 
+    # Python 仓库的标志文件（TD-SW008-563）
+    PYTHON_MARKER_FILES = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+    _SKIP_DIRS = frozenset({".git", ".venv", "venv", "env", "node_modules", "__pycache__", ".auto-pm"})
+
+    @staticmethod
+    def looks_like_python_repo(project_path: str, max_depth: int = 2) -> bool:
+        """目录看起来是不是 Python 仓库（TD-SW008-563）：有 pyproject/setup/requirements，或前两层里有 .py 文件"""
+        if any(os.path.isfile(os.path.join(project_path, name)) for name in ProjectScanner.PYTHON_MARKER_FILES):
+            return True
+
+        def _has_py(dir_path: str, depth: int) -> bool:
+            try:
+                entries = sorted(os.listdir(dir_path))
+            except OSError:
+                return False
+            for entry in entries:
+                entry_path = os.path.join(dir_path, entry)
+                if entry.endswith(".py") and os.path.isfile(entry_path):
+                    return True
+            if depth >= max_depth:
+                return False
+            return any(
+                _has_py(os.path.join(dir_path, e), depth + 1)
+                for e in entries
+                if e not in ProjectScanner._SKIP_DIRS and os.path.isdir(os.path.join(dir_path, e))
+            )
+
+        return _has_py(project_path, 1)
+
     @staticmethod
     def _find_plc_json_recursive(project_path: str, max_depth: int = 3) -> str | None:
         """递归查找 .plc.json（仅用于补充元数据，不用于项目识别）
