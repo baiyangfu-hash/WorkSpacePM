@@ -4,11 +4,15 @@ A Work still in an execution state although every Run it ever had has ended is a
 four days).  It must not be counted as "several active Works" or block ``orient``, but it must never be silent either:
 ``orient`` lists it as a warning.  A real conflict stays a conflict: a Work with a live Run, a lease that has not expired, or
 a Run that ended less than ``STALE_AFTER`` ago is never classed as a leftover.
+
+D-339 (CHG-SCPT-2026-647): an *orphan card* is the other way a card is left behind: the Mission is still open but the Work
+under it was already CANCELLED and every Run has ended.  ``classify_residue`` does not see it (its Work is terminal), so it
+has its own judgement, ``is_orphan_mission``; the four leftover conditions above are not touched.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime, timedelta
 
 from auto_pm.contracts.continuity import (
@@ -18,6 +22,7 @@ from auto_pm.contracts.continuity import (
     WorkState,
 )
 from auto_pm.contracts.continuity_resume import ResumeResidue
+from auto_pm.contracts.mission import Mission, MissionState
 
 STALE_AFTER = timedelta(
     hours=24
@@ -73,3 +78,20 @@ def classify_residue(
         last_run_state=last.state.value,
         last_run_ended_at=last.updated_at,
     )
+
+
+def is_orphan_mission(
+    mission: Mission,
+    work: WorkItem | None,
+    runs: Sequence[RunItem],
+    open_states: Collection[MissionState],
+) -> bool:
+    """D-339: the Mission is in one of ``open_states`` (still open, cancellable), it has a root Work, that Work is CANCELLED,
+    and every Run under it (``runs`` must be all of them, terminal ones included) has ended.  A single Run that has not ended
+    means somebody may still be working: not an orphan."""
+
+    if mission.state not in open_states or not mission.root_work_id or work is None:
+        return False
+    if work.work_id != mission.root_work_id or work.state is not WorkState.CANCELLED:
+        return False
+    return all(run.state in _TERMINAL_RUN_STATES for run in runs)
