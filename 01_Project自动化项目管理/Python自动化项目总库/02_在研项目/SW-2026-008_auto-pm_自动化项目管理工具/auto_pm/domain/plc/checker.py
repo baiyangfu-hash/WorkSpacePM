@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import cast
 
 from auto_pm.core.paths import find_prd_dir
+from auto_pm.domain.models.plc import LANGUAGE_SERVICE_CHECK, LANGUAGE_SERVICE_TEST
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 from auto_pm.models.enums import ProjectType
 from auto_pm.plc.doc_consistency import analyze_project, consistency_items, required_document_items
@@ -287,17 +288,17 @@ class _LegacyPlcCheckerCore:
         checked = report.check
         if not checked.available:
             result.add(
-                "Siemens 语言服务 check", "warn",
+                LANGUAGE_SERVICE_CHECK, "warn",
                 "未验证：本机未找到 Dynamic Siemens Language Support 插件命令行，语言服务这一层没有执行（交付阶段门禁按失败处理）",
             )
             return
         binary = f"（插件 {checked.binary.version}）" if checked.binary else ""
         if checked.passed:
-            result.add("Siemens 语言服务 check", "pass", f"插件命令行 check 退出码 0，无诊断错误{binary}: {checked.summary}")
+            result.add(LANGUAGE_SERVICE_CHECK, "pass", f"插件命令行 check 退出码 0，无诊断错误{binary}: {checked.summary}")
         else:
             shown = "；".join(checked.messages[:3])
             result.add(
-                "Siemens 语言服务 check", "fail",
+                LANGUAGE_SERVICE_CHECK, "fail",
                 f"插件命令行 check 退出码 {checked.exit_code}，{checked.error_count} 个错误{binary}" + (f"（如: {shown}）" if shown else ""),
             )
         tested = report.test
@@ -305,11 +306,11 @@ class _LegacyPlcCheckerCore:
             return
         if tested.passed:
             cases = f"，{tested.cases_run}/{tested.cases_total} 个用例" if tested.cases_total is not None else ""
-            result.add("Siemens 语言服务 test", "pass", f"插件命令行 test 退出码 0{cases}{binary}")
+            result.add(LANGUAGE_SERVICE_TEST, "pass", f"插件命令行 test 退出码 0{cases}{binary}")
         else:
             shown = "；".join(tested.messages[:3])
             result.add(
-                "Siemens 语言服务 test", "fail",
+                LANGUAGE_SERVICE_TEST, "fail",
                 f"插件命令行 test 退出码 {tested.exit_code}，{tested.error_count} 个问题{binary}" + (f"（如: {shown}）" if shown else ""),
             )
 

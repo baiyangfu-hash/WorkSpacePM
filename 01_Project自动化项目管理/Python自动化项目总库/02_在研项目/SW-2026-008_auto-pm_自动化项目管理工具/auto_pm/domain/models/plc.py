@@ -11,9 +11,14 @@ PLC 检查与修复模型（迁移自 plc/models.py:dataclass）
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from auto_pm.domain.models.enums import CheckStatus, DocType, ProjectType, RepairStatus
+
+# 检查器写 Siemens 语言服务两项用的名字（检查器、基线逐条比、证据摘要都引用这里）。
+# 找不到插件时 check 这一项是 warn（“未验证”），不会是 pass（D-295）
+LANGUAGE_SERVICE_CHECK = "Siemens 语言服务 check"
+LANGUAGE_SERVICE_TEST = "Siemens 语言服务 test"
 
 
 class CheckItem(BaseModel):
@@ -57,6 +62,19 @@ class CheckResult(BaseModel):
     def all_pass(self) -> bool:
         """是否全部通过（无 fail）"""
         return self.fail_count == 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def language_service_verified(self) -> bool | None:
+        """Siemens 语言服务（插件命令行）这一层有没有真跑过，``--json`` 里同名字段。
+
+        True＝跑了（过没过看 fail_count）；False＝本机没找到插件，语法和类型没人查过，不能当通过；
+        None＝这次没有这一层（没要求跑、不是带 .plc.json 的 PLC 项目）。
+        """
+        statuses = [item.status for item in self.items if item.item == LANGUAGE_SERVICE_CHECK]
+        if not statuses:
+            return None
+        return "warn" not in statuses
 
 
 class RepairAction(BaseModel):
