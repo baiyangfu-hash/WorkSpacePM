@@ -92,6 +92,9 @@ def test_a_new_template_project_is_registered_and_pm_orient_then_knows_it(tmp_pa
         "control_project_id": CONTROL,
         "control_pm_session": CONTROL_SESSION,
         "runtime_root": "",
+        # CHG-SCPT-2026-650：性质、状态两栏不带参数时写空（读成“未分类”“在研”）
+        "kind": "",
+        "status": "",
     }
 
     code, output = _cli(tmp_path, "pm", "orient", "DJ-2026-009", "--json")

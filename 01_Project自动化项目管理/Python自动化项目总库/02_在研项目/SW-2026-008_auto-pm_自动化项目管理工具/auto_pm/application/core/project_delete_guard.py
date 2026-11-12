@@ -6,10 +6,21 @@
 - ``delete_blockers``：列出挡住删除的原因（开着的 Mission、Work、Run；项目目录里没提交的改动；读不出来也算挡住）；
 - ``recycle_project``：把项目目录整体搬到 ``<工作区>/.auto-pm/recycle/<项目编号>/<时间戳>/``，可原样搬回；
 - ``list_recycled``：只读列出回收区里有什么、搬进来多久了（TD-208）。回收区没有任何自动清理，列表只为让人决定要不要手工清，这里不删任何东西。
+
+CHG-SCPT-2026-650：
+
+- ``recycle_project`` 搬完另记一张小记录（``.auto-pm/recycle-origins/<项目编号>/<时间戳>.json``，不放进回收区目录本身，
+  回收区里照旧只有搬进来的目录），写明原来在工作区哪个目录，搬回时照它放回原处；
+- ``mark_registry_deleted``：删除项目的公用一步，命令行 ``project delete`` 和窗口删除搬进回收区之后都调它，把登记表里这一条标“已删除”
+  （不抹行）。不放进 ``recycle_project``：``project import --force`` 覆盖旧目录也调 ``recycle_project``，那不是删项目；
+- ``plan_restore`` / ``restore_project``：把回收区的一份目录搬回原处，目标已有同名目录就拒绝，搬回后把登记表状态改回删除前的值。
+  谁能下令搬回（只听用户本人）由命令层负责，和删除同一口径。
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,6 +36,7 @@ from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityS
 from auto_pm.infrastructure.git_timeout import run_git_bounded_strict_text
 
 RECYCLE_RELATIVE_DIR = Path(".auto-pm") / "recycle"
+ORIGINS_RELATIVE_DIR = Path(".auto-pm") / "recycle-origins"  # 回收区每份目录“原来在哪”的记录
 _TERMINAL_RUN_STATES = frozenset({RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED})
 _PROJECT_ID_PREFIX = re.compile(r"^([A-Z]{2,4}-\d{4}-\d{3})")
 
@@ -148,7 +160,40 @@ def recycle_project(
         raise ProjectDeleteError(
             f"搬进回收区失败（项目目录保持原样或请手工核对）：{error}"
         ) from error
+    origin = {"project_id": project_id, "project_path": source.relative_to(workspace).as_posix()}
+    try:
+        record = _origin_file(workspace, project_id, stamp)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps(origin, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # 记录写不上不影响已经搬好的目录；搬回时退回去查登记表
     return destination
+
+
+def _origin_file(workspace: Path, project_id: str, stamp: str) -> Path:
+    return workspace / ORIGINS_RELATIVE_DIR / project_id / f"{stamp}.json"
+
+
+def mark_registry_deleted(workspace_root: str | Path, project_id: str) -> str:
+    """删除项目的公用一步：目录已经搬进回收区之后，把登记表里这一条标“已删除”，返回给人看的一句话。
+
+    登记表里没有这个项目时什么都不写；登记表读不出或写不上时抛 ``ProjectDeleteError``（目录已在回收区，要告诉人）。
+    """
+
+    from auto_pm.application.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    try:
+        changed = WorkspaceRegistryService(workspace_root).mark_deleted(project_id)
+    except (WorkspaceRegistryError, OSError) as error:
+        raise ProjectDeleteError(f"目录已搬进回收区，但登记表没标上“已删除”：{error}") from error
+    if changed is None:
+        return f"登记表里没有 {project_id}，没改登记表"
+    if not changed.written:
+        return f"登记表里 {project_id} 本来就是“已删除”"
+    return f"登记表里 {project_id} 已标“已删除”（这一条保留，编号以后仍可查）"
 
 
 @dataclass(frozen=True)
@@ -189,3 +234,113 @@ def list_recycled(workspace_root: str | Path) -> list[RecycledProject]:
                 found.append(RecycledProject(project_dir.name, entry.name, entry, _stamp_time(entry.name)))
     found.sort(key=lambda item: (item.recycled_at or datetime.min.replace(tzinfo=UTC), item.stamp), reverse=True)
     return found
+
+
+@dataclass(frozen=True)
+class RestorePlan:
+    """一份回收区目录搬回哪里；``problems`` 不空就不能搬。"""
+
+    item: RecycledProject
+    target: Path
+    target_relative: str
+    target_from: str  # 目标位置从哪来：回收区记录 / 登记表
+    problems: tuple[str, ...]
+
+
+def plan_restore(workspace_root: str | Path, project_id: str, stamp: str = "") -> RestorePlan:
+    """只读：找出回收区里要搬回的那一份和它原来的位置；找不到这一份、或不知道原来在哪时抛 ``ProjectDeleteError``。"""
+
+    workspace = Path(workspace_root).resolve()
+    items = [item for item in list_recycled(workspace) if item.project_id == project_id]
+    if not items:
+        raise ProjectDeleteError(f"回收区里没有项目 {project_id}（project recycle-list 可看回收区里有什么）")
+    if stamp:
+        chosen = next((item for item in items if item.stamp == stamp), None)
+        if chosen is None:
+            listed = "、".join(item.stamp for item in items)
+            raise ProjectDeleteError(f"回收区里 {project_id} 没有 {stamp} 这一份；有的是：{listed}")
+    elif len(items) > 1:
+        listed = "、".join(item.stamp for item in items)
+        raise ProjectDeleteError(f"回收区里 {project_id} 有 {len(items)} 份，请用 --stamp 指定搬回哪一份：{listed}")
+    else:
+        chosen = items[0]
+    relative, target_from = _origin_of(workspace, chosen)
+    if not relative:
+        raise ProjectDeleteError(
+            f"不知道 {project_id} 原来在哪（回收区没有原位置记录，登记表里也没有这一条）；"
+            f"请用户本人手工把 {chosen.path} 搬回原处，再用 project register 登记"
+        )
+    target = (workspace / relative).resolve()
+    recycle_root = workspace / RECYCLE_RELATIVE_DIR
+    problems: list[str] = []
+    if target == workspace or workspace not in target.parents:
+        problems.append(f"原位置不在工作区里面：{relative}")
+    elif target == recycle_root or recycle_root in target.parents:
+        problems.append(f"原位置在回收区里面：{relative}")
+    elif os.path.lexists(target):
+        problems.append(f"原位置已经有同名目录或文件：{relative}（先处理掉它再搬回）")
+    return RestorePlan(chosen, target, relative, target_from, tuple(problems))
+
+
+def _origin_of(workspace: Path, item: RecycledProject) -> tuple[str, str]:
+    record = _origin_file(workspace, item.project_id, item.stamp)
+    if record.is_file():
+        try:
+            data = json.loads(record.read_text(encoding="utf-8"))
+            relative = str(data.get("project_path") or "") if isinstance(data, dict) else ""
+        except (OSError, ValueError):
+            relative = ""
+        if relative:
+            return relative, "回收区记录"
+    from auto_pm.application.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    try:
+        entry = WorkspaceRegistryService(workspace).find(item.project_id)
+    except (WorkspaceRegistryError, OSError):
+        entry = None
+    if entry is not None and entry.project_root:
+        return entry.project_root, "登记表"
+    return "", ""
+
+
+def restore_project(workspace_root: str | Path, plan: RestorePlan) -> str:
+    """把 ``plan`` 那一份目录搬回原处，再把登记表状态改回删除前的值；返回登记表那一步给人看的一句话。"""
+
+    if plan.problems:
+        raise ProjectDeleteError("不能搬回：" + "；".join(plan.problems))
+    if os.path.lexists(plan.target):  # 预演之后、真搬之前又出现了同名目录
+        raise ProjectDeleteError(f"原位置已经有同名目录或文件：{plan.target_relative}（先处理掉它再搬回）")
+    try:
+        plan.target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(plan.item.path), str(plan.target))
+    except OSError as error:
+        raise ProjectDeleteError(f"搬回失败（回收区里的目录保持原样或请手工核对）：{error}") from error
+    workspace = Path(workspace_root).resolve()
+    record = _origin_file(workspace, plan.item.project_id, plan.item.stamp)
+    record.unlink(missing_ok=True)
+    for emptied in (plan.item.path.parent, record.parent):
+        try:
+            emptied.rmdir()  # 这个项目在回收区里已经空了才删得掉，不空就留着
+        except OSError:
+            pass
+
+    from auto_pm.application.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    project_id = plan.item.project_id
+    try:
+        changed = WorkspaceRegistryService(workspace_root).mark_restored(project_id)
+    except (WorkspaceRegistryError, OSError) as error:
+        raise ProjectDeleteError(f"目录已搬回 {plan.target_relative}，但登记表没改回来：{error}") from error
+    if changed is None:
+        return f"登记表里没有 {project_id}：要让驾驶舱认识它，请运行 project register {project_id} --path {plan.target_relative}"
+    if not changed.written:
+        return f"登记表里 {project_id} 不是“已删除”，没改登记表"
+    from auto_pm.contracts.workspace_context import status_label
+
+    return f"登记表里 {project_id} 的状态已改回“{status_label(changed.after)}”"

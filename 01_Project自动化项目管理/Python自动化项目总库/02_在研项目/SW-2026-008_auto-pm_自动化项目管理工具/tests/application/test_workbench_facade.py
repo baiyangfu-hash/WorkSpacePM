@@ -748,3 +748,64 @@ def test_save_workspace_root_partial_success_when_runtime_reload_fails(tmp_path,
     assert result.payload["runtime_reloaded"] is False
     assert result.payload["reload_message"] == f"重载失败: {os.path.abspath(str(tmp_path))}"
     assert "配置已保存，但运行态重载失败" in result.message
+
+
+def test_delete_project_in_the_window_marks_the_registry_like_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CHG-SCPT-2026-650：界面删除和命令行 project delete 走同一个 mark_registry_deleted，登记表这一条标“已删除”不抹行"""
+    import json
+    import subprocess
+    from unittest.mock import patch
+
+    _as_user(monkeypatch)
+    root, mock_project_service = _delete_world(tmp_path)
+    control = root / "SYS-2026-001_WorkspaceGovernance"
+    control.mkdir()
+    registry = control / "workspace_registry.json"
+    entry = {"project_id": "SW-2026-001", "project_root": "proj", "development_root": "proj", "kind": "tool"}
+    payload = {"schema_version": "workspace-registry.v1", "projects": [entry]}
+    registry.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    for args in (["add", "-A"], ["commit", "-q", "-m", "registry"]):
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", *args],
+            cwd=str(root), check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+
+    with patch("auto_pm.infrastructure.logging.audit.audit_log"):
+        facade = WorkbenchFacade(dashboard_service=MagicMock(), project_service=mock_project_service)
+        result = facade.delete_project("SW-2026-001")
+
+    assert result.success is True, result.message
+    (kept,) = json.loads(registry.read_text(encoding="utf-8"))["projects"]
+    assert (kept["project_id"], kept["kind"], kept["status"], kept["status_before_delete"]) == (
+        "SW-2026-001", "tool", "deleted", "",
+    )
+    assert "已删除" in result.message and "project restore SW-2026-001" in result.message
+    assert result.payload is not None and "已标" in result.payload["registry"]
+
+
+def test_delete_project_in_the_window_reports_a_registry_it_could_not_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import patch
+
+    from auto_pm.application.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    _as_user(monkeypatch)
+    root, mock_project_service = _delete_world(tmp_path)
+
+    def broken(self: WorkspaceRegistryService, project_id: str) -> None:
+        raise WorkspaceRegistryError("locked")
+
+    monkeypatch.setattr(WorkspaceRegistryService, "mark_deleted", broken)
+    with patch("auto_pm.infrastructure.logging.audit.audit_log"):
+        facade = WorkbenchFacade(dashboard_service=MagicMock(), project_service=mock_project_service)
+        result = facade.delete_project("SW-2026-001")
+
+    assert result.success is False and "已搬进回收区" in result.message and "locked" in result.message
+    assert not (root / "proj").exists()
+    mock_project_service.sync_to_cache.assert_called_once_with(force_full=True)

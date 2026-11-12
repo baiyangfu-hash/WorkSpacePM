@@ -140,6 +140,11 @@ COMMANDS: dict[str, CommandSpec] = {
     ),
     "release trial": CommandSpec(CommandKind.READ_ONLY, (), (), "copies the active release to a scratch folder outside the workspace; writes no ledger, pointer or workspace file (D-05)"),
     "project recycle-list": CommandSpec(CommandKind.READ_ONLY, (), (), "lists the recycle area by directory name only; deletes, moves and writes nothing (TD-208)"),
+    "project restore": CommandSpec(
+        CommandKind.NORMAL, ("operator=user",), (),
+        "CHG-SCPT-2026-650: dry run by default; --apply only from the user in person (agent markers refused, PIN or user words), "
+        "moves one recycle entry back and flips the registry status back; refuses when the place is taken",
+    ),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a
     # cloud clone with no runtime identity, so they carry no guards.
     "claim list": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the remote claim branches"),

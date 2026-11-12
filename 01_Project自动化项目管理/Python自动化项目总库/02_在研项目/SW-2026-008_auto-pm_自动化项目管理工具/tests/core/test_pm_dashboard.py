@@ -57,7 +57,8 @@ def _workspace(tmp_path: Path, missions: list[tuple[str, str, str, float]]) -> t
             {
                 "projects": [
                     {"project_id": "DJ-2026-101", "project_root": "0100_PLC自动化/DJ-2026-101_甲"},
-                    {"project_id": "SW-2026-008", "project_root": "tool"},
+                    # 性质读登记表（CHG-SCPT-2026-650）：SW-2026-008 是工具，DJ-2026-101 没填性质（按未分类，算在研项目）
+                    {"project_id": "SW-2026-008", "project_root": "tool", "kind": "tool"},
                 ]
             }
         ),
@@ -350,3 +351,49 @@ def test_store_reader_fits_the_real_continuity_store(tmp_path: Path) -> None:
     assert pd.main(["--root", str(root), "--out", str(tmp_path / "b.html"), "--now", NOW.isoformat(),
                     "--no-git", "--no-legacy", "--ledger-reader", "store"]) == 0
     assert _digest(db) == before
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：性质、状态读登记表
+
+
+def _with_columns(root: Path, extra: list[dict[str, str]], **columns: dict[str, str]) -> None:
+    registry = root / pd.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    for entry in data["projects"]:
+        entry.update(columns.get(entry["project_id"], {}))
+    data["projects"].extend(extra)
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def test_tool_comes_from_the_registry_kind_not_a_fixed_list(tmp_path: Path) -> None:
+    root, _db = _workspace(tmp_path, [])
+    _with_columns(root, [{"project_id": "SW-2026-900", "project_root": "t", "kind": "test"}], **{"SW-2026-008": {"kind": ""}})
+    projects = {p.project_id: p for p in pd.discover_projects(root)}
+    assert projects["SW-2026-008"].tool is False  # 名字不再决定“工具”
+    assert projects["SW-2026-900"].tool is True and projects["SW-2026-900"].kind_label == "测试"
+    assert projects["DJ-2026-101"].kind_label == "未分类" and projects["DJ-2026-101"].status_label == "在研"
+    assert projects["DJ-2026-102"].registered is False and projects["DJ-2026-102"].kind_label == "未登记"
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "pm_dashboard.py").read_text(encoding="utf-8")
+    assert source.count("DEFAULT_TOOL_PROJECTS") == 0
+
+
+def test_a_deleted_project_is_hidden_and_its_folder_is_not_counted_as_new(tmp_path: Path) -> None:
+    root, _db = _workspace(tmp_path, [])
+    _with_columns(
+        root,
+        [{"project_id": "DJ-2026-102", "project_root": "0100_PLC自动化/DJ-2026-102_乙", "status": "deleted"}],
+    )
+    ids = [p.project_id for p in pd.discover_projects(root)]
+    assert "DJ-2026-102" not in ids and "DJ-2026-101" in ids
+
+
+def test_an_archived_project_is_folded_on_the_page(tmp_path: Path) -> None:
+    root, db = _workspace(tmp_path, [])
+    _with_columns(root, [], **{"DJ-2026-101": {"status": "archived", "kind": "equipment"}})
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    (archived,) = [p for p in board.projects if p.archived]
+    assert archived.project_id == "DJ-2026-101" and archived.status_label == "已归档"
+    page = pd.render_page(board, timezone.utc)
+    assert "已归档项目（1 个" in page
+    in_research = page.split("<h2>在研项目</h2>", 1)[1].split("<h2>最近 7 天动态</h2>", 1)[0]
+    assert "DJ-2026-101" not in in_research

@@ -255,7 +255,7 @@ class ProjectScanner:
         V0.3.0-M0.5-Phase1: 修复元数据契约不一致问题。
         - description: 兼容 project_description（copier-python-template 标准）和 description
         - version: 优先从 answers 读取，回退到 pyproject.toml [project].version
-        - phase: 优先从 answers 读取，回退到 PM_SESSION_*.md frontmatter
+        - phase: 只从 answers 读取（CHG-SCPT-2026-650：PM_SESSION 已退役，不再从它推阶段；项目状态看工作区登记表）
         """
         answers_path = os.path.join(project_path, self.COPIER_ANSWERS_FILE)
         if not os.path.isfile(answers_path):
@@ -305,10 +305,7 @@ class ProjectScanner:
         if not version:
             version = self._read_version_from_pyproject(project_path)
 
-        # V0.3.0-M0.5-Phase1: phase 回退到 PM_SESSION frontmatter
         phase = answers.get("phase", "") or ""
-        if not phase:
-            phase = self._read_phase_from_pm_session(project_path, project_id)
 
         extra = dict(answers)
         info = ProjectInfo(
@@ -343,90 +340,6 @@ class ProjectScanner:
             return match.group(1) if match else ""
         except OSError:
             return ""
-
-    def _read_phase_from_pm_session(self, project_path: str, project_id: str) -> str:
-        """从 PM_SESSION_*.md 读取项目阶段（回退策略）
-
-        V0.3.6 扩展：除原有 frontmatter `phase:` 字段外，
-        增加从 §2 Current Focus / §8 Handoff Notes 推导阶段的能力，
-        解决 PM_SESSION 无 frontmatter phase 字段时阶段为空的问题。
-        """
-        if not project_id:
-            # project_id 为空时，扫描目录下的 PM_SESSION_*.md
-            try:
-                for name in os.listdir(project_path):
-                    if name.startswith(self.PM_SESSION_PREFIX) and name.endswith(".md"):
-                        project_id = name[len(self.PM_SESSION_PREFIX):-len(".md")]
-                        break
-            except OSError:
-                return ""
-        if not project_id:
-            return ""
-        pm_session_path = os.path.join(project_path, f"PM_SESSION_{project_id}.md")
-        if not os.path.isfile(pm_session_path):
-            return ""
-        try:
-            with open(pm_session_path, encoding="utf-8") as f:
-                content = f.read()
-            # 1. 优先从 frontmatter 提取 phase 字段（向后兼容）
-            match = re.search(r'^phase:\s*["\']?([^"\'\n]+)["\']?\s*$', content, re.MULTILINE)
-            if match:
-                return match.group(1).strip()
-            # 2. V0.3.6 扩展：从 §2/§8 推导阶段
-            return self._derive_phase_from_pm_session_content(content)
-        except OSError:
-            return ""
-
-    def _derive_phase_from_pm_session_content(self, content: str) -> str:
-        """从 PM_SESSION §2/§8 内容推导项目阶段
-
-        解析 §2 Current Focus 的 current_focus 字段和 §8 Handoff Notes 的
-        current_state 字段，根据关键词映射到标准阶段
-        （archived/production/commissioning/developing）。
-
-        V0.5.3 Fix 3: 当 PM_SESSION 存在 current_focus/current_state 字段但
-        关键词未匹配任何标准阶段时，默认返回 "developing"（项目存在 PM_SESSION
-        且字段有内容 = 项目在研）。仅当字段完全不存在时返回空字符串。
-        """
-        # 收集 current_focus 和 current_state 文本
-        texts: list[str] = []
-        for field in ("current_focus", "current_state"):
-            match = re.search(
-                rf'^-\s*{field}:\s*(.+)$',
-                content,
-                re.MULTILINE,
-            )
-            if match:
-                texts.append(match.group(1).strip())
-        if not texts:
-            return ""
-        combined = " ".join(texts).lower()
-
-        # 使用短语/词边界匹配，避免“测试生产解耦”之类文本被误判为 production。
-        if self._matches_phase_patterns(combined, (r"archived", r"已归档", r"归档中", r"已封存")):
-            return "archived"
-        if self._matches_phase_patterns(
-            combined,
-            (r"production", r"生产中", r"已投产", r"投产中", r"投产运行", r"上线运行", r"稳定运行"),
-        ):
-            return "production"
-        if self._matches_phase_patterns(
-            combined,
-            (r"commissioning", r"调试中", r"现场调试", r"联调", r"联机调试"),
-        ):
-            return "commissioning"
-        if self._matches_phase_patterns(
-            combined,
-            (r"developing", r"开发中", r"开发", r"待启动", r"进行中", r"迭代", r"里程碑", r"启动"),
-        ):
-            return "developing"
-        # V0.5.3 Fix 3: PM_SESSION 有字段但关键词未匹配 → 默认在研
-        return "developing"
-
-    @staticmethod
-    def _matches_phase_patterns(text: str, patterns: tuple[str, ...]) -> bool:
-        """阶段模式匹配（统一大小写处理，支持中英文短语）"""
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
     def read_plc_json(self, project_path: str) -> ProjectInfo | None:
         """从 .plc.json 读取项目元数据（仅检查项目根目录，用于项目识别）
@@ -593,12 +506,10 @@ class ProjectScanner:
         return _search_dir(project_path, 1)
 
     def read_pm_session(self, project_path: str) -> ProjectInfo | None:
-        """从 PM_SESSION_*.md 提取项目编号 + phase 元数据
+        """从 PM_SESSION_*.md 的文件名提取项目编号（只作识别锚点）
 
-        V0.5.3 Fix 3.5: 补全 phase 读取调用链。原实现仅从文件名提取 project_id，
-        phase 字段保持默认空字符串，导致 source=pm_session 的项目在导航树阶段节点
-        全部丢失（即使 _read_phase_from_pm_session 已能正确推导阶段）。
-        现在调用 _read_phase_from_pm_session 填充 phase 字段。
+        CHG-SCPT-2026-650：不再从 PM_SESSION 内容推阶段（PM_SESSION 已于 2026-10-10 退役，推出来的 developing
+        不是真状态）；phase 留空，项目状态以工作区登记表为准。
         """
         try:
             entries = os.listdir(project_path)
@@ -609,14 +520,11 @@ class ProjectScanner:
             if entry.startswith(self.PM_SESSION_PREFIX) and entry.endswith(".md"):
                 # PM_SESSION_DJ-2026-010.md -> DJ-2026-010
                 project_id = entry[len(self.PM_SESSION_PREFIX) : -len(".md")]
-                # V0.5.3 Fix 3.5: 读取 phase（frontmatter + §2/§8 关键词推导 + developing 兜底）
-                phase = self._read_phase_from_pm_session(project_path, project_id)
                 return ProjectInfo(
                     project_id=project_id,
                     name=os.path.basename(project_path),
                     path=project_path,
                     stack="unknown",
-                    phase=phase,
                     source="pm_session",
                 )
         return None

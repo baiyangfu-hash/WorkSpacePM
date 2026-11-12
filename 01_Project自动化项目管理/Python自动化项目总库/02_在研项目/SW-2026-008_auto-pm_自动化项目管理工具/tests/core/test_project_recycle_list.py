@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from auto_pm.application.core.project_delete_guard import (
     RECYCLE_RELATIVE_DIR,
@@ -173,3 +173,137 @@ def test_the_command_measures_age_from_the_frozen_clock_not_the_real_date(tmp_pa
     _recycle(tmp_path, "SW-2026-001", days_ago=7)
     (item,) = json.loads(_recycle_list(tmp_path, "--json"))
     assert item["age_days"] == 7
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：project restore 搬回原处
+
+USER_WORDS = "user-confirmation:cmsg_user_says_restore_ok"
+
+
+@pytest.fixture
+def no_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    for name in AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _registered_and_deleted(root: Path) -> tuple[Path, Path, Path]:
+    """登记表里 DJ-2026-005 原是“暂停”；目录搬进回收区并标“已删除”，和 project delete 走的是同两步。"""
+    from auto_pm.application.core.project_delete_guard import mark_registry_deleted
+    from tests.core.test_workspace_registry_service import _workspace
+
+    registry = _workspace(root)
+    text = registry.read_text(encoding="utf-8").replace(
+        '"runtime_root": ""\n    }\n  ]', '"runtime_root": "",\n      "status": "paused"\n    }\n  ]'
+    )
+    registry.write_text(text, encoding="utf-8", newline="\n")
+    project = root / "0100_PLC自动化" / "DJ-2026-005"
+    (project / "a.txt").write_text("keep me", encoding="utf-8")
+    recycled = recycle_project(root, project, "DJ-2026-005", now=NOW)
+    mark_registry_deleted(root, "DJ-2026-005")
+    return registry, project, recycled
+
+
+def _status(registry: Path) -> tuple[str, str]:
+    entry = json.loads(registry.read_text(encoding="utf-8"))["projects"][1]
+    return entry.get("status", ""), entry.get("status_before_delete", "")
+
+
+def _restore(root: Path, *args: str) -> Result:
+    return CliRunner().invoke(cli, ["-w", str(root), "project", "restore", *args], catch_exceptions=False)
+
+
+def test_restore_without_apply_only_previews(tmp_path: Path, no_agent: None) -> None:
+    registry, project, recycled = _registered_and_deleted(tmp_path)
+    before = _tree(tmp_path)
+    result = _restore(tmp_path, "DJ-2026-005")
+    assert result.exit_code == 0, result.output
+    assert "预演" in result.output and "0100_PLC自动化/DJ-2026-005" in result.output
+    assert "回收区记录" in result.output
+    assert _tree(tmp_path) == before and not project.exists() and recycled.is_dir()
+
+
+@pytest.mark.parametrize("marker", ["AUTO_PM_AGENT", "CLAUDECODE", "CODEX_THREAD_ID"])
+def test_restore_apply_is_refused_for_an_agent(
+    tmp_path: Path, no_agent: None, monkeypatch: pytest.MonkeyPatch, marker: str
+) -> None:
+    registry, project, recycled = _registered_and_deleted(tmp_path)
+    before = _tree(tmp_path)
+    monkeypatch.setenv(marker, "1")
+    result = _restore(tmp_path, "DJ-2026-005", "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1 and "只听用户本人" in result.output
+    assert _tree(tmp_path) == before
+
+
+@pytest.mark.parametrize("words", [None, "yes please", "user-confirmation:claude_said_ok"])
+def test_restore_apply_needs_the_users_own_words(tmp_path: Path, no_agent: None, words: str | None) -> None:
+    _registered_and_deleted(tmp_path)
+    before = _tree(tmp_path)
+    extra = [] if words is None else ["--approval-evidence-ref", words]
+    result = _restore(tmp_path, "DJ-2026-005", "--apply", *extra)
+    assert result.exit_code == 1 and "只听用户本人" in result.output
+    assert _tree(tmp_path) == before
+
+
+def test_restore_apply_moves_the_folder_back_and_puts_the_status_back(tmp_path: Path, no_agent: None) -> None:
+    from auto_pm.application.core.project_delete_guard import ORIGINS_RELATIVE_DIR
+
+    registry, project, recycled = _registered_and_deleted(tmp_path)
+    assert _status(registry) == ("deleted", "paused")
+    result = _restore(tmp_path, "DJ-2026-005", "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    assert (project / "a.txt").read_text(encoding="utf-8") == "keep me" and not recycled.exists()
+    assert _status(registry) == ("paused", "")
+    assert "暂停" in result.output
+    assert not (tmp_path / RECYCLE_RELATIVE_DIR / "DJ-2026-005").exists()
+    assert not (tmp_path / ORIGINS_RELATIVE_DIR / "DJ-2026-005").exists()
+    assert list_recycled(tmp_path) == []
+
+
+def test_restore_refuses_when_the_old_place_is_taken(tmp_path: Path, no_agent: None) -> None:
+    registry, project, recycled = _registered_and_deleted(tmp_path)
+    project.mkdir(parents=True)
+    (project / "new.txt").write_text("someone else", encoding="utf-8")
+    before = _tree(tmp_path)
+    result = _restore(tmp_path, "DJ-2026-005", "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1 and "已经有同名目录" in result.output
+    assert _tree(tmp_path) == before and _status(registry) == ("deleted", "paused")
+
+
+def test_restore_with_several_copies_needs_a_stamp(tmp_path: Path, no_agent: None) -> None:
+    registry, project, first = _registered_and_deleted(tmp_path)
+    project.mkdir(parents=True)
+    (project / "b.txt").write_text("second", encoding="utf-8")
+    second = recycle_project(tmp_path, project, "DJ-2026-005", now=NOW + timedelta(seconds=1))
+    result = _restore(tmp_path, "DJ-2026-005")
+    assert result.exit_code == 1 and "--stamp" in result.output
+    chosen = _restore(tmp_path, "DJ-2026-005", "--stamp", first.name, "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert chosen.exit_code == 0, chosen.output
+    assert (project / "a.txt").is_file() and second.is_dir()
+
+
+def test_restore_without_an_origin_record_falls_back_to_the_registry(tmp_path: Path, no_agent: None) -> None:
+    from auto_pm.application.core.project_delete_guard import ORIGINS_RELATIVE_DIR
+
+    registry, project, recycled = _registered_and_deleted(tmp_path)
+    for record in (tmp_path / ORIGINS_RELATIVE_DIR).rglob("*.json"):
+        record.unlink()
+    result = _restore(tmp_path, "DJ-2026-005", "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    assert "登记表" in result.output and (project / "a.txt").is_file()
+
+
+def test_restore_of_an_unregistered_project_only_hints_at_register(tmp_path: Path, no_agent: None) -> None:
+    _recycle(tmp_path, "SW-2026-001", days_ago=1)
+    result = _restore(tmp_path, "SW-2026-001", "--apply", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "proj" / "SW-2026-001" / "a.txt").is_file()
+    flat = " ".join(result.output.split())
+    assert "project register SW-2026-001 --path proj/SW-2026-001" in flat
+    assert not (tmp_path / "SYS-2026-001_WorkspaceGovernance").exists()  # 不自动登记，也不新建登记表
+
+
+def test_restore_of_something_not_in_the_recycle_area_is_refused(tmp_path: Path, no_agent: None) -> None:
+    result = _restore(tmp_path, "SW-2026-404")
+    assert result.exit_code == 1 and "回收区里没有项目 SW-2026-404" in result.output

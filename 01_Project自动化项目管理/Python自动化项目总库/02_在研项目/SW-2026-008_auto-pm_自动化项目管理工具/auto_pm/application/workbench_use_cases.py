@@ -415,7 +415,9 @@ class WorkbenchUseCases:
     def delete_project(self, project_id: str) -> CommandOutcome[dict[str, Any] | None]:
         try:
             from auto_pm.application.core.project_delete_guard import (
+                ProjectDeleteError,
                 delete_blockers,
+                mark_registry_deleted,
                 recycle_project,
                 surface_identity_problem,
             )
@@ -441,11 +443,21 @@ class WorkbenchUseCases:
                 path=project.path,
                 recycled_to=str(recycled),
             )
+            # CHG-SCPT-2026-650：和命令行 project delete 同一个公用函数，登记表这一条标“已删除”（不抹行）
+            try:
+                registry_note = mark_registry_deleted(self.project_service.workspace_root, project_id)
+            except ProjectDeleteError as error:
+                self.project_service.sync_to_cache(force_full=True)
+                return CommandOutcome(
+                    False,
+                    f"项目 {project_id} 已搬进回收区（{recycled}），但{error}",
+                    {"project_id": project_id, "name": project.name, "recycled_to": str(recycled)},
+                )
             self.project_service.sync_to_cache(force_full=True)
             return CommandOutcome(
                 True,
-                f"项目已删除: {project_id}（已搬进回收区，可原样搬回: {recycled}）",
-                {"project_id": project_id, "name": project.name, "recycled_to": str(recycled)},
+                f"项目已删除: {project_id}（已搬进回收区，可用 project restore {project_id} 搬回: {recycled}）；{registry_note}",
+                {"project_id": project_id, "name": project.name, "recycled_to": str(recycled), "registry": registry_note},
             )
         except Exception as exc:
             return CommandOutcome(False, str(exc))

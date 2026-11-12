@@ -389,27 +389,6 @@ class TestStaticMethods:
         assert ProjectScanner.get_project_mtime(str(project_dir)) == 0.0
 
 
-class TestPhaseDerivation:
-    """PM_SESSION 阶段推导测试"""
-
-    def test_derive_phase_avoids_false_production_match(self, tmp_path: Path) -> None:
-        """“测试生产解耦”不应被误判为 production"""
-        scanner = ProjectScanner(str(tmp_path))
-        content = """
-- current_focus: TD-A02 测试生产解耦修复启动，当前迭代进行中
-- current_state: 当前正在推进 V0.4.0 Week 1
-"""
-        assert scanner._derive_phase_from_pm_session_content(content) == "developing"
-
-    def test_derive_phase_matches_real_production_phrase(self, tmp_path: Path) -> None:
-        """明确生产阶段短语应判定为 production"""
-        scanner = ProjectScanner(str(tmp_path))
-        content = """
-- current_focus: 项目已投产运行，进入稳定运行阶段
-"""
-        assert scanner._derive_phase_from_pm_session_content(content) == "production"
-
-
 class TestBackwardCompatibility:
     """ProjectService 通过组合使用 ProjectScanner 的向后兼容测试"""
 
@@ -514,97 +493,60 @@ class TestStackFallback:
         assert info.stack == "python"
 
 
-class TestPhaseDerivationV053:
-    """V0.5.3 Fix 3 + 3.5: 阶段推导兜底 + read_pm_session 调用链补全"""
+class TestNoPhaseFromPmSession:
+    """CHG-SCPT-2026-650：PM_SESSION 已退役，扫描不再从它推阶段；项目状态以工作区登记表为准。"""
 
-    def test_derive_phase_returns_developing_when_field_present_no_keyword(
-        self, tmp_path: Path
-    ) -> None:
-        """V0.5.3 Fix 3: current_focus 存在但关键词未匹配 → developing"""
-        scanner = ProjectScanner(str(tmp_path))
-        content = """
-- current_focus: V0.5.3 修复 GUI 可用性阻断 bug，正在实施
-- current_state: 当前进行 Fix 1-4 实施
+    _SESSION = """# PM_SESSION
+
+- current_focus: 项目正在开发中，尚未进入调试
+- current_state: 已投产运行，进入稳定运行阶段
+phase: production
 """
-        # Fix 3: 字段存在但关键词不匹配任何标准阶段 → 默认 developing
-        assert scanner._derive_phase_from_pm_session_content(content) == "developing"
 
-    def test_derive_phase_returns_empty_when_no_fields(
-        self, tmp_path: Path
-    ) -> None:
-        """V0.5.3 Fix 3: 无 current_focus/current_state 字段 → 空字符串"""
-        scanner = ProjectScanner(str(tmp_path))
-        content = """
-# PM_SESSION_SW-2026-008
-
-## 1. 项目基础信息
-这里没有任何 current_focus 或 current_state 字段
-"""
-        # 无字段 → 返回空字符串（不假设在研）
-        assert scanner._derive_phase_from_pm_session_content(content) == ""
-
-    def test_read_pm_session_populates_phase(
-        self, tmp_path: Path
-    ) -> None:
-        """V0.5.3 Fix 3.5: read_pm_session 应调用 _read_phase_from_pm_session 填充 phase"""
+    def test_read_pm_session_only_names_the_project(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "SW-2026-001_项目"
         project_dir.mkdir()
-        # PM_SESSION 含 current_focus 但无标准阶段关键词 → 应推导为 developing
-        (project_dir / "PM_SESSION_SW-2026-001.md").write_text(
-            """# PM_SESSION
+        (project_dir / "PM_SESSION_SW-2026-001.md").write_text(self._SESSION, encoding="utf-8")
 
-- current_focus: V0.5.3 修复 GUI 可用性阻断 bug
-- current_state: 正在实施 Fix 1-4
-""",
-            encoding="utf-8",
-        )
-
-        scanner = ProjectScanner(str(tmp_path))
-        info = scanner.read_pm_session(str(project_dir))
+        info = ProjectScanner(str(tmp_path)).read_pm_session(str(project_dir))
 
         assert info is not None
         assert info.project_id == "SW-2026-001"
         assert info.source == "pm_session"
-        # Fix 3.5: phase 应被填充为 developing（而非默认空字符串）
-        assert info.phase == "developing"
-
-    def test_read_pm_session_phase_empty_when_no_derivation_fields(
-        self, tmp_path: Path
-    ) -> None:
-        """V0.5.3 Fix 3.5: PM_SESSION 无推导字段时 phase 为空"""
-        project_dir = tmp_path / "DJ-2026-099_项目"
-        project_dir.mkdir()
-        (project_dir / "PM_SESSION_DJ-2026-099.md").write_text(
-            "# PM_SESSION\n\n仅标题，无任何字段",
-            encoding="utf-8",
-        )
-
-        scanner = ProjectScanner(str(tmp_path))
-        info = scanner.read_pm_session(str(project_dir))
-
-        assert info is not None
-        assert info.project_id == "DJ-2026-099"
-        # 无 current_focus/current_state → phase 为空
         assert info.phase == ""
 
-    def test_scan_pm_session_project_has_phase(
-        self, tmp_path: Path
-    ) -> None:
-        """V0.5.3 Fix 3.5: 完整扫描流程下 PM_SESSION 项目 phase 不丢失"""
+    def test_scan_does_not_derive_developing_from_pm_session(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "SW-2026-001_项目"
         project_dir.mkdir()
-        (project_dir / "PM_SESSION_SW-2026-001.md").write_text(
-            """# PM_SESSION
+        (project_dir / "PM_SESSION_SW-2026-001.md").write_text(self._SESSION, encoding="utf-8")
 
-- current_focus: 项目正在开发中，尚未进入调试
-- current_state: V0.5.3 迭代进行中
-""",
-            encoding="utf-8",
+        results = ProjectScanner(str(tmp_path)).scan(scan_depth=2)
+
+        assert [(r.project_id, r.phase) for r in results] == [("SW-2026-001", "")]
+
+    def test_copier_project_without_phase_does_not_fall_back_to_pm_session(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "SW-2026-002_项目"
+        project_dir.mkdir()
+        (project_dir / ".copier-answers.yml").write_text(
+            "project_id: SW-2026-002\nproject_name: 测试\nstack: python\n", encoding="utf-8"
+        )
+        (project_dir / "PM_SESSION_SW-2026-002.md").write_text(self._SESSION, encoding="utf-8")
+
+        info = ProjectScanner(str(tmp_path)).read_copier_answers(str(project_dir))
+
+        assert info is not None and info.phase == ""
+
+    def test_copier_phase_is_still_read_from_the_answers(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "SW-2026-003_项目"
+        project_dir.mkdir()
+        (project_dir / ".copier-answers.yml").write_text(
+            "project_id: SW-2026-003\nproject_name: 测试\nstack: python\nphase: commissioning\n", encoding="utf-8"
         )
 
-        scanner = ProjectScanner(str(tmp_path))
-        results = scanner.scan(scan_depth=2)
+        info = ProjectScanner(str(tmp_path)).read_copier_answers(str(project_dir))
 
-        assert len(results) == 1
-        assert results[0].project_id == "SW-2026-001"
-        assert results[0].phase == "developing"
+        assert info is not None and info.phase == "commissioning"
+
+    def test_the_pm_session_phase_helpers_are_gone(self) -> None:
+        for name in ("_read_phase_from_pm_session", "_derive_phase_from_pm_session_content", "_matches_phase_patterns"):
+            assert not hasattr(ProjectScanner, name), name

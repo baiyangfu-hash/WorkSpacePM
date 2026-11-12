@@ -28,7 +28,7 @@ from typing import Any, cast
 import yaml
 
 from auto_pm.application.core.constants import get_template_name
-from auto_pm.application.core.paths import PROJECT_INIT_PATH, WORKSPACE_PROJECTS_SUBDIR
+from auto_pm.application.core.paths import PROJECT_INIT_PATH, resolve_project_destination
 from auto_pm.application.core.project_scanner import ProjectScanner
 from auto_pm.domain.models import ProjectInfo, ProjectListItem, ProjectRecord
 from auto_pm.domain.models.project import VALID_BUSINESS_LINES, extract_business_line
@@ -97,9 +97,32 @@ class ProjectService:
             scan_depth: 最大扫描深度（默认4层）
 
         Returns:
-            项目列表，按 project_id 排序
+            项目列表，按 project_id 排序；性质、状态从工作区登记表带上（CHG-SCPT-2026-650）
         """
-        return self._scanner.scan(scan_depth=scan_depth)
+        return self.with_registry(self._scanner.scan(scan_depth=scan_depth))
+
+    def with_registry(self, projects: list[ProjectInfo]) -> list[ProjectInfo]:
+        """给扫描出的项目带上登记表里的性质、状态；登记表读不出时两栏留空、registered 为 False，并记一条警告。
+
+        只读：不改登记表。按项目编号对；同一编号以登记表为准（登记表是这两栏的唯一真源）。
+        """
+        from auto_pm.application.core.workspace_registry_service import (
+            WorkspaceRegistryError,
+            WorkspaceRegistryService,
+        )
+
+        try:
+            entries = {item.project_id: item for item in WorkspaceRegistryService(self.workspace_root).registry().projects}
+        except (WorkspaceRegistryError, OSError) as error:
+            log.warning("读不出工作区登记表，项目性质、状态显示为未登记: %s", error)
+            return projects
+        for project in projects:
+            entry = entries.get(project.project_id)
+            if entry is not None:
+                project.registered = True
+                project.kind = entry.kind
+                project.status = entry.status
+        return projects
 
     def list_projects_cached(self) -> list[ProjectInfo]:
         """从 DB 缓存读取项目列表（不扫描文件系统）
@@ -314,7 +337,7 @@ class ProjectService:
         move: bool = False,
         force: bool = False,
     ) -> str:
-        """导入外部项目目录到工作空间的 02_在研项目/ 下
+        """导入外部项目目录到工作空间：落点按技术栈，和 project create 同一个 resolve_project_destination
 
         Args:
             src_path: 源项目目录路径
@@ -336,7 +359,8 @@ class ProjectService:
             raise FileNotFoundError(f"源目录不存在: {src}")
 
         dirname = os.path.basename(src)
-        dest_path = os.path.join(self.workspace_root, WORKSPACE_PROJECTS_SUBDIR, dirname)
+        # D-344 同类：窗口导入和命令行 project import、project create 同一个落点函数（PLC 进 0100_PLC自动化，其余进 Python 在研目录）
+        dest_path = os.path.join(resolve_project_destination(self.workspace_root, self.detect_stack(src)), dirname)
 
         if os.path.exists(dest_path):
             if not force:

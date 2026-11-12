@@ -413,3 +413,58 @@ class TestGeneratedPreCommitHookRuns:
 
         assert done.returncode == 0 and "没有检测到 staged Python 文件" in done.stdout + done.stderr
         assert not (root / "ruff.log").exists()
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：窗口导入落点、登记表两栏
+
+
+@pytest.mark.parametrize(("marker", "stack"), [(".plc.json", "plc"), ("pyproject.toml", "python"), ("notes.txt", "unknown")])
+def test_window_import_lands_where_the_cli_and_create_put_that_stack(
+    tmp_path: Path, marker: str, stack: str
+) -> None:
+    """D-344：窗口导入（ProjectService.import_project）和命令行 import、create 同一个 resolve_project_destination"""
+    from auto_pm.application.core.paths import resolve_project_destination
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    source = tmp_path / "incoming" / "SW-2026-321_Demo"
+    source.mkdir(parents=True)
+    (source / marker).write_text("{}\n" if marker.endswith(".json") else "[project]\nname = 'x'\n", encoding="utf-8")
+    service = ProjectService(str(workspace))
+    assert service.detect_stack(str(source)) == stack
+
+    landed = service.import_project(str(source))
+
+    assert landed == os.path.join(resolve_project_destination(str(workspace), stack), source.name)
+    assert (Path(landed) / marker).is_file()
+    if stack == "plc":
+        assert Path(landed).parent.name == "0100_PLC自动化"
+    else:
+        assert Path(landed).parent != workspace / "02_在研项目"  # 旧的固定落点不再用
+
+
+def test_with_registry_overlays_kind_and_status_and_survives_a_broken_registry(tmp_path: Path) -> None:
+    from auto_pm.domain.models import ProjectInfo as Info
+    from tests.core.test_workspace_registry_service import _workspace
+
+    registry = _workspace(tmp_path)
+    text = registry.read_text(encoding="utf-8").replace(
+        '"runtime_root": ""\n    }\n  ]', '"runtime_root": "",\n      "kind": "library",\n      "status": "archived"\n    }\n  ]'
+    )
+    registry.write_text(text, encoding="utf-8", newline="\n")
+    service = ProjectService(str(tmp_path))
+
+    def fresh() -> list[Info]:
+        return [
+            Info(project_id="DJ-2026-005", name="a", path=str(tmp_path / "a")),
+            Info(project_id="DJ-2026-777", name="b", path=str(tmp_path / "b")),
+        ]
+
+    known, unknown = service.with_registry(fresh())
+    assert (known.registered, known.kind, known.status) == (True, "library", "archived")
+    assert (unknown.registered, unknown.kind, unknown.status) == (False, "", "")
+
+    registry.write_text("{not json", encoding="utf-8")
+    broken = service.with_registry(fresh())
+    assert [(p.registered, p.kind, p.status) for p in broken] == [(False, "", ""), (False, "", "")]
+    assert registry.read_text(encoding="utf-8") == "{not json"  # 只读，不替人修

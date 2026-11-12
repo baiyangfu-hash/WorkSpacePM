@@ -10,7 +10,7 @@
   "counts": {
     "never": 12,
     "read": 68,
-    "user_only": 21,
+    "user_only": 22,
     "write": 118
   },
   "commands": {
@@ -554,6 +554,10 @@
     },
     "project register": {
       "class": "write"
+    },
+    "project restore": {
+      "class": "user_only",
+      "note": "从回收区把项目目录搬回原处，只听用户本人（和 project delete 同一口径）"
     },
     "project retrofit": {
       "class": "write"

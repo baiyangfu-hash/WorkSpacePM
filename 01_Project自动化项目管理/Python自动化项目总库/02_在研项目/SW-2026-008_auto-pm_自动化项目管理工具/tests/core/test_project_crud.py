@@ -345,7 +345,7 @@ class TestCliProjectImport:
         assert "项目已复制" in result.output
 
         # 目标路径应存在
-        dest = workspace / "02_在研项目" / "DJ-2026-IMP_导入项目"
+        dest = workspace / "0100_PLC自动化" / "DJ-2026-IMP_导入项目"  # D-344：带 .plc.json 的是 PLC 项目，和 project create 同一处
         assert dest.is_dir()
         assert (dest / "README.md").exists()
 
@@ -375,7 +375,7 @@ class TestCliProjectImport:
         assert "项目已移动" in result.output
 
         # 目标路径应存在
-        dest = workspace / "02_在研项目" / "SW-2026-MV_移动项目"
+        dest = workspace / "0100_PLC自动化" / "SW-2026-MV_移动项目"  # D-344：带 .plc.json 的是 PLC 项目，和 project create 同一处
         assert dest.is_dir()
 
         # 源目录应已不存在（移动模式）
@@ -458,7 +458,7 @@ class TestCliProjectImport:
         )
         assert result.exit_code == 0
 
-        dest = workspace / "02_在研项目" / "XT-2026-RT_自动补全"
+        dest = workspace / "0100_PLC自动化" / "XT-2026-RT_自动补全"  # D-344：带 .plc.json 的是 PLC 项目，和 project create 同一处
         answers_path = dest / ".copier-answers.yml"
         assert answers_path.exists()
         answers = yaml.safe_load(answers_path.read_text(encoding="utf-8"))

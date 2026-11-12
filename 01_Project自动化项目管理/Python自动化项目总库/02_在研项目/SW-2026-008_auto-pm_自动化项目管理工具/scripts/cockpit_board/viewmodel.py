@@ -123,6 +123,9 @@ class ProjectCard:
     issues: list[Issue] = field(default_factory=list)
     decisions: list[Decision] = field(default_factory=list)
     closed: bool = False  # 项目下已没有开着的卡（D-324）
+    kind_label: str = "未登记"  # 登记表的项目性质（CHG-SCPT-2026-650）
+    status_label: str = "未登记"  # 登记表的项目状态
+    archived: bool = False  # 登记表里是“已归档”：不进“要留意的项目”，排在折叠的那一组最后
 
     @property
     def health_label(self) -> str:
@@ -523,6 +526,9 @@ def project_card(
         now_step=step,
         last_text=ago(now, last),
         issues=issues,
+        kind_label=project.kind_label,
+        status_label=project.status_label,
+        archived=project.archived,
     )
     card.health = health_of(project, issues, cov)
     card.closed = project.registered and project_closed(project)
@@ -871,13 +877,14 @@ def home_vm(
         key=lambda d: (-SEV_RANK[d.sev], d.since or datetime.max.replace(tzinfo=UTC)),
     )
     checks = checks_of(board, cards, online, github)
+    # 已归档的项目（登记表状态）不进“要留意的项目”，收在折叠的那一组最后；hot + rest 仍是全部项目卡，件数口径不变
     hot = sorted(
-        [c for c in cards if c.health in ("block", "risk")],
+        [c for c in cards if c.health in ("block", "risk") and not c.archived],
         key=lambda c: (-HEALTH_RANK[c.health], c.tool, c.project_id),
     )
     rest = sorted(
-        [c for c in cards if c.health not in ("block", "risk")],
-        key=lambda c: (-HEALTH_RANK[c.health], c.tool, c.project_id),
+        [c for c in cards if c.health not in ("block", "risk") or c.archived],
+        key=lambda c: (c.archived, -HEALTH_RANK[c.health], c.tool, c.project_id),
     )
     activity = [
         (moment.strftime("%m-%d") if date_only else fmt(moment, offset), pid, text, example)

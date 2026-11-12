@@ -14,9 +14,10 @@ Commands:
     edit <ID> [--phase] [--desc]  编辑项目元数据
     delete <ID> --confirm         删除项目
     recycle-list [--older-than N] 只读列出回收区
+    restore <ID> [--stamp] [--apply]  把回收区里的项目目录搬回原处（默认只预演，只听用户本人）
     retrofit <ID>                 补全 .copier-answers.yml 元数据文件
     import <PATH> [--move]        导入外部项目目录到工作空间
-    register <ID> [--path]        把已有项目登记到工作区登记表
+    register <ID> [--path] [--kind] [--status]  把已有项目登记到工作区登记表
     snapshot <ID> [--dry-run]     刷新 PM_SESSION 的 Spec Snapshot 版本号
 """
 
@@ -35,6 +36,13 @@ from yaml import dump as yaml_dump
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.paths import ProjectDestinationError, resolve_project_destination
+from auto_pm.contracts.workspace_context import (
+    KIND_LABELS,
+    STATUS_LABELS,
+    USER_STATUSES,
+    kind_label,
+    status_label,
+)
 from auto_pm.core.constants import (
     EQUIPMENT_TYPE_CODES,
     PLC_VENDOR_CODES,
@@ -43,7 +51,6 @@ from auto_pm.core.constants import (
     get_project_type_label,
     get_template_name,
 )
-from auto_pm.core.paths import WORKSPACE_PROJECTS_SUBDIR
 from auto_pm.core.project_service import ProjectService
 from auto_pm.core.template_service import TemplateService
 from auto_pm.domain.models.project import (
@@ -130,6 +137,18 @@ def project_group(ctx: click.Context) -> None:
     help="按项目阶段筛选",
 )
 @click.option(
+    "--kind",
+    type=click.Choice([value for value in KIND_LABELS if value]),
+    default=None,
+    help="按项目性质筛选（登记表里的值）：equipment 设备 / library 公共库 / test 测试 / tool 工具",
+)
+@click.option(
+    "--status",
+    type=click.Choice([value for value in STATUS_LABELS if value]),
+    default=None,
+    help="按项目状态筛选（登记表里的值；没填的按 active 在研算）",
+)
+@click.option(
     "--search",
     default=None,
     help="关键字搜索（匹配项目编号/名称/描述）",
@@ -146,10 +165,12 @@ def cmd_list(
     business_line: str | None,
     stack: str | None,
     phase: str | None,
+    kind: str | None,
+    status: str | None,
     search: str | None,
     output_json: bool,
 ) -> None:
-    """列出工作空间内所有项目"""
+    """列出工作空间内所有项目；性质、状态读登记表（CHG-SCPT-2026-650），没登记的项目两栏显示“未登记”"""
     app_ctx: AppContext = ctx.obj
     svc = ProjectService(app_ctx.workspace_root)
     projects = svc.list_projects()
@@ -160,6 +181,10 @@ def cmd_list(
         projects = [p for p in projects if p.stack == stack]
     if phase is not None:
         projects = [p for p in projects if p.phase == phase]
+    if kind is not None:
+        projects = [p for p in projects if p.registered and p.kind == kind]
+    if status is not None:
+        projects = [p for p in projects if p.registered and (p.status or "active") == status]
     if search is not None:
         search_lower = search.lower()
         projects = [
@@ -186,7 +211,8 @@ def cmd_list(
     table.add_column("名称", style="white")
     table.add_column("技术栈", style="green")
     table.add_column("版本", style="yellow")
-    table.add_column("阶段", style="magenta")
+    table.add_column("性质", style="magenta")
+    table.add_column("状态", style="magenta")
     table.add_column("业务线", style="blue")
     table.add_column("来源", style="dim")
     table.add_column("路径", style="dim")
@@ -197,7 +223,8 @@ def cmd_list(
             p.name,
             p.stack,
             p.version,
-            p.phase or "-",
+            kind_label(p.kind) if p.registered else "未登记",
+            status_label(p.status) if p.registered else "未登记",
             p.business_line or "-",
             p.source,
             os.path.relpath(p.path, app_ctx.workspace_root),
@@ -631,6 +658,7 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evid
     from auto_pm.application.core.project_delete_guard import (
         ProjectDeleteError,
         delete_blockers,
+        mark_registry_deleted,
         recycle_project,
     )
 
@@ -691,8 +719,14 @@ def cmd_delete(ctx: click.Context, project_id: str, confirm: bool, approval_evid
         approval_evidence_ref=evidence,
     )
     console.print(f"[green]项目已删除: {proj.path}[/green]")
-    console.print(f"  已搬进回收区，需要时可原样搬回: {recycled}")
+    console.print(f"  已搬进回收区，需要时可搬回: project restore {project_id}（先预演）")
+    console.print(f"  回收区位置: {recycled}")
     console.print("  回收区不会自动清理；想看里面有什么、多久了：project recycle-list")
+    try:
+        console.print(f"  {mark_registry_deleted(app_ctx.workspace_root, project_id)}")
+    except ProjectDeleteError as e:
+        console.print(f"[red]{e}；请用户本人核对 SYS-2026-001_WorkspaceGovernance/workspace_registry.json[/red]")
+        ctx.exit(1)
 
 
 @project_group.command(name="recycle-list")
@@ -732,7 +766,82 @@ def cmd_recycle_list(ctx: click.Context, older_than: int | None, output_json: bo
     for item in items:
         age = item.age_days(now)
         console.print(f"{item.project_id}  {'时间未知' if age is None else f'{age} 天前'}  {item.path}")
-    console.print("只读列表：这里不会删除任何东西；要清理请由用户本人手工处理，要找回就把目录原样搬回项目目录。")
+    console.print("只读列表：这里不会删除任何东西；要清理请由用户本人手工处理，要找回用 project restore <项目编号>（先预演）。")
+
+
+@project_group.command(name="restore")
+@click.argument("project_id")
+@click.option("--stamp", default="", help="回收区里这个项目有好几份时，指定搬回哪一份（project recycle-list 里的时间戳）")
+@click.option("--apply", "apply_", is_flag=True, help="真的搬回；不加只预演，什么都不改")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
+@click.pass_context
+def cmd_restore(ctx: click.Context, project_id: str, stamp: str, apply_: bool, approval_evidence_ref: str) -> None:
+    """把回收区里的项目目录搬回原处（CHG-SCPT-2026-650）：默认只预演；--apply 只听用户本人，和 project delete 同一口径。
+
+    原处已有同名目录就拒绝。搬回后登记表里这一条的状态改回删除前的值；登记表里没有这一条的，只提示去登记，不自动登记。
+    """
+    from auto_pm.application.core.lease_handover_service import agent_markers
+    from auto_pm.application.core.project_delete_guard import (
+        ProjectDeleteError,
+        plan_restore,
+        restore_project,
+    )
+
+    app_ctx: AppContext = ctx.obj
+    try:
+        plan = plan_restore(app_ctx.workspace_root, project_id, stamp)
+    except ProjectDeleteError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        ctx.exit(1)
+    console.print(f"回收区里的这一份: {plan.item.path}")
+    console.print(f"搬回到: {plan.target_relative}（原位置来自{plan.target_from}）")
+    if plan.problems:
+        console.print(f"[red]拒绝: 不能搬回 {project_id}：[/red]")
+        for problem in plan.problems:
+            console.print(f"  - {problem}")
+        ctx.exit(1)
+    if not apply_:
+        console.print("[yellow]预演（没加 --apply）：什么都没改。要真的搬回，请用户本人加 --apply 再运行。[/yellow]")
+        return
+
+    markers = agent_markers(os.environ)
+    if markers:
+        console.print(
+            f"[red]拒绝: 搬回项目只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+            "请把完整命令交给用户，在用户自己的终端运行；agent 不得索要口令、代填或绕过。[/red]"
+        )
+        ctx.exit(1)
+    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+    evidence = _user_proof_or_exit(
+        ctx,
+        control_root,
+        summary=f"把项目 {project_id} 从回收区搬回 {plan.target_relative}",
+        purpose="project-restore",
+        subject=project_id,
+        evidence_ref=approval_evidence_ref,
+        action="搬回",
+    )
+    try:
+        registry_note = restore_project(app_ctx.workspace_root, plan)
+    except ProjectDeleteError as e:
+        console.print(f"[red]搬回失败: {e}[/red]")
+        ctx.exit(1)
+
+    from auto_pm.logging.audit import audit_log
+
+    audit_log(
+        "project_restore",
+        project_id=project_id,
+        recycled_from=str(plan.item.path),
+        path=plan.target_relative,
+        approval_evidence_ref=evidence,
+    )
+    console.print(f"[green]项目已搬回: {plan.target_relative}[/green]")
+    console.print(f"  {registry_note}")
 
 
 @project_group.command(name="retrofit")
@@ -944,7 +1053,6 @@ def cmd_snapshot(
         ctx.exit(1)
 
 
-_PROJECTS_SUBDIR = WORKSPACE_PROJECTS_SUBDIR  # M3-Iter6: 从 core.paths 读取
 
 
 @project_group.command(name="import")
@@ -979,7 +1087,7 @@ def cmd_import(
     stack: str | None,
     approval_evidence_ref: str,
 ) -> None:
-    """导入外部项目目录：Python 项目放到 project create --stack python 的同一个目录，其余放 02_在研项目/
+    """导入外部项目目录：落点和 project create 同一个函数（PLC 进 0100_PLC自动化，其余进 Python 在研目录）
 
     复制时不带源仓库的 .git（原仓库的历史和远端留在源目录）；--move 会连 .git 一起搬，并提示。
     """
@@ -993,15 +1101,12 @@ def cmd_import(
         console.print(f"[red]错误: 指定了 --stack {stack}，但目录内容看起来是 {detected} 项目[/red]")
         ctx.exit(1)
     stack = stack or detected
-    # TD-SW008-564：Python 项目和 project create --stack python 落在同一个目录
-    if stack == "python":
-        try:
-            dest_root = resolve_project_destination(app_ctx.workspace_root, "python")
-        except ProjectDestinationError as error:
-            console.print(f"[red]错误: {error}[/red]")
-            ctx.exit(1)
-    else:
-        dest_root = os.path.join(app_ctx.workspace_root, _PROJECTS_SUBDIR)
+    # TD-SW008-564、D-344：落点和 project create 同一个函数——PLC 进 0100_PLC自动化，其余（python、认不出的）进 Python 在研目录
+    try:
+        dest_root = resolve_project_destination(app_ctx.workspace_root, stack)
+    except ProjectDestinationError as error:
+        console.print(f"[red]错误: {error}[/red]")
+        ctx.exit(1)
     dest_path = os.path.join(dest_root, dirname)
 
     # 先校验、后落盘（D2）：指定了业务线时，编号前缀必须在白名单；放在任何复制、移动、覆盖之前
@@ -1129,9 +1234,23 @@ def cmd_import(
     default=None,
     help="项目目录（工作区相对路径或绝对路径）；不给则在工作区内按项目编号查找",
 )
+@click.option(
+    "--kind",
+    type=click.Choice([value for value in KIND_LABELS if value]),
+    default=None,
+    help="项目性质：equipment 设备 / library 公共库 / test 测试 / tool 工具；不给写空（显示“未分类”）",
+)
+@click.option(
+    "--status",
+    type=click.Choice(list(USER_STATUSES)),
+    default=None,
+    help="项目状态：active 在研 / paused 暂停 / archived 已归档；不给写空（按“在研”）",
+)
 @click.option("--dry-run", is_flag=True, help="只显示将要登记的内容，不写登记表")
 @click.pass_context
-def cmd_register(ctx: click.Context, project_id: str, project_path: str | None, dry_run: bool) -> None:
+def cmd_register(
+    ctx: click.Context, project_id: str, project_path: str | None, kind: str | None, status: str | None, dry_run: bool
+) -> None:
     """把已有项目登记到工作区登记表（登记后 pm orient、批准、驾驶舱才认识它）"""
     from auto_pm.core.workspace_registry_service import (
         WorkspaceRegistryError,
@@ -1141,7 +1260,7 @@ def cmd_register(ctx: click.Context, project_id: str, project_path: str | None, 
     app_ctx: AppContext = ctx.obj
     try:
         result = WorkspaceRegistryService(app_ctx.workspace_root).register(
-            project_id, project_path, dry_run=dry_run
+            project_id, project_path, dry_run=dry_run, kind=kind or "", status=status or ""
         )
     except WorkspaceRegistryError as e:
         console.print(f"[red]登记失败: {e}[/red]")
@@ -1163,6 +1282,7 @@ def cmd_register(ctx: click.Context, project_id: str, project_path: str | None, 
     console.print(f"  项目目录: {mapping.project_root}")
     console.print(f"  控制项目: {mapping.control_project_id or '-'}")
     console.print(f"  运行版本目录: {mapping.runtime_root or '-'}")
+    console.print(f"  项目性质: {kind_label(mapping.kind)}  项目状态: {status_label(mapping.status)}")
 
 
 @project_group.group(name="hooks")
