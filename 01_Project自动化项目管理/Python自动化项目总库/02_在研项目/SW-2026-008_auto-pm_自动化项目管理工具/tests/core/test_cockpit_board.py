@@ -995,3 +995,20 @@ def test_b1_07_a_closed_card_with_an_unfinished_closure_counts_in_one_cell_only(
     titles = [i.title for i in _card(home).issues if "CLOSURE-MISSION-0" in i.detail]
     assert titles == ["说完成但机器没过"]
 
+
+def test_b1_08_cards_closed_the_old_way_are_not_counted_but_are_named_in_the_note(tmp_path: Path) -> None:
+    """D-330（TD-SW008-595）：没有收口记录的已关卡不计数，说明里写明另有几张和依据；收口 COMPLETED 的不计也不提。"""
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "CLOSED", "旧办法关的", 30), ("DJ-2026-101", "CLOSED", "正常收口的", 30)],
+        _closure("MISSION-1", "COMPLETED", 30),
+    )
+    check = next(k for k in vm.home_vm(board, OFFSET, online=None, use_git=False).checks if k.key == "unverified")
+    assert check.value == 0
+    assert "另有 1 张按旧办法关闭、没有收口记录的卡，未计入" in check.note and "依据" in check.note
+
+
+def test_b1_08b_no_old_way_cards_means_no_extra_note(tmp_path: Path) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "CLOSED", "正常收口的", 30)], _closure("MISSION-0", "COMPLETED", 30))
+    check = next(k for k in vm.home_vm(board, OFFSET, online=None, use_git=False).checks if k.key == "unverified")
+    assert check.value == 0 and "另有" not in check.note

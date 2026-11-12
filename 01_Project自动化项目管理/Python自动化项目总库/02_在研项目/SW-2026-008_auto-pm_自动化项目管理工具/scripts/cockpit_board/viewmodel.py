@@ -808,10 +808,17 @@ def checks_of(
         for m in p.missions
         if m.state == "CLOSED" and m.closure_state and m.closure_state != "COMPLETED"
     )
+    # D-330：已关、却没有收口记录的卡（收口机制出现之前按旧办法关的）不计数，但在说明里写明有几张
+    no_record = sum(1 for p in board.projects for m in p.missions if m.state == "CLOSED" and not m.closure_state)
     unverified_note = (
         "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出。"
         "还开着的卡收口停在半路的，算在“账本对不上”"
     )
+    if no_record:
+        unverified_note += (
+            f"；另有 {no_record} 张按旧办法关闭、没有收口记录的卡，未计入"
+            "（依据：账本里这些卡已关闭，但查不到收口记录，是收口机制出现之前关的）"
+        )
     return [
         gate,
         Check("scope", "越界改动", "unchecked", note="越界检查（pr-scope-check）还没合进 main"),
