@@ -822,3 +822,193 @@ def test_pending_asks_without_the_tables_are_empty_and_create_nothing(tmp_path: 
     assert pd.read_pending_asks_copy(db, root) == []
     after = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert before == after and "intake_items" not in after
+
+
+# ---------------------------------------------------------------- 批 1 看板说真话（CHG-SCPT-2026-644）
+
+
+def _edited_board(tmp_path: Path, missions: list[tuple[str, str, str, float]], *sql: str) -> Any:
+    """照 _board 造账本，再按给的 SQL 改几处（去掉工作项、取消 Run、加收口记录等），然后读成看板。"""
+    root, db = base._workspace(tmp_path, missions)
+    connection = sqlite3.connect(db)
+    for statement in sql:
+        connection.execute(statement)
+    connection.commit()
+    connection.close()
+    return pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+
+
+def _card(home: Any, project_id: str = "DJ-2026-101") -> Any:
+    return next(c for c in home.hot + home.rest if c.project_id == project_id)
+
+
+FIELD_NAMES = ("mission.state", "execution_leases", "checkpoints", "mission_items", "planning_scope_cards",
+               "intake_items", "updated_at", "snapshot()")
+
+
+def test_b1_09_issue_basis_is_plain_language_without_ledger_field_names(tmp_path: Path) -> None:
+    """D-326（TD-SW008-591）：依据一栏写白话，不出现账本字段名。"""
+    board = _board(
+        tmp_path,
+        [
+            ("DJ-2026-101", "BLOCKED", "卡住了", 0.5),
+            ("DJ-2026-101", "AWAITING_APPROVAL", "等批一", 4),
+            ("DJ-2026-101", "ACCEPTANCE_PENDING", "等验收", 1),
+            ("DJ-2026-101", "ACTIVE", "写通讯层", 0.2),
+            ("DJ-2026-101", "PARKED", "搁很久", 9),
+            *[("DJ-2026-101", "DRAFT", f"草稿{i}", 0.1) for i in range(5)],
+        ],
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    texts = [i.basis for c in home.hot + home.rest for i in c.issues] + [d.basis for d in home.decisions]
+    assert len(texts) >= 6
+    assert [t for t in texts if any(name in t for name in FIELD_NAMES)] == []
+
+
+def test_b1_01_a_draft_without_work_is_not_waiting_for_you(tmp_path: Path) -> None:
+    """D-328（TD-SW008-593）：没有工作项的草稿卡不进“等你超过 N 天”，也不算进“要你出手”。"""
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "没开起来的草稿", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL")
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert not any(i.title.startswith("等你超过") for i in card.issues)
+    draft = next(i for i in card.issues if "没有工作项" in i.title)
+    assert draft.sev == "hint" and "草稿，没有工作项" in draft.title and not draft.who.startswith(vm.USER)
+    assert not any("没开起来的草稿" in d.why for d in home.decisions)
+
+
+def _with_approval(decision: str, expires_days: float) -> tuple[str, ...]:
+    """给造出来的卡补授权（批准编号 DEC-B1-OK、到期时间）和一条批准记录（批准编号 decision）。"""
+    expires = (NOW + timedelta(days=expires_days)).isoformat()
+    return (
+        "ALTER TABLE mission_items ADD COLUMN authority_json TEXT",
+        f"UPDATE mission_items SET authority_json = '{{\"decision_id\": \"DEC-B1-OK\", \"expires_at\": \"{expires}\"}}'",
+        "CREATE TABLE planning_draft_decision_bindings (request_id TEXT PRIMARY KEY, decision_id TEXT, change_id TEXT, "
+        "plan_hash TEXT, approver TEXT, approval_evidence_ref TEXT, created_at TEXT)",
+        f"INSERT INTO planning_draft_decision_bindings VALUES ('REQ-B1', '{decision}', 'CHG-B1', 'h', 'fubai', 'e', 'x')",
+    )
+
+
+def test_b1_01b_an_approved_draft_without_work_still_waits_for_you(tmp_path: Path) -> None:
+    """D-328 审计裁定②：有有效批准记录、还没有工作项的草稿＝已批准、等开工，照常进“要你出手”、照常报“等你超过 N 天”。"""
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "批了还没开工", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL", "DELETE FROM execution_leases", *_with_approval("DEC-B1-OK", 20))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert [i.title for i in card.issues if "批了还没开工" in i.detail] == [
+        f"等你超过 {pd.WAITING_RED_DAYS} 天：已批准，还没开工"
+    ]
+    assert any("批了还没开工" in d.why for d in home.decisions)
+
+
+@pytest.mark.parametrize(("decision", "expires_days"), [("DEC-OTHER", 20), ("DEC-B1-OK", -1)])
+def test_b1_01c_a_missing_or_expired_approval_counts_as_none(tmp_path: Path, decision: str, expires_days: float) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "批准查不到或过期", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL", "DELETE FROM execution_leases", *_with_approval(decision, expires_days))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert [i.title for i in _card(home).issues if "批准查不到或过期" in i.detail] == ["草稿，没有工作项，也没有批准记录"]
+    assert not any("批准查不到或过期" in d.why for d in home.decisions)
+
+
+def test_b1_02_a_draft_with_work_still_waits_for_you(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "DRAFT", "真等你的草稿", 6)])
+    card = _card(vm.home_vm(board, OFFSET, online=None, use_git=False))
+    assert any(i.title.startswith(f"等你超过 {pd.WAITING_RED_DAYS} 天") and i.sev == "block" for i in card.issues)
+
+
+def test_b1_03_an_active_card_whose_work_and_run_are_cancelled_is_not_a_lost_executor(tmp_path: Path) -> None:
+    """D-327（TD-SW008-592，看板侧）：ACTIVE 卡下面 Work、Run 都已取消、没有租约，不报执行者失联。"""
+    board = _edited_board(
+        tmp_path, [("DJ-2026-101", "ACTIVE", "早就停了的活", 3)],
+        "UPDATE work_items SET state = 'CANCELLED'", "UPDATE run_items SET state = 'CANCELLED'",
+        "DELETE FROM execution_leases",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert not any(i.title == "执行者失联" for i in card.issues)
+    assert next(k for k in home.checks if k.key == "lost").value == 0
+    idle = next(i for i in card.issues if i.title == "卡开着，但下面没有在跑的执行")
+    assert idle.who.startswith("主执行") and "已取消" in idle.detail
+
+
+def test_b1_03b_cancelled_run_with_an_old_expired_lease_is_not_lost_either(tmp_path: Path) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "ACTIVE", "停了但租约还在", 3)],
+                          "UPDATE run_items SET state = 'CANCELLED'")
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert next(k for k in home.checks if k.key == "lost").value == 0
+
+
+def test_b1_04_a_running_run_with_an_expired_lease_is_still_lost(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 2 / 24)])
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert any(i.title == "执行者失联" for i in _card(home).issues)
+    assert next(k for k in home.checks if k.key == "lost").value == 1
+
+
+def test_b1_05_a_closed_project_keeps_its_leftovers_as_old_records_not_risk(tmp_path: Path) -> None:
+    """D-324（TD-SW008-589）：项目下的卡全关了，账本一致性留下的两条算旧账：降成提示、项目标“旧账”，首页分开计，不隐藏。"""
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "CLOSED", "早关了的一张", 20), ("DJ-2026-101", "CANCELLED", "作废的一张", 20)],
+        "UPDATE work_items SET state = 'BLOCKED'",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    old = [i for i in card.issues if i.title == "工作项卡住"]
+    assert len(old) == 2 and {(i.sev, i.basis) for i in old} == {("hint", vm.OLD_BASIS)}
+    assert (card.health, card.health_label, card.closed) == ("old", "旧账", True)
+    mismatch = next(k for k in home.checks if k.key == "mismatch")
+    assert (mismatch.value, mismatch.text, mismatch.soft) == (0, "在干 0，旧账 2", True)
+
+
+def test_b1_06_an_open_project_with_a_blocked_work_item_is_still_at_risk(tmp_path: Path) -> None:
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "ACTIVE", "在干的一张", 0.01), ("DJ-2026-101", "CLOSED", "早关了的一张", 20)],
+        "UPDATE work_items SET state = 'BLOCKED' WHERE title = '早关了的一张'",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    stuck = [i for i in card.issues if i.title == "工作项卡住"]
+    assert [(i.sev, i.basis) for i in stuck] == [("risk", "账本一致性检查")]
+    assert (card.health, card.closed) == ("risk", False)
+    mismatch = next(k for k in home.checks if k.key == "mismatch")
+    assert (mismatch.value, mismatch.text) == (1, "1 条")
+
+
+def _closure(mission: str, state: str, days_ago: float) -> str:
+    return (f"INSERT INTO closure_items VALUES ('CLOSURE-{mission}', '{mission}', 'CHG-B1-{mission}', '{state}', "
+            f"'{(NOW - timedelta(days=days_ago)).isoformat()}')")
+
+
+@pytest.mark.parametrize("with_open_card", [False, True])
+def test_b1_07_a_closed_card_with_an_unfinished_closure_counts_in_one_cell_only(tmp_path: Path, with_open_card: bool) -> None:
+    """D-329（TD-SW008-594）：已关的卡收口停在半路，只在“说完成但机器没过”计 1，“账本对不上”不重复计；两格说明互相指到。"""
+    missions: list[tuple[str, str, str, float]] = [("DJ-2026-101", "CLOSED", "关了但收口没走完", 5)]
+    if with_open_card:
+        missions.append(("DJ-2026-101", "ACTIVE", "在干的一张", 0.01))
+    board = _edited_board(tmp_path, missions, _closure("MISSION-0", "PREPARED", 5))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    checks = {k.key: k for k in home.checks}
+    assert (checks["unverified"].value, checks["mismatch"].value) == (1, 0)
+    assert "说完成但机器没过" in checks["mismatch"].note and "账本对不上" in checks["unverified"].note
+    titles = [i.title for i in _card(home).issues if "CLOSURE-MISSION-0" in i.detail]
+    assert titles == ["说完成但机器没过"]
+
+
+def test_b1_08_cards_closed_the_old_way_are_not_counted_but_are_named_in_the_note(tmp_path: Path) -> None:
+    """D-330（TD-SW008-595）：没有收口记录的已关卡不计数，说明里写明另有几张和依据；收口 COMPLETED 的不计也不提。"""
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "CLOSED", "旧办法关的", 30), ("DJ-2026-101", "CLOSED", "正常收口的", 30)],
+        _closure("MISSION-1", "COMPLETED", 30),
+    )
+    check = next(k for k in vm.home_vm(board, OFFSET, online=None, use_git=False).checks if k.key == "unverified")
+    assert check.value == 0
+    assert "另有 1 张按旧办法关闭、没有收口记录的卡，未计入" in check.note and "依据" in check.note
+
+
+def test_b1_08b_no_old_way_cards_means_no_extra_note(tmp_path: Path) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "CLOSED", "正常收口的", 30)], _closure("MISSION-0", "COMPLETED", 30))
+    check = next(k for k in vm.home_vm(board, OFFSET, online=None, use_git=False).checks if k.key == "unverified")
+    assert check.value == 0 and "另有" not in check.note

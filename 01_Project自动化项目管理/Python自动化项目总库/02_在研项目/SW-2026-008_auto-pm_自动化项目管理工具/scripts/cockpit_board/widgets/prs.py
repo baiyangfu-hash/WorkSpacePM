@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from cockpit_board import shell
@@ -39,14 +41,37 @@ def pull_rows(snapshot: Any) -> list[tuple[str, str]]:
     return rows
 
 
-def audit_rows(snapshot: Any) -> list[tuple[str, str]]:
+def audit_rows(snapshot: Any, dirs: Sequence[Path] = ()) -> list[tuple[str, str]]:
+    """审计报告这一块（D-317）：只把对上了开着的 PR 的报告列在“当前审计报告”下，每份标来源和日期；
+    其余的只给份数，不当作当前报告；读不到的目录或文件写“读不到”，不写成“没有”。"""
     audits = list(snapshot.audits)
-    rows = [("审计报告", c.count_text(audits, "份"))]
-    for audit in audits[:LISTED]:
+    problems = list(getattr(snapshot, "audit_problems", []) or [])
+    pulls = list(snapshot.pulls)
+    current = [p.audit for p in pulls if p.audit is not None]
+    seen: set[str] = set()
+    current = [a for a in current if not (a.file in seen or seen.add(a.file))]
+    rows: list[tuple[str, str]] = []
+    if problems:
+        rows.append(("读不到", "；".join(problems)))
+    if not pulls:
+        rows.append(("当前审计报告", "分不出：开着的 PR 没读到或没有，读到的报告都不当作当前报告"))
+    elif current:
+        rows.append(("当前审计报告", f"{len(current)} 份（对上了开着的 PR）"))
+    else:
+        rows.append(("当前审计报告", "读不到" if problems else "开着的 PR 都没对上审计报告"))
+    for audit in current[:LISTED]:
         target = f"PR #{audit.pr}" if audit.pr else audit.file
-        rows.append((target, f"{VERDICT_ZH.get(audit.verdict, audit.verdict)} · {audit.summary}"))
+        rows.append((target, f"{VERDICT_ZH.get(audit.verdict, audit.verdict)} · {audit.summary}"
+                             f" · 来源 {audit.source or '未知'} · 日期 {audit.date or '日期读不到'}"))
+    others = [a for a in audits if a.file not in seen]
+    if others:
+        dated = sorted(a.date[:10] for a in others if a.date[:4].isdigit())
+        when = f"，日期 {dated[0]}～{dated[-1]}" if dated else ""
+        rows.append(("另有旧报告", f"{len(others)} 份没对上开着的 PR，不当作当前审计报告{when}"))
+    if dirs:
+        rows.append(("读的目录", "、".join(str(d) for d in dirs)
+                     + "；只认这些目录里“编号_*.md”的报告，写在别处的（如共享库）这里看不到，可启动时加 --reviews-dir"))
     return rows
-
 
 class PrsPage(QWidget):
     def __init__(self) -> None:
@@ -63,6 +88,7 @@ class PrsPage(QWidget):
         body.addWidget(holder)
         self.empty_text, self.error_text = shell.page_texts()["prs"]
         self.status: tuple[str, str] = ("", "")
+        self.reviews_dirs: list[Path] = []  # 窗口启动时填 options.reviews_dirs（<root>/reviews 加 --reviews-dir 给的）
         body.addWidget(c.placeholder("每个 PR 的检查、审计逐条对照", "采集里已有这些字段，还没排版", ""))
         self.show_github(None, disabled=False)
 
@@ -84,5 +110,5 @@ class PrsPage(QWidget):
         # 只有这次真读到了才列；缓存和从没读到过都不列，免得旧数据冒充现在、或画成“没有 PR”
         if snapshot is not None and snapshot.fresh:
             layout.addWidget(c.kv(pull_rows(snapshot)))
-            layout.addWidget(c.kv(audit_rows(snapshot)))
+            layout.addWidget(c.kv(audit_rows(snapshot, self.reviews_dirs)))
         self.box.addWidget(frame)

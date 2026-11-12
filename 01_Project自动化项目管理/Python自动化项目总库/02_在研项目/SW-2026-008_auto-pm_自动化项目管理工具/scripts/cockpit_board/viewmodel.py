@@ -26,8 +26,12 @@ import pm_dashboard as pd  # noqa: E402 - scripts/pm_dashboard.py 数据层
 
 SEV_RANK = {"block": 3, "risk": 2, "hint": 1}
 SEV_LABEL = {"block": "阻塞", "risk": "风险", "hint": "提醒"}
-HEALTH_LABEL = {"ok": "正常", "risk": "有风险", "block": "受阻", "nodata": "无数据", "off": "未接入"}
-HEALTH_RANK = {"block": 4, "risk": 3, "nodata": 2, "ok": 1, "off": 0}
+HEALTH_LABEL = {"ok": "正常", "risk": "有风险", "block": "受阻", "old": "旧账", "nodata": "无数据", "off": "未接入"}
+HEALTH_RANK = {"block": 5, "risk": 4, "old": 3, "nodata": 2, "ok": 1, "off": 0}
+# D-324：项目下已没有开着的卡（全部 CLOSED / CANCELLED，或没有卡）时，账本一致性检查留下的问题算“旧账”：
+# 降一级成提示、项目标“旧账”不标“有风险”，首页格子分开写“在干 X，旧账 Y”；不隐藏。
+OLD_BASIS = "账本一致性检查（项目下已没有开着的卡，算旧账）"
+CLOSED_STATES = ("CLOSED", "CANCELLED")
 LOST_HOURS = 1  # 执行者失联：卡开着 + 租约过期 + 最近断点都超过这么久
 USER = "你"
 
@@ -68,6 +72,7 @@ class Check:
     unit: str = ""
     note: str = ""
     soft: bool = False  # 数是真的，但有没跑 / 没声明的，0 也不给绿
+    split: str = ""  # 分开写的数（D-324：“在干 X，旧账 Y”）；有它时格子显示它，颜色仍按 value（在干的数）
 
     @property
     def sev(self) -> str:
@@ -83,6 +88,8 @@ class Check:
             return "没检查"
         if self.state == "offline":
             return "断网未知"
+        if self.split:
+            return self.split
         return f"{self.value} {self.unit}".strip()
 
 
@@ -115,6 +122,7 @@ class ProjectCard:
     last_text: str
     issues: list[Issue] = field(default_factory=list)
     decisions: list[Decision] = field(default_factory=list)
+    closed: bool = False  # 项目下已没有开着的卡（D-324）
 
     @property
     def health_label(self) -> str:
@@ -263,6 +271,11 @@ def _open(project: pd.Project) -> list[pd.MissionInfo]:
     return [m for m in project.missions if m.column != "已关"]
 
 
+def project_closed(project: pd.Project) -> bool:
+    """D-324 判据（审计裁定）：项目下没有开着的卡＝全部卡是 CLOSED 或 CANCELLED，或者没有卡。不用旧文件里的“阶段”。"""
+    return all(m.state in CLOSED_STATES for m in project.missions)
+
+
 # ---------------------------------------------------------------- 问题三档
 
 
@@ -271,31 +284,52 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
     pid = project.project_id
     if not project.registered:
         return issues
+    closed = project_closed(project)
     for m in _open(project):
         if m.state == "BLOCKED":
             issues.append(
                 Issue(
                     "block", pid, "卡住要拿主意", pd._short(m.title, 60), USER + " → 主执行",
-                    "账本 mission.state = BLOCKED", m.updated_at, m.example,
+                    "账本里这张卡的状态是“卡住”", m.updated_at, m.example,
+                )
+            )
+        elif m.state == "DRAFT" and not m.work_id and not m.approved:
+            # D-328（审计裁定②）：没有工作项、也查不到批准记录的草稿，不是在等你拍板，多半是没开起来的陈卡；
+            # 只提示，谁来办写主执行，不进“要你出手”。有批准记录、还没开工的照常算“等你”。
+            issues.append(
+                Issue(
+                    "hint", pid, "草稿，没有工作项，也没有批准记录", pd._short(m.title, 60), "主执行（补工作项或作废）",
+                    "账本里这张卡是草稿，下面没有工作项，也查不到你的批准记录", m.updated_at, m.example,
                 )
             )
         elif m.column == "等你":
-            ask = pd.WAITING_ASK.get(m.state, "看一眼")
+            ask = pd.waiting_ask(m)
             if pd._days(now, m.updated_at) > pd.WAITING_RED_DAYS:
                 issues.append(
                     Issue(
                         "block", pid, f"等你超过 {pd.WAITING_RED_DAYS} 天：{ask}",
                         pd._short(m.title, 60), USER,
-                        f"账本 mission.state = {m.state}，进入该状态的时间", m.updated_at, m.example,
+                        f"账本里这张卡的状态是“{pd.STATE_LABEL.get(m.state, m.state)}”，从进入这个状态算起", m.updated_at, m.example,
                     )
                 )
             else:
                 issues.append(
                     Issue(
                         "hint", pid, ask, pd._short(m.title, 60), USER,
-                        f"账本 mission.state = {m.state}", m.updated_at, m.example,
+                        f"账本里这张卡的状态是“{pd.STATE_LABEL.get(m.state, m.state)}”", m.updated_at, m.example,
                     )
                 )
+        elif m.state == "ACTIVE" and (m.run is None or m.run.state not in pd.OPEN_RUN_STATES or m.work_state == "CANCELLED"):
+            # D-327：卡开着，但下面的工作项或最近一次执行已结束（如都已取消）：不是执行者失联，是卡没跟着收；主执行来办
+            why = "没有执行记录" if m.run is None else f"最近一次执行 {m.run.run_id} 已是 {m.run.state}"
+            if m.work_state == "CANCELLED":
+                why = "工作项已取消，" + why
+            issues.append(
+                Issue(
+                    "hint", pid, "卡开着，但下面没有在跑的执行", f"{why}：{pd._short(m.title, 40)}",
+                    "主执行（关卡或重新派工）", "账本里这张卡还开着，下面的工作项和执行已经结束", m.updated_at, m.example,
+                )
+            )
         elif m.state == "ACTIVE" and m.run is not None:
             lease = m.run.lease_expires
             last = m.run.updated_at
@@ -310,21 +344,21 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                         f"{m.run.executor} 的租约 {lease.strftime('%H:%M')} 到期，之后没有新断点："
                         f"{pd._short(m.title, 40)}",
                         "主执行立即查",
-                        "账本 execution_leases.expires_at + checkpoints 最近一条", lease, m.example,
+                        "账本里执行者的租约到期时间和最近一次断点", lease, m.example,
                     )
                 )
         elif m.column == "搁着" and pd._days(now, m.updated_at) > pd.PARKED_YELLOW_DAYS:
             issues.append(
                 Issue(
                     "hint", pid, f"搁了超过 {pd.PARKED_YELLOW_DAYS} 天", pd._short(m.title, 60),
-                    USER + "（继续搁 / 取消）", "账本 mission.state = PARKED", m.updated_at, m.example,
+                    USER + "（继续搁 / 取消）", "账本里这张卡的状态是“搁着”", m.updated_at, m.example,
                 )
             )
     if len(_open(project)) > pd.OPEN_SOFT_LIMIT:
         issues.append(
             Issue(
                 "hint", pid, f"开着的卡超过 {pd.OPEN_SOFT_LIMIT} 张",
-                f"共 {len(_open(project))} 张", USER + "（挂起或关卡）", "账本 mission_items", None,
+                f"共 {len(_open(project))} 张", USER + "（挂起或关卡）", "账本里开着的卡", None,
             )
         )
     for a in project.attention:
@@ -334,7 +368,13 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             "工作项卡住": ("risk", "主执行"),
         }.get(a.what, ("hint", "主执行"))
         title = {"执行记录没结账": "账本遗留", "收口停在半路": "账本对不上"}.get(a.what, a.what)
-        issues.append(Issue(sev, pid, title, a.detail, who, "账本一致性检查", a.since))
+        if a.what == "收口停在半路" and a.mission_state == "CLOSED":
+            # D-329：卡已关、收口没走完，就是“说完成但机器没过”那一格的事；只在那一格计，不再算进“账本对不上”
+            title = "说完成但机器没过"
+        if closed:
+            issues.append(Issue("hint", pid, title, a.detail, who, OLD_BASIS, a.since))
+        else:
+            issues.append(Issue(sev, pid, title, a.detail, who, "账本一致性检查", a.since))
     for c in project.changes:
         if c.status.startswith("待批"):
             issues.append(
@@ -348,14 +388,14 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             issues.append(
                 Issue(
                     "hint", pid, "批准范围", f"{pending.ref} {pending.subject}", USER,
-                    f"账本 planning_scope_cards 第 {pending.revision} 版，未批准（同 pm pending）", pending.since,
+                    f"账本里的范围卡第 {pending.revision} 版，还没批准（同 pm pending）", pending.since,
                 )
             )
         elif pending.kind == "inbox":
             issues.append(
                 Issue(
                     "hint", pid, "核对需求", f"{pending.ref} {pending.subject}", USER,
-                    "账本 intake_items.status = PROPOSED（同 pm inbox list）", pending.since,
+                    "账本收件箱里这一条还没确认（同 pm inbox list）", pending.since,
                 )
             )
     for card in project.cards:
@@ -373,7 +413,7 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
         issues.append(
             Issue(
                 "hint", pid, f"{pd.QUIET_YELLOW_DAYS} 天没动静", "有活开着，账本和 git log 都没更新",
-                USER + "看一眼", "max(账本 updated_at, git log -1)", max(moments),
+                USER + "看一眼", "账本最近一次更新和最近一次提交，取较晚的那个", max(moments),
             )
         )
     return sorted(issues, key=lambda i: (-SEV_RANK[i.sev], i.since or now))
@@ -422,7 +462,7 @@ def legacy_decision(project: pd.Project, covered: list[Decision]) -> Decision | 
         return None
     return Decision(
         "hint", project.project_id, ask, pd._short(legacy.next_action, 60), f"{ask}：认",
-        "老驾驶舱后台 snapshot()", None,
+        "老驾驶舱后台给这个项目的状态卡", None,
     )
 
 
@@ -437,6 +477,8 @@ def health_of(project: pd.Project, issues: list[Issue], coverage: Coverage) -> s
         return "block"
     if top == 2:
         return "risk"
+    if project_closed(project) and any(i.basis == OLD_BASIS for i in issues):
+        return "old"
     if not _open(project) or not (coverage.ledger and coverage.git):
         return "nodata"
     return "ok"
@@ -482,6 +524,7 @@ def project_card(
         issues=issues,
     )
     card.health = health_of(project, issues, cov)
+    card.closed = project.registered and project_closed(project)
     card.decisions = decisions_from(issues)
     extra = legacy_decision(project, card.decisions)
     if extra is not None:
@@ -514,8 +557,8 @@ GITHUB_HEADLINE = {
 def _audit_cell(pull: gh.PullInfo) -> Cell:
     audit = pull.audit
     if audit is None:
-        return Cell("没审计记录", "na", "reviews/ 里没有对上这个 PR 号或分支名的审计")
-    tip = f"审计 {audit.number}：{audit.summary}"
+        return Cell("没审计记录", "na", "本机读的审计目录里没有对上这个 PR 号或分支名的报告（看板不读共享库）")
+    tip = f"审计 {audit.number}：{audit.summary}（来源 {audit.source or '未知'}，日期 {audit.date or '日期读不到'}）"
     if pull.audit_stale:
         return Cell(f"{audit.number} {AUDIT_TEXT[audit.verdict]}（审的是旧头 {audit.head[:8]}）", "risk",
                     tip + f"；现在的头是 {pull.head_sha[:8]}，之后的提交没审")
@@ -576,7 +619,11 @@ def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> 
     if fresh and drafts:
         notes.append("草稿 PR " + "、".join(f"#{n}" for n in drafts)
                      + " 也改了规则文件：转成可审（ready）后才会出现在“要你出手”里，现在批了，再推提交也要重批")
-    notes.append(f"审计结论读自本机 reviews/ 目录，共 {len(snapshot.audits)} 份")
+    current = sum(1 for p in snapshot.pulls if p.audit is not None)
+    if snapshot.audit_problems:
+        notes.append("审计报告有读不到的：" + "；".join(snapshot.audit_problems))
+    notes.append(f"审计结论读自本机审计目录（看板不读共享库）：对上开着的 PR 的 {current} 份，"
+                 f"其余 {max(len(snapshot.audits) - current, 0)} 份是旧报告，不当作当前审计")
     rows = [pr_row(p, fresh, as_of) for p in snapshot.pulls]
     return GithubVM(snapshot.state, fresh, headline, as_of, main_ci, rows, notes)
 
@@ -720,7 +767,7 @@ def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow
         return [
             EvidenceRow("na", "门禁", why),
             EvidenceRow("na", "安全区签字", why),
-            EvidenceRow("na", "独立审计", f"本机 reviews/ 读到：{audit}（PR 是旧数据，不判过）"),
+            EvidenceRow("na", "独立审计", f"本机审计目录读到：{audit}（PR 是旧数据，不判过）"),
         ]
     if not rows:
         none = f"没有改到这个项目的开着的 PR · {github.as_of}"
@@ -756,22 +803,39 @@ def checks_of(
         gate = Check(gate.key, gate.label, "offline", note=gate.note)
         safety = Check(safety.key, safety.label, "offline", note=safety.note)
     lost = sum(1 for c in cards for i in c.issues if i.title == "执行者失联")
-    mismatch = sum(1 for c in cards for i in c.issues if i.title in ("账本对不上", "工作项卡住"))
+    mismatch_titles = ("账本对不上", "工作项卡住")
+    mismatch = sum(1 for c in cards if not c.closed for i in c.issues if i.title in mismatch_titles)
+    mismatch_old = sum(1 for c in cards if c.closed for i in c.issues if i.title in mismatch_titles)
     unverified = sum(
         1
         for p in board.projects
         for m in p.missions
         if m.state == "CLOSED" and m.closure_state and m.closure_state != "COMPLETED"
     )
+    # D-330：已关、却没有收口记录的卡（收口机制出现之前按旧办法关的）不计数，但在说明里写明有几张
+    no_record = sum(1 for p in board.projects for m in p.missions if m.state == "CLOSED" and not m.closure_state)
+    unverified_note = (
+        "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出。"
+        "还开着的卡收口停在半路的，算在“账本对不上”"
+    )
+    if no_record:
+        unverified_note += (
+            f"；另有 {no_record} 张按旧办法关闭、没有收口记录的卡，未计入"
+            "（依据：账本里这些卡已关闭，但查不到收口记录，是收口机制出现之前关的）"
+        )
     return [
         gate,
         Check("scope", "越界改动", "unchecked", note="越界检查（pr-scope-check）还没合进 main"),
         Check(
-            "unverified", "说完成但机器没过", "number", unverified, "张",
-            "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出",
+            "unverified", "说完成但机器没过", "number", unverified, "张", unverified_note,
         ),
         safety,
-        Check("mismatch", "账本对不上", "number", mismatch, "条", "收口单与卡状态、工作项 BLOCKED"),
+        Check(
+            "mismatch", "账本对不上", "number", mismatch, "条",
+            "收口单与卡状态、工作项 BLOCKED；已关的卡收口没走完的算在“说完成但机器没过”，这里不重复计；"
+            "旧账＝项目下已没有开着的卡时留下的，分开计、不算风险",
+            soft=bool(mismatch_old), split=f"在干 {mismatch}，旧账 {mismatch_old}" if mismatch_old else "",
+        ),
         Check(
             "lost", "执行者失联", "number", lost, "个",
             "卡开着 + 租约过期 + 最近断点超过 1 小时；只覆盖写账本的执行者",
@@ -921,9 +985,10 @@ def project_vm(
         columns.append(BoardColumn(name, note, card_rows))
     evidence = [
         EvidenceRow(
-            "ok" if not any(i.title == "账本对不上" for i in card.issues) else "risk",
+            "ok" if not any(i.title == "账本对不上" for i in card.issues) else "na" if card.closed else "risk",
             "账本一致性",
-            "收口单与卡状态、工作项、过期执行记录（本机账本副本）",
+            "收口单与卡状态、工作项、过期执行记录（本机账本副本）"
+            + ("；项目下已没有开着的卡，留下的算旧账，不算风险" if card.closed else ""),
         ),
         EvidenceRow(
             "ok" if not any(m.state == "CLOSED" and m.closure_state not in ("", "COMPLETED") for m in project.missions) else "block",

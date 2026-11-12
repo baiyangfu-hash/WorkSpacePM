@@ -97,6 +97,7 @@ AUDIT_PR_LINE = re.compile(r"^\s*(?:#\s.*?|-\s*(?:PR|对象)\s*[：:]\s*)PR\s*#?
 AUDIT_HEAD = re.compile(r"头(?:部)?\s*[：:]?\s*`?([0-9a-f]{7,40})`?")
 AUDIT_BRANCH = re.compile(r"分支\s*[：:]?\s*`?((?:claude|codex|manual|feature|fix)/[\w./-]+?)`?(?=[\s，,（(；;]|$)")
 AUDIT_HEADING = re.compile(r"^##\s*((?:结论|复核).*)$")
+AUDIT_DATE = re.compile(r"(20\d\d)\s*[-./年]\s*(\d{1,2})\s*[-./月]\s*(\d{1,2})")
 
 
 class OfflineError(Exception):
@@ -144,6 +145,8 @@ class Audit:
     pr: int | None = None
     branch: str = ""
     head: str = ""
+    source: str = ""  # 读自哪个目录（D-317：每份报告标来源）
+    date: str = ""  # 报告日期：正文前 20 行里写的日期；没写就用文件修改时间，并注明（D-317）
 
 
 @dataclass(frozen=True)
@@ -205,6 +208,7 @@ class Snapshot:
     token_rejected: bool = False  # 这一轮带的令牌被 GitHub 拒了（401），已改用游客读；调用方该丢掉这个令牌
     login_refused: bool = False  # 本机登录连续被拒到上限，已不再问 gh、按游客读（由窗口设置，重启后重试）
     env_token_problem: str = ""  # 环境变量里的令牌形状不对，已忽略；这里写原因（不含令牌本身）
+    audit_problems: list[str] = field(default_factory=list)  # 审计报告读不到的目录或文件（D-317）
 
     @property
     def fresh(self) -> bool:
@@ -355,9 +359,10 @@ def parse_audit(path: Path) -> Audit | None:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return Audit(int(match.group(1)), path.name, "unknown", "读不出这份文件")
+        return Audit(int(match.group(1)), path.name, "unknown", "读不出这份文件", source=_source(path), date=_file_date(path))
     lines = text.splitlines()
     top = "\n".join(lines[:20])
+    written = AUDIT_DATE.search(top)
     pr_number = _audit_pr(path.name, lines[:20])
     head = AUDIT_HEAD.search(top)
     branch = AUDIT_BRANCH.search(top)
@@ -387,19 +392,48 @@ def parse_audit(path: Path) -> Audit | None:
         pr=pr_number,
         branch=branch.group(1) if branch else "",
         head=(head.group(1) if head and head.groups() else head.group(0) if head else "").lower(),
+        source=_source(path),
+        date=f"{written.group(1)}-{int(written.group(2)):02d}-{int(written.group(3)):02d}" if written else _file_date(path),
     )
 
 
+def _source(path: Path) -> str:
+    return path.parent.name + "/"
+
+
+def _file_date(path: Path) -> str:
+    """正文没写日期时用文件修改时间，注明是文件时间；连时间都读不到就写“日期读不到”。"""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y-%m-%d") + "（文件修改时间）"
+    except OSError:
+        return "日期读不到"
+
+
 def read_audits(dirs: Iterable[Path]) -> list[Audit]:
+    return read_audits_checked(dirs)[0]
+
+
+def read_audits_checked(dirs: Iterable[Path]) -> tuple[list[Audit], list[str]]:
+    """读审计报告，同时记下读不到的地方（D-317：读不到要写“读不到”，不能显示成没有报告）。"""
     out: list[Audit] = []
+    problems: list[str] = []
     for folder in dirs:
         if not folder.is_dir():
+            problems.append(f"{folder}（目录不存在或不是目录）")
             continue
-        for path in sorted(folder.glob("*.md")):
+        try:
+            paths = sorted(folder.glob("*.md"))
+        except OSError as error:
+            problems.append(f"{folder}（列不出文件：{error}）")
+            continue
+        for path in paths:
             audit = parse_audit(path)
-            if audit is not None:
-                out.append(audit)
-    return sorted(out, key=lambda a: (a.number, a.file))
+            if audit is None:
+                continue
+            if audit.summary == "读不出这份文件":
+                problems.append(f"{path}（读不出这份文件）")
+            out.append(audit)
+    return sorted(out, key=lambda a: (a.number, a.file)), problems
 
 
 def audit_for(pull: PullInfo, audits: list[Audit]) -> Audit | None:
@@ -721,6 +755,7 @@ def save_cache(path: Path, etags: dict[str, list[Any]], snapshot: Snapshot) -> N
     """写缓存：先写临时文件再替换，写一半断电也不坏。令牌不进缓存。审计结论每次现读，也不进缓存。"""
     snap = asdict(snapshot)
     snap.pop("audits", None)
+    snap.pop("audit_problems", None)
     snap["checked_at"] = snapshot.checked_at.isoformat()
     snap["fetched_at"] = snapshot.fetched_at.isoformat() if snapshot.fetched_at else None
     snap["reset_at"] = None
@@ -783,8 +818,25 @@ def collect(
 
     ``token`` 显式给了就用它（本机 gh 登录取来的，只在内存里）；不给才从 ``env`` 里找 GITHUB_TOKEN / GH_TOKEN。
     令牌被 GitHub 拒（401）时，同一轮里改用游客读一次（只此一次，不循环），快照上标 token_rejected。
+    审计报告读不到的目录或文件记在快照的 audit_problems 上（D-317），不管 GitHub 读没读到。
     """
-    audits = read_audits(reviews_dirs)
+    audits, audit_problems = read_audits_checked(reviews_dirs)
+    snapshot = _collect(repo, repo_root, audits, cache_path, now, fetch, env, offline, token)
+    snapshot.audit_problems = audit_problems
+    return snapshot
+
+
+def _collect(
+    repo: str,
+    repo_root: Path,
+    audits: list[Audit],
+    cache_path: Path | None,
+    now: datetime,
+    fetch: Fetch | None,
+    env: Mapping[str, str],
+    offline: bool,
+    token: str | None,
+) -> Snapshot:
     etags, cached = load_cache(cache_path) if cache_path else ({}, None)
     if cached is not None and cached.repo != repo:
         etags, cached = {}, None
