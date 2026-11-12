@@ -78,7 +78,7 @@ FB_2001_CommonAlarm_AllStation_{{ project_tag }} 是一个**纯逻辑功能块**
 │                                                                          │
 │    输出 (VAR_OUTPUT) — 10个:                                              │
 │    ├─ q_wCurrentAlarmCode  WORD     → 主控 → D120 (HMI文本显示)         │
-│    ├─ q_wGlobalAlarmWord   WORD     → 主控 → D400 (HMI报警灯指示)       │
+│    ├─ stGlobal.o_wGlobalAlarmWord   WORD     → 主控 → D400 (HMI报警灯指示)       │
 │    ├─ q_iAlarmCount        INT      → 主控 → D404 (MES累计统计)         │
 │    ├─ q_aMesQueue[1..10]    WORD[10] → 主控 → D406~D425 (MES队列)        │
 │    ├─ q_bNewAlarmPulse     BOOL     → 主控 (单周期脉冲, 触发MES上传)     │
@@ -249,7 +249,7 @@ END_IF;
 | D地址 | 位宽 | 来源变量 | 说明 |
 |-------|------|----------|------|
 | **D120** | WORD (16bit) | q_wCurrentAlarmCode | 当前最高优先级报警码数值(HMI文本显示) |
-| **D400** | WORD (16bit) | q_wGlobalAlarmWord | 报警码WORD形式(非零即有报警) |
+| **D400** | WORD (16bit) | stGlobal.o_wGlobalAlarmWord | 报警码WORD形式(非零即有报警) |
 | **D404** | INT (16bit) | q_iAlarmCount | 自上次复位以来的累计报警次数 |
 | **D406~D425** | 10×INT (160bit) | q_aMesQueue[1..10] | MES报警环形队列(按写入顺序, 最新覆盖最旧) |
 

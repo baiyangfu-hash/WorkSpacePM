@@ -409,7 +409,7 @@ def test_v14d_the_alarm_queue_tail_index_starts_inside_the_queue(tmp_path: Path)
     project = _generate(tmp_path)
     fb = (project / "02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl").read_text(encoding="utf-8-sig")
     assert re.search(r"^\s*s_iQueueTailIndex\s*:\s*INT\s*:=\s*1\s*;", fb, flags=re.M), "the tail index must start at 1"
-    assert fb.count("q_iMESAlarmQueue[s_iQueueTailIndex]") == 1, "the queue is written in exactly one place"
+    assert fb.count("s_arrMesAlarmQueue[s_iQueueTailIndex]") == 1, "the queue is written in exactly one place"
 
 
 def test_v15_the_program_scheme_interface_document_has_the_fc_table_and_the_exchange_area_contract(tmp_path: Path) -> None:

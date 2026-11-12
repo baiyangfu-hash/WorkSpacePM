@@ -772,7 +772,7 @@ def test_common_alarm_template_passes_and_reverting_the_fix_is_reported() -> Non
     assert lines[37].strip().startswith("s_iQueueTailIndex") and ":= 1;" in lines[37]
     assert lines[207].strip().startswith("IF s_iQueueTailIndex < 1")
     assert lines[209].strip().startswith("END_IF")
-    assert lines[210].strip().startswith("q_iMESAlarmQueue[s_iQueueTailIndex]")
+    assert lines[210].strip().startswith("s_arrMesAlarmQueue[s_iQueueTailIndex]")
     mutated = list(lines)
     mutated[37] = "    s_iQueueTailIndex          : INT;"
     mutated[207:210] = ["", "", ""]
