@@ -218,6 +218,18 @@ class ContinuityResumeService:
         )
         if mission is None and work is None and mission_candidates:
             next_action = "AWAIT_USER_SWITCH"
+        if (
+            mission is None
+            and work is None
+            and run is None
+            and not work_candidates
+            and not mission_candidates
+            and not conflicts
+        ):
+            # TD-SW008-569: a registered project with nothing on the ledger yet starts by recording the user's request
+            # (``pm inbox add``).  Only this exact state gets it; every fail-closed state above keeps an empty action, and
+            # nothing here opens or creates the store.
+            next_action = "USE_INBOX"
         if conflicts == ["LEASE_EXPIRED"]:
             # 只有租约过期这一个冲突时的出口是回收（continuity run reclaim）：申请人必须换一个名字（原持有者续租被拒、
             # 自己回收自己也被拒），原持有者进程判不出时还须用户本人 pm sign-risk 签字。settle-expired 要另开恢复

@@ -267,7 +267,7 @@ def test_empty_store_returns_explicitly_empty_execution_state(tmp_path: Path) ->
     assert result.lease is None
     assert result.work_candidates == ()
     assert result.run_candidates == ()
-    assert result.next_legal_action == ""
+    assert result.next_legal_action == "USE_INBOX"  # TD-SW008-569: a new project is told its first step
     assert not (tmp_path / ".auto-pm" / "continuity.db").exists()
 
 
