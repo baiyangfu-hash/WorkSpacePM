@@ -68,7 +68,7 @@ def test_pm_resume_cli_defaults_to_v2(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     assert payload["schema_version"] == "continuity-resume.v2"
     assert payload["work"] is None
-    assert payload["next_legal_action"] == ""
+    assert payload["next_legal_action"] == "USE_INBOX"  # TD-SW008-569: the empty workspace's first step
 
 
 def test_v2_rejects_manual_control_override(tmp_path: Path) -> None:
