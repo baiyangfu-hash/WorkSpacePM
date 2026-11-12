@@ -107,6 +107,10 @@ class Project(BaseModel):
     plc_model: str = Field("", description="PLC 型号: S7-1200 等")
     extra: dict[str, Any] = Field(default_factory=dict, description="额外字段")
     file_mtime: float = Field(0.0, description="项目文件最近修改时间")
+    # CHG-SCPT-2026-650：性质、状态的唯一真源是工作区登记表，这里只是 project list 读出来带上的副本，不从项目文件推
+    registered: bool = Field(False, description="是否在工作区登记表里")
+    kind: str = Field("", description="项目性质（登记表值）: equipment/library/test/tool，空为未分类")
+    status: str = Field("", description="项目状态（登记表值）: active/paused/archived/deleted，空按在研")
 
     model_config = ConfigDict(from_attributes=True)
 

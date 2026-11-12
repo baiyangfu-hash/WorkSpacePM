@@ -44,15 +44,13 @@ SCAN_DIRS = (
 )
 PROJECT_DIR_PATTERN = re.compile(r"^((?:DJ|SW|SYS)-\d{4}-\d{3})(?:_(.+))?$")
 
-# 驾驶舱自身和验证套件，项目经理视图里收进“工具与验证”一组。以后应搬进 workspace_registry.json。
-DEFAULT_TOOL_PROJECTS = (
-    "SYS-2026-001",
-    "SW-2026-008",
-    "SW-2026-009",
-    "SW-2026-010",
-    "DJ-2026-000",
-    "DJ-2026-011",
-)
+# 项目性质、状态（CHG-SCPT-2026-650）：唯一真源是 workspace_registry.json 里每一条的 kind、status 两栏，
+# 看板不再写死项目名单。本脚本可以单独拷走运行（不依赖 auto_pm），所以照抄一份取值；
+# 和 auto_pm.contracts.workspace_context 的同名常量逐字一致，有测试守着。缺省（没有这一栏或空串）按“未分类”“在研”。
+KIND_LABELS = {"": "未分类", "equipment": "设备", "library": "公共库", "test": "测试", "tool": "工具"}
+STATUS_LABELS = {"": "在研", "active": "在研", "paused": "暂停", "archived": "已归档", "deleted": "已删除"}
+# 项目经理视图里收进“工具与验证”一组的性质：驾驶舱自己（工具）和验证套件（测试）
+TOOL_KINDS = frozenset({"tool", "test"})
 
 # Mission 状态 -> 看板四栏（Mission挂起状态设计稿 §3.1）。PARKED（搁着）账本里已有（TD-071，auto_pm.contracts.mission）。
 COLUMN_OF_STATE = {
@@ -213,6 +211,20 @@ class Project:
     attention: list[Attention] = field(default_factory=list)
     legacy: LegacyCard | None = None
     asks: list[PendingAsk] = field(default_factory=list)
+    kind: str = ""  # 登记表的项目性质；没登记的项目为空
+    status: str = ""  # 登记表的项目状态；空按在研
+
+    @property
+    def kind_label(self) -> str:
+        return KIND_LABELS.get(self.kind, self.kind) if self.registered else "未登记"
+
+    @property
+    def status_label(self) -> str:
+        return STATUS_LABELS.get(self.status, self.status) if self.registered else "未登记"
+
+    @property
+    def archived(self) -> bool:
+        return self.status == "archived"
 
 
 @dataclass
@@ -608,13 +620,22 @@ def _latest_run(connection: sqlite3.Connection, work_id: str, tables: set[str]) 
     )
 
 
-def discover_projects(root: Path, tool_projects: Iterable[str]) -> list[Project]:
-    tool_set = set(tool_projects)
+def discover_projects(root: Path) -> list[Project]:
+    """登记表里的项目（性质、状态读登记表两栏），加上文件夹里有、登记表没有的项目（标“还没接入驾驶舱”）。
+
+    登记表里标“已删除”的项目不上看板（目录已在回收区），但它的编号占着，同名文件夹也不再当成新项目。
+    """
     found: dict[str, Project] = {}
+    deleted: set[str] = set()
     registry_path = root / REGISTRY_RELATIVE
     if registry_path.is_file():
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         for entry in registry.get("projects", []):
+            kind = str(entry.get("kind") or "")
+            status = str(entry.get("status") or "")
+            if status == "deleted":
+                deleted.add(entry["project_id"])
+                continue
             project_root = entry.get("project_root", "")
             match = PROJECT_DIR_PATTERN.match(Path(project_root).name)
             found[entry["project_id"]] = Project(
@@ -622,7 +643,9 @@ def discover_projects(root: Path, tool_projects: Iterable[str]) -> list[Project]
                 name=(match.group(2) or "") if match else "",
                 root=project_root,
                 registered=True,
-                tool=entry["project_id"] in tool_set,
+                tool=kind in TOOL_KINDS,
+                kind=kind,
+                status=status,
             )
     for scan in SCAN_DIRS:
         base = root / scan
@@ -630,14 +653,14 @@ def discover_projects(root: Path, tool_projects: Iterable[str]) -> list[Project]
             continue
         for child in sorted(base.iterdir()):
             match = PROJECT_DIR_PATTERN.match(child.name)
-            if not child.is_dir() or not match or match.group(1) in found:
+            if not child.is_dir() or not match or match.group(1) in found or match.group(1) in deleted:
                 continue
             found[match.group(1)] = Project(
                 project_id=match.group(1),
                 name=match.group(2) or "",
                 root=(scan / child.name).as_posix(),
                 registered=False,
-                tool=match.group(1) in tool_set,
+                tool=False,  # 没登记就没有性质，先放在在研项目里，提示去登记
             )
     return list(found.values())
 
@@ -879,13 +902,12 @@ def build_board(
     root: Path,
     db_path: Path | None,
     now: datetime,
-    tool_projects: Iterable[str] = DEFAULT_TOOL_PROJECTS,
     use_git: bool = True,
     use_legacy: bool = True,
     legacy_factory: Callable[[Path], object] | None = None,
     ledger_reader: str = "auto",
 ) -> Board:
-    projects = discover_projects(root, tool_projects)
+    projects = discover_projects(root)
     by_id = {project.project_id: project for project in projects}
     ledger_note = "没找到账本，只显示文件夹里的记录"
     if db_path is not None and db_path.is_file():
@@ -1171,8 +1193,9 @@ def render_pm(board: Board, offset: tzinfo) -> str:
         parts.append('<div class="none">目前没有要你定的事。</div>')
     parts.append("</div>")
 
-    business = [p for p in board.projects if not p.tool]
-    tools = [p for p in board.projects if p.tool]
+    business = [p for p in board.projects if not p.tool and not p.archived]
+    tools = [p for p in board.projects if p.tool and not p.archived]
+    archived = [p for p in board.projects if p.archived]
     parts.append(f"<div><h2>在研项目</h2>{_pm_table(business, now, offset)}</div>")
     events = recent_events(board)
     parts.append("<div><h2>最近 7 天动态</h2>")
@@ -1192,6 +1215,11 @@ def render_pm(board: Board, offset: tzinfo) -> str:
         f"<details><summary>工具与验证项目（{len(tools)} 个，驾驶舱自己和测试台）</summary>"
         f"{_pm_table(tools, now, offset)}</details>"
     )
+    if archived:
+        parts.append(
+            f"<details><summary>已归档项目（{len(archived)} 个，登记表里状态是“已归档”）</summary>"
+            f"{_pm_table(archived, now, offset)}</details>"
+        )
     parts.append(
         '<div class="legend">'
         f'<span><i class="red"></i>红：有卡住的，或等你超过 {WAITING_RED_DAYS} 天</span>'
@@ -1254,7 +1282,7 @@ def _pm_table(projects: list[Project], now: datetime, offset: tzinfo) -> str:
         rows.append(
             f'<details class="prow"><summary class="row">'
             f'<span class="lampdot {color}" title="{_e(reason)}"></span>'
-            f'<div><span class="pid">{_e(project.project_id)}</span> {_e(project.name)}<br><span class="small">{_e(reason)} · 最后动静 {_e(_when(moved, offset))}</span>{stage_text}</div>'
+            f'<div><span class="pid">{_e(project.project_id)}</span> {_e(project.name)} <span class="small">{_e(project.kind_label)} · {_e(project.status_label)}</span><br><span class="small">{_e(reason)} · 最后动静 {_e(_when(moved, offset))}</span>{stage_text}</div>'
             f'<div class="counts">{chips}<span class="small" style="flex-basis:100%">{doing_text}</span></div>'
             f'<div>{change_text}<br><span class="open small">{open_text}</span></div>'
             f"</summary>{_project_detail(project)}</details>"

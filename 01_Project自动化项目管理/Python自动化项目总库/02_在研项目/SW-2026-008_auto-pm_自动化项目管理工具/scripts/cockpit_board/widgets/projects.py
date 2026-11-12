@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-HEADERS = ("项目", "健康", "里程碑", "到期", "数据覆盖", "现在在干", "问题", "最后动静")
+HEADERS = ("项目", "性质", "状态", "健康", "里程碑", "到期", "数据覆盖", "现在在干", "问题", "最后动静")
+HEALTH_COLUMN = HEADERS.index("健康")
 
 
 class ProjectsPage(QWidget):
@@ -25,7 +26,7 @@ class ProjectsPage(QWidget):
         self.on_project = on_project
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 16)
-        layout.addWidget(c.section("全部项目", "受阻和有风险的排前，未接入的排后；双击一行进项目页"))
+        layout.addWidget(c.section("全部项目", "受阻和有风险的排前，未接入的排后，已归档的在最后；性质、状态读登记表；双击一行进项目页"))
         self.table = QTableWidget(0, len(HEADERS))
         self.table.setObjectName("projects")
         self.table.setHorizontalHeaderLabels(HEADERS)
@@ -45,6 +46,8 @@ class ProjectsPage(QWidget):
         for row, card in enumerate(cards):
             cells = [
                 f"{card.project_id}\n{card.name}",
+                card.kind_label,
+                card.status_label,
                 card.health_label,
                 card.milestone,
                 card.due_text,
@@ -56,7 +59,7 @@ class ProjectsPage(QWidget):
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                if column == 1:
+                if column == HEALTH_COLUMN:
                     item.setData(Qt.ItemDataRole.UserRole, card.health)
                 self.table.setItem(row, column, item)
         self.table.resizeRowsToContents()

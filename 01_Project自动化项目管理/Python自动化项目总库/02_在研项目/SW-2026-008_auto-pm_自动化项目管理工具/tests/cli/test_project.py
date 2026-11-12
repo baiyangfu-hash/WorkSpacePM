@@ -1051,3 +1051,46 @@ class TestDocRefresh:
         content = program_doc.read_text(encoding="utf-8")
         assert "auto-pm doc refresh" in content
         assert "program_blocks.yml" in content
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：list 显示、筛选两栏
+
+
+def _two_column_workspace(root: Path) -> None:
+    from tests.core.test_workspace_registry_service import _anchor, _workspace
+
+    registry = _workspace(root)
+    text = registry.read_text(encoding="utf-8").replace(
+        '"runtime_root": ""\n    }\n  ]', '"runtime_root": "",\n      "kind": "equipment",\n      "status": "paused"\n    }\n  ]'
+    )
+    registry.write_text(text, encoding="utf-8", newline="\n")
+    _anchor(root / "0100_PLC自动化" / "DJ-2026-009", "DJ-2026-009")  # 有目录、没登记
+
+
+def _listed(root: Path, *args: str) -> list[dict[str, object]]:
+    result = CliRunner().invoke(cli, ["-w", str(root), "project", "list", "--json", *args], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    return list(json.loads(result.output)) if result.output.strip() != "[]" else []
+
+
+def test_project_list_shows_kind_and_status_from_the_registry(tmp_path: Path) -> None:
+    _two_column_workspace(tmp_path)
+    rows = {str(row["project_id"]): row for row in _listed(tmp_path)}
+    assert (rows["DJ-2026-005"]["registered"], rows["DJ-2026-005"]["kind"], rows["DJ-2026-005"]["status"]) == (
+        True, "equipment", "paused",
+    )
+    assert rows["DJ-2026-009"]["registered"] is False
+    table = CliRunner().invoke(cli, ["-w", str(tmp_path), "project", "list"], catch_exceptions=False)
+    assert table.exit_code == 0
+    assert "性质" in table.output and "状态" in table.output and "阶段" not in table.output
+    assert "设备" in table.output and "暂停" in table.output and "未登记" in table.output
+
+
+def test_project_list_filters_by_kind_and_status(tmp_path: Path) -> None:
+    _two_column_workspace(tmp_path)
+    assert [row["project_id"] for row in _listed(tmp_path, "--kind", "equipment")] == ["DJ-2026-005"]
+    assert [row["project_id"] for row in _listed(tmp_path, "--status", "paused")] == ["DJ-2026-005"]
+    assert _listed(tmp_path, "--status", "archived") == []
+    assert _listed(tmp_path, "--kind", "tool") == []
+    refused = CliRunner().invoke(cli, ["-w", str(tmp_path), "project", "list", "--status", "dead"])
+    assert refused.exit_code == 2

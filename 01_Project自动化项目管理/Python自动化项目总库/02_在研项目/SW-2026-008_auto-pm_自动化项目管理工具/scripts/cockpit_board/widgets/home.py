@@ -59,6 +59,13 @@ def check_tile(check: Check) -> QFrame:
     return frame
 
 
+def rest_summary(rest: list[ProjectCard]) -> str:
+    """折叠那一组的一句话：已归档的单独点数（它们排在这一组最后）。"""
+    archived = sum(1 for card in rest if card.archived)
+    text = f"另有 {len(rest) - archived} 个正常、无数据或未接入的项目"
+    return text + (f"，{archived} 个已归档" if archived else "")
+
+
 def project_tile(card: ProjectCard, on_project: Callable[[str], None]) -> QFrame:
     frame, layout = c.card(dashed=card.health == "off")
     frame.setProperty("project_id", card.project_id)
@@ -66,10 +73,12 @@ def project_tile(card: ProjectCard, on_project: Callable[[str], None]) -> QFrame
     frame.setCursor(Qt.CursorShape.PointingHandCursor)
     frame.mouseReleaseEvent = lambda _event: on_project(card.project_id)  # type: ignore[method-assign]
     head = c.hrow(
-        c.label(card.project_id + ("  工具" if card.tool else ""), "mono", wrap=False), 1,
+        c.label(card.project_id, "mono", wrap=False), 1,
         c.chip(card.health_label, theme.HEALTH_SEV.get(card.health, "na")),
     )
     layout.addWidget(head)
+    # 性质、状态读登记表（CHG-SCPT-2026-650），不再按写死的名单标“工具”
+    layout.addWidget(c.label(f"{card.kind_label} · {card.status_label}", "small", wrap=False))
     layout.addWidget(c.label(card.name, "section"))
     if card.registered:
         layout.addWidget(c.hrow(c.label(card.milestone, "muted", wrap=False), 1, c.label(card.due_text, "mono", wrap=False)))
@@ -137,11 +146,11 @@ class HomePage(QWidget):
             lay.addWidget(holder)
         else:
             lay.addWidget(c.label("没有受阻或有风险的项目。", "muted"))
-        fold = c.button("收起" if self.fold_open else "展开", "ghost",
-                        f"另有 {len(vm.rest)} 个正常、无数据或未接入的项目")
+        rest_text = rest_summary(vm.rest)
+        fold = c.button("收起" if self.fold_open else "展开", "ghost", rest_text)
         fold.setObjectName("fold")
         fold.clicked.connect(self._toggle)
-        lay.addWidget(c.hrow(c.label(f"另有 {len(vm.rest)} 个正常、无数据或未接入的项目", "muted", wrap=False), fold, 1))
+        lay.addWidget(c.hrow(c.label(rest_text, "muted", wrap=False), fold, 1))
         self.rest_holder, grid = c.grid(CARD_COLUMNS)
         c.fill_grid(grid, [project_tile(p, self.on_project) for p in vm.rest], CARD_COLUMNS)
         self.rest_holder.setVisible(self.fold_open)

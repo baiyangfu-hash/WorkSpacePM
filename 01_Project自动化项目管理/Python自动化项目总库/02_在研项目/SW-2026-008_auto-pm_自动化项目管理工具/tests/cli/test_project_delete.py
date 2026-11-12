@@ -257,7 +257,7 @@ def test_d12_two_deletes_of_the_same_id_never_overwrite_each_other(tmp_path: Pat
 def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.paths import resolve_project_destination
     from auto_pm.application.core.project_service import ProjectService
 
     monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
@@ -265,7 +265,8 @@ def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
     source = tmp_path / "incoming" / "SW-2026-123_X"
     source.mkdir(parents=True)
     (source / "new.txt").write_text("new\n", encoding="utf-8")
-    dest = world.root / WORKSPACE_PROJECTS_SUBDIR / source.name
+    # D-344：import 和 create 同一个落点函数；这个目录认不出技术栈，落在非 PLC 的那一处
+    dest = Path(resolve_project_destination(str(world.root), "unknown")) / source.name
     dest.mkdir(parents=True)
     (dest / "old.txt").write_text("old\n", encoding="utf-8")
     git(world.root, "add", "-A")
@@ -284,14 +285,14 @@ def test_d13_import_force_recycles_the_existing_project_instead_of_deleting_it(
 
 
 def _import_force_world(world: World, monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[Path, Path]:
-    from auto_pm.application.core.paths import WORKSPACE_PROJECTS_SUBDIR
+    from auto_pm.application.core.paths import resolve_project_destination
     from auto_pm.application.core.project_service import ProjectService
 
     monkeypatch.setattr(project_command_module(), "ProjectService", ProjectService)
     source = world.root.parent / "incoming" / name
     source.mkdir(parents=True)
     (source / "new.txt").write_text("new\n", encoding="utf-8")
-    dest = world.root / WORKSPACE_PROJECTS_SUBDIR / name
+    dest = Path(resolve_project_destination(str(world.root), "unknown")) / name
     dest.mkdir(parents=True)
     (dest / "old.txt").write_text("old\n", encoding="utf-8")
     return source, dest
@@ -397,3 +398,89 @@ def test_d22_import_force_with_a_committed_pin_ignores_the_evidence_text_and_nee
     result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
     assert result.exit_code == 1 and "用户本人在自己的终端" in result.output
     assert (dest / "old.txt").is_file() and not (dest / "new.txt").exists()
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：删除标“已删除”，不抹行
+
+
+def _registry_for(world: World, *, status: str = "") -> Path:
+    import json
+
+    control = world.root / "SYS-2026-001_WorkspaceGovernance"
+    control.mkdir(exist_ok=True)
+    entry: dict[str, str] = {
+        "project_id": PROJECT,
+        "project_root": "proj",
+        "development_root": "proj",
+        "control_project_id": "",
+        "control_pm_session": "",
+        "runtime_root": "",
+    }
+    if status:
+        entry["status"] = status
+    registry = control / "workspace_registry.json"
+    payload = {"schema_version": "workspace-registry.v1", "projects": [entry]}
+    registry.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    git(world.root, "add", "-A")
+    git(world.root, "commit", "-q", "-m", "registry")
+    return registry
+
+
+def test_d23_delete_marks_the_registry_entry_deleted_and_keeps_it(world: World) -> None:
+    import json
+
+    registry = _registry_for(world, status="archived")
+    result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    (entry,) = json.loads(registry.read_text(encoding="utf-8"))["projects"]
+    assert (entry["project_id"], entry["status"], entry["status_before_delete"]) == (PROJECT, "deleted", "archived")
+    assert "已标“已删除”" in result.output and f"project restore {PROJECT}" in result.output
+
+
+def test_d24_delete_of_an_unregistered_project_leaves_the_registry_alone(world: World) -> None:
+    result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    assert "没改登记表" in result.output
+    assert not (world.root / "SYS-2026-001_WorkspaceGovernance").exists()
+
+
+def test_d25_a_registry_that_cannot_be_written_is_reported_after_the_move(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.workspace_registry_service import (
+        WorkspaceRegistryError,
+        WorkspaceRegistryService,
+    )
+
+    _registry_for(world)
+
+    def broken(self: WorkspaceRegistryService, project_id: str) -> Any:
+        raise WorkspaceRegistryError("disk full")
+
+    monkeypatch.setattr(WorkspaceRegistryService, "mark_deleted", broken)
+    result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1 and "登记表没标上" in result.output and "disk full" in result.output
+    assert len(world.recycled()) == 1  # 目录已在回收区，说清楚，不装作没发生
+
+
+def test_d26_import_force_recycles_but_does_not_mark_the_registry(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    source, dest = _import_force_world(world, monkeypatch, "SW-2026-124_Y")
+    control = world.root / "SYS-2026-001_WorkspaceGovernance"
+    control.mkdir()
+    registry = control / "workspace_registry.json"
+    relative = dest.relative_to(world.root).as_posix()
+    payload = {
+        "schema_version": "workspace-registry.v1",
+        "projects": [{"project_id": source.name, "project_root": relative, "development_root": relative}],
+    }
+    registry.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    _commit_all(world.root)
+    original = registry.read_bytes()
+    result = _import_force(world, source, "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 0, result.output
+    assert registry.read_bytes() == original  # 覆盖导入是换内容，不是删除项目（回收区按目录名 source.name 收）
+    assert list((world.root / ".auto-pm" / "recycle" / source.name).iterdir())

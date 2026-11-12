@@ -1068,3 +1068,42 @@ def test_d342_home_vm_keeps_pr_signatures_without_a_project(tmp_path: Path) -> N
     assert home.decisions_total == sum(len(c.decisions) for c in home.hot + home.rest) + len(home.loose_decisions)
     count = vm.attention_count(home, ["DJ-2026-101"])
     assert count.loose == 1 and count.counted + sum(n for _p, n in count.unread) + count.loose == home.decisions_total
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-650：已归档折叠、性质状态上卡
+
+
+def test_an_archived_project_is_folded_last_and_cards_carry_kind_and_status(tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "BLOCKED", "卡住了", 0.5)])
+    registry = root / pd.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0].update({"kind": "equipment", "status": "archived"})
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+
+    assert all(c.project_id != "DJ-2026-101" for c in home.hot)  # 受阻也不进“要留意的项目”
+    assert home.rest[-1].project_id == "DJ-2026-101" and home.rest[-1].archived
+    card = home.rest[-1]
+    assert (card.kind_label, card.status_label) == ("设备", "已归档")
+    tool = next(c for c in home.hot + home.rest if c.project_id == "SW-2026-008")
+    assert (tool.kind_label, tool.status_label, tool.tool) == ("工具", "在研", True)
+    other = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-102")
+    assert (other.kind_label, other.status_label) == ("未登记", "未登记")
+    assert len(home.hot) + len(home.rest) == len(board.projects)  # 件数口径不变
+
+
+def test_the_station_default_prefers_equipment_then_unclassified(tmp_path: Path) -> None:
+    from cockpit_board.app import default_station_project
+
+    root, _db = base._workspace(tmp_path, [])
+    assert default_station_project(root) == "DJ-2026-101"  # 未分类、在研，退回用它
+    registry = root / pd.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0]["status"] = "archived"
+    data["projects"].append({"project_id": "DJ-2026-103", "project_root": "x/DJ-2026-103_丙", "kind": "library"})
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert default_station_project(root) == ""  # 已归档、公共库、工具都不当默认
+    data["projects"].append({"project_id": "DJ-2026-104", "project_root": "x/DJ-2026-104_丁", "kind": "equipment"})
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert default_station_project(root) == "DJ-2026-104"

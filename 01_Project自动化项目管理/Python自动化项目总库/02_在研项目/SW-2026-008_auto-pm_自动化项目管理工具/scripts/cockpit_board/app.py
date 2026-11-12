@@ -168,8 +168,11 @@ def fill_identity(options: argparse.Namespace, runner: Callable[..., Any] | None
 
 
 def default_station_project(root: Path) -> str:
-    """工程工位默认项目：登记过的第一个客户项目（不是工具项目）；没有就空串。冒烟脚本 smoke.py 也用它。"""
-    return next((p.project_id for p in pd.discover_projects(root, pd.DEFAULT_TOOL_PROJECTS) if not p.tool and p.registered), "")
+    """工程工位默认项目：登记过的第一个设备项目；登记表还没填性质时退回第一个登记过、不是工具或测试、没归档的项目；
+    都没有就空串。性质、状态读登记表（CHG-SCPT-2026-650）。冒烟脚本 smoke.py 也用它。"""
+    candidates = [p for p in pd.discover_projects(root) if p.registered and not p.tool and not p.archived]
+    equipment = next((p.project_id for p in candidates if p.kind == "equipment"), "")
+    return equipment or next((p.project_id for p in candidates if not p.kind), "")
 
 
 def read_pages(root: Path, reads: tuple[shell.PageRead, ...], project_ids: list[str], runner: Callable[..., Any] | None,

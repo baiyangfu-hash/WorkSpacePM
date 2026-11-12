@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -137,3 +138,26 @@ def test_b1_05_a_closed_project_shows_an_old_records_chip_on_both_pages(qapp: QA
     for holder in (tile, page):
         chips = [label for label in holder.findChildren(QLabel) if label.text() == "旧账"]
         assert [label.property("sev") for label in chips] == ["hint"]
+
+
+def test_a_tile_shows_kind_and_status_and_the_fold_counts_archived(qapp: QApplication, tmp_path: Path) -> None:
+    """CHG-SCPT-2026-650：小方块写“性质 · 状态”，不再按名单挂“工具”；折叠那一句单独点出已归档几个。"""
+    from cockpit_board.widgets.home import project_tile, rest_summary
+
+    root, db = base._workspace(tmp_path, [])
+    registry = root / pd.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0].update({"kind": "equipment", "status": "archived"})
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    board = pd.build_board(root, db, board_tests.NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
+    card = next(c for c in home.rest if c.project_id == "DJ-2026-101")
+    tile = project_tile(card, lambda _pid: None)
+    texts = [label.text() for label in tile.findChildren(QLabel)]
+    assert "设备 · 已归档" in texts
+    tool = next(c for c in home.hot + home.rest if c.project_id == "SW-2026-008")
+    tool_tile = project_tile(tool, lambda _pid: None)
+    tool_texts = [label.text() for label in tool_tile.findChildren(QLabel)]
+    assert "工具 · 在研" in tool_texts and not any(t.endswith("  工具") for t in tool_texts)
+    assert rest_summary(home.rest).endswith("，1 个已归档")
+    assert "已归档" not in rest_summary([c for c in home.rest if not c.archived])
