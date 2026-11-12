@@ -202,7 +202,7 @@ FB 实例不声明在 GlobalVars_{{ project_tag }} 里，每个 FB 一个背景�
 |--------|--------|----------|------|
 | `DB_3001_ExternalInteraction_{{ project_tag }}` | FB_3001_ExternalInteraction_{{ project_tag }} | `01_外部设备交互/DB_3001_ExternalInteraction.scl` | 外部设备交互实例 |
 {%- for station in station_instances %}
-| `DB_1001_{{ station }}_{{ project_tag }}` | FB_1001_Station1_{{ project_tag }} | `02_工位1_动作机构/DB_1001_{{ station }}.scl` | {{ station }} 实例 |
+| `DB_1001_{{ station }}_{{ project_tag }}` | FB_1001_Station1_{{ project_tag }} | `02_工位_动作机构/DB_1001_{{ station }}.scl` | {{ station }} 实例 |
 {%- endfor %}
 | `DB_2001_CommonAlarm_{{ project_tag }}` | FB_2001_CommonAlarm_AllStation_{{ project_tag }} | `05_公共报警/DB_2001_CommonAlarm.scl` | 公共报警实例 |
 

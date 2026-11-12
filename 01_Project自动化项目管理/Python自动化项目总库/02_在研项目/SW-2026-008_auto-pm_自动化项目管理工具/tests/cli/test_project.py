@@ -301,9 +301,11 @@ def test_project_create_station_option_generates_one_instance_db_per_station(
 
     assert result.exit_code == 0, result.output
     plc = dest_dir / "DJ-2026-023_三工位" / "02_PLC程序" / "PLC_ST"
-    station_dir = plc / "02_工位1_动作机构"
+    station_dir = plc / "02_工位_动作机构"
     assert sorted(p.name for p in station_dir.glob("DB_1001_*.scl")) == [
         "DB_1001_Station1.scl", "DB_1001_Station2.scl", "DB_1001_Station3.scl"]
+    # TD-SW008-575（D-310）：多工位时背景 DB 所在文件夹不再叫“工位1”
+    assert [d.name for d in plc.iterdir() if d.is_dir() and "工位1" in d.name] == []
     global_vars = (plc / "00_全局数据" / "GlobalVars.db").read_text(encoding="utf-8")
     ob = (plc / "00_主程序" / "OB123.scl").read_text(encoding="utf-8")
     for station in ("Station1", "Station2", "Station3"):
