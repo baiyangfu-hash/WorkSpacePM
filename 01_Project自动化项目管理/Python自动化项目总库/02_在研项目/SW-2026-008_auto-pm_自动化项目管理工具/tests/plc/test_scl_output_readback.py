@@ -9,8 +9,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from auto_pm.domain.plc.checker import SCL_OUTPUT_READBACK_ITEM, PlcChecker
 from auto_pm.domain.plc.scl_linter import SclLinter
+
+pytestmark = pytest.mark.external_reads  # D-200: r07 reads real files outside the project
 
 _FB = """FUNCTION_BLOCK "FB_9106_Out"
    VAR_INPUT
@@ -111,8 +115,6 @@ def test_r07_the_known_real_hits_are_in_syslib_and_000_only() -> None:
     """真工程命中清单（逐条标过“真命中”）：只在 SysLib 和 000，005、009、011 里没有。新增命中要人看过再改这里。"""
     root = _repo_plc_root()
     if root is None:
-        import pytest
-
         pytest.skip("这份克隆里没有 0100_PLC自动化")
     files = {
         str(path.relative_to(root)).replace("\\", "/"): sum(

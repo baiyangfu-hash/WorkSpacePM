@@ -14,6 +14,8 @@ import pytest
 from auto_pm.domain.plc.checker import SCL_SYNTAX_ITEM, PlcChecker
 from auto_pm.domain.plc.scl_linter import SclLinter
 
+pytestmark = pytest.mark.external_reads  # D-200: l12 reads real files outside the project
+
 _FB = """FUNCTION_BLOCK "FB_9102_Lite"
 VERSION : 0.1
    VAR_INPUT
