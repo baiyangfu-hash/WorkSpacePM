@@ -1,0 +1,31 @@
+---
+spec_id: INT-801
+title: "{{ project_id }} OB123 主程序组织块接口文档 (IFC)"
+version: "V1.0.0"
+status: "正式"
+created: "2026-11-12"
+domain: plc
+---
+
+# 接口文档 (IFC) - {{ project_id }} {{ project_name }} OB123（块名 `{{ project_tag }}_Main`）
+
+## 1. 模块定位
+主循环组织块，只做调度：按固定顺序调用三类功能块的背景数据块，不含业务逻辑。
+块名带项目标记 `{{ project_tag }}`，导入用户已有的 TIA 项目时不覆盖同名块（LSP-905 §3.4、§4.11）。
+TIA 从源生成块时自己分配块号，导入后要在块属性里手工改成 123（见《程序架构文档》§7.4）。
+
+## 2. 调用清单（按执行顺序）
+
+| 顺序 | 背景数据块 | 功能块 | 传入的结构体（VAR_IN_OUT，按引用传递） |
+|:---:|:---|:---|:---|
+| 1 | `DB_3001_ExternalInteraction_{{ project_tag }}` | `FB_3001_ExternalInteraction_{{ project_tag }}` | `GlobalVars_{{ project_tag }}.stExternal`（ST_3001_ExternalDevice{{ udt_suffix }}） |
+{%- for station in station_instances %}
+| {{ loop.index + 1 }} | `DB_1001_{{ station }}_{{ project_tag }}` | `FB_1001_Station1_{{ project_tag }}` | `GlobalVars_{{ project_tag }}.st{{ station }}`（ST_1001_Station1{{ udt_suffix }}） |
+{%- endfor %}
+| {{ station_instances | length + 2 }} | `DB_2001_CommonAlarm_{{ project_tag }}` | `FB_2001_CommonAlarm_AllStation_{{ project_tag }}` | `GlobalVars_{{ project_tag }}.stGlobal`（ST_2001_CommonAlarm{{ udt_suffix }}） |
+
+## 3. 接口约定
+- OB123 自己没有输入输出参数，`VAR_TEMP` 为空。
+- 结构体按引用传递，调用后不需要再写回 `GlobalVars_{{ project_tag }}`。
+- FB 实例不放在 `GlobalVars_{{ project_tag }}` 里（LSP-905 §4.11-1）：每个功能块有自己的背景数据块，和功能块放在同一个文件夹。
+- 项目里已有主程序时，可以不导入本 OB，只把上表的调用复制进自己的主程序。

@@ -14,11 +14,11 @@
 
 ## 2. 变更记录摘要
 
-> 完整变更历史请参阅: [变更记录_CHG-FB2001-CommonAlarm-V6.0.0.md](./变更记录_CHG-FB2001-CommonAlarm-V6.0.0.md)
+> 完整变更历史请参阅: [变更记录_CHG-FB2001-CommonAlarm.md](./变更记录_CHG-FB2001-CommonAlarm.md)
 
 | 版本号 | 日期 | 变更内容摘要 | 详细说明链接 |
 |--------|------|-------------|-------------|
-| **V6.0.0** | **2026-05-18** | **重构: 基于SRC基线重写。3-INT输入→~25 BOOL分类输入, 内置49类报警码优先级扫描, 新增指示灯/蜂鸣器5路输出, 新增MES去重环形队列, 全英文化变量** | [→ V6.0.0变更详情](./变更记录_CHG-FB2001-CommonAlarm-V6.0.0.md#v600) |
+| **V6.0.0** | **2026-05-18** | **重构: 基于SRC基线重写。3-INT输入→~25 BOOL分类输入, 内置49类报警码优先级扫描, 新增指示灯/蜂鸣器5路输出, 新增MES去重环形队列, 全英文化变量** | [→ 变更记录](./变更记录_CHG-FB2001-CommonAlarm.md) |
 | V2.1.0 | 2026-05-04 | 旧版3-INT输入(~20报警码) | 已废弃 |
 
 ---
@@ -98,22 +98,14 @@ FB_2001_CommonAlarm_AllStation_{{ project_tag }} 是一个**纯逻辑功能块**
 ### 4.1 在主控系统中的位置
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     主控程序 (PRG_MainControl_DJ2026005)                  │
-│                                                                          │
-│  Step1: FB_ExternalDeviceInteraction  ──外部设备交互                      │
-│  Step2: FB_1001_Conveyor4Layer        ──四层输送机控制                   │
-│  Step3: FB_1003_PickPlace             ──取放料机构                       │
-│  Step4: FB_1004_GlueMachineFeeder     ──打胶机送料                       │
-│                          ↓                                               │
-│  Step5: "DB_2001_CommonAlarm_{{ project_tag }}"(背景DB, FB_2001_CommonAlarm_AllStation_{{ project_tag }})    │
-│         各工站/外部/系统BOOL ──→ 扫描 ──→ 报警码 + 指示灯/蜂鸣器          │
-│                          ↓                                               │
-│  Step6: IO输出映射 (报警灯/蜂鸣器 → Y24~Y27/Y50)                         │
-│  Step7: HMI数据回写 (D120/D400/D404/D406~D425)                           │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+OB123（块名 {{ project_tag }}_Main）每个扫描周期:
+  第1部分  "DB_3001_ExternalInteraction_{{ project_tag }}"   外部设备交互
+  第2部分  "DB_1001_<工位名>_{{ project_tag }}"              各工位动作机构（每个工位一行）
+  第3部分  "DB_2001_CommonAlarm_{{ project_tag }}"           本功能块（FB_2001_CommonAlarm_AllStation_{{ project_tag }}）
+           各工站/外部/系统 BOOL ──→ 扫描 ──→ 报警码 + 指示灯/蜂鸣器
 ```
+
+本功能块排在最后，报警码和指示灯反映本扫描周期各工位动作之后的结果。
 
 ---
 
@@ -270,25 +262,23 @@ END_IF;
 | 文档类型 | 文档名称 | 说明 |
 |---------|:--------|:-----|
 | **详细设计说明书 (DSN)** | 本文档 | BOOL输入分类、49类报警码优先级扫描、环形队列、指示灯/蜂鸣器算法 |
-| **接口文档 (IFC)** | [接口文档_IFC-FB2001-CommonAlarm-V6.0.0.md](./接口文档_IFC-FB2001-CommonAlarm-V6.0.0.md) | ~25输入/10输出的完整接口定义 |
-| **使用说明 (UM)** | [使用说明_UM-FB2001-CommonAlarm-V6.0.0.md](./使用说明_UM-FB2001-CommonAlarm-V6.0.0.md) | ST调用示例、调试指南、常见问题排查 |
-| **变更记录 (CHG)** | [变更记录_CHG-FB2001-CommonAlarm-V6.0.0.md](./变更记录_CHG-FB2001-CommonAlarm-V6.0.0.md) | 版本历史、变更台账 |
+| **接口文档 (IFC)** | [接口文档_IFC-FB2001-CommonAlarm.md](./接口文档_IFC-FB2001-CommonAlarm.md) | 输入输出接口定义 |
+| **使用说明 (UM)** | [使用说明_UM-FB2001-CommonAlarm.md](./使用说明_UM-FB2001-CommonAlarm.md) | 调用示例、调试指南 |
+| **变更记录 (CHG)** | [变更记录_CHG-FB2001-CommonAlarm.md](./变更记录_CHG-FB2001-CommonAlarm.md) | 版本历史 |
 
 ### 7.2 关联FB文档
 
 | FB名称 | 文档路径 | 关系说明 |
 |--------|:---------|:--------|
-| FB_1001_Conveyor4Layer (四层输送机) | `../四层输送机/` | 提供输送机BOOL报警输入 |
-| FB_1003_PickPlace (取放料机构) | `../取放料机构/` | 提供取放料BOOL报警输入 |
-| FB_1004_GlueMachineFeeder (打胶机送料) | `../送料机构/` | 提供送料BOOL报警输入 |
-| FB_3001_ExternalDeviceInteraction | `../external/` | 提供急停/安全门/总线/组框机/机器人BOOL输入 |
+| FB_1001_Station1_{{ project_tag }} (工位动作机构) | `../../02_工位_动作机构/PRD/` | 各工位提供 BOOL 报警输入 |
+| FB_3001_ExternalInteraction_{{ project_tag }} (外部设备交互) | `../../01_外部设备交互/PRD/` | 提供上下游通讯与外部设备 BOOL 输入 |
 
 ### 7.3 项目级文档
 
 | 文档名称 | 路径 | 说明 |
 |---------|:-----|:-----|
-| PLC程序设计总文档 | `../../程序文档/016_DJ-2026-005_PLC程序设计总文档_PLC.md` | 整体架构说明 |
-| PLC变量定义文档 | `../../程序文档/PLC变量定义文档_VAR-DJ-2026-005.md` | 全局D/M区变量定义(含D120/D400/D404/M200等) |
+| PLC程序设计总文档 | `../../../程序文档/016_PLC程序设计总文档_PLC.md` | 整体架构说明 |
+| PLC变量定义文档 | `../../../程序文档/PLC变量定义文档_VAR.md` | 全局变量与结构体定义 |
 
 ---
 
