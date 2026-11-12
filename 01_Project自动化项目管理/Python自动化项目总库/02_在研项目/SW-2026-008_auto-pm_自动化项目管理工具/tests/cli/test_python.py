@@ -329,3 +329,32 @@ def test_python_repair_actual(cli_runner: CliRunner, tmp_path: Path) -> None:
     proj_dir = tmp_path / "SW-2026-PYT_Python工具"
     assert (proj_dir / ".pre-commit-config.yaml").is_file()
 
+
+
+# ── TD-SW008-567（D-302）：有不合格项时退出码为 1 ─────────────
+
+
+@pytest.mark.cli
+@pytest.mark.parametrize("extra", [[], ["--json"]])
+def test_python_check_exits_1_when_an_item_fails(cli_runner: CliRunner, tmp_path: Path, extra: list[str]) -> None:
+    """缺必需文件时有 ✗ 项，文字和 --json 两种输出都退 1，才能当门禁用"""
+    _make_python_project(tmp_path, "SW-2026-PYT", complete=False)
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "python", "check", "SW-2026-PYT", *extra])
+    assert result.exit_code == 1, result.output
+    if extra:
+        data = json.loads(result.output)
+        assert data[0]["all_ok"] is False
+    else:
+        assert "✗" in result.output
+        assert "有不合格项的项目: SW-2026-PYT" in result.output
+
+
+@pytest.mark.cli
+def test_python_check_all_exits_1_when_one_project_fails(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """--all 里只要有一个项目不合格就退 1，合格的项目照样列出"""
+    _make_python_project(tmp_path, "SW-2026-001", "项目1", complete=True)
+    _make_python_project(tmp_path, "SW-2026-002", "项目2", complete=False)
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "python", "check", "--all"])
+    assert result.exit_code == 1, result.output
+    assert "SW-2026-001" in result.output
+    assert "有不合格项的项目: SW-2026-002" in result.output

@@ -182,23 +182,28 @@ def cmd_check(
         result = _check_python_project(proj.path, proj.project_id)
         results.append(result)
 
+    failed = [r["project_id"] for r in results if not r["all_ok"]]
     if output_json:
         click.echo(json.dumps(results, ensure_ascii=False, indent=2))
-        return
+    else:
+        # 表格输出
+        for result in results:
+            table = Table(title=f"Python 项目检查: {result['project_id']}")
+            table.add_column("检查项", style="cyan")
+            table.add_column("状态", style="white")
+            table.add_column("说明", style="dim")
 
-    # 表格输出
-    for result in results:
-        table = Table(title=f"Python 项目检查: {result['project_id']}")
-        table.add_column("检查项", style="cyan")
-        table.add_column("状态", style="white")
-        table.add_column("说明", style="dim")
+            for item in result["checks"]:
+                status = "[green]✓[/green]" if item["ok"] else "[red]✗[/red]"
+                table.add_row(item["name"], status, item.get("detail", ""))
 
-        for item in result["checks"]:
-            status = "[green]✓[/green]" if item["ok"] else "[red]✗[/red]"
-            table.add_row(item["name"], status, item.get("detail", ""))
-
-        console.print(table)
-        console.print()
+            console.print(table)
+            console.print()
+        if failed:
+            console.print(f"[red]有不合格项的项目: {'、'.join(failed)}（退出码 1）[/red]")
+    # TD-SW008-567（D-302）：有 ✗ 项就退 1，才能当门禁用；JSON 方式同样。
+    if failed:
+        ctx.exit(1)
 
 
 @python_group.command(name="repair")
