@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -212,6 +212,7 @@ class HomeVM:
     github: GithubVM | None = None
     extra_issues: list[Issue] = field(default_factory=list)  # 归不到任何一张项目卡的问题（PR 只改了仓库公共文件等）
     issue_notes: list[str] = field(default_factory=list)  # 问题页顶上要说的：哪些没检查、条数不含它们
+    loose_decisions: list[Decision] = field(default_factory=list)  # 归不到看板上任何项目的 PR 签字（算进 decisions_total）
 
 
 @dataclass
@@ -864,8 +865,9 @@ def home_vm(
         else:
             extra_issues.append(issue)
     known = {c.project_id for c in cards}
+    loose = [d for d in pr_decisions if d.project_id not in known]
     decisions = sorted(
-        [*(d for c in cards for d in c.decisions), *(d for d in pr_decisions if d.project_id not in known)],
+        [*(d for c in cards for d in c.decisions), *loose],
         key=lambda d: (-SEV_RANK[d.sev], d.since or datetime.max.replace(tzinfo=UTC)),
     )
     checks = checks_of(board, cards, online, github)
@@ -898,7 +900,39 @@ def home_vm(
         github=github_vm(github, now, offset),
         extra_issues=extra_issues,
         issue_notes=github_issue_notes(github),
+        loose_decisions=loose,
     )
+
+
+@dataclass(frozen=True)
+class AttentionCount:
+    """“要你出手”分页顶上“计入”一块（D-342）：全部取自首页那份 HomeVM，不另读账本、不另写一套判断。
+
+    per_project：分页读的每个项目（按读的顺序）和它计入的条目＝首页这个项目卡的 card.decisions，逐条一样；
+    unread：首页有件数、但分页这次没读的项目（项目号, 件数）；loose：归不到任何项目的 PR 签字件数。
+    三样加起来就是首页的“要你出手”总件数（total）。
+    """
+
+    per_project: tuple[tuple[str, tuple[Decision, ...]], ...]
+    unread: tuple[tuple[str, int], ...]
+    loose: int
+    total: int
+
+    @property
+    def counted(self) -> int:
+        """分页读到的项目里计入的件数。"""
+        return sum(len(items) for _pid, items in self.per_project)
+
+
+def attention_count(home: HomeVM, asked: Sequence[str]) -> AttentionCount:
+    """首页的 HomeVM ＋ 分页读的项目号 → 分页“计入”块。只读，不改 home。"""
+    cards = {card.project_id: card for card in home.hot + home.rest}
+    wanted = list(dict.fromkeys(pid for pid in asked if pid))
+    per_project = tuple((pid, tuple(cards[pid].decisions) if pid in cards else ()) for pid in wanted)
+    unread = tuple(
+        (pid, len(card.decisions)) for pid, card in sorted(cards.items()) if pid not in wanted and card.decisions
+    )
+    return AttentionCount(per_project, unread, len(home.loose_decisions), home.decisions_total)
 
 
 def all_issues(home: HomeVM) -> list[Issue]:

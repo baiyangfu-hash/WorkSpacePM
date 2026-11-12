@@ -1,8 +1,9 @@
-"""工程工具页：变更单（看、建、转状态）、决策（看）、变量表（IO 查重），以及“打开高级工作台”。
+"""工程工具页：变更单（看、建、转状态）、决策（看）、变量表（IO 查重）、入箱（记一条新事项），以及“打开高级工作台”。
 
 界面是命令行的另一层皮：每个按钮对应 tool_actions.TOOLS 白名单里的一条命令，命令和退出码都进“最近动作”。
-会写文件的（建变更单、转状态）先点“预览命令”，看过整条命令再点运行；表单一改，预览作废。
+会写文件的（建变更单、转状态、入箱）先点“预览命令”，看过整条命令再点运行；表单一改，预览作废。
 批准类状态（已批准、有条件批准）这里不提供，只在终端里由你本人做。
+入箱只记一条 PROPOSED 的条目，确认、驳回照旧在“决定”页；“用户原话”一栏只能由人亲手填，看板不预填、不拷、不给默认值。
 真正起子进程的是 tool_actions.py，这里只发请求、收回执。
 """
 
@@ -30,11 +31,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"))
+TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"), ("inbox", "入箱"))
 DOMAIN_ZH = {"ELEC": "电气", "MECH": "机械", "PLC": "PLC", "HMI": "HMI", "SCPT": "脚本", "DOCU": "文档", "SAFE": "安全", "SPEC": "规范"}
 NATURE_ZH = {"REQ": "需求变更", "DEF": "缺陷修复", "OPT": "优化", "CFG": "配置调整", "EMRG": "紧急处理"}
 SCOPE_ZH = {"LOCAL": "局部", "MODULE": "模块", "SYSTEM": "系统", "CROSS": "跨系统", "SAFE": "安全"}
 URGENCY_ZH = {"normal": "普通", "urgent": "紧急", "critical": "特急"}
+# 入箱的几个下拉框（取值照 tool_actions.INBOX_*，测试对照）
+INBOX_KIND_ZH = {"iteration": "迭代", "bug": "缺陷", "change": "变更", "urgent": "加急", "debt": "技术债"}
+INBOX_ACTION_ZH = {"add": "新增", "modify": "修改", "reduce": "缩减", "freeze": "冻结", "remove": "去掉"}
+INBOX_DISPOSITION_ZH = {"interrupt_now": "马上插进来", "after_current": "手上这张做完再做", "inbox_wait": "先放收件箱", "reject": "建议不做"}
+INBOX_CRITERION_ZH = {"safety": "安全", "data_loss": "丢数据", "blocks_all": "全部卡住", "wrong_output": "输出错误"}
+NOT_CHANGE = "（类别不是变更时不填）"
+INFER = "（不填：按项目推断）"
+NONE = "（不填）"
 ALL_STATUSES = "（全部状态）"
 PICK = "（请选择）"
 NO_PROJECT = "（没有登记的项目）"
@@ -74,8 +83,10 @@ class ToolsPage(QWidget):
         self.preview_text = ""
         self._jobs: list[_Job] = []
         self.write_buttons: dict[str, QPushButton] = {}
-        self.inputs: dict[str, QLineEdit | QComboBox] = {}
+        self.inputs: dict[str, QLineEdit | QComboBox | QPlainTextEdit] = {}
         self.scope_boxes: dict[str, QCheckBox] = {}
+        self.inbox_scope_boxes: dict[str, QCheckBox] = {}
+        self.clock: Callable[[], str] = tool_actions.board_request_id  # 入箱请求号；测试可换成固定的
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll_area, self.layout_ = c.page()
@@ -117,8 +128,9 @@ class ToolsPage(QWidget):
         items.append(self.workbench_button)
         lay.addWidget(c.hrow(*items))
         lay.addWidget(self._boxed(c.hrow(c.label("项目", "muted", wrap=False), self.project_box, 1)))
-        for (key, _text), builder in zip(TABS, (self._change_tab, self._decision_tab, self._vartable_tab), strict=True):
-            self.pages[key] = builder()  # 三页都放进布局，选哪页就显示哪页（不用 QStackedWidget：它按最高那页撑高，其余页会被拉出大空白）
+        builders = (self._change_tab, self._decision_tab, self._vartable_tab, self._inbox_tab)
+        for (key, _text), builder in zip(TABS, builders, strict=True):
+            self.pages[key] = builder()  # 几页都放进布局，选哪页就显示哪页（不用 QStackedWidget：它按最高那页撑高，其余页会被拉出大空白）
             lay.addWidget(self.pages[key])
         lay.addWidget(self.note)
         lay.addWidget(c.section("输出", "命令的原样输出；失败也照实显示，不吞"))
@@ -164,6 +176,16 @@ class ToolsPage(QWidget):
         box.currentIndexChanged.connect(self._clear_preview)
         self.inputs[key] = box
         return box
+
+    def _text(self, key: str, hint: str, height: int = 64) -> QPlainTextEdit:
+        """多行栏（用户原话、一行一个的清单）。看板从不往里预填字。"""
+        edit = QPlainTextEdit()
+        edit.setObjectName("tool_" + key)
+        edit.setPlaceholderText(hint)
+        edit.setFixedHeight(height)
+        edit.textChanged.connect(self._clear_preview)
+        self.inputs[key] = edit
+        return edit
 
     def _change_tab(self) -> QWidget:
         page = QWidget()
@@ -255,6 +277,47 @@ class ToolsPage(QWidget):
         lay.addWidget(c.label("比较规则：地址去掉前面的 % 和空格、不分大小写；不同站里的同名同址不算重复；空地址、空变量名单独数。", "small"))
         return page
 
+    def _inbox_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(c.section("记一条新事项进收件箱", "pm inbox add：先预览命令，看过再记；记进去是“等你确认”（PROPOSED），确认、驳回在“决定”页"))
+        frame, grid = self._form()
+        scope_row = QWidget()
+        scope_lay = QGridLayout(scope_row)
+        scope_lay.setContentsMargins(0, 0, 0, 0)
+        for index, (value, text) in enumerate(SCOPE_ZH.items()):
+            box = QCheckBox(f"{text}（{value}）")
+            box.setObjectName("tool_inbox_scope_" + value)
+            box.toggled.connect(self._clear_preview)
+            self.inbox_scope_boxes[value] = box
+            scope_lay.addWidget(box, 0, index)
+        rows: list[tuple[str, QWidget]] = [
+            ("标题", self._edit("inbox_title", "一行，至多 120 字")),
+            ("类别", self._combo("inbox_kind", INBOX_KIND_ZH, PICK)),
+            ("变更动作", self._combo("inbox_change_action", INBOX_ACTION_ZH, NOT_CHANGE)),
+            ("用户原话", self._text("inbox_original_words", "照原样填你（或客户）说的话；看板不替你填", 80)),
+            ("影响了什么", self._edit("inbox_affects", "项目、WBS 行、文件、依赖")),
+            ("查重", self._edit("inbox_duplicate_check", "查了哪里、结论是什么")),
+            ("重复的条目", self._text("inbox_duplicate_of", "可不填；一行一个编号，例如 IN-… / TD-… / CHG-…")),
+            ("取证（至少一条）", self._text("inbox_evidence", "一行一条，写成 file:… / cmd:… / ledger:… / chg:… / commit:…")),
+            ("建议处置", self._combo("inbox_disposition", INBOX_DISPOSITION_ZH, PICK)),
+            ("紧急判据", self._combo("inbox_urgent_criterion", INBOX_CRITERION_ZH, NONE)),
+            ("理由", self._edit("inbox_rationale", "为什么这样处置")),
+            ("备选方案（至少一个）", self._text("inbox_alternatives", "一行一个")),
+            ("成本与风险", self._edit("inbox_cost_risk", "大概多少工夫、有什么风险")),
+            ("要你决定的点", self._text("inbox_asks", "可不填；一行一个")),
+            ("技术领域", self._combo("inbox_domain", DOMAIN_ZH, INFER)),
+            ("影响范围（不选＝模块）", scope_row),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        lay.addWidget(frame)
+        lay.addWidget(self._preview_row("inbox_add", "记入收件箱", self._inbox_params))
+        lay.addWidget(c.label("请求号由看板按时间生成（board-<UTC 时间>），提出者写 cockpit-board；同一次预览只记一次。", "small"))
+        return page
+
     def _preview_row(self, key: str, run_text: str, params: Callable[[], dict[str, Any]]) -> QWidget:
         preview = c.button("预览命令", "", "只显示要运行的整条命令，不运行")
         preview.clicked.connect(lambda: self.preview_command(key, params()))
@@ -267,7 +330,11 @@ class ToolsPage(QWidget):
 
     def _value(self, key: str) -> str:
         widget = self.inputs[key]
-        return str(widget.currentData() or "") if isinstance(widget, QComboBox) else widget.text().strip()
+        if isinstance(widget, QComboBox):
+            return str(widget.currentData() or "")
+        if isinstance(widget, QPlainTextEdit):
+            return widget.toPlainText()  # 原样交出（用户原话不并空格、不改换行）；清单栏由 tool_actions 按行拆
+        return widget.text().strip()
 
     def pid(self) -> str:
         return str(self.project_box.currentData() or "")
@@ -278,6 +345,20 @@ class ToolsPage(QWidget):
             "scope": [value for value, box in self.scope_boxes.items() if box.isChecked()],
             "urgency": self._value("urgency"), "applicant": self._value("applicant"), "background": self._value("background"),
             "necessity": self._value("necessity"), "references": self._value("references"),
+        }
+
+    def _inbox_params(self) -> dict[str, Any]:
+        """每次预览都按当时的时间生成新请求号；运行用的是预览那一份，所以预览一次只记一次。"""
+        return {
+            "pid": self.pid(), "request_id": self.clock(), "title": self._value("inbox_title"), "kind": self._value("inbox_kind"),
+            "change_action": self._value("inbox_change_action"), "domain": self._value("inbox_domain"),
+            "impact_scope": [value for value, box in self.inbox_scope_boxes.items() if box.isChecked()],
+            "original_words": self._value("inbox_original_words"), "affects": self._value("inbox_affects"),
+            "duplicate_check": self._value("inbox_duplicate_check"), "duplicate_of": self._value("inbox_duplicate_of"),
+            "evidence": self._value("inbox_evidence"), "urgent_criterion": self._value("inbox_urgent_criterion"),
+            "disposition": self._value("inbox_disposition"), "rationale": self._value("inbox_rationale"),
+            "alternatives": self._value("inbox_alternatives"), "cost_risk": self._value("inbox_cost_risk"),
+            "asks": self._value("inbox_asks"),
         }
 
     def _transition_params(self) -> dict[str, Any]:
