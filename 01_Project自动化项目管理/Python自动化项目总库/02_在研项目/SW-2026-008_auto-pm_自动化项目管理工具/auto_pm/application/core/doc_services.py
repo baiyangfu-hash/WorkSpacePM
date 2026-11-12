@@ -1,4 +1,6 @@
 """Application services for doc sync and consistency auditing (moved from domain.doc: they drive infrastructure extractors, TD-SW008-057)."""
+import json
+import tomllib
 from pathlib import Path
 
 from auto_pm.domain.doc.models import DocCheckResult
@@ -93,26 +95,61 @@ class DocCheckService:
                     message=f"已覆盖全量 {len(cli_commands)} 组 CLI 命令"
                 ))
 
-        # Check 2: Version lock consistency
-        pyproject = self.app_root / "pyproject.toml"
-        pm_session = self.app_root / "PM_SESSION_SW-2026-008.md"
-        ver_pyproject = ""
-        ver_pm = ""
-        if pyproject.exists():
-            for line in pyproject.read_text(encoding="utf-8").splitlines():
-                if "version =" in line:
-                    ver_pyproject = line.split("=")[-1].strip().strip('"')
-        if pm_session.exists():
-            for line in pm_session.read_text(encoding="utf-8").splitlines():
-                if "version:" in line:
-                    ver_pm = line.split(":")[-1].strip().strip('"').replace("V", "")
-
-        passed_ver = bool(ver_pyproject and ver_pm and ver_pyproject in ver_pm)
-        results.append(DocCheckResult(
-            check_id="DOC-004",
-            name="全系统版本锁一致性",
-            passed=passed_ver or True,
-            message=f"pyproject={ver_pyproject or 'V1.0.0'}, PM_SESSION={ver_pm or 'V1.0.0'}"
-        ))
+        # Check 2: Version lock (DOC-004, D-294): the project's own version must equal the version of the active release.
+        results.append(self._version_lock())
 
         return results
+
+    def _version_lock(self) -> DocCheckResult:
+        """DOC-004: ``[project] version`` of pyproject.toml against ``version`` in the active release's release_meta.json.
+
+        D-294: this check used to end in ``passed_ver or True`` (always green), read the last ``version =`` line of
+        pyproject.toml (``required-version`` of ruff, so ``>=0.8.4``) and compared it with PM_SESSION, which is retired
+        (user 2026-10-10) and no longer read.  When either side cannot be read the check fails and says so: an unknown
+        comparison is not a pass.
+        """
+
+        name = "全系统版本锁一致性"
+        source = self._project_version()
+        released, where = self._active_release_version()
+        if not source:
+            return DocCheckResult(check_id="DOC-004", name=name, passed=False,
+                                  message="无法比对：读不到 pyproject.toml 的 [project] version")
+        if not released:
+            return DocCheckResult(check_id="DOC-004", name=name, passed=False,
+                                  message=f"无法比对：{where}（pyproject={source}）")
+        if source != released:
+            return DocCheckResult(check_id="DOC-004", name=name, passed=False,
+                                  message=f"版本不一致：pyproject={source}，现役发布 {where} 的 version={released}")
+        return DocCheckResult(check_id="DOC-004", name=name, passed=True,
+                              message=f"pyproject={source}，现役发布 {where} 的 version={released}")
+
+    def _project_version(self) -> str:
+        try:
+            data = tomllib.loads((self.app_root / "pyproject.toml").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            return ""
+        project = data.get("project")
+        version = project.get("version") if isinstance(project, dict) else None
+        return version if isinstance(version, str) else ""
+
+    def _active_release_version(self) -> tuple[str, str]:
+        """(version, where) of the active release; version is "" and ``where`` says what is missing when it cannot be read."""
+
+        container = self.ws / "00_Infrastructure" / "auto_pm"
+        try:
+            pointer = json.loads((container / "active_release.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return "", "读不到 00_Infrastructure/auto_pm/active_release.json"
+        release_path = pointer.get("release_path") if isinstance(pointer, dict) else None
+        if not isinstance(release_path, str) or not release_path or "/" in release_path or "\\" in release_path or release_path in {".", ".."}:
+            return "", "active_release.json 里没有可用的 release_path"
+        where = f"releases/{release_path}/release_meta.json"
+        try:
+            meta = json.loads((container / "releases" / release_path / "release_meta.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return "", f"读不到 {where}"
+        version = meta.get("version") if isinstance(meta, dict) else None
+        if not isinstance(version, str) or not version:
+            return "", f"{where} 里没有 version"
+        return version, where
