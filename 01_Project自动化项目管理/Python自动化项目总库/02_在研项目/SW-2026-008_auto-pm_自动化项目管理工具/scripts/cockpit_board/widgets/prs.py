@@ -42,20 +42,36 @@ def pull_rows(snapshot: Any) -> list[tuple[str, str]]:
 
 
 def audit_rows(snapshot: Any, dirs: Sequence[Path] = ()) -> list[tuple[str, str]]:
-    """审计报告几份、读的是哪些目录、最新一份是哪份（D-317：写明读了哪里，别让人以为“没有新审计”）。"""
+    """审计报告这一块（D-317）：只把对上了开着的 PR 的报告列在“当前审计报告”下，每份标来源和日期；
+    其余的只给份数，不当作当前报告；读不到的目录或文件写“读不到”，不写成“没有”。"""
     audits = list(snapshot.audits)
-    rows = [("审计报告", c.count_text(audits, "份"))]
+    problems = list(getattr(snapshot, "audit_problems", []) or [])
+    pulls = list(snapshot.pulls)
+    current = [p.audit for p in pulls if p.audit is not None]
+    seen: set[str] = set()
+    current = [a for a in current if not (a.file in seen or seen.add(a.file))]
+    rows: list[tuple[str, str]] = []
+    if problems:
+        rows.append(("读不到", "；".join(problems)))
+    if not pulls:
+        rows.append(("当前审计报告", "分不出：开着的 PR 没读到或没有，读到的报告都不当作当前报告"))
+    elif current:
+        rows.append(("当前审计报告", f"{len(current)} 份（对上了开着的 PR）"))
+    else:
+        rows.append(("当前审计报告", "读不到" if problems else "开着的 PR 都没对上审计报告"))
+    for audit in current[:LISTED]:
+        target = f"PR #{audit.pr}" if audit.pr else audit.file
+        rows.append((target, f"{VERDICT_ZH.get(audit.verdict, audit.verdict)} · {audit.summary}"
+                             f" · 来源 {audit.source or '未知'} · 日期 {audit.date or '日期读不到'}"))
+    others = [a for a in audits if a.file not in seen]
+    if others:
+        dated = sorted(a.date[:10] for a in others if a.date[:4].isdigit())
+        when = f"，日期 {dated[0]}～{dated[-1]}" if dated else ""
+        rows.append(("另有旧报告", f"{len(others)} 份没对上开着的 PR，不当作当前审计报告{when}"))
     if dirs:
         rows.append(("读的目录", "、".join(str(d) for d in dirs)
                      + "；只认这些目录里“编号_*.md”的报告，写在别处的（如共享库）这里看不到，可启动时加 --reviews-dir"))
-    if audits:
-        newest = max(audits, key=lambda a: (a.number, a.file))
-        rows.append(("编号最大的一份", newest.file))
-    for audit in audits[:LISTED]:
-        target = f"PR #{audit.pr}" if audit.pr else audit.file
-        rows.append((target, f"{VERDICT_ZH.get(audit.verdict, audit.verdict)} · {audit.summary}"))
     return rows
-
 
 class PrsPage(QWidget):
     def __init__(self) -> None:

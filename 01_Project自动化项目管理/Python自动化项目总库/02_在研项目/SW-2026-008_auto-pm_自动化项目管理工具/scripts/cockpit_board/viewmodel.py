@@ -557,8 +557,8 @@ GITHUB_HEADLINE = {
 def _audit_cell(pull: gh.PullInfo) -> Cell:
     audit = pull.audit
     if audit is None:
-        return Cell("没审计记录", "na", "reviews/ 里没有对上这个 PR 号或分支名的审计")
-    tip = f"审计 {audit.number}：{audit.summary}"
+        return Cell("没审计记录", "na", "本机读的审计目录里没有对上这个 PR 号或分支名的报告（看板不读共享库）")
+    tip = f"审计 {audit.number}：{audit.summary}（来源 {audit.source or '未知'}，日期 {audit.date or '日期读不到'}）"
     if pull.audit_stale:
         return Cell(f"{audit.number} {AUDIT_TEXT[audit.verdict]}（审的是旧头 {audit.head[:8]}）", "risk",
                     tip + f"；现在的头是 {pull.head_sha[:8]}，之后的提交没审")
@@ -619,7 +619,11 @@ def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> 
     if fresh and drafts:
         notes.append("草稿 PR " + "、".join(f"#{n}" for n in drafts)
                      + " 也改了规则文件：转成可审（ready）后才会出现在“要你出手”里，现在批了，再推提交也要重批")
-    notes.append(f"审计结论读自本机 reviews/ 目录，共 {len(snapshot.audits)} 份")
+    current = sum(1 for p in snapshot.pulls if p.audit is not None)
+    if snapshot.audit_problems:
+        notes.append("审计报告有读不到的：" + "；".join(snapshot.audit_problems))
+    notes.append(f"审计结论读自本机审计目录（看板不读共享库）：对上开着的 PR 的 {current} 份，"
+                 f"其余 {max(len(snapshot.audits) - current, 0)} 份是旧报告，不当作当前审计")
     rows = [pr_row(p, fresh, as_of) for p in snapshot.pulls]
     return GithubVM(snapshot.state, fresh, headline, as_of, main_ci, rows, notes)
 
@@ -763,7 +767,7 @@ def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow
         return [
             EvidenceRow("na", "门禁", why),
             EvidenceRow("na", "安全区签字", why),
-            EvidenceRow("na", "独立审计", f"本机 reviews/ 读到：{audit}（PR 是旧数据，不判过）"),
+            EvidenceRow("na", "独立审计", f"本机审计目录读到：{audit}（PR 是旧数据，不判过）"),
         ]
     if not rows:
         none = f"没有改到这个项目的开着的 PR · {github.as_of}"
