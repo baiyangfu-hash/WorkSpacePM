@@ -39,13 +39,14 @@ def _state(root: Path) -> WorkState:
 
 def test_retire_is_registered_under_pm() -> None:
     assert retire_pm.name == "retire"
-    assert {option.name for option in retire_pm.params} >= {"project_id", "work_ids", "stale", "apply_"}
+    assert {option.name for option in retire_pm.params} >= {"project_id", "work_ids", "mission_ids", "stale", "apply_"}
 
 
-def test_it_needs_either_a_named_work_or_stale(root: Path) -> None:
-    for args in ((), ("--stale", "--work-id", "WORK-OLD")):
+def test_it_needs_exactly_one_of_a_named_work_a_named_card_or_stale(root: Path) -> None:
+    for args in ((), ("--stale", "--work-id", "WORK-OLD"), ("--stale", "--mission-id", "M-1"),
+                 ("--work-id", "WORK-OLD", "--mission-id", "M-1")):
         result = _run(root, *args)
-        assert result.exit_code != 0 and "二者选一" in result.output
+        assert result.exit_code != 0 and "三选一" in result.output, args
     assert _state(root) is WorkState.BLOCKED
 
 
@@ -96,3 +97,53 @@ def test_apply_outside_the_control_root_is_refused_before_anything_is_written(ro
     assert result.exit_code != 0 and "NOT-CONTROL-ROOT" in result.output
     assert _state(root) is WorkState.BLOCKED
     assert not (root / ".auto-pm" / "reports" / "retire").exists()
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-647：--mission-id
+
+
+@pytest.fixture
+def draft(root: Path) -> str:
+    from tests.core.test_retire_service import _bare
+
+    return _bare(root, "MISSION-DRAFT")
+
+
+def _card_state(root: Path, mission_id: str) -> str:
+    return ContinuityStore(root).get_mission(mission_id).state.value
+
+
+def _payload(result: Result) -> dict[str, object]:
+    loaded: dict[str, object] = json.loads(result.output[result.output.index("{") : result.output.rindex("}") + 1])
+    return loaded
+
+
+def test_mission_id_preview_lists_the_card_and_writes_nothing(root: Path, draft: str) -> None:
+    result = _run(root, "--mission-id", draft, "--mission-id", "MISSION-NOPE")
+    assert result.exit_code == 0, result.output
+    payload = _payload(result)
+    assert payload["mode"] == "dry-run" and payload["leftovers"] == [] and payload["not_card"] == ["MISSION-NOPE"]
+    assert payload["cards"] == [{
+        "mission_id": draft, "title": "draft card", "mission_state": "DRAFT", "root_work_id": "",
+        "kind": "draft_without_work", "can_retire": True, "blocked_reason": "",
+    }]
+    assert _card_state(root, draft) == "DRAFT" and not (root / ".auto-pm" / "reports" / "retire").exists()
+
+
+@pytest.mark.parametrize("words", [(), ("--approval-evidence-ref", "agent-decided-it")])
+def test_mission_id_apply_from_an_agent_is_refused(root: Path, draft: str, words: tuple[str, ...]) -> None:
+    result = _run(root, "--mission-id", draft, "--apply", *words, env={"CLAUDECODE": "1"})
+    assert result.exit_code != 0
+    assert _card_state(root, draft) == "DRAFT" and not (root / ".auto-pm" / "reports" / "retire").exists()
+
+
+def test_the_user_in_person_retires_a_named_draft(root: Path, draft: str) -> None:
+    result = _run(root, "--mission-id", draft, "--apply")
+    assert result.exit_code == 0, result.output
+    payload = _payload(result)
+    assert payload["results"] == [{
+        "kind": "draft_without_work", "work_id": "", "mission_ids": [draft], "mission_states_before": ["DRAFT"],
+        "cancelled_mission_ids": [draft], "outcome": "retired", "detail": "已取消",
+    }]
+    assert Path(str(payload["trace"])).is_file()
+    assert _card_state(root, draft) == "CANCELLED" and _state(root) is WorkState.BLOCKED  # 残留 Work 没被顺手收
