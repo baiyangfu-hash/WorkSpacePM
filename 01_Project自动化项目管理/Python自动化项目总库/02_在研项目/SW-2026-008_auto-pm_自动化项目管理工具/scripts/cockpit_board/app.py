@@ -368,6 +368,9 @@ class CockpitWindow(QMainWindow):
     def _on_reads(self, payload: tuple[str, str, list[c.ReadResult]]) -> None:
         key, scope, results = payload
         self._reading_pages.discard(key)
+        if key == "attention":  # 只重画明细并写明读取时间；“计入”块只跟首页走（_render），这里不碰（D-342）
+            self.attention.show_results(scope, results, (self.options.now or datetime.now(UTC)).astimezone(self.offset))
+            return
         self.read_pages[key].show_results(scope, results)
 
     def _refresh_decisions(self) -> None:
@@ -489,6 +492,8 @@ class CockpitWindow(QMainWindow):
         self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github)
         now = board.generated_at
         self.home.show_board(self.home_vm, now)
+        # D-342：“要你出手”分页的“计入”块和首页同一轮、同一份 HomeVM，首页一重算就重画，不等下一轮读取
+        self.attention.show_counted(vm.attention_count(self.home_vm, ask_project_ids(board, self.options.station_project)))
         self.issues.show_view(vm.all_issues(self.home_vm), now, self.home_vm.issue_notes)
         self.projects.show_view(self.home_vm.hot + self.home_vm.rest)
         identity = {

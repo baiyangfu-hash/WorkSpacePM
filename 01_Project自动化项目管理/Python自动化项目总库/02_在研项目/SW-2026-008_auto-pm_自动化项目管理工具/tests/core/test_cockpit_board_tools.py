@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -37,10 +38,17 @@ TOOL_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = TOOL_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from cockpit_board import iocheck, policy, tool_actions, tool_policy  # noqa: E402
+from cockpit_board import decisions, iocheck, policy, tool_actions, tool_policy  # noqa: E402
 from cockpit_board.actions import Receipt  # noqa: E402
 from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
 
+from auto_pm.contracts.intake import (  # noqa: E402
+    EVIDENCE_KINDS,
+    ChangeAction,
+    Disposition,
+    IntakeKind,
+    UrgentCriterion,
+)
 from auto_pm.domain.change.constants import STATUS_FLOW, STATUS_LABELS  # noqa: E402
 
 ERR = tool_actions.ToolError
@@ -50,6 +58,17 @@ def _create(**changes: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "pid": "DJ-2026-009", "domain": "PLC", "nature": "REQ", "scope": ["LOCAL", "MODULE"], "applicant": "张工（客户设备科）",
         "background": "上料节拍太慢", "necessity": "客户要提产", "urgency": "normal", "references": "",
+    }
+    values.update(changes)
+    return values
+
+
+def _inbox(**changes: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "pid": "DJ-2026-009", "request_id": "board-20261112T210000Z", "title": "上料节拍太慢", "kind": "iteration",
+        "original_words": "上料那段  太慢了，\n客户要提产", "affects": "上料工位 OB1", "duplicate_check": "查过收件箱和台账，没有同类",
+        "evidence": "file:说明书.md\ncmd:main.py pm inbox list --project-id DJ-2026-009", "disposition": "after_current",
+        "rationale": "不挡手上的卡", "alternatives": "先改定时器\n换气缸", "cost_risk": "半天；低风险",
     }
     values.update(changes)
     return values
@@ -76,6 +95,15 @@ def test_choices_match_the_real_change_create_options() -> None:
     assert tool_actions.CHANGE_URGENCIES == _choices(create, "urgency")
 
 
+def test_inbox_choices_match_the_real_inbox_add_options_and_the_contract() -> None:
+    add = _cli().commands["pm"].commands["inbox"].commands["add"]
+    assert tool_actions.INBOX_KINDS == _choices(add, "kind") == tuple(k.value.lower() for k in IntakeKind)
+    assert tool_actions.INBOX_ACTIONS == _choices(add, "change_action") == tuple(a.value.lower() for a in ChangeAction)
+    assert tool_actions.INBOX_DISPOSITIONS == _choices(add, "disposition") == tuple(d.value.lower() for d in Disposition)
+    assert tool_actions.INBOX_CRITERIA == _choices(add, "urgent_criterion") == tuple(u.value.lower() for u in UrgentCriterion)
+    assert tool_actions.INBOX_EVIDENCE_KINDS == EVIDENCE_KINDS
+
+
 def test_status_lists_match_the_real_change_states() -> None:
     transition = _cli().commands["change"].commands["transition"]
     real = set(_choices(transition, "new_status"))
@@ -92,10 +120,16 @@ def test_every_tool_command_exists_with_the_options_we_pass() -> None:
         "change create": {"--pid", "--domain", "--nature", "--scope", "--applicant", "--background", "--necessity", "--urgency", "--references"},
         "change transition": {"--to", "--pid", "--comment", "--approver", "--verification-conclusion"},
         "decision list": {"--pid", "--change-id"}, "decision show": set(), "vartable parse": {"--output-format"},
+        "pm inbox add": {
+            "--project-id", "--request-id", "--title", "--kind", "--change-action", "--domain", "--impact-scope", "--original-words",
+            "--affects", "--duplicate-check", "--duplicate-of", "--evidence", "--urgent-criterion", "--disposition", "--rationale",
+            "--alternative", "--cost-risk", "--ask", "--proposed-by",
+        },
     }
     for label, flags in needs.items():
-        group, sub = label.split()
-        command = cli.commands[group].commands[sub]
+        command = cli
+        for word in label.split():
+            command = command.commands[word]
         have = {opt for p in command.params for opt in getattr(p, "opts", [])}
         assert flags <= have, (label, flags - have)
 
@@ -118,6 +152,30 @@ def test_build_command_exact_argv() -> None:
     assert b("decision_list", {"pid": "DJ-1", "change_id": "CHG-X-1"}) == ["decision", "list", "--pid", "DJ-1", "--change-id", "CHG-X-1"]
     assert b("decision_show", {"decision_id": "DEC-1"}) == ["decision", "show", "DEC-1"]
     assert b("vartable_parse", {"file": "/x/io_points.csv"}) == ["vartable", "parse", "/x/io_points.csv", "--output-format", "json"]
+
+
+def test_inbox_add_exact_argv_keeps_the_original_words_as_typed() -> None:
+    assert tool_actions.build_command("inbox_add", _inbox()) == [
+        "pm", "inbox", "add", "--project-id", "DJ-2026-009", "--request-id", "board-20261112T210000Z", "--title", "上料节拍太慢",
+        "--kind", "iteration", "--original-words", "上料那段  太慢了，\n客户要提产", "--affects", "上料工位 OB1",
+        "--duplicate-check", "查过收件箱和台账，没有同类", "--evidence", "file:说明书.md",
+        "--evidence", "cmd:main.py pm inbox list --project-id DJ-2026-009", "--disposition", "after_current", "--rationale", "不挡手上的卡",
+        "--alternative", "先改定时器", "--alternative", "换气缸", "--cost-risk", "半天；低风险", "--proposed-by", "cockpit-board"]
+    full = tool_actions.build_command("inbox_add", _inbox(
+        kind="change", change_action="modify", domain="PLC", impact_scope=["LOCAL", "SAFE"], duplicate_of="TD-SW008-001\n",
+        urgent_criterion="safety", asks="要不要停线改"))
+    assert full[full.index("--change-action") + 1] == "modify" and full[full.index("--domain") + 1] == "PLC"
+    assert [full[i + 1] for i, a in enumerate(full) if a == "--impact-scope"] == ["LOCAL", "SAFE"]
+    assert full[full.index("--duplicate-of") + 1] == "TD-SW008-001" and full[full.index("--urgent-criterion") + 1] == "safety"
+    assert full[full.index("--ask") + 1] == "要不要停线改" and full[-2:] == ["--proposed-by", "cockpit-board"]
+
+
+def test_board_request_id_is_utc_time() -> None:
+    from datetime import UTC, datetime, timedelta, timezone
+
+    moment = datetime(2026, 11, 12, 14, 0, 5, tzinfo=timezone(timedelta(hours=-7)))
+    assert tool_actions.board_request_id(moment) == "board-20261112T210005Z"
+    assert tool_actions.board_request_id().startswith("board-" + datetime.now(UTC).strftime("%Y%m%d"))
 
 
 def test_default_urgency_is_normal_and_scope_may_be_a_single_string() -> None:
@@ -157,6 +215,32 @@ def test_every_other_target_is_allowed_given_its_required_fields() -> None:
     ("decision_show", {"decision_id": "-h"}, "不能以 - 开头"),
     ("vartable_parse", {}, "还没填"),
     ("vartable_parse", {"file": "--format x"}, "不能以 - 开头"),
+    ("inbox_add", _inbox(original_words=""), "还没填：original_words"),
+    ("inbox_add", _inbox(original_words="  \n "), "还没填：original_words"),
+    ("inbox_add", _inbox(original_words="--project-id X"), "不能以 - 开头"),
+    ("inbox_add", _inbox(title=""), "还没填：title"),
+    ("inbox_add", _inbox(affects=""), "还没填：affects"),
+    ("inbox_add", _inbox(duplicate_check=""), "还没填：duplicate_check"),
+    ("inbox_add", _inbox(rationale=""), "还没填：rationale"),
+    ("inbox_add", _inbox(cost_risk=""), "还没填：cost_risk"),
+    ("inbox_add", _inbox(pid=""), "还没填：pid"),
+    ("inbox_add", _inbox(request_id=""), "还没填：request_id"),
+    ("inbox_add", _inbox(evidence=""), "取证（至少一条）"),
+    ("inbox_add", _inbox(evidence="\n\n"), "取证（至少一条）"),
+    ("inbox_add", _inbox(alternatives=""), "备选方案（至少一个）"),
+    ("inbox_add", _inbox(evidence="说明书.md"), "取证每行要写成"),
+    ("inbox_add", _inbox(evidence="url:http://x"), "取证每行要写成"),
+    ("inbox_add", _inbox(evidence="file:a\nfile:a"), "有重复的行"),
+    ("inbox_add", _inbox(alternatives="A\nA"), "有重复的行"),
+    ("inbox_add", _inbox(kind=""), "类别只能是"),
+    ("inbox_add", _inbox(kind="feature"), "类别只能是"),
+    ("inbox_add", _inbox(kind="change"), "变更动作只能是"),
+    ("inbox_add", _inbox(change_action="add"), "只有类别是“变更”"),
+    ("inbox_add", _inbox(disposition=""), "建议处置只能是"),
+    ("inbox_add", _inbox(urgent_criterion="soon"), "紧急判据只能是"),
+    ("inbox_add", _inbox(domain="XX"), "技术领域只能是"),
+    ("inbox_add", _inbox(impact_scope=["GALAXY"]), "影响范围只能是"),
+    ("inbox_add", _inbox(rationale="--kind bug"), "不能以 - 开头"),
 ])
 def test_bad_input_is_refused_before_any_command_runs(key: str, params: dict[str, Any], needle: str) -> None:
     with pytest.raises(ERR, match=needle):
@@ -166,7 +250,7 @@ def test_bad_input_is_refused_before_any_command_runs(key: str, params: dict[str
 def test_whitelist_has_no_dangerous_verbs() -> None:
     for spec in tool_actions.TOOLS.values():
         assert not any(word in spec.label for word in ("merge", "delete", "approve", "sign", "release", "codex"))
-    assert {k for k, s in tool_actions.TOOLS.items() if s.writes} == {"change_create", "change_transition"}
+    assert {k for k, s in tool_actions.TOOLS.items() if s.writes} == {"change_create", "change_transition", "inbox_add"}
 
 
 # ---------------------------------------------------------------- 跑
@@ -347,6 +431,12 @@ EXPECTED_CONTROLS = {
     "tool_number", "tool_to", "tool_comment", "tool_approver", "tool_verification_conclusion",
     # 看决策、变量表查重
     "tool_decision_change", "tool_decision_id", "tool_vartable_file",
+    # 入箱（CHG-SCPT-2026-648）
+    "tool_inbox_title", "tool_inbox_kind", "tool_inbox_change_action", "tool_inbox_original_words", "tool_inbox_affects",
+    "tool_inbox_duplicate_check", "tool_inbox_duplicate_of", "tool_inbox_evidence", "tool_inbox_disposition",
+    "tool_inbox_urgent_criterion", "tool_inbox_rationale", "tool_inbox_alternatives", "tool_inbox_cost_risk", "tool_inbox_asks",
+    "tool_inbox_domain",
+    "tool_inbox_scope_LOCAL", "tool_inbox_scope_MODULE", "tool_inbox_scope_SYSTEM", "tool_inbox_scope_CROSS", "tool_inbox_scope_SAFE",
     # 输出框（只读）
     "tool_output",
 }
@@ -379,6 +469,7 @@ def test_page_controls_are_exactly_the_expected_list_and_all_in_forms(qapp: QApp
             assert _inside(widget, "tool_form"), widget.objectName()  # 其余全在 tool_form 框里（深色模式靠它着色）
     # 每个输入口都登记在页面里：能读到值的只有这几个，没有“看不见、读不到”的旁路
     registered = {id(w) for w in page.inputs.values()} | {id(w) for w in page.scope_boxes.values()} | {id(page.project_box), id(page.output)}
+    registered |= {id(w) for w in page.inbox_scope_boxes.values()}
     assert {id(w) for w in controls} == registered
 
 
@@ -483,6 +574,113 @@ def test_project_choice_survives_a_refresh_and_empty_projects_are_handled(qapp: 
 def test_tabs_show_one_page_at_a_time(qapp: QApplication, tmp_path: Path) -> None:
     page = _page(tmp_path)
     page.show()
-    for key in ("decision", "vartable", "change"):
+    for key in ("decision", "vartable", "inbox", "change"):
         page.select_tab(key)
         assert [name for name, widget in page.pages.items() if widget.isVisible()] == [key]
+
+
+# ---------------------------------------------------------------- 入箱页签（CHG-SCPT-2026-648）
+
+
+def _pick(box: Any, value: str) -> None:
+    box.setCurrentIndex(box.findData(value))
+
+
+def _fill_inbox(page: ToolsPage, words: str = "上料那段太慢了") -> None:
+    for key, text in (("inbox_title", "上料节拍太慢"), ("inbox_affects", "上料工位"), ("inbox_duplicate_check", "查过，没有同类"),
+                      ("inbox_rationale", "不挡手上的卡"), ("inbox_cost_risk", "半天")):
+        page.inputs[key].setText(text)
+    for key, text in (("inbox_original_words", words), ("inbox_evidence", "file:README.md"), ("inbox_alternatives", "先改定时器")):
+        page.inputs[key].setPlainText(text)
+    _pick(page.inputs["inbox_kind"], "iteration")
+    _pick(page.inputs["inbox_disposition"], "after_current")
+
+
+def test_inbox_dropdowns_offer_exactly_the_real_choices(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    for key, allowed in (("inbox_kind", tool_actions.INBOX_KINDS), ("inbox_change_action", tool_actions.INBOX_ACTIONS),
+                         ("inbox_disposition", tool_actions.INBOX_DISPOSITIONS), ("inbox_urgent_criterion", tool_actions.INBOX_CRITERIA),
+                         ("inbox_domain", tool_actions.CHANGE_DOMAINS)):
+        box = page.inputs[key]
+        assert isinstance(box, QComboBox)
+        assert [box.itemData(i) for i in range(box.count())] == ["", *allowed], key  # 第一项是空：不替你选
+    assert set(page.inbox_scope_boxes) == set(tool_actions.CHANGE_SCOPES)
+
+
+def test_the_board_never_fills_the_original_words(qapp: QApplication, tmp_path: Path) -> None:
+    """“用户原话”只能由人亲手填（审计裁定）：页面打开、切项目、切页签、刷新项目、预览都不往里写字。"""
+    page = _page(tmp_path, runner=_Fake(0, "ok"))
+    words = page.inputs["inbox_original_words"]
+    assert isinstance(words, QPlainTextEdit) and words.toPlainText() == ""
+    page.select_tab("inbox")
+    page.project_box.setCurrentIndex(1)
+    page.set_projects([("DJ-1", "a"), ("SW-1", "b")])
+    page.preview_command("inbox_add", page._inbox_params())
+    assert words.toPlainText() == "" and page.preview is None and "还没填" in page.note.text()
+    for key in ("inbox_evidence", "inbox_alternatives"):  # 取证、备选方案也不替你塞
+        assert page.inputs[key].toPlainText() == ""
+    typed = "  原话 里有两个空格\n第二行  "
+    _fill_inbox(page, typed)
+    assert page._inbox_params()["original_words"] == typed  # 原样交给命令
+
+
+def test_inbox_preview_then_record_runs_once_and_edits_void_the_preview(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(0, '{"created": true}')
+    page = _page(tmp_path)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    stamps = iter(f"board-20261112T21{n:02d}00Z" for n in range(10))
+    page.clock = lambda: next(stamps)
+    button = page.write_buttons["inbox_add"]
+    page.preview_command("inbox_add", page._inbox_params())  # 空表：不开放、不起进程
+    assert not button.isEnabled() and fake.calls == []
+    _fill_inbox(page)
+    page.preview_command("inbox_add", page._inbox_params())
+    assert button.isEnabled() and "main.py pm inbox add --project-id DJ-1 --request-id board-20261112T210100Z" in page.output.toPlainText()
+    page.inputs["inbox_original_words"].setPlainText("改了一个字")
+    assert not button.isEnabled() and page.preview is None
+    page.preview_command("inbox_add", page._inbox_params())
+    page.run_preview()
+    page.run_preview()  # 连点：预览已用掉
+    assert len(fake.calls) == 1
+    argv = fake.calls[0][0][5:]
+    assert argv[:3] == ["pm", "inbox", "add"] and argv[argv.index("--request-id") + 1] == "board-20261112T210200Z"
+    assert argv[argv.index("--original-words") + 1] == "改了一个字" and page.receipts[0].rc == 0
+
+
+def test_inbox_failure_shows_the_exit_code_and_output(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(1, "", "Error: 参数不合格")
+    page = _page(tmp_path)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    _fill_inbox(page)
+    page.preview_command("inbox_add", page._inbox_params())
+    page.run_preview()
+    assert "rc 1" in page.output.toPlainText() and "参数不合格" in page.output.toPlainText() and page.receipts[0].rc == 1
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_inbox_add_really_records_a_proposed_item_the_decisions_page_can_read(qapp: QApplication, tmp_path: Path) -> None:
+    """在临时账本上真跑一次看板拼出的整条命令（进程内跑真的命令行），条目是 PROPOSED，“决定”页的解析能读到它。"""
+    from click.testing import CliRunner
+
+    importlib.import_module("tests.cli.test_pm_facade")._setup_planning(tmp_path)
+    cli = _cli()
+
+    def in_process(command: list[str], **_kwargs: Any) -> Any:
+        assert command[:5] == [sys.executable, "-B", str(tmp_path / "main.py"), "-w", str(tmp_path)]
+        result = CliRunner().invoke(cli, command[3:])
+        return subprocess.CompletedProcess(command, result.exit_code, result.output, "")
+
+    page = _page(tmp_path)
+    page.set_projects([("SW-TEST-001", "SW-TEST-001")])
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=in_process)
+    _fill_inbox(page, "登录页有时候是白的，刷新才好")
+    _pick(page.inputs["inbox_domain"], "SCPT")  # 临时项目没有技术栈，命令要求写明领域
+    page.preview_command("inbox_add", page._inbox_params())
+    page.run_preview()
+    assert page.receipts[0].rc == 0, page.output.toPlainText()
+    listed = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", "inbox", "list", "--project-id", "SW-TEST-001"])
+    items = json.loads(listed.output)["items"]
+    assert [(i["status"], i["proposed_by"], i["ticket"]["original_words"]) for i in items] == [
+        ("PROPOSED", "cockpit-board", "登录页有时候是白的，刷新才好")]
+    targets = decisions.parse_inbox(listed.output, "SW-TEST-001")
+    assert [t.item_id for t in targets] == [items[0]["item_id"]]

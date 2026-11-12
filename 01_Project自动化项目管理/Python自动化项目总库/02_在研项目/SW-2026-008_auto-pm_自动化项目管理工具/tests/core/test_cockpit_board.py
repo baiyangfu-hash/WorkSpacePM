@@ -1012,3 +1012,59 @@ def test_b1_08b_no_old_way_cards_means_no_extra_note(tmp_path: Path) -> None:
     board = _edited_board(tmp_path, [("DJ-2026-101", "CLOSED", "正常收口的", 30)], _closure("MISSION-0", "COMPLETED", 30))
     check = next(k for k in vm.home_vm(board, OFFSET, online=None, use_git=False).checks if k.key == "unverified")
     assert check.value == 0 and "另有" not in check.note
+
+
+# ---------------------------------------------------------------- D-342“要你出手”分页和首页同一口径（CHG-SCPT-2026-648）
+
+
+def d342_board(tmp_path: Path) -> Any:
+    """DJ-2026-101：一张已批准、还没开工的草稿（等你）＋一张没有工作项、也没有批准记录的草稿（不算）；
+    SW-2026-008：一张有工作项的等批准卡（首页算，分页读 DJ-2026-101 时没读到这个项目）。"""
+    return _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "DRAFT", "批了还没开工", 6), ("DJ-2026-101", "DRAFT", "没批的草稿", 6),
+         ("SW-2026-008", "AWAITING_APPROVAL", "别的项目等批", 2)],
+        "UPDATE mission_items SET root_work_id = NULL WHERE subject_project_id = 'DJ-2026-101'",
+        "DELETE FROM execution_leases", *_with_approval("DEC-B1-OK", 20),
+        "UPDATE mission_items SET authority_json = NULL WHERE title = '没批的草稿'",
+    )
+
+
+def _loose(project_id: str = "github") -> Any:
+    return vm.Decision("block", project_id, "PR #9 等你安全签字", "x", "安全签字 abc", "y", None)
+
+
+def test_d342_counted_items_are_the_home_cards_decisions_per_project(tmp_path: Path) -> None:
+    home = vm.home_vm(d342_board(tmp_path), OFFSET, online=None, use_git=False)
+    home.loose_decisions.append(_loose())  # 归不到项目的 PR 签字（首页算进总数）
+    home.decisions_total += 1
+    count = vm.attention_count(home, ["DJ-2026-101", "DJ-2026-101", "XX-0000-000"])
+    by_card = {c.project_id: c for c in home.hot + home.rest}
+    assert [pid for pid, _items in count.per_project] == ["DJ-2026-101", "XX-0000-000"]  # 去重、照读的顺序；读了但首页没有的项目记 0
+    counted = dict(count.per_project)
+    assert list(counted["DJ-2026-101"]) == by_card["DJ-2026-101"].decisions  # 逐条一样
+    assert counted["XX-0000-000"] == ()
+    assert any("批了还没开工" in d.why for d in counted["DJ-2026-101"])
+    assert not any("没批的草稿" in d.why for d in counted["DJ-2026-101"])  # 草稿首页和分页都不算
+    assert count.unread == (("SW-2026-008", len(by_card["SW-2026-008"].decisions)),) and count.unread[0][1] >= 1
+    assert count.loose == 1 and count.total == home.decisions_total
+    assert count.counted + sum(n for _p, n in count.unread) + count.loose == home.decisions_total  # 首页总数＝三样之和
+
+
+def test_d342_home_vm_keeps_pr_signatures_without_a_project(tmp_path: Path) -> None:
+    """不属于看板上任何项目的 PR 签字单独记在 loose_decisions，首页总数＝各项目卡的件数＋它们。"""
+    import github_collector as gh
+
+    board = _board(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    mine = _pull(480, ["DJ-2026-101"], [])
+    shared = _pull(481, [], [])
+    snapshot = _snapshot([
+        gh.PullInfo(**{**mine.__dict__, "safety": gh.Safety("waiting", "是", "等签")}),
+        gh.PullInfo(**{**shared.__dict__, "safety": gh.Safety("waiting", "是", "等签")}),
+    ])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    assert [d.ask for d in home.loose_decisions] == ["PR #481 等你安全签字"]
+    assert any(d.ask == "PR #480 等你安全签字" for d in _card(home).decisions)
+    assert home.decisions_total == sum(len(c.decisions) for c in home.hot + home.rest) + len(home.loose_decisions)
+    count = vm.attention_count(home, ["DJ-2026-101"])
+    assert count.loose == 1 and count.counted + sum(n for _p, n in count.unread) + count.loose == home.decisions_total

@@ -42,6 +42,7 @@ from cockpit_board.widgets import (  # noqa: E402
 )
 from cockpit_board.widgets import common as c  # noqa: E402
 
+from tests.core import test_cockpit_board as board_tests  # noqa: E402 - 复用 D-342 的造数
 from tests.core import test_pm_dashboard as base  # noqa: E402 - 复用假工作空间
 from tests.core import test_pm_dashboard_gui as gui_tests  # noqa: E402 - 复用窗口工厂
 
@@ -434,10 +435,16 @@ def _top(page: QWidget) -> list[str]:
 def test_read_page_top_line_empty_full_and_errors(qapp: QApplication, key: str) -> None:
     empty_text, error_text = TEXTS[key]
     page = PAGE_CLASSES[key]()
-    page.show_results("x", _results(key, EMPTY_DATA))
-    assert page.status == ("empty", "") and _top(page) == [empty_text]  # 空态不配三态标签
-    page.show_results("x", _results(key, FULL_DATA))
-    assert page.status == ("", "") and _top(page) == []
+    if key == "attention":  # D-342：“要你出手”空不空只看顶上“计入”（和首页同一口径），明细读到什么都不判空
+        page.show_results("x", _results(key, EMPTY_DATA))
+        assert page.status == ("", "") and _top(page) == []
+        page.show_results("x", _results(key, FULL_DATA))
+        assert page.status == ("", "") and _top(page) == []
+    else:
+        page.show_results("x", _results(key, EMPTY_DATA))
+        assert page.status == ("empty", "") and _top(page) == [empty_text]  # 空态不配三态标签
+        page.show_results("x", _results(key, FULL_DATA))
+        assert page.status == ("", "") and _top(page) == []
     first = shell.page_reads()[key][0].reader
     for mode, state in (("offline", "offline"), ("missing", "unchecked"), ("garbage", "unreadable")):
         page.show_results("x", _results(key, EMPTY_DATA, broken=first, mode=mode))
@@ -672,3 +679,80 @@ def test_b1_12b_unreadable_audit_folders_are_not_shown_as_no_reports(qapp: QAppl
     table = dict(prs.audit_rows(snapshot))
     assert table["当前审计报告"] == "读不到" and "nowhere" in table["读不到"]
     assert not any("没有" == v for v in table.values())
+
+
+# ---- D-342：“要你出手”分页的件数和首页同一口径、同一轮（CHG-SCPT-2026-648）---------------------------------------
+
+
+def _counted(page: QWidget) -> list[str]:
+    """顶上“计入”那一块的字。"""
+    for frame in page.findChildren(QWidget):
+        if frame.property("counted") == "true":
+            return _texts(frame)
+    return []
+
+
+def _d342_home(tmp_path: Path) -> Any:
+    from cockpit_board import viewmodel as vm
+
+    return vm.home_vm(board_tests.d342_board(tmp_path), board_tests.OFFSET, online=None, use_git=False)
+
+
+def test_attention_counted_block_matches_the_home_cards_per_project(qapp: QApplication, tmp_path: Path) -> None:
+    from cockpit_board import viewmodel as vm
+
+    home = _d342_home(tmp_path)
+    count = vm.attention_count(home, ["DJ-2026-101"])
+    cards = {card.project_id: card for card in home.hot + home.rest}
+    page = attention.AttentionPage()
+    page.show_counted(count)
+    texts = _counted(page)
+    mine = len(cards["DJ-2026-101"].decisions)
+    theirs = len(cards["SW-2026-008"].decisions)
+    assert mine >= 1 and theirs >= 1
+    assert texts[:4] == ["计入（和首页同一口径）", f"{home.decisions_total} 件", "DJ-2026-101", f"{mine} 件"]
+    assert [d.ask for d in cards["DJ-2026-101"].decisions] == [t.removeprefix("　· ") for t in texts if t.startswith("　· ")]
+    assert f"另有 {theirs} 件在本页没读的 1 个项目里：SW-2026-008" in texts
+    assert not any("没批的草稿" in t for t in texts)  # 没批的草稿首页不算，分页也不算
+    assert TEXTS["attention"][0] not in _texts(page) and attention.is_empty(count) is False
+
+
+def test_attention_empty_only_when_the_home_count_is_zero_and_not_ready_is_not_none(qapp: QApplication, tmp_path: Path) -> None:
+    from cockpit_board import viewmodel as vm
+
+    page = attention.AttentionPage()
+    assert _counted(page) == ["计入", attention.NOT_READY] and attention.is_empty(None) is None
+    assert TEXTS["attention"][0] not in _texts(page)  # 首页还没算好：不写“没有”
+    page.show_results("x", _results("attention", EMPTY_DATA))
+    assert TEXTS["attention"][0] not in _texts(page) and attention.NOT_READY in _counted(page)
+    empty = vm.AttentionCount((("DJ-2026-101", ()),), (), 0, 0)
+    page.show_counted(empty)
+    assert _top(page) == [TEXTS["attention"][0]] and attention.is_empty(empty) is True
+    loose_only = vm.AttentionCount((("DJ-2026-101", ()),), (), 1, 1)
+    page.show_counted(loose_only)  # 只有归不到项目的 PR 签字也不算空
+    assert _top(page) == [] and "不属于任何项目的 PR 签字" in _counted(page) and "1 件" in _counted(page)
+    page.show_results("x", _results("attention", EMPTY_DATA, broken="pending", mode="offline"))
+    assert _top(page) == [c.STATES["offline"], TEXTS["attention"][1]]  # 明细没读到照样画错态
+
+
+def test_attention_counted_block_follows_the_home_page_in_the_same_round(qapp: QApplication, tmp_path: Path) -> None:
+    """同一轮（审计裁定）：首页重算 self.home_vm、不触发新的读取，分页“计入”立刻等于新首页的件数；明细还是旧的、标着读取时间。"""
+    root, db = base._workspace(tmp_path / "a", [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    seen: list[list[str]] = []
+    window = gui_tests._window(qapp, root, db, read_runner=_runner("ok", seen))
+    window._refresh_decisions = lambda: None
+    page = window.attention
+    assert page.count is not None and page.count.total == window.home_vm.decisions_total  # 首页一算好就有，不等打开分页
+    window.goto("attention")
+    _wait(qapp, window)
+    details, reads = list(page.results), len(seen)
+    assert details and "明细读于" in page.project_line.text()
+    first = window.home_vm.decisions_total
+    window.show_board(board_tests.d342_board(tmp_path / "b"))  # 换一份账本，_render 重算首页
+    qapp.processEvents()
+    assert len(seen) == reads and window._reading_pages == set()  # 没有新的读取
+    assert window.home_vm.decisions_total != first
+    assert page.count is not None and page.count.total == window.home_vm.decisions_total
+    assert _counted(page)[1] == f"{window.home_vm.decisions_total} 件"
+    assert page.results == details and "明细读于" in page.project_line.text()  # 明细不动
+    window.close()

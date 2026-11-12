@@ -8,6 +8,8 @@
 和 actions.py 分开放，是为了两条线（决定类按钮、工程类工具）各改各的文件、不抢同一份。
 整个包里起子进程的只有 actions.py 和本文件，test_cockpit_board_tools.py 会数。
 
+入箱（pm inbox add）只记一条 PROPOSED 的条目，确认、驳回照旧在“决定”页由你做；“用户原话”一栏看板从不预填。
+
 永远没有：批准（approved、有条件批准）、合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
 批准变更单只能用户本人在终端里做（有口令要输口令），这里连选项都不给。
 """
@@ -19,6 +21,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +50,14 @@ STATUS_LABELS_ZH = {
 }
 CHANGE_STATUSES = CHANGE_TARGETS + USER_ONLY_TARGETS  # change list --status 可筛的全部状态
 
+# 入箱（`pm inbox add`）的选项。取值照 `main.py pm inbox add --help`，测试会对照真实命令和 auto_pm/contracts/intake.py。
+INBOX_KINDS = ("iteration", "bug", "change", "urgent", "debt")
+INBOX_ACTIONS = ("add", "modify", "reduce", "freeze", "remove")  # 只有类别是 change 时才填，其余类别不许填
+INBOX_DISPOSITIONS = ("interrupt_now", "after_current", "inbox_wait", "reject")
+INBOX_CRITERIA = ("safety", "data_loss", "blocks_all", "wrong_output")
+INBOX_EVIDENCE_KINDS = ("file", "cmd", "ledger", "chg", "commit")
+INBOX_PROPOSED_BY = "cockpit-board"  # 看板入箱时的提出者；看板以你的身份运行，不冒充别的 agent
+
 
 class ToolError(ValueError):
     """表单没填好或不在白名单里；文字直接显示给用户，不跑任何命令。"""
@@ -67,6 +78,7 @@ TOOLS: dict[str, ToolSpec] = {
     "decision_list": ToolSpec("decision list", False),
     "decision_show": ToolSpec("decision show", False),
     "vartable_parse": ToolSpec("vartable parse", False),
+    "inbox_add": ToolSpec("pm inbox add", True),
 }
 
 
@@ -107,6 +119,8 @@ def build_command(key: str, params: dict[str, Any]) -> list[str]:
         return _change_create(params)
     if key == "change_transition":
         return _change_transition(params)
+    if key == "inbox_add":
+        return _inbox_add(params)
     if key == "decision_list":
         args = ["decision", "list"]
         for name, option, label in (("pid", "--pid", "项目编号"), ("change_id", "--change-id", "变更单号")):
@@ -165,6 +179,79 @@ def _change_transition(params: dict[str, Any]) -> list[str]:
         if str(params.get(name, "")).strip():
             args += [option, _flag_text(params[name], label)]
     return args
+
+
+def _lines(params: dict[str, Any], name: str, label: str) -> list[str]:
+    """多值栏：一行一个，空行不算；每行照单行栏的规矩收拾，重复的行直接拒（命令那头也会拒，这里先说人话）。"""
+    raw = params.get(name) or []
+    values = raw.splitlines() if isinstance(raw, str) else [str(item) for item in raw]
+    out = [_flag_text(value, label) for value in values if value.strip()]
+    if len(set(out)) != len(out):
+        raise ToolError(f"“{label}”有重复的行")
+    return out
+
+
+def _words_text(value: str, label: str) -> str:
+    """用户原话：照人填的原样交给命令（不并空格、不改换行），只拒以 - 开头。看板从不替你填这一栏。"""
+    if value.lstrip().startswith("-"):
+        raise ToolError(f"“{label}”不能以 - 开头（会被当成命令选项）")
+    return value
+
+
+def _inbox_add(params: dict[str, Any]) -> list[str]:
+    _need(params, "pid", "request_id", "title", "original_words", "affects", "duplicate_check", "rationale", "cost_risk")
+    kind = _choice(params, "kind", INBOX_KINDS, "类别")
+    evidence = _lines(params, "evidence", "取证")
+    alternatives = _lines(params, "alternatives", "备选方案")
+    missing = [label for label, values in (("取证（至少一条）", evidence), ("备选方案（至少一个）", alternatives)) if not values]
+    if missing:
+        raise ToolError("还没填：" + "、".join(missing))
+    for entry in evidence:
+        prefix, colon, rest = entry.partition(":")
+        if not colon or prefix not in INBOX_EVIDENCE_KINDS or not rest.strip():
+            raise ToolError("取证每行要写成 " + "|".join(k + ":" for k in INBOX_EVIDENCE_KINDS) + " 之一开头，例如 file:说明书.md")
+    args = [
+        "pm", "inbox", "add", "--project-id", _flag_text(params["pid"], "项目编号"),
+        "--request-id", _flag_text(params["request_id"], "请求号"),
+        "--title", _flag_text(params["title"], "标题"), "--kind", kind,
+    ]
+    action = str(params.get("change_action", "")).strip()
+    if kind == "change":
+        args += ["--change-action", _choice(params, "change_action", INBOX_ACTIONS, "变更动作")]
+    elif action:
+        raise ToolError("只有类别是“变更”（change）时才填变更动作")
+    if str(params.get("domain", "")).strip():
+        args += ["--domain", _choice(params, "domain", CHANGE_DOMAINS, "技术领域")]
+    for scope in _lines(params, "impact_scope", "影响范围"):
+        if scope not in CHANGE_SCOPES:
+            raise ToolError(f"影响范围只能是：{' / '.join(CHANGE_SCOPES)}")
+        args += ["--impact-scope", scope]
+    args += [
+        "--original-words", _words_text(str(params["original_words"]), "用户原话"),
+        "--affects", _flag_text(params["affects"], "影响了什么"),
+        "--duplicate-check", _flag_text(params["duplicate_check"], "查重"),
+    ]
+    for ref in _lines(params, "duplicate_of", "重复的条目"):
+        args += ["--duplicate-of", ref]
+    for entry in evidence:
+        args += ["--evidence", entry]
+    if str(params.get("urgent_criterion", "")).strip():
+        args += ["--urgent-criterion", _choice(params, "urgent_criterion", INBOX_CRITERIA, "紧急判据")]
+    args += [
+        "--disposition", _choice(params, "disposition", INBOX_DISPOSITIONS, "建议处置"),
+        "--rationale", _flag_text(params["rationale"], "理由"),
+    ]
+    for item in alternatives:
+        args += ["--alternative", item]
+    args += ["--cost-risk", _flag_text(params["cost_risk"], "成本与风险")]
+    for ask in _lines(params, "asks", "要你决定的点"):
+        args += ["--ask", ask]
+    return args + ["--proposed-by", INBOX_PROPOSED_BY]
+
+
+def board_request_id(now: datetime | None = None) -> str:
+    """看板入箱的请求号：board-<UTC 时间>。预览时生成一次，运行用同一个（同号重放同内容不会重复入箱）。"""
+    return "board-" + (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 # ---------------------------------------------------------------- 跑
