@@ -881,3 +881,32 @@ def test_b1_02_a_draft_with_work_still_waits_for_you(tmp_path: Path) -> None:
     board = _board(tmp_path, [("DJ-2026-101", "DRAFT", "真等你的草稿", 6)])
     card = _card(vm.home_vm(board, OFFSET, online=None, use_git=False))
     assert any(i.title.startswith(f"等你超过 {pd.WAITING_RED_DAYS} 天") and i.sev == "block" for i in card.issues)
+
+
+def test_b1_03_an_active_card_whose_work_and_run_are_cancelled_is_not_a_lost_executor(tmp_path: Path) -> None:
+    """D-327（TD-SW008-592，看板侧）：ACTIVE 卡下面 Work、Run 都已取消、没有租约，不报执行者失联。"""
+    board = _edited_board(
+        tmp_path, [("DJ-2026-101", "ACTIVE", "早就停了的活", 3)],
+        "UPDATE work_items SET state = 'CANCELLED'", "UPDATE run_items SET state = 'CANCELLED'",
+        "DELETE FROM execution_leases",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert not any(i.title == "执行者失联" for i in card.issues)
+    assert next(k for k in home.checks if k.key == "lost").value == 0
+    idle = next(i for i in card.issues if i.title == "卡开着，但下面没有在跑的执行")
+    assert idle.who.startswith("主执行") and "已取消" in idle.detail
+
+
+def test_b1_03b_cancelled_run_with_an_old_expired_lease_is_not_lost_either(tmp_path: Path) -> None:
+    board = _edited_board(tmp_path, [("DJ-2026-101", "ACTIVE", "停了但租约还在", 3)],
+                          "UPDATE run_items SET state = 'CANCELLED'")
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert next(k for k in home.checks if k.key == "lost").value == 0
+
+
+def test_b1_04_a_running_run_with_an_expired_lease_is_still_lost(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 2 / 24)])
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert any(i.title == "执行者失联" for i in _card(home).issues)
+    assert next(k for k in home.checks if k.key == "lost").value == 1

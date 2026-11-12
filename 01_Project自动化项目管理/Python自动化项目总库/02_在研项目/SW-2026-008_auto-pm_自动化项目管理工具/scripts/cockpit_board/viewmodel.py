@@ -304,6 +304,17 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                         f"账本里这张卡的状态是“{pd.STATE_LABEL.get(m.state, m.state)}”", m.updated_at, m.example,
                     )
                 )
+        elif m.state == "ACTIVE" and (m.run is None or m.run.state not in pd.OPEN_RUN_STATES or m.work_state == "CANCELLED"):
+            # D-327：卡开着，但下面的工作项或最近一次执行已结束（如都已取消）：不是执行者失联，是卡没跟着收；主执行来办
+            why = "没有执行记录" if m.run is None else f"最近一次执行 {m.run.run_id} 已是 {m.run.state}"
+            if m.work_state == "CANCELLED":
+                why = "工作项已取消，" + why
+            issues.append(
+                Issue(
+                    "hint", pid, "卡开着，但下面没有在跑的执行", f"{why}：{pd._short(m.title, 40)}",
+                    "主执行（关卡或重新派工）", "账本里这张卡还开着，下面的工作项和执行已经结束", m.updated_at, m.example,
+                )
+            )
         elif m.state == "ACTIVE" and m.run is not None:
             lease = m.run.lease_expires
             last = m.run.updated_at
