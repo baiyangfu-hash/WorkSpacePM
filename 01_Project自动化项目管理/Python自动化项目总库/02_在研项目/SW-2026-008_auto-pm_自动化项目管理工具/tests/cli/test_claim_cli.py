@@ -222,3 +222,35 @@ def test_d152_list_shows_a_number_only_claim_as_such(monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == 0, result.output
     assert "路径：（只占号，未补路径）" in result.output
+
+
+def _write_outcome(monkeypatch: pytest.MonkeyPatch, *args: str, released: bool = True, reclaimed: bool = True) -> str:
+    from auto_pm.application.core.claim_service import Claim
+
+    class _Service:
+        def __init__(self, root: object) -> None:
+            pass
+
+        def release(self, card: str, *, owner: str) -> bool:
+            return released
+
+        def reclaim(self, card: str, *, by: str, reason: str, approval_ref: str) -> Claim:
+            return Claim(card=card, owner="o", machine="m", paths=(), goal="", claimed_at="", commit="c", status="reclaimed", written=reclaimed)
+
+    monkeypatch.setattr(claim_cli, "ClaimService", _Service)
+    result = CliRunner().invoke(claim_cli.claim_group, list(args), obj=type("Ctx", (), {"control_root": "/x", "workspace_root": ""})())
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+def test_td397_release_says_released_only_when_it_wrote_and_says_nothing_was_written_otherwise(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "已放下卡 c1（远程已记为 released）" in _write_outcome(monkeypatch, "release", "c1", "--as", "claude", released=True)
+    said = _write_outcome(monkeypatch, "release", "c1", "--as", "claude", released=False)
+    assert "这次什么都没写" in said and "已放下卡" not in said
+
+
+def test_td485_reclaim_says_reclaimed_only_when_it_wrote(monkeypatch: pytest.MonkeyPatch) -> None:
+    args = ("reclaim", "c2", "--reason", "r", "--approval-evidence-ref", "user-confirmation:cmsg_01", "--as", "claude")
+    assert "卡 c2 的占位已收回（远程已记为 reclaimed）" in _write_outcome(monkeypatch, *args, reclaimed=True)
+    said = _write_outcome(monkeypatch, *args, reclaimed=False)
+    assert "早就是 reclaimed，这次什么都没写" in said and "已收回" not in said

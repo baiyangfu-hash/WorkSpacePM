@@ -21,7 +21,7 @@ import re
 import socket
 import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -91,6 +91,9 @@ class Claim:
     expires_at: str = ""
     renewed_at: str = ""  # the last *explicit* renewal; the keep-alive never writes it, so it cannot extend its own cap
     paths_added_at: str = ""  # the last time ``add_paths`` widened the claim; ``claimed_at`` and the lease stay as they were (D-125)
+    # True only on the value a write (release, reclaim, renew, add-paths) returns after it really pushed a commit; never read
+    # from the remote, so a command can say "nothing was written" truthfully (TD-SW008-397, TD-SW008-485).
+    written: bool = field(default=False, compare=False)
 
     @property
     def free(self) -> bool:
@@ -345,16 +348,21 @@ class ClaimService:
 
     # ── release ───────────────────────────────────────────────────────
 
-    def release(self, card: str, *, owner: str) -> None:
-        """Mark the holder's own claim released by pushing a commit on top of it (works where deleting a branch is refused)."""
+    def release(self, card: str, *, owner: str) -> bool:
+        """Mark the holder's own claim released by pushing a commit on top of it (works where deleting a branch is refused).
+
+        Returns True when a ``released`` commit was pushed, False when the claim was already released or reclaimed and
+        nothing was written.  An ``active`` claim whose lease ran out is still written down as released (TD-SW008-397):
+        an expired lease only stops it blocking others, it does not record that the holder let go.
+        """
 
         for claim in self.all_claims():
             if claim.card == card:
                 problem = holder_problem(claim, owner, self._machine)
                 if problem:
                     raise ClaimError(f"{problem}；别人的占位只由用户决定放不放")
-                if claim.free:
-                    return  # already released or expired: nothing to do
+                if claim.status != "active":
+                    return False  # already released or reclaimed: nothing to write
                 payload: dict[str, object] = {
                     "owner": claim.owner,
                     "machine": claim.machine,
@@ -370,7 +378,7 @@ class ClaimService:
                 result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"])
                 if result.returncode != 0:
                     raise ClaimError("放下占位没推成功：" + _decode(result.stderr).strip())
-                return
+                return True
         raise ClaimError(f"没有叫 {card} 的占位")
 
     # ── renew / reclaim ───────────────────────────────────────────────
@@ -488,6 +496,8 @@ class ClaimService:
         """Take a card back from a holder that went silent (D-39).  Only on the user's word: ``approval_ref`` must be ``user-confirmation:<where>``.
 
         Nothing is deleted: a commit marked ``reclaimed`` (who, why, when, on whose word) goes on top, so the history stays and the card is free.
+        An ``active`` claim whose lease ran out is reclaimed the same way (TD-SW008-485): the user's word must be on record.  Only a
+        claim that is already released or reclaimed is returned as it is, with ``written`` False.
         """
 
         if not reason.strip():
@@ -496,8 +506,8 @@ class ClaimService:
         if not approval_ref.startswith(prefix) or len(approval_ref[len(prefix):].strip()) < 6:
             raise ClaimError("收回别人的占位只听用户的：--approval-evidence-ref 写成 user-confirmation:<用户那条消息的时间或编号>")
         claim = self._find(card)
-        if claim.free:
-            return claim  # already released, reclaimed or expired: nothing to do
+        if claim.status != "active":
+            return claim  # already released or reclaimed: nothing to write
         payload = self._payload(claim, "reclaimed")
         payload.update(
             {
@@ -536,7 +546,7 @@ class ClaimService:
         if result.returncode != 0:
             raise ClaimError(f"{failure}：" + _decode(result.stderr).strip())
         self._fetch(timeout=timeout)
-        return self._parse(claim.card, commit, f"claim {claim.card}\n" + json.dumps(payload, ensure_ascii=False))
+        return replace(self._parse(claim.card, commit, f"claim {claim.card}\n" + json.dumps(payload, ensure_ascii=False)), written=True)
 
     # ── git plumbing ──────────────────────────────────────────────────
 

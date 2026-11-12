@@ -11,6 +11,7 @@ from typing import Any, TypeVar, cast
 
 import click
 from click.core import ParameterSource
+from pydantic import ValidationError
 
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
@@ -72,6 +73,30 @@ _KIND_CHOICES = tuple(item.value.lower() for item in IntakeKind)
 _ACTION_CHOICES = tuple(item.value.lower() for item in ChangeAction)
 
 
+def _plain_error(error: BaseException) -> str:
+    """Say a refused input in plain words (TD-SW008-571).
+
+    A pydantic ``ValidationError`` (raised directly, or wrapped by a service error) is shown as one
+    ``--option: reason`` line per field, without the model name, the echoed input or the pydantic URL;
+    every other error keeps its own text.  Only ``pm inbox add`` uses it: there every field is a command option.
+    """
+
+    cause: BaseException | None = error
+    while cause is not None and not isinstance(cause, ValidationError):
+        cause = cause.__cause__
+    if cause is None:
+        return str(error)
+    lines = []
+    for item in cause.errors(include_url=False, include_input=False):
+        location = [str(part) for part in item.get("loc", ())]
+        field = "--" + location[0].replace("_", "-") if location else "参数组合"
+        if len(location) > 1:
+            field += "（" + ".".join(location[1:]) + "）"
+        message = str(item.get("msg", "")).removeprefix("Value error, ")
+        lines.append(f"  {field}: {message}")
+    return "参数不合格，命令没有执行：\n" + "\n".join(lines)
+
+
 @click.group(name="pm")
 def pm_group() -> None:
     """面向用户的 PM 门面：计划、确认、执行、恢复与验收。"""
@@ -110,6 +135,8 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True
     """Other parties' active claims from the last fetch (no network here), and the ones that overlap this project's scope (D-39).
 
     Hints go to stderr like the control-root notice; a clone with no claims or no Git answer says nothing and never fails.
+    The view is this clone's last fetch, so every line says so and points to ``claim list``, which fetches: a claim
+    released or reclaimed since then must not read as held here while ``claim list`` calls it free (TD-SW008-578).
     """
 
     try:
@@ -123,11 +150,17 @@ def _claims_notice(root: str, scope_paths: tuple[str, ...], *, echo: bool = True
         result.append({**claim.as_json(), "overlaps_scope": list(clash)})
         if not echo:
             continue
-        text = f"有人领了 {claim.label()}，要改：{'、'.join(claim.paths)}"
+        text = f"本机上次抓到的占位里，有人领着 {claim.label()}（到期 {claim.expires_at}），要改：{'、'.join(claim.paths)}"
         if clash:
             click.echo(f"⚠️ [领卡占位] {text}——和本项目范围重叠：{'、'.join(clash)}。开工前先和对方确认。", err=True)
         else:
             click.echo(f"ℹ️ [领卡占位] {text}", err=True)
+    if echo and active:
+        click.echo(
+            "ℹ️ [领卡占位] 以上是本机上次抓取的记录（这条提示不联网），之后可能已放下或被收回；"
+            "以 `main.py claim list`（联网）为准",
+            err=True,
+        )
     return result
 
 
@@ -188,25 +221,34 @@ def _classification_options(function: _F) -> _F:
     return function
 
 
-def _checklist_options(function: _F) -> _F:
-    """Add the plan poka-yoke fields (计划防呆必填栏) shared by ``plan`` and ``approve``."""
+_PLAN_REQUIRED = "【必填】"
+_APPROVE_REQUIRED = "【带全参数批准时必填】"
 
-    options = (
-        click.option("--original-request", default="", help="①需求原文：一字不改照抄用户原话"),
-        click.option(
-            "--safety-circuit", default="", help="④是否涉及安全回路（急停/安全门/光栅/联锁等）：只能填 是 或 否"
-        ),
-        click.option(
-            "--check",
-            "checks",
-            multiple=True,
-            help="⑤验收命令，格式“命令 => 退出码”，按 --acceptance 的顺序一条对一条，可重复",
-        ),
-        click.option("--rollback", default="", help="⑦回退办法：出问题时怎么退回去"),
-    )
-    for option in reversed(options):
-        function = option(function)
-    return function
+
+def _checklist_option_group(required: str) -> Callable[[_F], _F]:
+    """The plan poka-yoke fields (计划防呆必填栏) shared by ``plan`` and ``approve``; ``required`` says when they are mandatory (TD-SW008-572)."""
+
+    def decorate(function: _F) -> _F:
+        options = (
+            click.option("--original-request", default="", help=f"{required}①需求原文：一字不改照抄用户原话"),
+            click.option(
+                "--safety-circuit",
+                default="",
+                help=f"{required}④是否涉及安全回路（急停/安全门/光栅/联锁等）：只能填 是 或 否",
+            ),
+            click.option(
+                "--check",
+                "checks",
+                multiple=True,
+                help=f"{required}⑤验收命令，格式“命令 => 退出码”，按 --acceptance 的顺序一条对一条，可重复",
+            ),
+            click.option("--rollback", default="", help=f"{required}⑦回退办法：出问题时怎么退回去"),
+        )
+        for option in reversed(options):
+            function = option(function)
+        return function
+
+    return decorate
 
 
 def _plan_checklist(
@@ -551,27 +593,33 @@ def _approve_planning_change(ctx: click.Context, card: PlanningScopeCard, approv
 
 @pm_group.command(name="plan")
 @click.option("--mission-id", default="", help="兼容旧入口：已有 Mission 编号")
-@click.option("--project-id", default="", help="新需求所属项目 PID")
-@click.option("--request-id", default="", help="用户请求幂等标识")
-@click.option("--objective", default="", help="新需求目标")
-@click.option("--acceptance", multiple=True, help="验收条件，可重复")
-@click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
-@click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
-@click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
+@click.option("--project-id", default="", help="【新需求必填】所属项目 PID")
+@click.option("--request-id", default="", help="【必填】用户请求幂等标识（按已存草稿提交时只给它）")
+@click.option("--objective", default="", help="【新需求必填】需求目标")
+@click.option("--acceptance", multiple=True, help="【新需求必填】验收条件，可重复")
+@click.option("--scope", "scope_paths", multiple=True, help="【必填】②可改范围：精确文件范围，可重复")
+@click.option("--risk", "risks", multiple=True, help="【必填】⑥明确风险，可重复，不能只写“无”")
+@click.option("--non-goal", "non_goals", multiple=True, help="【必填】非目标（这次不做什么），可重复")
 @click.option(
     "--adapter",
     type=click.Choice(tuple(item.value for item in ExecutionAdapterKind)),
     default=None,
+    help="【必填】执行端",
 )
-@click.option("--approved-model", default="")
-@click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
+@click.option("--approved-model", default="", help="【必填】批准使用的模型")
+@click.option(
+    "--declared-dirty",
+    "declared_dirty_paths",
+    multiple=True,
+    help="【必填】③本次要改的文件，逐个列出，必须是 --scope 的子集，可重复",
+)
 @click.option("--submitted-by", default="pm-cli", show_default=True, help="范围卡提交者标识，写入事件链")
 @click.option(
     "--dry-run",
     is_flag=True,
     help="只做 plan 落盘前的全部检查并打印会怎样归档，什么都不写（不建草稿、不占 CHG 号、不写变更单）；只用于新需求",
 )
-@_checklist_options
+@_checklist_option_group(_PLAN_REQUIRED)
 @_classification_options
 @click.pass_context
 def plan_pm(
@@ -603,6 +651,7 @@ def plan_pm(
 
     只给 --request-id（不给 --project-id/--objective/--acceptance）时，为已保存的草稿
     （例如驾驶舱保存的草稿）起草并持久化范围卡。新需求必须分类（--kind 或 --inbox-id）。
+    标【必填】的参数缺一个就拒绝并一次列全缺了哪些；带 --mission-id（兼容旧入口）时都不用填。
     """
     new_values = (
         project_id,
@@ -794,7 +843,12 @@ def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> Non
 @click.option("--request-id", required=True, help="幂等标识；同一标识重放同一内容不会重复入箱")
 @click.option("--title", required=True, help="一行标题（至多 120 字）")
 @click.option("--kind", required=True, type=click.Choice(_KIND_CHOICES, case_sensitive=False))
-@click.option("--change-action", type=click.Choice(_ACTION_CHOICES, case_sensitive=False), default=None)
+@click.option(
+    "--change-action",
+    type=click.Choice(_ACTION_CHOICES, case_sensitive=False),
+    default=None,
+    help=f"只用于 --kind change，且这时必填：{'|'.join(_ACTION_CHOICES)}；其他类别不要给",
+)
 @click.option("--domain", default="", help="技术领域；缺省时按项目技术栈推断")
 @click.option("--impact-scope", "impact_scope", multiple=True, help="影响范围，可重复；缺省 MODULE")
 @click.option("--original-words", required=True, help="用户原话")
@@ -849,6 +903,12 @@ def inbox_add(
         missing = [flag for flag, values in (("--evidence", evidence), ("--alternative", alternatives)) if not values]
         if missing:  # said in plain words before anything is created, instead of a raw validation dump
             raise click.ClickException(f"入箱必须带 {'、'.join(missing)}（各至少一个）；--evidence 的写法见 --help")
+        if (kind.lower() == IntakeKind.CHANGE.value.lower()) != (change_action is not None):
+            raise click.ClickException(
+                f"--kind change 必须带 --change-action（{'|'.join(_ACTION_CHOICES)}）"
+                if change_action is None
+                else f"--change-action 只用于 --kind change；--kind {kind.lower()} 不要给 --change-action"
+            )
         _control_root_sync_notice(ctx, project_id=project_id)
         _ensure_continuity_store(ctx)  # first use of a fresh clone (D6); only after the identity check
         classification = service.classify(
@@ -880,7 +940,7 @@ def inbox_add(
             proposed_by=proposed_by,
         )
     except (PmIntakeError, ValueError, WorktreePolicyError) as error:
-        raise click.ClickException(str(error)) from error
+        raise click.ClickException(_plain_error(error)) from error
     _emit_item(item.model_dump(mode="json"), created=created)
 
 
@@ -1005,21 +1065,27 @@ def inbox_reject(
     default="",
     help="兼容旧入口；新 Mission 已在创建时绑定内部授权，无需填写。",
 )
-@click.option("--project-id", default="", help="新需求所属项目 PID")
-@click.option("--request-id", default="", help="用户请求幂等标识")
-@click.option("--objective", default="", help="新需求目标")
-@click.option("--acceptance", multiple=True, help="验收条件，可重复")
-@click.option("--scope", "scope_paths", multiple=True, help="精确文件范围，可重复")
-@click.option("--risk", "risks", multiple=True, help="明确风险，可重复")
-@click.option("--non-goal", "non_goals", multiple=True, help="非目标，可重复")
+@click.option("--project-id", default="", help="【带全参数批准时必填】所属项目 PID")
+@click.option("--request-id", default="", help="【必填】用户请求幂等标识（只给它和 --plan-hash 时按已保存的范围卡批准）")
+@click.option("--objective", default="", help="【带全参数批准时必填】需求目标")
+@click.option("--acceptance", multiple=True, help="【带全参数批准时必填】验收条件，可重复")
+@click.option("--scope", "scope_paths", multiple=True, help="【带全参数批准时必填】②可改范围：精确文件范围，可重复")
+@click.option("--risk", "risks", multiple=True, help="【带全参数批准时必填】⑥明确风险，可重复，不能只写“无”")
+@click.option("--non-goal", "non_goals", multiple=True, help="【带全参数批准时必填】非目标（这次不做什么），可重复")
 @click.option(
     "--adapter",
     type=click.Choice(tuple(item.value for item in ExecutionAdapterKind)),
     default=None,
+    help="【带全参数批准时必填】执行端",
 )
-@click.option("--approved-model", default="")
-@click.option("--declared-dirty", "declared_dirty_paths", multiple=True)
-@click.option("--plan-hash", default="", help="plan 输出的不可变方案哈希")
+@click.option("--approved-model", default="", help="【带全参数批准时必填】批准使用的模型")
+@click.option(
+    "--declared-dirty",
+    "declared_dirty_paths",
+    multiple=True,
+    help="【带全参数批准时必填】③本次要改的文件，逐个列出，必须是 --scope 的子集，可重复",
+)
+@click.option("--plan-hash", default="", help="【必填】plan 输出的不可变方案哈希")
 @click.option("--approver", default="", help="真实人类审批人（已启用批准口令时由口令决定，可不填）")
 @click.option(
     "--approval-evidence-ref",
@@ -1032,7 +1098,7 @@ def inbox_reject(
     default="",
     help="项目开着的卡已满 8 张，或新卡和开着的卡要改同一批文件时，用户放行原话的位置",
 )
-@_checklist_options
+@_checklist_option_group(_APPROVE_REQUIRED)
 @_classification_options
 @click.pass_context
 def approve_pm(

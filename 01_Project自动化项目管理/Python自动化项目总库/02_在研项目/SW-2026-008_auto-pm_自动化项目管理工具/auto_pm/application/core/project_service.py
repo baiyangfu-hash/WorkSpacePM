@@ -500,7 +500,15 @@ class ProjectService:
 
     # ── 项目补全 ──────────────────────────────────────────
 
-    def retrofit_project_by_path(self, project_path: str) -> str:
+    def detect_stack(self, project_path: str) -> str:
+        """目录的技术栈（TD-SW008-563）：有 .plc.json（根或子目录）是 plc，像 Python 仓库是 python，否则 unknown"""
+        if self._scanner._find_plc_json_recursive(project_path):
+            return "plc"
+        if self._scanner.looks_like_python_repo(project_path):
+            return "python"
+        return "unknown"
+
+    def retrofit_project_by_path(self, project_path: str, stack_hint: str | None = None) -> str:
         """为指定路径的项目补全 .copier-answers.yml 元数据文件
 
         从目录名提取 project_id，从 .plc.json/PM_SESSION 读取已有元数据。
@@ -508,6 +516,7 @@ class ProjectService:
 
         Args:
             project_path: 项目目录路径
+            stack_hint: 认不出技术栈时用的技术栈（plc/python），None 表示只按目录内容识别
 
         Returns:
             创建的 .copier-answers.yml 路径
@@ -566,6 +575,12 @@ class ProjectService:
                 session_info = self._read_pm_session(project_path)
                 if session_info is not None:
                     project_id = session_info.project_id
+                # TD-SW008-563：Python 仓库以前一律记成 unknown，python check 随即拒绝。
+                # stack_hint 是调用方（project import --stack）指定的技术栈，只在认不出来时用。
+                if stack_hint in ("plc", "python"):
+                    stack = stack_hint
+                elif self._scanner.looks_like_python_repo(project_path):
+                    stack = "python"
 
         template_name = get_template_name(stack)
         content: dict[str, str] = {
@@ -576,6 +591,8 @@ class ProjectService:
             "description": description or project_name,
             "version": version or "V1.0.0",
         }
+        if stack != "unknown":
+            content["stack"] = stack  # 扫描器先读这一项（TD-SW008-563）
         content.update(plc_extra)
 
         write_file(answers_path, yaml.safe_dump(content, allow_unicode=True, sort_keys=False))
