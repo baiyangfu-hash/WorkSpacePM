@@ -70,13 +70,13 @@ def test_i02_import_and_create_put_a_python_project_in_the_same_folder(tmp_path:
     assert Path(create_dir.path).parent == Path(import_dir.path).parent == ws.joinpath(*RESEARCH)
 
 
-def test_i03_a_plc_project_still_goes_to_the_old_folder_and_records_its_stack(tmp_path: Path) -> None:
+def test_i03_a_plc_project_goes_where_create_puts_it_and_records_its_stack(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     src = tmp_path / "incoming" / "DJ-2026-954_PLC"
     src.mkdir(parents=True)
     (src / ".plc.json").write_text(json.dumps({"name": "DJ-2026-954", "version": "V1.0.0"}), encoding="utf-8")
     assert _import(ws, str(src)).exit_code == 0
-    answers = yaml.safe_load((ws / "02_在研项目" / src.name / ".copier-answers.yml").read_text(encoding="utf-8"))
+    answers = yaml.safe_load((ws / "0100_PLC自动化" / src.name / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert answers["stack"] == "plc"
 
 
