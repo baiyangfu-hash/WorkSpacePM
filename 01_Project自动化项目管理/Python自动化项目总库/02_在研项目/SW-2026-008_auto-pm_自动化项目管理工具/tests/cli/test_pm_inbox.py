@@ -12,6 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
@@ -639,3 +640,70 @@ def test_td093_approve_refuses_each_invalid_contract_field_for_its_own_reason(
 def test_td261_d11_plan_help_says_a_confirmed_inbox_item_needs_no_retyping(cli_runner: CliRunner, root: Path) -> None:
     result = _run(cli_runner, root, "plan", "--help")
     assert "分类（--kind 等）直接取自条目，不用重填" in " ".join(result.output.split())
+
+
+_RAW_DUMP_MARKS = ("validation error for", "errors.pydantic.dev", "input_value", "[type=")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "said"),
+    [
+        ({"change_action": "modify"}, "--change-action 只用于 --kind change；--kind bug 不要给 --change-action"),
+        ({"kind": "change", "change_action": None}, "--kind change 必须带 --change-action（add|modify|reduce|freeze|remove）"),
+        ({"title": "长" * 121}, "--title: text must not exceed 120 characters"),
+    ],
+)
+def test_td571_inbox_add_refuses_a_wrong_option_in_plain_words_and_records_nothing(
+    cli_runner: CliRunner, root: Path, overrides: dict[str, Any], said: str
+) -> None:
+    result = _add(cli_runner, root, **overrides)
+    assert result.exit_code == 1
+    assert said in result.output
+    assert not [mark for mark in _RAW_DUMP_MARKS if mark in result.output], result.output
+    assert _listed(cli_runner, root) == []
+
+
+def test_td571_inbox_add_help_says_change_action_is_only_for_a_change(cli_runner: CliRunner, root: Path) -> None:
+    assert _run(cli_runner, root, "inbox", "add", "--help").exit_code == 0
+    pm_group = cli.commands["pm"]
+    assert isinstance(pm_group, click.Group)
+    inbox = pm_group.commands["inbox"]
+    assert isinstance(inbox, click.Group)
+    helps = [param.help or "" for param in inbox.commands["add"].params if isinstance(param, click.Option) and "--change-action" in param.opts]
+    assert helps == ["只用于 --kind change，且这时必填：add|modify|reduce|freeze|remove；其他类别不要给"]
+
+
+def _option_help(command: str, flag: str) -> str:
+    pm_group = cli.commands["pm"]
+    assert isinstance(pm_group, click.Group)
+    for param in pm_group.commands[command].params:
+        if isinstance(param, click.Option) and flag in param.opts:
+            return param.help or ""
+    raise AssertionError(f"pm {command} 没有 {flag}")
+
+
+def test_td572_every_option_plan_refuses_to_go_without_is_marked_required_in_its_help(
+    cli_runner: CliRunner, root: Path
+) -> None:
+    """The help is checked against what ``pm plan`` actually refuses, so the two cannot drift apart."""
+
+    refused = _run(
+        cli_runner, root, "plan", "--project-id", PROJECT, "--request-id", "REQ-HELP", "--objective", "o", "--acceptance", "a"
+    )
+    assert refused.exit_code == 1 and "新需求 plan 缺少必填参数: " in refused.output
+    missing = refused.output.split("新需求 plan 缺少必填参数: ", 1)[1].strip().split(", ")
+    assert missing == ["--scope", "--risk", "--non-goal", "--adapter", "--approved-model"]
+    checklist = ["--original-request", "--declared-dirty", "--safety-circuit", "--check", "--rollback"]
+    for flag in [*missing, *checklist, "--request-id"]:
+        assert _option_help("plan", flag).startswith("【必填】"), flag
+    for flag in ("--project-id", "--objective", "--acceptance"):
+        assert _option_help("plan", flag).startswith("【新需求必填】"), flag
+    for flag in ("--mission-id", "--submitted-by", "--dry-run"):
+        assert "必填" not in _option_help("plan", flag), flag
+
+
+def test_td572_approve_marks_say_they_apply_only_when_approving_with_the_full_arguments() -> None:
+    for flag in ("--project-id", "--scope", "--risk", "--non-goal", "--adapter", "--approved-model", "--declared-dirty", "--original-request", "--rollback"):
+        assert _option_help("approve", flag).startswith("【带全参数批准时必填】"), flag
+    assert _option_help("approve", "--plan-hash").startswith("【必填】")
+    assert _option_help("approve", "--request-id").startswith("【必填】")
