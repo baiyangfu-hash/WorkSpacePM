@@ -822,3 +822,44 @@ def test_pending_asks_without_the_tables_are_empty_and_create_nothing(tmp_path: 
     assert pd.read_pending_asks_copy(db, root) == []
     after = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert before == after and "intake_items" not in after
+
+
+# ---------------------------------------------------------------- 批 1 看板说真话（CHG-SCPT-2026-644）
+
+
+def _edited_board(tmp_path: Path, missions: list[tuple[str, str, str, float]], *sql: str) -> Any:
+    """照 _board 造账本，再按给的 SQL 改几处（去掉工作项、取消 Run、加收口记录等），然后读成看板。"""
+    root, db = base._workspace(tmp_path, missions)
+    connection = sqlite3.connect(db)
+    for statement in sql:
+        connection.execute(statement)
+    connection.commit()
+    connection.close()
+    return pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
+
+
+def _card(home: Any, project_id: str = "DJ-2026-101") -> Any:
+    return next(c for c in home.hot + home.rest if c.project_id == project_id)
+
+
+FIELD_NAMES = ("mission.state", "execution_leases", "checkpoints", "mission_items", "planning_scope_cards",
+               "intake_items", "updated_at", "snapshot()")
+
+
+def test_b1_09_issue_basis_is_plain_language_without_ledger_field_names(tmp_path: Path) -> None:
+    """D-326（TD-SW008-591）：依据一栏写白话，不出现账本字段名。"""
+    board = _board(
+        tmp_path,
+        [
+            ("DJ-2026-101", "BLOCKED", "卡住了", 0.5),
+            ("DJ-2026-101", "AWAITING_APPROVAL", "等批一", 4),
+            ("DJ-2026-101", "ACCEPTANCE_PENDING", "等验收", 1),
+            ("DJ-2026-101", "ACTIVE", "写通讯层", 0.2),
+            ("DJ-2026-101", "PARKED", "搁很久", 9),
+            *[("DJ-2026-101", "DRAFT", f"草稿{i}", 0.1) for i in range(5)],
+        ],
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    texts = [i.basis for c in home.hot + home.rest for i in c.issues] + [d.basis for d in home.decisions]
+    assert len(texts) >= 6
+    assert [t for t in texts if any(name in t for name in FIELD_NAMES)] == []

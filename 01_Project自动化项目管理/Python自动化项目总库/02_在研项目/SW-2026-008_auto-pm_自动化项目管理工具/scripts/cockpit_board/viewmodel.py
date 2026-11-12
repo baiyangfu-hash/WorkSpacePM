@@ -276,7 +276,7 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             issues.append(
                 Issue(
                     "block", pid, "卡住要拿主意", pd._short(m.title, 60), USER + " → 主执行",
-                    "账本 mission.state = BLOCKED", m.updated_at, m.example,
+                    "账本里这张卡的状态是“卡住”", m.updated_at, m.example,
                 )
             )
         elif m.column == "等你":
@@ -286,14 +286,14 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                     Issue(
                         "block", pid, f"等你超过 {pd.WAITING_RED_DAYS} 天：{ask}",
                         pd._short(m.title, 60), USER,
-                        f"账本 mission.state = {m.state}，进入该状态的时间", m.updated_at, m.example,
+                        f"账本里这张卡的状态是“{pd.STATE_LABEL.get(m.state, m.state)}”，从进入这个状态算起", m.updated_at, m.example,
                     )
                 )
             else:
                 issues.append(
                     Issue(
                         "hint", pid, ask, pd._short(m.title, 60), USER,
-                        f"账本 mission.state = {m.state}", m.updated_at, m.example,
+                        f"账本里这张卡的状态是“{pd.STATE_LABEL.get(m.state, m.state)}”", m.updated_at, m.example,
                     )
                 )
         elif m.state == "ACTIVE" and m.run is not None:
@@ -310,21 +310,21 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                         f"{m.run.executor} 的租约 {lease.strftime('%H:%M')} 到期，之后没有新断点："
                         f"{pd._short(m.title, 40)}",
                         "主执行立即查",
-                        "账本 execution_leases.expires_at + checkpoints 最近一条", lease, m.example,
+                        "账本里执行者的租约到期时间和最近一次断点", lease, m.example,
                     )
                 )
         elif m.column == "搁着" and pd._days(now, m.updated_at) > pd.PARKED_YELLOW_DAYS:
             issues.append(
                 Issue(
                     "hint", pid, f"搁了超过 {pd.PARKED_YELLOW_DAYS} 天", pd._short(m.title, 60),
-                    USER + "（继续搁 / 取消）", "账本 mission.state = PARKED", m.updated_at, m.example,
+                    USER + "（继续搁 / 取消）", "账本里这张卡的状态是“搁着”", m.updated_at, m.example,
                 )
             )
     if len(_open(project)) > pd.OPEN_SOFT_LIMIT:
         issues.append(
             Issue(
                 "hint", pid, f"开着的卡超过 {pd.OPEN_SOFT_LIMIT} 张",
-                f"共 {len(_open(project))} 张", USER + "（挂起或关卡）", "账本 mission_items", None,
+                f"共 {len(_open(project))} 张", USER + "（挂起或关卡）", "账本里开着的卡", None,
             )
         )
     for a in project.attention:
@@ -348,14 +348,14 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             issues.append(
                 Issue(
                     "hint", pid, "批准范围", f"{pending.ref} {pending.subject}", USER,
-                    f"账本 planning_scope_cards 第 {pending.revision} 版，未批准（同 pm pending）", pending.since,
+                    f"账本里的范围卡第 {pending.revision} 版，还没批准（同 pm pending）", pending.since,
                 )
             )
         elif pending.kind == "inbox":
             issues.append(
                 Issue(
                     "hint", pid, "核对需求", f"{pending.ref} {pending.subject}", USER,
-                    "账本 intake_items.status = PROPOSED（同 pm inbox list）", pending.since,
+                    "账本收件箱里这一条还没确认（同 pm inbox list）", pending.since,
                 )
             )
     for card in project.cards:
@@ -373,7 +373,7 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
         issues.append(
             Issue(
                 "hint", pid, f"{pd.QUIET_YELLOW_DAYS} 天没动静", "有活开着，账本和 git log 都没更新",
-                USER + "看一眼", "max(账本 updated_at, git log -1)", max(moments),
+                USER + "看一眼", "账本最近一次更新和最近一次提交，取较晚的那个", max(moments),
             )
         )
     return sorted(issues, key=lambda i: (-SEV_RANK[i.sev], i.since or now))
@@ -422,7 +422,7 @@ def legacy_decision(project: pd.Project, covered: list[Decision]) -> Decision | 
         return None
     return Decision(
         "hint", project.project_id, ask, pd._short(legacy.next_action, 60), f"{ask}：认",
-        "老驾驶舱后台 snapshot()", None,
+        "老驾驶舱后台给这个项目的状态卡", None,
     )
 
 
