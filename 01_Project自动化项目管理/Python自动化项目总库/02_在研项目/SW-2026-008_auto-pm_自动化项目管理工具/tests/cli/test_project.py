@@ -311,6 +311,33 @@ def test_project_create_station_option_generates_one_instance_db_per_station(
         assert f'"DB_1001_{station}_DJ2026023"(io_stStation := "GlobalVars_DJ2026023".st{station});' in ob
 
 
+def test_project_create_records_the_station_list_and_template_update_passes_it_back(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TD-SW008-525（D-260）：工位清单写进 .copier-answers.yml，template update 读回来传给 copier，不退回只有 Station1。"""
+    import copier
+    import yaml
+
+    from auto_pm.application.core.template_service import TemplateService
+
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
+    dest_dir = tmp_path / "0100_项目"
+    args = ["-w", str(tmp_path), "project", "create", "--stack", "plc", "--id", "DJ-2026-025", "--name", "记工位",
+            "--dest-dir", str(dest_dir), "--station", "StationA", "--station", "StationB", "--station", "StationC"]
+    result = cli_runner.invoke(cli, args, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+
+    project_dir = dest_dir / "DJ-2026-025_记工位"
+    answers = yaml.safe_load((project_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert answers["station_instances"] == ["StationA", "StationB", "StationC"]
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(copier, "run_update", lambda **kwargs: seen.update(kwargs))
+    TemplateService(str(tmp_path)).update_template(str(project_dir))
+    assert seen["data"] == {"station_instances": ["StationA", "StationB", "StationC"]}
+
+
 @pytest.mark.parametrize(
     ("stations", "message"),
     [
