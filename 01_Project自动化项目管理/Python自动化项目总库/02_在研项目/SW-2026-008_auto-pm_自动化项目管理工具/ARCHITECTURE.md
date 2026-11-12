@@ -130,6 +130,8 @@ launcher/launch.py   指针 → 校验 manifest 登记 → 逐文件核 SHA-256 
 | ③ GitHub 层 | `main` 只走 PR；`pr-gate`（改动不超出“可改范围”）、`safety-gate`（安全区须用户本人签字）、`rules-gate`（改规则文件须用户本人评论 `规则批准 <头提交号>`，`reviews/tools/rules_approval_check.py`）、`reviews-tools-ci`；`sw008-ci`、`plc-ci` 等按路径触发 | 硬。**2026-11-02 用接口核过规则集**：`MainPR_Gate` 必过 `gate`、`safety-zone`、`reviews-tools`；`main-protect` 禁删除、禁强推、必须走 PR、评审对话须解决、只许 Merge commit，**要求的批准人数是 0、不要求 code owner 审**，两条的绕过名单都是空。因此一个 Write 账号只要必过检查绿就能合并；`rules-gate` 就是补这个洞的，它是否已设为必过：**未核实**（11-02 核时必过列表里还没有） |
 | ④ 人 | 独立审计（`reviews/tools/audit_pr.py` 加清单）、用户验收、用户亲口同意 | 取决于人在不在 |
 
+这些护栏为什么要加：用户的原话见 `04_监控/01_变更管理/02_变更记录/03_需求变更记录.md` 的 RC-001（2026-11-12）。
+
 电气类比的另一面：命令层像 PLC 程序里的联锁，只管经过这个程序的动作；Git 钩子像现场的急停按钮，谁都可能不按；GitHub 层像上游设备的硬接线联锁。
 
 ## 7. 入口：命令行、界面与 CI
