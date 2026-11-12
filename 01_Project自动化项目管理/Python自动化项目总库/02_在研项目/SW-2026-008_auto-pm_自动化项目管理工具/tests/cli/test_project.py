@@ -433,10 +433,10 @@ def test_project_create_python_falls_back_when_research_directory_is_absent(
     ).exists()
 
 
-def test_project_create_plc_initializes_dynamic_spec_snapshot(
+def test_project_create_plc_no_longer_writes_spec_snapshot(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PLC Copier 项目在首次检查前即携带当前规范快照。"""
+    """建 PLC 项目不再往 PM_SESSION 里写规范快照（TD-SW008-583；读快照的检查已退役，TD-561），首检照样无告警。"""
     monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
     _write_spec_registry(tmp_path)
     _create_syslib(tmp_path)
@@ -467,10 +467,7 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
         / "PM_SESSION_DJ-2026-023.md"
     )
     assert result.exit_code == 0
-    assert parse_spec_snapshot(str(pm_session)) == {
-        "LSP-906": "V2.0.0",
-        "LSP-907": "V1.2.1",
-    }
+    assert parse_spec_snapshot(str(pm_session)) == {}
     check_result = cli_runner.invoke(
         cli,
         # 本测试只看规范快照：不跑 Siemens 语言服务这一层（它在没有插件的机器上会多出一条“未验证”警告）
@@ -482,6 +479,29 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
     assert check_payload["warn_count"] == 0
     # Spec Snapshot 检查已退役（TD-SW008-561）
     assert [item for item in check_payload["items"] if item["item"] == "Spec Snapshot"] == []
+
+
+def test_project_create_shared_library_with_a_library_name_unlike_the_id(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """共享库模式、库名和项目号不同（TD-SW008-583）：以前找 PM_SESSION_<项目号>.md 找不到、退出码 1，现在退出码 0。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
+    _create_syslib(tmp_path)
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "project", "create", "--stack", "plc", "--mode", "shared-library",
+            "--id", "DJ-2026-954", "--name", "验收库", "--library-name", "AccLib",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    created = [p for p in (tmp_path / "0100_PLC自动化").iterdir() if p.name.startswith("DJ-2026-954")]
+    assert len(created) == 1
+    assert not (created[0] / "PM_SESSION_DJ-2026-954.md").exists()  # 原来就找它：共享库模板只按库名生成
 
 
 def test_project_create_plc_requires_registry_before_generation(
