@@ -1,0 +1,140 @@
+# Copier 模板配置 - PLC 标准单机项目（LSP-907）
+# 用于生成符合 LSP-907 §3.1 规范的 PLC 标准项目骨架
+
+project_id:
+  type: str
+  help: 项目编号（如 DJ-2026-010）
+  validator: >-
+    {% if not (project_id | regex_search('^[A-Z]+-\\d{4}-\\d{3}$')) %}
+    project_id 必须匹配格式: 字母-年份-序号（如 DJ-2026-010）
+    {% endif %}
+
+project_name:
+  type: str
+  help: 项目名称（如 边框缓存机）
+
+description:
+  type: str
+  help: 项目描述
+  default: "{{ project_name }}"
+
+version:
+  type: str
+  help: 项目初始版本
+  default: "V1.0.0"
+
+# 块名项目标记（LSP-905 §3.4-2、§4.11-4）：生成的 FB、DB、OB 块名都带它，导入用户已有 TIA 项目时不覆盖同名块。
+# 由项目编号去掉横线得到（DJ-2026-011 → DJ2026011），只在这一处算；文件名、文档名不带。
+project_tag:
+  type: str
+  default: "{{ project_id | replace('-', '') }}"
+  when: false
+
+# UDT（ST_ 类型）名后缀，只在这一处控制。LSP-905 §3.3/§3.4 规定 UDT 名“不带数字”，所以默认空（不带标记）；
+# 要让 UDT 也带项目标记，把默认值改成 "_{{ project_tag }}" 即可，模板里所有 ST_ 声明和引用一起变。
+udt_suffix:
+  type: str
+  default: ""
+  when: false
+
+# 工位实例清单（CHG-SCPT-2026-635）：每个工位共用 FB_1001_Station1，各有一个背景 DB、一个 GlobalVars 成员、一行 OB123 调用。
+# 由 `project create --station <名字>`（可重复）传入；不传就是只有 Station1，生成结果和以前一样。最多 8 个（槽位文件只有 8 个）。
+# 名字：英文字母开头，只用字母和数字，不能重复（它会出现在块名、文件名和变量名 st<名字> 里）。
+station_instances:
+  type: yaml
+  default: "[Station1]"
+  when: false
+  validator: >-
+    {% if station_instances is string or station_instances is mapping or station_instances | length < 1 or station_instances | length > 8 %}
+    station_instances 必须是 1～8 个工位名的列表
+    {% elif station_instances | unique | list | length != station_instances | length %}
+    station_instances 里有重复的工位名
+    {% else %}{% for name in station_instances %}{% if not (name is string and name | regex_search('^[A-Za-z][A-Za-z0-9]*$')) %}
+    工位名 {{ name }} 不合规：要英文字母开头，只用字母和数字
+    {% endif %}{% endfor %}{% endif %}
+
+# 背景 DB 槽位文件名（一个背景 DB 一个文件）：工位 FB 文件夹里的 {{ db_slot_N }}.jinja 用它们当文件名，
+# 清单不够长时为空，copier 就跳过那个文件。判断写在这里而不写进文件名，是为了让文件名短：
+# 判断写进文件名时完整路径在 Windows 上会超过 260 个字符。DB 内容只有一份：_includes/DB_1001_Station.scl.jinja。
+db_slot_1:
+  type: str
+  default: "DB_1001_{{ station_instances[0] }}.scl"
+  when: false
+db_slot_2:
+  type: str
+  default: "{% if station_instances[1] is defined %}DB_1001_{{ station_instances[1] }}.scl{% endif %}"
+  when: false
+db_slot_3:
+  type: str
+  default: "{% if station_instances[2] is defined %}DB_1001_{{ station_instances[2] }}.scl{% endif %}"
+  when: false
+db_slot_4:
+  type: str
+  default: "{% if station_instances[3] is defined %}DB_1001_{{ station_instances[3] }}.scl{% endif %}"
+  when: false
+db_slot_5:
+  type: str
+  default: "{% if station_instances[4] is defined %}DB_1001_{{ station_instances[4] }}.scl{% endif %}"
+  when: false
+db_slot_6:
+  type: str
+  default: "{% if station_instances[5] is defined %}DB_1001_{{ station_instances[5] }}.scl{% endif %}"
+  when: false
+db_slot_7:
+  type: str
+  default: "{% if station_instances[6] is defined %}DB_1001_{{ station_instances[6] }}.scl{% endif %}"
+  when: false
+db_slot_8:
+  type: str
+  default: "{% if station_instances[7] is defined %}DB_1001_{{ station_instances[7] }}.scl{% endif %}"
+  when: false
+
+# V0.2.1-P1-3: 记录技术栈元数据（非交互，由 CLI 传入）
+stack:
+  type: str
+  default: "plc"
+  when: false
+
+mode:
+  type: str
+  default: "standard-project"
+  when: false
+
+business_line:
+  type: str
+  default: ""
+  when: false
+
+project_type:
+  type: str
+  default: "single_machine"
+  when: false
+
+equipment_type:
+  type: str
+  default: ""
+  when: false
+
+plc_vendor:
+  type: str
+  default: ""
+  when: false
+
+plc_model:
+  type: str
+  default: ""
+  when: false
+
+# 模板内容在 template/ 子目录
+_subdirectory: template
+
+# 排除以下文件不渲染
+_exclude:
+  - "copier.yml"
+  - "README.md"
+  # M3-PRDLAYOUT: 根 PRD/ 不再生成（标准位置是 02_PLC程序/PLC_ST/00_程序方案/）；
+  # 源文件在卡工具包能删除路径之前留在模板里作为不用的死文件，由 _exclude 挡住
+  - "/PRD"
+
+# 生成 .copier-answers.yml 记录答案
+_answers_file: .copier-answers.yml
