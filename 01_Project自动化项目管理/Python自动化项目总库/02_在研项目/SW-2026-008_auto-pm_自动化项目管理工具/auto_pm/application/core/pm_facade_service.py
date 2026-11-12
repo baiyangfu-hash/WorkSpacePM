@@ -52,6 +52,10 @@ from auto_pm.application.core.mission_admission import (
 from auto_pm.application.core.mission_service import MissionService, MissionServiceError
 from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
 from auto_pm.application.core.work_registry_service import WorkRegistryError, WorkRegistryService
+from auto_pm.application.core.workspace_context_service import (
+    WorkspaceContextError,
+    WorkspaceContextService,
+)
 from auto_pm.contracts.acceptance_command import shell_fragility_problem
 from auto_pm.contracts.continuity import DEFAULT_LEASE_SECONDS, RunState, WorkItem, WorkState
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
@@ -361,7 +365,7 @@ class PmFacadeService:
         draft = self.create_planning_draft(intent)
         try:
             return self._store.bind_planning_draft_specs(
-                draft.request_id, self._effective_spec_sources()
+                draft.request_id, self._effective_spec_sources(self._spec_domains(intent.subject_project_id))
             )
         except ContinuityStoreError as error:
             raise PmFacadeError(str(error)) from error
@@ -1511,7 +1515,22 @@ class PmFacadeService:
         ):
             raise PmFacadeError("既有 Decision 与 PlanningScopeCard 批准事实不一致")
 
-    def _effective_spec_sources(self) -> tuple[tuple[str, str, str], ...]:
+    def _spec_domains(self, project_id: str) -> frozenset[str]:
+        """范围卡要挂哪几个领域的规范（TD-SW008-568）：Python 项目只挂 python，PLC 项目只挂 plc。
+
+        技术栈读不出来（登记表里没有、栈是 unknown）时两个领域都挂，和以前一样，宁多勿漏。
+        """
+        try:
+            stack = WorkspaceContextService(str(self._workspace_root)).resolve(
+                project_id=project_id, start_path=self._workspace_root
+            ).subject.stack.lower()
+        except WorkspaceContextError:
+            stack = "unknown"
+        return frozenset({stack}) if stack in {"python", "plc"} else frozenset({"python", "plc"})
+
+    def _effective_spec_sources(
+        self, domains: frozenset[str] = frozenset({"python", "plc"})
+    ) -> tuple[tuple[str, str, str], ...]:
         registry_path = self._workspace_root / "00_Obsidian_Base全局规范文件仓库" / "spec_registry.json"
         try:
             payload = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -1532,7 +1551,7 @@ class PmFacadeService:
             entry = cast(dict[str, Any], raw)
             domain = entry.get("domain")
             lifecycle = entry.get("lifecycle")
-            if domain not in {"python", "plc"} or lifecycle not in {"stable", "active"}:
+            if domain not in domains or lifecycle not in {"stable", "active"}:
                 continue
             canonical_path = entry.get("canonical_path")
             version = entry.get("version")
@@ -1549,7 +1568,7 @@ class PmFacadeService:
                 raise PmFacadeError(f"规范文件不存在: {spec_id} -> {canonical_path}")
             covered_domains.add(domain)
             sources.append((spec_id, canonical_path, version))
-        missing = {"python", "plc"} - covered_domains
+        missing = set(domains) - covered_domains
         if missing:
             raise PmFacadeError(f"规范注册表缺少有效领域: {', '.join(sorted(missing))}")
         return tuple(sorted(sources))
