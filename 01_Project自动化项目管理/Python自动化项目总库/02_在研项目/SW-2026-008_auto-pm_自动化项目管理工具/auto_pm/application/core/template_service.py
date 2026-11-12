@@ -163,16 +163,8 @@ class TemplateService:
 
         log.info("Copier update: project=%s, overwrite=%s", project_path, overwrite)
 
-        # 工位清单是 `when: false` 的题，copier 更新时不读旧答案、会退回默认的 [Station1]，
-        # 所以从答案文件里读回来显式传（TD-SW008-525，D-260）。老工程的答案文件里没有，就不传。
-        data: dict[str, Any] = {}
-        stations = self._read_answers(project_path).get("station_instances")
-        if isinstance(stations, list) and stations:
-            data["station_instances"] = stations
-
         copier.run_update(
             dst_path=project_path,
-            data=data,
             defaults=True,
             overwrite=overwrite,
             unsafe=True,
@@ -180,20 +172,6 @@ class TemplateService:
 
         log.info("模板更新完成: %s", project_path)
         return {"project_path": project_path, "updated": True}
-
-    @staticmethod
-    def _read_answers(project_path: str) -> dict[str, Any]:
-        """读 .copier-answers.yml；读不了或不是映射时返回空字典。"""
-        import yaml
-
-        answers_path = os.path.join(project_path, ".copier-answers.yml")
-        try:
-            with open(answers_path, encoding="utf-8") as f:
-                answers = yaml.safe_load(f)
-        except (OSError, yaml.YAMLError) as e:
-            log.warning("读取 .copier-answers.yml 失败: %s: %s", project_path, e)
-            return {}
-        return answers if isinstance(answers, dict) else {}
 
     def _read_template_info(self, project_path: str) -> dict[str, Any]:
         """从 .copier-answers.yml 读取模板信息（名称/版本/上次更新时间）"""

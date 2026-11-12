@@ -120,15 +120,3 @@ class TestUpdateTemplate:
 
         with pytest.raises(FileNotFoundError, match="缺少 .copier-answers.yml"):
             svc.update_template(str(tmp_path))
-
-    def test_update_template_without_a_station_list_passes_no_stations(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """TD-SW008-525：老工程答案文件里没有工位清单，就不传，不回填。"""
-        import copier
-
-        (tmp_path / ".copier-answers.yml").write_text("project_id: DJ-2026-005\nstack: plc\n", encoding="utf-8")
-        seen: dict[str, object] = {}
-        monkeypatch.setattr(copier, "run_update", lambda **kwargs: seen.update(kwargs))
-        TemplateService(str(tmp_path)).update_template(str(tmp_path))
-        assert seen["data"] == {}
