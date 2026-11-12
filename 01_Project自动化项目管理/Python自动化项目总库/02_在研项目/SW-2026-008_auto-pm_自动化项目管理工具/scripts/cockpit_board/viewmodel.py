@@ -368,6 +368,9 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             "工作项卡住": ("risk", "主执行"),
         }.get(a.what, ("hint", "主执行"))
         title = {"执行记录没结账": "账本遗留", "收口停在半路": "账本对不上"}.get(a.what, a.what)
+        if a.what == "收口停在半路" and a.mission_state == "CLOSED":
+            # D-329：卡已关、收口没走完，就是“说完成但机器没过”那一格的事；只在那一格计，不再算进“账本对不上”
+            title = "说完成但机器没过"
         if closed:
             issues.append(Issue("hint", pid, title, a.detail, who, OLD_BASIS, a.since))
         else:
@@ -805,17 +808,21 @@ def checks_of(
         for m in p.missions
         if m.state == "CLOSED" and m.closure_state and m.closure_state != "COMPLETED"
     )
+    unverified_note = (
+        "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出。"
+        "还开着的卡收口停在半路的，算在“账本对不上”"
+    )
     return [
         gate,
         Check("scope", "越界改动", "unchecked", note="越界检查（pr-scope-check）还没合进 main"),
         Check(
-            "unverified", "说完成但机器没过", "number", unverified, "张",
-            "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出",
+            "unverified", "说完成但机器没过", "number", unverified, "张", unverified_note,
         ),
         safety,
         Check(
             "mismatch", "账本对不上", "number", mismatch, "条",
-            "收口单与卡状态、工作项 BLOCKED；旧账＝项目下已没有开着的卡时留下的，分开计、不算风险",
+            "收口单与卡状态、工作项 BLOCKED；已关的卡收口没走完的算在“说完成但机器没过”，这里不重复计；"
+            "旧账＝项目下已没有开着的卡时留下的，分开计、不算风险",
             soft=bool(mismatch_old), split=f"在干 {mismatch}，旧账 {mismatch_old}" if mismatch_old else "",
         ),
         Check(

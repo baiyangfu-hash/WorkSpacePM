@@ -974,3 +974,24 @@ def test_b1_06_an_open_project_with_a_blocked_work_item_is_still_at_risk(tmp_pat
     assert (card.health, card.closed) == ("risk", False)
     mismatch = next(k for k in home.checks if k.key == "mismatch")
     assert (mismatch.value, mismatch.text) == (1, "1 条")
+
+
+def _closure(mission: str, state: str, days_ago: float) -> str:
+    return (f"INSERT INTO closure_items VALUES ('CLOSURE-{mission}', '{mission}', 'CHG-B1-{mission}', '{state}', "
+            f"'{(NOW - timedelta(days=days_ago)).isoformat()}')")
+
+
+@pytest.mark.parametrize("with_open_card", [False, True])
+def test_b1_07_a_closed_card_with_an_unfinished_closure_counts_in_one_cell_only(tmp_path: Path, with_open_card: bool) -> None:
+    """D-329（TD-SW008-594）：已关的卡收口停在半路，只在“说完成但机器没过”计 1，“账本对不上”不重复计；两格说明互相指到。"""
+    missions = [("DJ-2026-101", "CLOSED", "关了但收口没走完", 5)]
+    if with_open_card:
+        missions.append(("DJ-2026-101", "ACTIVE", "在干的一张", 0.01))
+    board = _edited_board(tmp_path, missions, _closure("MISSION-0", "PREPARED", 5))
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    checks = {k.key: k for k in home.checks}
+    assert (checks["unverified"].value, checks["mismatch"].value) == (1, 0)
+    assert "说完成但机器没过" in checks["mismatch"].note and "账本对不上" in checks["unverified"].note
+    titles = [i.title for i in _card(home).issues if "CLOSURE-MISSION-0" in i.detail]
+    assert titles == ["说完成但机器没过"]
+
