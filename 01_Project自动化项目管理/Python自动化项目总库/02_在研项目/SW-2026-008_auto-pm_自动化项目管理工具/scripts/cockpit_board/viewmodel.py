@@ -279,6 +279,14 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
                     "账本里这张卡的状态是“卡住”", m.updated_at, m.example,
                 )
             )
+        elif m.state == "DRAFT" and not m.work_id:
+            # D-328：没有工作项的草稿卡不是在等你拍板，多半是没开起来的陈卡；只提示，谁来办写主执行，不进“要你出手”
+            issues.append(
+                Issue(
+                    "hint", pid, "草稿，没有工作项", pd._short(m.title, 60), "主执行（补工作项或作废）",
+                    "账本里这张卡是草稿，下面没有工作项", m.updated_at, m.example,
+                )
+            )
         elif m.column == "等你":
             ask = pd.WAITING_ASK.get(m.state, "看一眼")
             if pd._days(now, m.updated_at) > pd.WAITING_RED_DAYS:

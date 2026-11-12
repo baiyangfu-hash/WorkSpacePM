@@ -119,6 +119,9 @@ class MissionInfo:
     # 搁着的卡才有：放下的原因和断点（干到哪、下一步做什么），读自账本 run_parks + checkpoints。
     park_reason: str = ""
     park_summary: str = ""
+    # 卡下面的工作项（账本 mission_items.root_work_id）和它的状态；没有工作项时两个都是空串（D-327、D-328）。
+    work_id: str = ""
+    work_state: str = ""
 
     @property
     def column(self) -> str:
@@ -158,6 +161,7 @@ class Attention:
     what: str
     since: datetime | None
     detail: str
+    mission_state: str = ""  # 收口停在半路时：这条收口所属卡的状态（CLOSED 的已算进“说完成但机器没过”，D-329）
 
 
 @dataclass
@@ -452,7 +456,13 @@ def read_ledger(
             updated_at=parse_time(row["updated_at"]),
             change_id=change_id,
             closure_state=closure_state,
+            work_id=row["root_work_id"] or "",
         )
+        if mission.work_id and "work_items" in tables:
+            work = connection.execute(
+                "SELECT state FROM work_items WHERE work_id = ?", (mission.work_id,)
+            ).fetchone()
+            mission.work_state = (work["state"] or "") if work else ""
         if row["root_work_id"] and "run_items" in tables:
             mission.run = _latest_run(connection, row["root_work_id"], tables)
         if mission.state == "PARKED":
@@ -484,7 +494,7 @@ def read_ledger(
                 )
     if "closure_items" in tables:
         for row in connection.execute(
-            "SELECT c.closure_id, c.change_id, c.state, c.updated_at, m.subject_project_id "
+            "SELECT c.closure_id, c.change_id, c.state, c.updated_at, m.subject_project_id, m.state AS mission_state "
             "FROM closure_items c JOIN mission_items m ON m.mission_id = c.mission_id "
             "WHERE c.state != 'COMPLETED'"
         ):
@@ -498,6 +508,7 @@ def read_ledger(
                         detail="{}（{}，状态 {}）".format(
                             row["closure_id"], row["change_id"], row["state"]
                         ),
+                        mission_state=row["mission_state"] or "",
                     )
                 )
     if "work_items" in tables:

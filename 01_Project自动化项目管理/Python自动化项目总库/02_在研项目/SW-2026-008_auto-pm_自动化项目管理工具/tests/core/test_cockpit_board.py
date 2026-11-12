@@ -863,3 +863,21 @@ def test_b1_09_issue_basis_is_plain_language_without_ledger_field_names(tmp_path
     texts = [i.basis for c in home.hot + home.rest for i in c.issues] + [d.basis for d in home.decisions]
     assert len(texts) >= 6
     assert [t for t in texts if any(name in t for name in FIELD_NAMES)] == []
+
+
+def test_b1_01_a_draft_without_work_is_not_waiting_for_you(tmp_path: Path) -> None:
+    """D-328（TD-SW008-593）：没有工作项的草稿卡不进“等你超过 N 天”，也不算进“要你出手”。"""
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "没开起来的草稿", 6)],
+                          "UPDATE mission_items SET root_work_id = NULL")
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    assert not any(i.title.startswith("等你超过") for i in card.issues)
+    draft = next(i for i in card.issues if "没有工作项" in i.title)
+    assert draft.sev == "hint" and "草稿，没有工作项" in draft.title and not draft.who.startswith(vm.USER)
+    assert not any("没开起来的草稿" in d.why for d in home.decisions)
+
+
+def test_b1_02_a_draft_with_work_still_waits_for_you(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "DRAFT", "真等你的草稿", 6)])
+    card = _card(vm.home_vm(board, OFFSET, online=None, use_git=False))
+    assert any(i.title.startswith(f"等你超过 {pd.WAITING_RED_DAYS} 天") and i.sev == "block" for i in card.issues)
