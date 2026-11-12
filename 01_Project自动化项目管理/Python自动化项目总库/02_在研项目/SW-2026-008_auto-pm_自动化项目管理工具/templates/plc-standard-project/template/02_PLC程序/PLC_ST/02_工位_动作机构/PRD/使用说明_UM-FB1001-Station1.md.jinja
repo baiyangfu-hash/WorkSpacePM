@@ -12,7 +12,7 @@
 
 ## 1. 实例化与调用方法
 
-每个工位一个背景数据块，和本 FB 放在同一个文件夹 `02_工位1_动作机构/DB_1001_<工位名>.scl`（不放进 `GlobalVars_{{ project_tag }}`，LSP-905 §4.11-1）。所有工位共用本 FB 和结构体类型 `ST_1001_Station1{{ udt_suffix }}`；工位清单在建项目时由 `project create --station <名字>`（可重复，最多 8 个）给出，不给就是只有 Station1。以 Station1 为例：
+每个工位一个背景数据块，和本 FB 放在同一个文件夹 `02_工位_动作机构/DB_1001_<工位名>.scl`（不放进 `GlobalVars_{{ project_tag }}`，LSP-905 §4.11-1）。所有工位共用本 FB 和结构体类型 `ST_1001_Station1{{ udt_suffix }}`；工位清单在建项目时由 `project create --station <名字>`（可重复，最多 8 个）给出，不给就是只有 Station1。以 Station1 为例：
 ```scl
 DATA_BLOCK "DB_1001_Station1_{{ project_tag }}"
 "FB_1001_Station1_{{ project_tag }}"
@@ -27,7 +27,7 @@ END_DATA_BLOCK
 {%- endfor %}
 ```
 
-**工位内多个同类设备用多重实例**（LSP-905 §4.11-1）：例如一个工位里有 4 个同样的气缸，把气缸 FB 的实例声明在本 FB 的静态区 `VAR` 里（如 `fbCylinder1 : FB_1011_CylinderControl;`），在本 FB 里用 `#fbCylinder1(...)` 调用。它们的数据存在本工位的背景 DB 里，不再单独出 DB。
+**工位内多个同类设备用多重实例**（LSP-905 §4.11-1）：例如一个工位里有 4 个同样的气缸，把气缸 FB 的实例声明在本 FB 的静态区 `VAR` 里（如 `fbCylinder1 : <你的气缸FB名>;`，这个气缸 FB 模板里没有，要自己加），在本 FB 里用 `#fbCylinder1(...)` 调用。它们的数据存在本工位的背景 DB 里，不再单独出 DB。
 
 ---
 

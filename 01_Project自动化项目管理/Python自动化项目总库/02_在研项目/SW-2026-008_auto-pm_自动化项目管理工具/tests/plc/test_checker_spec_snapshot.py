@@ -1,11 +1,8 @@
-"""PlcChecker Spec Snapshot 检查项单元测试（V2.0.3 规范漂移检测）
+"""PlcChecker 的 Spec Snapshot 检查项已退役（TD-SW008-561）
 
-覆盖场景：
-- 无漂移（PASS）
-- 主版本漂移（FAIL）
-- 次版本漂移（WARN）
-- Spec Snapshot 表格缺失（WARN）
-- spec_registry.json 缺失（WARN）
+这一项读 PM_SESSION 里的 Spec Snapshot 表（PM_SESSION 已于 2026-10-10 退役），老工程永远报失败。
+原来的五个场景（无漂移、主版本漂移、次版本漂移、快照表缺失、规范注册表缺失）都保留，改成断言：
+检查器不再出这一项，也不会因为快照漂移让检查失败。
 """
 
 from __future__ import annotations
@@ -88,145 +85,65 @@ def _write_registry(tmp_path: Path, specs: dict[str, Any]) -> None:
     )
 
 
-def _get_spec_snapshot_item(result: Any) -> CheckItem:
-    """从 CheckResult 中提取 Spec Snapshot 检查项"""
-    items = [i for i in result.items if i.item == "Spec Snapshot"]
-    assert items, "未找到 Spec Snapshot 检查项"
-    return cast(CheckItem, items[0])
+def _assert_retired(result: Any) -> None:
+    """检查结果里没有 Spec Snapshot 这一项，也没有任何一项的说明在讲快照漂移。"""
+    assert [i.item for i in result.items if i.item == "Spec Snapshot"] == []
+    assert not any("漂移" in cast(CheckItem, i).message for i in result.items)
+
+
+def _registry_three(v906: str = "V1.0.0", v907: str = "V1.0.0") -> dict[str, Any]:
+    return {
+        "LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"},
+        "LSP-906": {"version": v906, "title": "PLC编程错误预防规则"},
+        "LSP-907": {"version": v907, "title": "PLC项目配置规范"},
+    }
 
 
 # ── 测试用例 ──────────────────────────────────────────
 
 
 class TestSpecSnapshotCheck:
-    """PlcChecker Spec Snapshot 检查项测试"""
+    """Spec Snapshot 检查项退役：五个老场景都不再出这一项"""
+
+    def _session(self, project_id: str) -> str:
+        return _PM_SESSION_TEMPLATE.format(project_id=project_id, v905="V1.0.2", v906="V1.0.0", v907="V1.0.0")
 
     def test_spec_snapshot_no_drift(self, tmp_path: Path) -> None:
-        """无漂移：Spec Snapshot 与 registry 一致 → PASS"""
-        project_id = "DJ-2026-001"
-        pm_session = _PM_SESSION_TEMPLATE.format(
-            project_id=project_id,
-            v905="V1.0.2",
-            v906="V1.0.0",
-            v907="V1.0.0",
-        )
-        project_dir = _create_project(tmp_path, project_id, pm_session)
-
-        _write_registry(
-            tmp_path,
-            {
-                "LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"},
-                "LSP-906": {"version": "V1.0.0", "title": "PLC编程错误预防规则"},
-                "LSP-907": {"version": "V1.0.0", "title": "PLC项目配置规范"},
-            },
-        )
-
-        checker = PlcChecker(str(tmp_path))
-        result = checker.check_project(str(project_dir))
-
-        item = _get_spec_snapshot_item(result)
-        assert item.status == "pass"
-        assert "一致" in item.message
+        """无漂移：以前 PASS，现在不出这一项"""
+        project_dir = _create_project(tmp_path, "DJ-2026-001", self._session("DJ-2026-001"))
+        _write_registry(tmp_path, _registry_three())
+        _assert_retired(PlcChecker(str(tmp_path)).check_project(str(project_dir)))
 
     def test_spec_snapshot_major_drift(self, tmp_path: Path) -> None:
-        """主版本漂移：LSP-906 V1.0.0 → V2.0.0 → FAIL"""
-        project_id = "DJ-2026-002"
-        pm_session = _PM_SESSION_TEMPLATE.format(
-            project_id=project_id,
-            v905="V1.0.2",
-            v906="V1.0.0",
-            v907="V1.0.0",
-        )
-        project_dir = _create_project(tmp_path, project_id, pm_session)
-
-        _write_registry(
-            tmp_path,
-            {
-                "LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"},
-                "LSP-906": {"version": "V2.0.0", "title": "PLC编程错误预防规则"},
-                "LSP-907": {"version": "V1.0.0", "title": "PLC项目配置规范"},
-            },
-        )
-
-        checker = PlcChecker(str(tmp_path))
-        result = checker.check_project(str(project_dir))
-
-        item = _get_spec_snapshot_item(result)
-        assert item.status == "fail"
-        assert "LSP-906" in item.message
-        assert "V1.0.0" in item.message
-        assert "V2.0.0" in item.message
-        assert "主版本漂移" in item.message
+        """主版本漂移：以前 FAIL（005、011、SysLib 永远红在这里），现在不出这一项、不因它失败"""
+        project_dir = _create_project(tmp_path, "DJ-2026-002", self._session("DJ-2026-002"))
+        _write_registry(tmp_path, _registry_three(v906="V2.0.0"))
+        result = PlcChecker(str(tmp_path)).check_project(str(project_dir))
+        _assert_retired(result)
+        assert not any(i.status == "fail" and "LSP-906" in i.message for i in result.items)
 
     def test_spec_snapshot_minor_drift(self, tmp_path: Path) -> None:
-        """次版本漂移：LSP-907 V1.0.0 → V1.2.1 → WARN"""
-        project_id = "DJ-2026-003"
-        pm_session = _PM_SESSION_TEMPLATE.format(
-            project_id=project_id,
-            v905="V1.0.2",
-            v906="V1.0.0",
-            v907="V1.0.0",
-        )
-        project_dir = _create_project(tmp_path, project_id, pm_session)
-
-        _write_registry(
-            tmp_path,
-            {
-                "LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"},
-                "LSP-906": {"version": "V1.0.0", "title": "PLC编程错误预防规则"},
-                "LSP-907": {"version": "V1.2.1", "title": "PLC项目配置规范"},
-            },
-        )
-
-        checker = PlcChecker(str(tmp_path))
-        result = checker.check_project(str(project_dir))
-
-        item = _get_spec_snapshot_item(result)
-        assert item.status == "warn"
-        assert "LSP-907" in item.message
-        assert "V1.0.0" in item.message
-        assert "V1.2.1" in item.message
-        assert "次版本漂移" in item.message
+        """次版本漂移：以前 WARN，现在不出这一项"""
+        project_dir = _create_project(tmp_path, "DJ-2026-003", self._session("DJ-2026-003"))
+        _write_registry(tmp_path, _registry_three(v907="V1.2.1"))
+        _assert_retired(PlcChecker(str(tmp_path)).check_project(str(project_dir)))
 
     def test_spec_snapshot_missing_table(self, tmp_path: Path) -> None:
-        """Spec Snapshot 表格缺失 → WARN"""
-        project_id = "DJ-2026-004"
-        pm_session = _PM_SESSION_NO_TABLE.format(project_id=project_id)
-        project_dir = _create_project(tmp_path, project_id, pm_session)
-
-        _write_registry(
-            tmp_path,
-            {
-                "LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"},
-            },
-        )
-
-        checker = PlcChecker(str(tmp_path))
-        result = checker.check_project(str(project_dir))
-
-        item = _get_spec_snapshot_item(result)
-        assert item.status == "warn"
-        assert "缺少" in item.message
+        """快照表缺失：以前 WARN，现在不出这一项"""
+        project_dir = _create_project(tmp_path, "DJ-2026-004", _PM_SESSION_NO_TABLE.format(project_id="DJ-2026-004"))
+        _write_registry(tmp_path, {"LSP-905": {"version": "V1.0.2", "title": "SCL编程规范"}})
+        _assert_retired(PlcChecker(str(tmp_path)).check_project(str(project_dir)))
 
     def test_spec_snapshot_registry_missing(self, tmp_path: Path) -> None:
-        """spec_registry.json 缺失 → WARN"""
-        project_id = "DJ-2026-005"
-        pm_session = _PM_SESSION_TEMPLATE.format(
-            project_id=project_id,
-            v905="V1.0.2",
-            v906="V1.0.0",
-            v907="V1.0.0",
-        )
-        project_dir = _create_project(tmp_path, project_id, pm_session)
+        """规范注册表缺失：以前 WARN，现在不出这一项"""
+        project_dir = _create_project(tmp_path, "DJ-2026-005", self._session("DJ-2026-005"))
+        result = PlcChecker(str(tmp_path)).check_project(str(project_dir))
+        _assert_retired(result)
+        assert not any("spec_registry.json" in i.message for i in result.items)
 
-        # 不创建 spec_registry.json
-
-        checker = PlcChecker(str(tmp_path))
-        result = checker.check_project(str(project_dir))
-
-        item = _get_spec_snapshot_item(result)
-        assert item.status == "warn"
-        assert "spec_registry.json" in item.message
+    def test_the_check_list_no_longer_offers_the_item(self) -> None:
+        """plc check --list 也不再列这一项"""
+        assert all(item["item"] != "Spec Snapshot" for item in PlcChecker.CHECK_ITEMS)
 
     def test_compatible_stage_dirs_do_not_fail_duplicate_check(self, tmp_path: Path) -> None:
         """01_启动 + 01_需求与设计 兼容共存时不应触发 fail"""

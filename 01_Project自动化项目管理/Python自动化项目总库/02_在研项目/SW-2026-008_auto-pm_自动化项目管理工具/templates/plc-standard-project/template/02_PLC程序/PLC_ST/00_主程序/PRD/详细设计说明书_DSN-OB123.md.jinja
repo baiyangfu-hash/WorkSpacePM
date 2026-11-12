@@ -1,0 +1,28 @@
+---
+spec_id: DES-801
+title: "{{ project_id }} OB123 主程序组织块详细设计说明书 (DSN)"
+version: "V1.0.0"
+status: "正式"
+created: "2026-11-12"
+domain: plc
+---
+
+# 详细设计说明书 (DSN) - {{ project_id }} {{ project_name }} OB123（块名 `{{ project_tag }}_Main`）
+
+## 1. 扫描周期内的执行顺序
+
+```
+OB123 每个扫描周期:
+  第1部分  外部设备交互   "DB_3001_ExternalInteraction_{{ project_tag }}"(io_stExternal := ...stExternal)
+{%- for station in station_instances %}
+  第2部分  工位 {{ station }}  "DB_1001_{{ station }}_{{ project_tag }}"(io_stStation := ...st{{ station }})
+{%- endfor %}
+  第3部分  公共报警       "DB_2001_CommonAlarm_{{ project_tag }}"(io_stGlobal := ...stGlobal)
+```
+
+先处理外部交互，让工位拿到本周期的上下游信号；工位动作之后再汇总报警，报警码和指示灯反映本周期的结果。
+
+## 2. 设计决定
+1. **只调度不做逻辑**：联锁、状态机都在各功能块里，OB123 只按顺序调用。
+2. **每个工位一行调用**：工位共用 `FB_1001_Station1_{{ project_tag }}`，每个工位一个背景数据块，工位清单在建项目时由 `project create --station` 给出。
+3. **结构体整块传递**：每个功能块只拿一个 VAR_IN_OUT 结构体，接口字段统一在《PLC变量定义文档_VAR》维护。

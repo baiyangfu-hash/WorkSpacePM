@@ -8,7 +8,8 @@
 PLC 项目结构检查器（LSP-907 907_项目配置规范_LSP）
 
 迁移自 SW-2026-005 的 PlcProjectService.check_project/check_workspace。
-检查项：.plc.json / PM_SESSION / PRD 文档 / 目录结构 / Spec Snapshot 规范漂移。
+检查项：.plc.json / PM_SESSION / PRD 文档 / 目录结构。
+“Spec Snapshot 规范漂移”一项已退役（TD-SW008-561）：它读已退役的 PM_SESSION 里的快照表，老工程永远报失败。
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import cast
 
 from auto_pm.core.paths import find_prd_dir
+from auto_pm.domain.models.plc import LANGUAGE_SERVICE_CHECK, LANGUAGE_SERVICE_TEST
 from auto_pm.domain.plc.language_service import LanguageService, evaluate_project
 from auto_pm.models.enums import ProjectType
 from auto_pm.plc.doc_consistency import analyze_project, consistency_items, required_document_items
@@ -39,13 +41,13 @@ from auto_pm.plc.models import (
 )
 from auto_pm.plc.scheme_doc import scheme_items
 from auto_pm.plc.scl_linter import SclLinter
-from auto_pm.plc.spec_snapshot import (
-    compare_versions,
-    load_spec_registry,
-    parse_spec_snapshot,
-)
 
 log = logging.getLogger(__name__)
+
+# 不依赖西门子插件的轻量语法层（TD-SW008-560 方案②）：控制结构闭合、本块变量已声明，命中算失败
+SCL_SYNTAX_ITEM = "SCL 轻量语法（不依赖插件）"
+# 块里读自己的输出引脚（TD-SW008-316）：第一阶段对所有工程一律只报警告，不改退出码
+SCL_OUTPUT_READBACK_ITEM = "SCL 读自己的输出引脚"
 
 # SysLib 关键文件清单（相对路径），用于 libraries 路径深度校验
 _KEY_FILES = [
@@ -136,13 +138,6 @@ class _LegacyPlcCheckerCore:
             "description": "检查 12 个标准目录是否存在（01_启动/00_项目管理、01_需求与设计、02_PLC程序、03_HMI设计、04_现场调试、04_驱动器与设备、05_测试与验证、06_文档与交付、07_技术支持、08_备件管理、09_项目总结、10_知识库）",
             "spec": "LSP-907 §3.1",
         },
-        {
-            "id": "10",
-            "category": "规范",
-            "item": "Spec Snapshot",
-            "description": "检查 PM_SESSION 中的 Spec Snapshot 表格与 spec_registry.json 是否一致，检测主版本/次版本/补丁版本漂移",
-            "spec": "V2.0.3",
-        },
     ]
 
     def __init__(self, workspace_root: str, language_service: LanguageService | None = None) -> None:
@@ -218,8 +213,7 @@ class _LegacyPlcCheckerCore:
         # 4.5. 检查目录唯一性与影子冗余冲突（DEV-001/DEV-003/LSP-907）
         self._check_naming_and_shadow_duplicates(project_path, result)
 
-        # 5. 检查 Spec Snapshot 规范漂移
-        self._check_spec_snapshot(project_path, result)
+        # 5. （已退役）Spec Snapshot 规范漂移：读已退役的 PM_SESSION，TD-SW008-561
 
         # 6. 检查 SCL 代码语法与命名规范 (LSP-905)
         self._check_scl_code_compliance(project_path, result)
@@ -255,25 +249,63 @@ class _LegacyPlcCheckerCore:
         total_errors = 0
         total_warnings = 0
         error_messages: list[str] = []
+        errors: list[str] = []  # 逐条明细“文件:行 说明”，文字和 --json 都全部列出（TD-SW008-573）
+        warnings: list[str] = []
+        syntax_hits: list[str] = []  # 不依赖插件的轻量语法层（TD-560 方案②）单独成一项，全部按“文件:行”列出
+        readback_hits: list[str] = []  # 读自己的输出引脚（TD-316）单独成一项，只报警告
+        syntax_files = 0
 
-        for scl_file in scl_files:
+        for scl_file in sorted(scl_files):
             report = SclLinter.lint_file(scl_file)
-            total_errors += report.errors_count
-            total_warnings += report.warnings_count
-            rel_name = os.path.relpath(scl_file, project_path)
+            rel_name = os.path.relpath(scl_file, project_path).replace("\\", "/")
+            if scl_file.lower().endswith(SclLinter.SOURCE_SUFFIXES):
+                syntax_files += 1
             for v in report.violations:
-                if v.severity == "ERROR" and len(error_messages) < 3:
-                    error_messages.append(f"{rel_name}:{v.line_number} {v.message}")
+                line = f"{rel_name}:{v.line_number} {v.message}"
+                if v.rule_id in SclLinter.SYNTAX_RULES:
+                    syntax_hits.append(line)
+                elif v.rule_id == SclLinter.OUTPUT_READBACK_RULE:
+                    readback_hits.append(line)
+                elif v.severity == "ERROR":
+                    total_errors += 1
+                    errors.append(line)
+                    if len(error_messages) < 3:
+                        error_messages.append(line)
+                else:
+                    total_warnings += 1
+                    warnings.append(f"{line}（建议）")
 
         if total_errors > 0:
             msg = f"发现 {total_errors} 个规范错误"
             if error_messages:
                 msg += f"（如: {'; '.join(error_messages)}）"
-            result.add("SCL 代码规范", "fail", msg)
+            result.add("SCL 代码规范", "fail", msg, errors + warnings)
         elif total_warnings > 0:
-            result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议")
+            result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议（逐条见明细）", warnings)
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+
+        if syntax_files:
+            if syntax_hits:
+                result.add(
+                    SCL_SYNTAX_ITEM, "fail",
+                    f"控制结构没闭合或变量没声明 {len(syntax_hits)} 处（不依赖西门子插件的轻量检查，逐条见明细）",
+                    syntax_hits,
+                )
+            else:
+                result.add(
+                    SCL_SYNTAX_ITEM, "pass",
+                    f"{syntax_files} 个 .scl 文件的 IF/CASE/FOR/WHILE/REPEAT 都闭合、#变量都在本块声明过"
+                    "（不依赖西门子插件的轻量检查；类型错不查，归插件）",
+                )
+            if readback_hits:
+                result.add(
+                    SCL_OUTPUT_READBACK_ITEM, "warn",
+                    f"块里读了自己的输出引脚 {len(readback_hits)} 处（第一阶段只报警告，逐条见明细）",
+                    readback_hits,
+                )
+            else:
+                result.add(SCL_OUTPUT_READBACK_ITEM, "pass", "块里没有读自己的输出引脚")
 
     def _check_language_service(self, project_path: str, result: CheckResult) -> None:
         """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。
@@ -287,17 +319,17 @@ class _LegacyPlcCheckerCore:
         checked = report.check
         if not checked.available:
             result.add(
-                "Siemens 语言服务 check", "warn",
+                LANGUAGE_SERVICE_CHECK, "warn",
                 "未验证：本机未找到 Dynamic Siemens Language Support 插件命令行，语言服务这一层没有执行（交付阶段门禁按失败处理）",
             )
             return
         binary = f"（插件 {checked.binary.version}）" if checked.binary else ""
         if checked.passed:
-            result.add("Siemens 语言服务 check", "pass", f"插件命令行 check 退出码 0，无诊断错误{binary}: {checked.summary}")
+            result.add(LANGUAGE_SERVICE_CHECK, "pass", f"插件命令行 check 退出码 0，无诊断错误{binary}: {checked.summary}")
         else:
             shown = "；".join(checked.messages[:3])
             result.add(
-                "Siemens 语言服务 check", "fail",
+                LANGUAGE_SERVICE_CHECK, "fail",
                 f"插件命令行 check 退出码 {checked.exit_code}，{checked.error_count} 个错误{binary}" + (f"（如: {shown}）" if shown else ""),
             )
         tested = report.test
@@ -305,11 +337,11 @@ class _LegacyPlcCheckerCore:
             return
         if tested.passed:
             cases = f"，{tested.cases_run}/{tested.cases_total} 个用例" if tested.cases_total is not None else ""
-            result.add("Siemens 语言服务 test", "pass", f"插件命令行 test 退出码 0{cases}{binary}")
+            result.add(LANGUAGE_SERVICE_TEST, "pass", f"插件命令行 test 退出码 0{cases}{binary}")
         else:
             shown = "；".join(tested.messages[:3])
             result.add(
-                "Siemens 语言服务 test", "fail",
+                LANGUAGE_SERVICE_TEST, "fail",
                 f"插件命令行 test 退出码 {tested.exit_code}，{tested.error_count} 个问题{binary}" + (f"（如: {shown}）" if shown else ""),
             )
 
@@ -602,84 +634,6 @@ class _LegacyPlcCheckerCore:
         except OSError:
             return 0
         return count
-
-    def _check_spec_snapshot(self, project_path: str, result: CheckResult) -> None:
-        """检查 Spec Snapshot 规范漂移（V2.0.3）
-
-        解析 PM_SESSION 中的 Spec Snapshot 表格，对比 spec_registry.json，
-        根据漂移级别设置检查项状态：
-        - major 漂移 → FAIL
-        - minor/patch 漂移 → WARN
-        - 无漂移 → PASS
-
-        边界情况：
-        - PM_SESSION 不存在 → 跳过（已在 PM_SESSION 检查中报告）
-        - spec_registry.json 缺失 → WARN
-        - Spec Snapshot 表格缺失 → WARN
-        """
-        # 查找 PM_SESSION 文件路径（复用现有查找逻辑）
-        project_id = self.resolve_project_id(project_path)
-        pm_session = os.path.join(project_path, f"PM_SESSION_{project_id}.md")
-        if not os.path.isfile(pm_session):
-            # 尝试模糊匹配
-            found = None
-            try:
-                for f in os.listdir(project_path):
-                    if f.startswith("PM_SESSION_") and f.endswith(".md"):
-                        found = f
-                        break
-            except OSError:
-                pass
-            if found:
-                pm_session = os.path.join(project_path, found)
-            else:
-                # PM_SESSION 不存在，已在第 2 项检查中报告
-                return
-
-        # 加载 spec_registry.json
-        registry = load_spec_registry(self.workspace_root)
-        if registry is None:
-            result.add(
-                "Spec Snapshot",
-                "warn",
-                "未找到 spec_registry.json，跳过漂移检测",
-            )
-            return
-
-        # 解析 Spec Snapshot 表格
-        snapshot = parse_spec_snapshot(pm_session)
-        if not snapshot:
-            result.add(
-                "Spec Snapshot",
-                "warn",
-                "PM_SESSION 缺少 Spec Snapshot 表格",
-            )
-            return
-
-        # 对比版本
-        drifts = compare_versions(snapshot, registry)
-        if not drifts:
-            result.add(
-                "Spec Snapshot",
-                "pass",
-                "Spec Snapshot 与 spec_registry.json 一致",
-            )
-            return
-
-        # 根据漂移级别设置状态
-        level_names = {
-            "major": "主版本漂移",
-            "minor": "次版本漂移",
-            "patch": "补丁漂移",
-        }
-        drift_msgs = [
-            f"{d.spec_id}: {d.snapshot_version} → {d.registry_version} "
-            f"({level_names[d.drift_level]})"
-            for d in drifts
-        ]
-        has_major = any(d.drift_level == "major" for d in drifts)
-        status = "fail" if has_major else "warn"
-        result.add("Spec Snapshot", status, "; ".join(drift_msgs))
 
     def _check_prd_docs(self, project_path: str, result: CheckResult) -> None:
         """检查 PRD 文档完整性"""
@@ -1277,7 +1231,6 @@ class _CheckGroupBase:
 class _PlcConfigChecks(_CheckGroupBase):
     _check_plc_json = _LegacyPlcCheckerCore._check_plc_json
     _check_pm_session = _LegacyPlcCheckerCore._check_pm_session
-    _check_spec_snapshot = _LegacyPlcCheckerCore._check_spec_snapshot
     _check_prd_docs = _LegacyPlcCheckerCore._check_prd_docs
     _check_sub_prd_substance = _LegacyPlcCheckerCore._check_sub_prd_substance
     _check_fb_prd_docs = _LegacyPlcCheckerCore._check_fb_prd_docs

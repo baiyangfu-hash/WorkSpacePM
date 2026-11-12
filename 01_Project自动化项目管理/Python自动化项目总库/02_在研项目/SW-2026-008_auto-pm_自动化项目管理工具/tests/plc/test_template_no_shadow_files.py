@@ -1,8 +1,7 @@
 """TD-SW008-131 guard: a template must not carry a static file next to a ``.jinja`` file that renders to the same path (the ``.jinja`` version wins, so the static twin is a shadow).
 
-Nine such twins exist today in ``plc-standard-project`` (the OB1 and FB_1001 twins drifted apart there before). Removing them needs a tool that can delete paths in a governed card
-(the card toolkit only modifies and adds) and is tracked in TD-SW008-131; until then this test pins the set, so a *new* shadow fails immediately and removing the known ones must
-update the list (a stale entry fails too).
+The last known twins in ``plc-standard-project`` were removed with TD-SW008-575 (the four FB_1001 ones) and TD-SW008-501 (the two GlobalVars ones),
+so the known set is now empty: any new shadow fails immediately.
 """
 
 from __future__ import annotations
@@ -10,15 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
-BASE = "plc-standard-project/template/02_PLC程序/PLC_ST/"
-KNOWN_SHADOWS = sorted(BASE + p for p in (
-    "00_全局数据/PRD/变更记录_CHG-GlobalVars.md",
-    "00_全局数据/PRD/接口文档_IFC-GlobalVars.md",
-    "02_工位1_动作机构/PRD/使用说明_UM-FB1001-Station1.md",
-    "02_工位1_动作机构/PRD/变更记录_CHG-FB1001-Station1.md",
-    "02_工位1_动作机构/PRD/接口文档_IFC-FB1001-Station1.md",
-    "02_工位1_动作机构/PRD/详细设计说明书_DSN-FB1001-Station1.md",
-))
+KNOWN_SHADOWS: list[str] = []
 
 
 def _jinja_files() -> list[Path]:

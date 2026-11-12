@@ -485,10 +485,14 @@ def _print_check_summary(results: list[CheckResult]) -> None:
     table.add_column("状态", style="bold")
 
     total_pass = 0
+    unverified = 0
     for r in applicable:
         status = "[green]PASS[/green]" if r.all_pass else "[red]FAIL[/red]"
         if r.all_pass:
             total_pass += 1
+            if r.language_service_verified is False:
+                status = "[yellow]PASS（语法未验证）[/yellow]"
+                unverified += 1
         table.add_row(
             PlcChecker.resolve_project_id(r.project_path),
             r.project_type,
@@ -503,6 +507,10 @@ def _print_check_summary(results: list[CheckResult]) -> None:
         f"\n合计: {len(applicable)} 个项目, {total_pass} 个 PASS, "
         f"{len(applicable) - total_pass} 个 FAIL"
     )
+    if unverified:
+        console.print(
+            f"[yellow]其中 {unverified} 个 PASS 只是结构检查通过：本机没有西门子插件，语法和类型未验证[/yellow]"
+        )
 
     # V0.4.1 Step 3: not_applicable 项目单独展示
     if not_applicable:
@@ -535,12 +543,32 @@ def _print_check_detail(result: CheckResult) -> None:
         table.add_row(item.item, status_str, item.message)
 
     console.print(table)
+    _print_item_details(result)
     console.print(
         f"\nPass={result.pass_count} "
         f"Warn={result.warn_count} "
         f"Fail={result.fail_count} "
-        f"-> {'[green]ALL PASS[/green]' if result.all_pass else '[red]HAS FAIL[/red]'}"
+        f"-> {_verdict(result)}"
     )
+
+
+def _print_item_details(result: CheckResult) -> None:
+    """没通过的检查项有逐条明细的，表格下面逐条列出（“文件:行 说明”，一条一行，不截断；TD-SW008-573）。"""
+    for item in result.items:
+        if item.status == "pass" or not item.details:
+            continue
+        console.print(f"\n{item.item}（{item.status.upper()}）逐条 {len(item.details)} 条：", markup=False)
+        for line in item.details:
+            console.print(f"  - {line}", markup=False, soft_wrap=True)
+
+
+def _verdict(result: CheckResult) -> str:
+    """汇总那一行的结论。没找到西门子插件时不写 ALL PASS：结构查过了，语法和类型没人查（D-295）。"""
+    if not result.all_pass:
+        return "[red]HAS FAIL[/red]"
+    if result.language_service_verified is False:
+        return "[yellow]结构检查通过；语法和类型未验证（本机没有西门子插件）[/yellow]"
+    return "[green]ALL PASS[/green]"
 
 
 def _print_repair_result(result: RepairResult) -> None:
@@ -580,5 +608,5 @@ def _print_repair_result(result: RepairResult) -> None:
             f"修复后检查: Pass={result.after_check.pass_count} "
             f"Warn={result.after_check.warn_count} "
             f"Fail={result.after_check.fail_count} "
-            f"-> {'[green]ALL PASS[/green]' if result.after_check.all_pass else '[red]HAS FAIL[/red]'}"
+            f"-> {_verdict(result.after_check)}"
         )

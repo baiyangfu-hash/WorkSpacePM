@@ -452,22 +452,8 @@ def cmd_create(
         # 确保目标根目录存在
         os.makedirs(dest_root, exist_ok=True)
         tpl_svc.copy_template(template_name, dest_path, data)
-        if stack == "plc":
-            from auto_pm.plc.spec_snapshot import (
-                ensure_spec_snapshot_section,
-                parse_spec_snapshot,
-            )
-
-            pm_session_path = os.path.join(dest_path, f"PM_SESSION_{project_id}.md")
-            initialized = ensure_spec_snapshot_section(
-                pm_session_path,
-                plc_spec_registry or {},
-            )
-            if not initialized and not parse_spec_snapshot(pm_session_path):
-                raise RuntimeError(
-                    "PLC 项目已生成，但 Spec Snapshot 初始化失败；"
-                    "请保留该目录并检查 PM_SESSION 写入权限。"
-                )
+        # 不再往 PM_SESSION 里写 Spec Snapshot（TD-SW008-583）：PM_SESSION 已退役，读快照的检查也已退役（TD-561）；
+        # 以前按 PM_SESSION_<项目号>.md 找文件，共享库模式生成的是 PM_SESSION_<库名>.md，找不到就让建项目退出码 1。
         # 审计日志：记录项目创建操作（电气部门试用期间操作追溯）
         from auto_pm.logging.audit import audit_log
         audit_log(

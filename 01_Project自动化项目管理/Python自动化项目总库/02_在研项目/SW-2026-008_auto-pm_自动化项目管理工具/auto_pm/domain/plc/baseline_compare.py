@@ -27,7 +27,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from auto_pm.domain.models.plc import CheckResult
+from auto_pm.domain.models.plc import LANGUAGE_SERVICE_CHECK, LANGUAGE_SERVICE_TEST, CheckResult
 from auto_pm.domain.plc.language_service import LanguageService, LanguageServiceResult
 from auto_pm.domain.plc.scl_linter import SclLinter
 
@@ -40,7 +40,7 @@ MAX_CODE_TEXT = 300
 CONTEXT_LINES = 2
 SCL_ITEM = "SCL 代码规范"
 DOC_ITEM_PREFIX = "文档一致性"
-LANGUAGE_ITEMS = {"Siemens 语言服务 check": "check", "Siemens 语言服务 test": "test"}
+LANGUAGE_ITEMS = {LANGUAGE_SERVICE_CHECK: "check", LANGUAGE_SERVICE_TEST: "test"}
 
 
 @dataclass(frozen=True)

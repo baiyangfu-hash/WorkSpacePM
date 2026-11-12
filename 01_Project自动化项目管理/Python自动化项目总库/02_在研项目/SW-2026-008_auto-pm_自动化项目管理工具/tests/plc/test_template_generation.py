@@ -144,7 +144,7 @@ def test_one_instance_db_per_station_in_the_station_fb_folder(
     tmp_path: Path, stations: list[str] | None, expected: list[str]
 ) -> None:
     plc = _render(tmp_path, stations)
-    station_dir = plc / "02_工位1_动作机构"
+    station_dir = plc / "02_工位_动作机构"
     assert sorted(p.name for p in station_dir.glob("DB_1001_*.scl")) == sorted(f"DB_1001_{s}.scl" for s in expected)
     assert not list(plc.glob("00_全局数据/DB_*"))  # 背景 DB 不再放 00_全局数据
     assert (plc / "01_外部设备交互" / "DB_3001_ExternalInteraction.scl").is_file()
@@ -201,5 +201,5 @@ def test_template_paths_fit_in_windows_max_path() -> None:
 
     longest = max(_STANDARD.rglob("*"), key=length)
     assert length(longest) <= 260, longest
-    added = [*(_STANDARD / "template/02_PLC程序/PLC_ST/02_工位1_动作机构").glob("{{ db_slot_*"), *(_STANDARD / "_includes").glob("*")]
+    added = [*(_STANDARD / "template/02_PLC程序/PLC_ST/02_工位_动作机构").glob("{{ db_slot_*"), *(_STANDARD / "_includes").glob("*")]
     assert len(added) == 9 and all(length(p) <= 250 for p in added), [(p.name, length(p)) for p in added]

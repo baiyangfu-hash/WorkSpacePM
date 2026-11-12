@@ -67,7 +67,7 @@ def test_plc_standard_template_with_three_stations_passes_the_checker(tmp_path: 
     data = {"project_id": "DJ-2026-998", "project_name": "三工位机", "description": "三工位", "version": "V1.0.0",
             "station_instances": ["Station1", "Station2", "Station3"]}
     TemplateService(str(templates_dir)).copy_template("plc-standard-project", str(target_proj), data)
-    station_dir = target_proj / "02_PLC程序" / "PLC_ST" / "02_工位1_动作机构"
+    station_dir = target_proj / "02_PLC程序" / "PLC_ST" / "02_工位_动作机构"
     assert sorted(p.name for p in station_dir.glob("DB_1001_*.scl")) == [
         "DB_1001_Station1.scl", "DB_1001_Station2.scl", "DB_1001_Station3.scl"]
     check_res = PlcChecker(workspace_root=str(tmp_path)).check_project(str(target_proj))
@@ -80,7 +80,7 @@ def test_slot_files_and_shared_db_fragment_are_in_place() -> None:
     root = Path(__file__).resolve().parent.parent.parent / "templates" / "plc-standard-project"
     fragment = root / "_includes" / "DB_1001_Station.scl.jinja"
     assert fragment.read_bytes().startswith(b"\xef\xbb\xbf")  # TIA 要 UTF-8 带 BOM（LSP-905 §4.10）
-    station_dir = root / "template" / "02_PLC程序" / "PLC_ST" / "02_工位1_动作机构"
+    station_dir = root / "template" / "02_PLC程序" / "PLC_ST" / "02_工位_动作机构"
     for n in range(1, 9):
         slot = station_dir / f"{{{{ db_slot_{n} }}}}.jinja"
         assert slot.read_text(encoding="utf-8") == f'{{% set slot = {n} %}}{{% include "_includes/DB_1001_Station.scl.jinja" %}}'

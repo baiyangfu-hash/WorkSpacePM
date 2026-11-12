@@ -394,3 +394,43 @@ class TestStandardizeWorkspace:
 
         assert len(results) >= 1
         assert any(r.applied_count >= 1 for r in results)
+
+
+# ── TD-SW008-511（D-246）：补 HMI 点表时变量路径跟着工程里全局 DB 的实际名字 ──
+
+
+def _mapping_blocks(project: Path) -> set[str]:
+    from auto_pm.domain.models.plc import RepairResult
+
+    result = RepairResult(project_path=str(project))
+    PlcRepairer(str(project.parent))._repair_hmi_mapping(str(project), "DJ-2026-951", "x", result, dry_run=False)
+    data = json.loads((project / "03_HMI设计" / "hmi_tag_mapping.json").read_text(encoding="utf-8"))
+    return {entry["block"] for entry in data["mappings"].values()}
+
+
+def test_hmi_mapping_uses_the_template_global_db_name(tmp_path: Path) -> None:
+    project = tmp_path / "DJ-2026-951_模板"
+    db_dir = project / "02_PLC程序" / "PLC_ST" / "00_全局数据"
+    db_dir.mkdir(parents=True)
+    (db_dir / "GlobalVars.db").write_text(
+        "﻿// 全局变量\nDATA_BLOCK GlobalVars_DJ2026951\nVAR\n    stGlobal : ST_2001_CommonAlarm;\nEND_VAR\nBEGIN\nEND_DATA_BLOCK\n",
+        encoding="utf-8",
+    )
+    blocks = _mapping_blocks(project)
+    assert blocks == {
+        "GlobalVars_DJ2026951.stGlobal.iStep",
+        "GlobalVars_DJ2026951.stGlobal.iAlarmCode",
+        "GlobalVars_DJ2026951.stGlobal.bAutoRunning",
+        "GlobalVars_DJ2026951.stGlobal.bReset",
+    }
+
+
+def test_hmi_mapping_reads_a_quoted_name_and_falls_back_to_globalvars(tmp_path: Path) -> None:
+    quoted = tmp_path / "DJ-2026-952_引号"
+    (quoted / "02_PLC程序" / "DB1").mkdir(parents=True)
+    (quoted / "02_PLC程序" / "DB1" / "GlobalVars.scl").write_text('DATA_BLOCK "GV_Line2"\nBEGIN\nEND_DATA_BLOCK\n', encoding="utf-8")
+    assert {b.split(".", 1)[0] for b in _mapping_blocks(quoted)} == {"GV_Line2"}
+
+    bare = tmp_path / "DJ-2026-953_没有DB"
+    bare.mkdir()
+    assert {b.split(".", 1)[0] for b in _mapping_blocks(bare)} == {"GlobalVars"}

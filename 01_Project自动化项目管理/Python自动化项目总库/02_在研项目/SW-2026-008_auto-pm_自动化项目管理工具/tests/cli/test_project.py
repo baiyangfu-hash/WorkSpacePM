@@ -301,9 +301,11 @@ def test_project_create_station_option_generates_one_instance_db_per_station(
 
     assert result.exit_code == 0, result.output
     plc = dest_dir / "DJ-2026-023_三工位" / "02_PLC程序" / "PLC_ST"
-    station_dir = plc / "02_工位1_动作机构"
+    station_dir = plc / "02_工位_动作机构"
     assert sorted(p.name for p in station_dir.glob("DB_1001_*.scl")) == [
         "DB_1001_Station1.scl", "DB_1001_Station2.scl", "DB_1001_Station3.scl"]
+    # TD-SW008-575（D-310）：多工位时背景 DB 所在文件夹不再叫“工位1”
+    assert [d.name for d in plc.iterdir() if d.is_dir() and "工位1" in d.name] == []
     global_vars = (plc / "00_全局数据" / "GlobalVars.db").read_text(encoding="utf-8")
     ob = (plc / "00_主程序" / "OB123.scl").read_text(encoding="utf-8")
     for station in ("Station1", "Station2", "Station3"):
@@ -433,10 +435,10 @@ def test_project_create_python_falls_back_when_research_directory_is_absent(
     ).exists()
 
 
-def test_project_create_plc_initializes_dynamic_spec_snapshot(
+def test_project_create_plc_no_longer_writes_spec_snapshot(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PLC Copier 项目在首次检查前即携带当前规范快照。"""
+    """建 PLC 项目不再往 PM_SESSION 里写规范快照（TD-SW008-583；读快照的检查已退役，TD-561），首检照样无告警。"""
     monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
     _write_spec_registry(tmp_path)
     _create_syslib(tmp_path)
@@ -467,10 +469,7 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
         / "PM_SESSION_DJ-2026-023.md"
     )
     assert result.exit_code == 0
-    assert parse_spec_snapshot(str(pm_session)) == {
-        "LSP-906": "V2.0.0",
-        "LSP-907": "V1.2.1",
-    }
+    assert parse_spec_snapshot(str(pm_session)) == {}
     check_result = cli_runner.invoke(
         cli,
         # 本测试只看规范快照：不跑 Siemens 语言服务这一层（它在没有插件的机器上会多出一条“未验证”警告）
@@ -480,9 +479,31 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
     check_payload = json.loads(check_result.output)
     assert check_result.exit_code == 0
     assert check_payload["warn_count"] == 0
-    assert {
-        item["status"] for item in check_payload["items"] if item["item"] == "Spec Snapshot"
-    } == {"pass"}
+    # Spec Snapshot 检查已退役（TD-SW008-561）
+    assert [item for item in check_payload["items"] if item["item"] == "Spec Snapshot"] == []
+
+
+def test_project_create_shared_library_with_a_library_name_unlike_the_id(
+    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """共享库模式、库名和项目号不同（TD-SW008-583）：以前找 PM_SESSION_<项目号>.md 找不到、退出码 1，现在退出码 0。"""
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    _write_spec_registry(tmp_path)
+    _create_syslib(tmp_path)
+
+    result = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "project", "create", "--stack", "plc", "--mode", "shared-library",
+            "--id", "DJ-2026-954", "--name", "验收库", "--library-name", "AccLib",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    created = [p for p in (tmp_path / "0100_PLC自动化").iterdir() if p.name.startswith("DJ-2026-954")]
+    assert len(created) == 1
+    assert not (created[0] / "PM_SESSION_DJ-2026-954.md").exists()  # 原来就找它：共享库模板只按库名生成
 
 
 def test_project_create_plc_requires_registry_before_generation(
@@ -806,7 +827,7 @@ class TestProjectSnapshot:
 class TestProjectRetrofit:
     """project retrofit 命令测试"""
 
-    def test_retrofit_populates_copier_answers_and_spec_snapshot(
+    def test_retrofit_populates_copier_answers_without_spec_snapshot(
         self, cli_runner: CliRunner, tmp_path: Path
     ) -> None:
         workspace = _setup_retrofit_workspace(tmp_path, _PM_SESSION_NO_TABLE.replace("SW-2026-TEST", "DJ-2026-TEST"))
@@ -820,10 +841,9 @@ class TestProjectRetrofit:
         assert result.exit_code == 0
         project_dir = tmp_path / "DJ-2026-TEST_补齐项目"
         assert (project_dir / ".copier-answers.yml").exists()
+        # Spec Snapshot 检查已退役（TD-SW008-561）：retrofit 不再因为它去往 PM_SESSION 里补快照表
         pm_session = (project_dir / "PM_SESSION_DJ-2026-TEST.md").read_text(encoding="utf-8")
-        assert "## Spec Snapshot" in pm_session
-        assert "| LSP-905 | V1.2.0 |" in pm_session
-        assert "| LSP-907 | V1.3.0 |" in pm_session
+        assert "## Spec Snapshot" not in pm_session
 
 
 def _setup_doc_refresh_workspace(tmp_path: Path) -> Path:

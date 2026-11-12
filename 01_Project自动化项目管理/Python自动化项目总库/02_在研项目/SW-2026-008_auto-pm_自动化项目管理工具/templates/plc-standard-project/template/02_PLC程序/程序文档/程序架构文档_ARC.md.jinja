@@ -58,7 +58,7 @@
 | 1 | **OB123**（块名 `{{ project_tag }}_Main`） | OB | `02_PLC程序/PLC_ST/00_主程序/OB123.scl` | 主循环、FB 调用顺序管理、安全联锁 |
 | 2 | **GlobalVars_{{ project_tag }}** | DB | `02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db` | 全局变量、I/O 映射中心（不含 FB 实例） |
 | 3 | **FB_3001_ExternalInteraction_{{ project_tag }}** | FB | `02_PLC程序/PLC_ST/01_外部设备交互/` | 外部设备交互 (上游/下游) |
-| 4 | **FB_1001_Station1_{{ project_tag }}** | FB | `02_PLC程序/PLC_ST/02_工位1_动作机构/` | 工位1 动作机构 |
+| 4 | **FB_1001_Station1_{{ project_tag }}** | FB | `02_PLC程序/PLC_ST/02_工位_动作机构/` | 工位1 动作机构 |
 | 5 | **FB_2001_CommonAlarm_AllStation_{{ project_tag }}** | FB | `02_PLC程序/PLC_ST/05_公共报警/` | 公共报警管理 (汇总+MES) |
 | 6 | **DB_3001 / DB_1001_<工位名> / DB_2001** | 背景DB | 和各自的 FB 在同一个文件夹 | 上面三个 FB 的背景数据块；工位 FB 每个工位一个（{{ station_instances | join('、') }}） |
 | 7 | **FC_4001_ScaleAnalog** | FC | `02_PLC程序/PLC_ST/06_公共函数/` | 模拟量换算 |
@@ -79,10 +79,11 @@
 ### 5.2 工站间信号传递
 
 ```
-  conveyor.q_bLayerFeedDone → pickplace.i_bLayerFeedDone
-  pickplace.q_bPlaceDoneToFeeder → feeder.i_bPlaceDone
-  各工站.q_iAlarmCode → common.i_iXXXAlarm
+  上游/下游信号 → FB_3001 (stExternal) → 各工位 FB_1001 (st<工位名>)
+  各工位 FB_1001 的报警 → GlobalVars_{{ project_tag }} → FB_2001 (stGlobal) → 报警码、指示灯
 ```
+
+工站之间只通过 `GlobalVars_{{ project_tag }}` 里的结构体交换信号，功能块之间不直接互相引用。
 
 ## 6. 目录结构
 
@@ -90,16 +91,14 @@
 02_PLC程序/
 ├── PLC_ST/                        # PLC 项目根 (.plc.json 所在)
 │   ├── .plc.json                  # PLC 项目配置
-│   ├── DB1/
-│   │   └── GlobalVars.db          # 全局变量数据块
-│   ├── OB1/
-│   │   └── OB1.scl                # 主循环程序
-│   ├── Test/                      # 测试用例
-│   ├── common/                    # 公共功能块
-│   ├── conveyor/                  # 输送机功能块
-│   ├── external/                  # 外部设备交互功能块
-│   ├── feeder/                    # 送料功能块
-│   └── pickplace/                 # 取放料功能块
+│   ├── 00_主程序/                 # OB123.scl 主循环 (块名 {{ project_tag }}_Main)
+│   ├── 00_全局数据/               # GlobalVars.db 全局变量数据块
+│   ├── 00_程序方案/               # 方案级文档 (INT、DSN、IO、FLOW 等)
+│   ├── 01_外部设备交互/           # FB_3001 + ST_3001 + DB_3001
+│   ├── 02_工位_动作机构/          # FB_1001 + ST_1001 + 每个工位一个 DB_1001_<工位名>
+│   ├── 05_公共报警/               # FB_2001 + ST_2001 + DB_2001
+│   ├── 06_公共函数/               # FC_4001_ScaleAnalog
+│   └── Test/                      # 测试用例 (.scltest)
 ├── 工程资产/
 │   ├── io_points.csv              # IO 点表
 │   ├── program_blocks.yml         # 程序块清单
@@ -109,9 +108,10 @@
     ├── 018_自动工艺流程图_FLOW.md
     ├── 程序架构文档_ARC.md
     ├── PLC变量定义文档_VAR.md
-    ├── 015_IO分配表_IO.md
-    └── 详细设计说明书_DSN.md
+    └── 015_IO分配表_IO.md
 ```
+
+每个功能块文件夹下还有 `<功能块文件夹>/PRD/`，放该块的接口文档、详细设计说明书、变更记录和使用说明。
 
 ## 7. 关键技术特点
 
@@ -138,7 +138,7 @@
 在 TIA Portal 里“添加新的外部文件”后逐个“从源生成块”，顺序：
 
 1. `06_公共函数/`：FC。
-2. 每个功能块文件夹（`02_工位1_动作机构/`、`01_外部设备交互/`、`05_公共报警/`）内：先结构体 `ST_*`，再 FB，最后背景 DB。
+2. 每个功能块文件夹（`02_工位_动作机构/`、`01_外部设备交互/`、`05_公共报警/`）内：先结构体 `ST_*`，再 FB，最后背景 DB。
 3. `00_全局数据/GlobalVars.db`：要在所有结构体之后。
 4. `00_主程序/OB123.scl`：最后。
 5. 所有块生成后、编译前，打开 `{{ project_tag }}_Main` 的块属性窗口，在“常规”页签的“常规”项里把“编号”改成 123，下面选“手动”，点“确定”。理由：源文件里写不了块号（TIA V19 实测），TIA 从源生成块时自己分配块号。项目里已经有 OB123 时，先把那个块改成别的号（不要删，LSP-905 §4.11 第 4 条要求不动用户的块），或者不导入本 OB、只把调用那几行复制进自己的主程序。

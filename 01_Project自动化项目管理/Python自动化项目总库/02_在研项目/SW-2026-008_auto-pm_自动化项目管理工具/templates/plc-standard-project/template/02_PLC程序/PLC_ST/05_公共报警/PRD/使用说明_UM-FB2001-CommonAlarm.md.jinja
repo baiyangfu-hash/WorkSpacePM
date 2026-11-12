@@ -14,11 +14,11 @@
 
 | 灯 | 条件 |
 |----|------|
-| 绿灯 | NOT q_wGlobalAlarmWord.0 AND 自动运行中 |
-| 红灯 | q_wGlobalAlarmWord <> 16#0000 |
+| 绿灯 | NOT stGlobal.o_wGlobalAlarmWord.0 AND 自动运行中 |
+| 红灯 | stGlobal.o_wGlobalAlarmWord <> 16#0000 |
 | 黄灯 | 暂停OR等待OR回原点中 |
 | 蜂鸣器 | q_bNewAlarmPulse (1s ON/OFF脉冲) |
-| 复位灯 | q_wGlobalAlarmWord.0 (无报警=ON，反馈复位状态) |
+| 复位灯 | stGlobal.o_wGlobalAlarmWord.0 (无报警=ON，反馈复位状态) |
 
 ## 4. 复位策略
 

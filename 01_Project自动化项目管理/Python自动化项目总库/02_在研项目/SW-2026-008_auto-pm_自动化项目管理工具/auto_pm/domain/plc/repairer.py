@@ -704,6 +704,33 @@ class PlcRepairer:
                     detail=f"已创建最小 {dt} 骨架",
                 )
 
+    _GLOBAL_DB_DECL = re.compile(r'^\s*DATA_BLOCK\s+"?([A-Za-z_]\w*)"?', re.MULTILINE)
+
+    @classmethod
+    def _global_db_name(cls, project_path: str) -> str:
+        """找本项目全局变量 DB 的实际名字（TD-SW008-511，D-246）。
+
+        模板生成的是 ``DATA_BLOCK GlobalVars_<项目标签>``，老项目是 ``DATA_BLOCK GlobalVars``，
+        点表里的变量路径要跟着工程走。按文件名 GlobalVars*.db / GlobalVars*.scl 找，
+        读不到就用 ``GlobalVars``。
+        """
+        plc_dir = os.path.join(project_path, "02_PLC程序")
+        candidates: list[str] = []
+        for root, _dirs, files in os.walk(plc_dir):
+            for name in files:
+                stem, ext = os.path.splitext(name)
+                if stem.startswith("GlobalVars") and ext.lower() in (".db", ".scl"):
+                    candidates.append(os.path.join(root, name))
+        for path in sorted(candidates):
+            try:
+                with open(path, encoding="utf-8-sig") as handle:
+                    match = cls._GLOBAL_DB_DECL.search(handle.read())
+            except (OSError, UnicodeDecodeError):
+                continue
+            if match:
+                return match.group(1)
+        return "GlobalVars"
+
     def _repair_hmi_mapping(
         self,
         project_path: str,
@@ -721,15 +748,16 @@ class PlcRepairer:
 
         if not dry_run:
             os.makedirs(hmi_dir, exist_ok=True)
+            global_db = self._global_db_name(project_path)
             mapping_data = {
                 "project_id": project_id,
                 "project_name": project_name,
                 "version": "V1.0.0",
                 "mappings": {
-                    "D100": {"name": "GlobalStatusWord", "type": "WORD", "block": "GlobalVars.stGlobal.iStep", "description": "全局状态字"},
-                    "D110": {"name": "ActiveAlarmCode", "type": "DINT", "block": "GlobalVars.stGlobal.iAlarmCode", "description": "当前首出报警代码"},
-                    "M100": {"name": "AutoRunStart", "type": "BOOL", "block": "GlobalVars.stGlobal.bAutoRunning", "description": "自动运行启动"},
-                    "M102": {"name": "SystemReset", "type": "BOOL", "block": "GlobalVars.stGlobal.bReset", "description": "系统故障复位"},
+                    "D100": {"name": "GlobalStatusWord", "type": "WORD", "block": f"{global_db}.stGlobal.iStep", "description": "全局状态字"},
+                    "D110": {"name": "ActiveAlarmCode", "type": "DINT", "block": f"{global_db}.stGlobal.iAlarmCode", "description": "当前首出报警代码"},
+                    "M100": {"name": "AutoRunStart", "type": "BOOL", "block": f"{global_db}.stGlobal.bAutoRunning", "description": "自动运行启动"},
+                    "M102": {"name": "SystemReset", "type": "BOOL", "block": f"{global_db}.stGlobal.bReset", "description": "系统故障复位"},
                 },
             }
             from auto_pm.utils.file_utils import write_file
