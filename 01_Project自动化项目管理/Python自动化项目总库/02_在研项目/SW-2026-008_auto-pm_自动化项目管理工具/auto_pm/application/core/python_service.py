@@ -16,9 +16,12 @@ import logging
 import os
 import re
 import shutil
+import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import yaml
 
 from auto_pm.application.core.paths import PG_INITIATING_DIR, PYTHON_REQUIRED_DIRS
@@ -52,6 +55,84 @@ def derive_package_name(project_name: str, project_id: str) -> str:
     if _PACKAGE_NAME_RE.match(candidate):
         return candidate
     return project_id.replace("-", "_").lower()
+
+
+# 没渲染的 Jinja 占位符（TD-SW008-566）：`{{ 变量 }}` 或 `{% 语句 %}`。`{{.变量}}` 是 go-task 自己的写法，不算。
+_UNRENDERED_RE = re.compile(r"\{\{-?\s*(?!\.)[^{}\n]*\}\}|\{%.*?%\}")
+# repair 会写、check 要查内容的文本文件
+_RENDERED_FILES = ("pyproject.toml", "README.md", "Taskfile.yml", ".copier-answers.yml", "tests/conftest.py")
+# 找现成包目录时跳过的目录
+_NOT_A_PACKAGE = {"tests", "test", "docs", "build", "dist", "venv", "env", "node_modules"}
+# 模板里没有 copier.yml 时用的默认值（与 templates/python-tool/copier.yml 一致）
+_FALLBACK_DEFAULTS = {"author": "fubai", "version": "0.1.0", "stack": "python", "mode": "", "business_line": ""}
+
+
+def find_unrendered(text: str) -> list[str]:
+    """文本里没渲染的模板占位符（原样返回，最多前几处由调用方截）"""
+    return _UNRENDERED_RE.findall(text)
+
+
+def declared_packages(pyproject_text: str) -> list[str]:
+    """pyproject 里 hatch wheel 声明的包目录；读不出来时返回空列表"""
+    try:
+        data = tomllib.loads(pyproject_text)
+    except tomllib.TOMLDecodeError:
+        return []
+    wheel = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+    packages = wheel.get("packages", []) if isinstance(wheel, dict) else []
+    return [str(p) for p in packages if isinstance(p, str)]
+
+
+def _existing_package(project_path: str) -> str:
+    """项目根下唯一一个现成的 Python 包目录（有 __init__.py、名字合法）；没有或不止一个时返回空串"""
+    try:
+        entries = sorted(os.listdir(project_path))
+    except OSError:
+        return ""
+    found = [
+        e for e in entries
+        if e not in _NOT_A_PACKAGE and not e.startswith((".", "_")) and _PACKAGE_NAME_RE.match(e)
+        and os.path.isfile(os.path.join(project_path, e, "__init__.py"))
+    ]
+    return found[0] if len(found) == 1 else ""
+
+
+def _jinja_env() -> jinja2.Environment:
+    """和 copier 一样的少量过滤器；变量缺了直接报错，不留半渲染的文件"""
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined, keep_trailing_newline=True)
+    env.filters["strftime"] = lambda fmt: time.strftime(fmt)
+    env.filters["to_nice_yaml"] = lambda value: yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
+    return env
+
+
+def _template_context(tpl_path: str, answers: dict[str, Any]) -> dict[str, Any]:
+    """模板变量：已知答案优先，其余按模板 copier.yml 的默认值依次渲染（与 copier 建项目时同一套值）"""
+    context: dict[str, Any] = dict(answers)
+    copier_yml = os.path.join(os.path.dirname(tpl_path), "copier.yml")
+    questions: dict[str, Any] = {}
+    try:
+        with open(copier_yml, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f)
+        if isinstance(loaded, dict):
+            questions = loaded
+    except (OSError, yaml.YAMLError):
+        questions = {}
+    env = _jinja_env()
+    for name, spec in questions.items():
+        if name.startswith("_") or name in context or not isinstance(spec, dict) or "default" not in spec:
+            continue
+        default = spec["default"]
+        if isinstance(default, str):
+            try:
+                default = env.from_string(default).render(context)
+            except jinja2.TemplateError:
+                continue
+        context[name] = default
+    for name, value in _FALLBACK_DEFAULTS.items():
+        context.setdefault(name, value)
+    context.setdefault("description", context.get("project_name", ""))
+    context["_copier_answers"] = {k: v for k, v in context.items() if not k.startswith("_")} | {"_src_path": "templates/python-tool"}
+    return context
 
 
 class PythonProjectService:
@@ -152,6 +233,9 @@ class PythonProjectService:
             "detail": "" if pm_session_found else "缺少 PM_SESSION_*.md",
         })
 
+        # 6. 内容检查（TD-SW008-566）：只查文件在不在会把留着占位符的半成品判成合格
+        checks.extend(self._content_checks(project_path))
+
         passed = sum(1 for c in checks if c["ok"])
         total = len(checks)
 
@@ -164,6 +248,47 @@ class PythonProjectService:
             "checks": checks,
         }
 
+    @staticmethod
+    def _content_checks(project_path: str) -> list[dict[str, Any]]:
+        """没渲染的模板占位符、pyproject 声明的包目录是否真的存在"""
+        names = list(_RENDERED_FILES)
+        try:
+            names += sorted(e for e in os.listdir(project_path) if e.startswith("PM_SESSION_") and e.endswith(".md"))
+        except OSError:
+            pass
+        leftovers: list[str] = []
+        for name in names:
+            path = os.path.join(project_path, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    found = find_unrendered(f.read())
+            except (OSError, UnicodeDecodeError):
+                continue
+            if found:
+                leftovers.append(f"{name} {len(found)} 处（如 {found[0]}）")
+        result = [{
+            "name": "没渲染的模板占位符",
+            "ok": not leftovers,
+            "detail": "；".join(leftovers),
+        }]
+        pyproject_path = os.path.join(project_path, "pyproject.toml")
+        if os.path.isfile(pyproject_path):
+            try:
+                with open(pyproject_path, encoding="utf-8") as f:
+                    packages = declared_packages(f.read())
+            except (OSError, UnicodeDecodeError):
+                packages = []
+            if packages:
+                missing = [p for p in packages if not os.path.isdir(os.path.join(project_path, p))]
+                result.append({
+                    "name": "pyproject.toml: 声明的包目录存在",
+                    "ok": not missing,
+                    "detail": f"声明了不存在的包目录: {'、'.join(missing)}" if missing else "",
+                })
+        return result
+
     def repair_project_spec(self, project_path: str, project_id: str, dry_run: bool = False) -> list[str]:
         """修复单个 Python 项目规范问题"""
         repaired_items: list[str] = []
@@ -175,21 +300,25 @@ class PythonProjectService:
             # 类似 "SW-2026-008_auto-pm_自动化项目管理工具"
             parts = project_name.split("_", 1)
             project_name = parts[1]
-        package_name = derive_package_name(project_name, project_id)
-        cli_command = package_name.replace("_", "-")
-
         # 读取现有的 copier answers 或其他元数据以尽可能还原
+        answers: dict[str, Any] = {}
         answers_path = os.path.join(project_path, ".copier-answers.yml")
         if os.path.isfile(answers_path):
             try:
                 with open(answers_path, encoding="utf-8") as f:
-                    answers = yaml.safe_load(f) or {}
-                project_id = answers.get("project_id", project_id)
-                project_name = answers.get("project_name", project_name)
-                package_name = answers.get("package_name", package_name)
-                cli_command = answers.get("cli_command", cli_command)
-            except Exception:
-                pass
+                    loaded = yaml.safe_load(f) or {}
+                if isinstance(loaded, dict):
+                    answers = {k: v for k, v in loaded.items() if isinstance(k, str) and not k.startswith("_")}
+            except (OSError, yaml.YAMLError) as e:
+                log.warning("读取 .copier-answers.yml 失败: %s: %s", answers_path, e)
+        project_id = str(answers.get("project_id") or project_id)
+        project_name = str(answers.get("project_name") or project_name)
+        # 包名：答案里有就用；没有时先认项目里唯一的现成包，再按项目名推导（TD-SW008-566：不声明不存在的包）
+        package_name = str(answers.get("package_name") or _existing_package(project_path)
+                           or derive_package_name(project_name, project_id))
+        cli_command = str(answers.get("cli_command") or package_name.replace("_", "-"))
+        known = answers | {"project_id": project_id, "project_name": project_name,
+                           "package_name": package_name, "cli_command": cli_command}
 
         if not os.path.exists(tpl_path):
             # 向上回溯查找工程根目录下的 templates/python-tool/template
@@ -214,22 +343,32 @@ class PythonProjectService:
                     shutil.copy2(src, dst)
                 repaired_items.append(f"Restored file {dst_name}")
 
+        context = _template_context(tpl_path, known)
+        env = _jinja_env()
+
         def render_jinja_file(src_name: str, dst_name: str) -> None:
+            # TD-SW008-566：真用 Jinja 渲染（以前只替换 4 个变量，version 等 5 处原样留下还报“修好了”）。
+            # 渲染不了（变量缺失、语法错）就不写，如实报“没修”。
             src = os.path.join(tpl_path, src_name)
             dst = os.path.join(project_path, dst_name)
-            if os.path.isfile(src) and not os.path.exists(dst):
-                if not dry_run:
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    with open(src, encoding="utf-8") as sf:
-                        content = sf.read()
-                    # 简单占位符替换以模拟 jinja 渲染
-                    content = content.replace("{{ project_id }}", project_id)
-                    content = content.replace("{{ project_name }}", project_name)
-                    content = content.replace("{{ package_name }}", package_name)
-                    content = content.replace("{{ cli_command }}", cli_command)
-                    with open(dst, "w", encoding="utf-8") as df:
-                        df.write(content)
-                repaired_items.append(f"Restored rendered file {dst_name}")
+            if not os.path.isfile(src) or os.path.exists(dst):
+                return
+            try:
+                with open(src, encoding="utf-8") as sf:
+                    content = env.from_string(sf.read()).render(context)
+            except (OSError, jinja2.TemplateError) as e:
+                log.warning("渲染模板失败: %s: %s", src, e)
+                repaired_items.append(f"Not repaired {dst_name}: 模板渲染失败（{e}）")
+                return
+            leftover = find_unrendered(content)
+            if leftover:
+                repaired_items.append(f"Not repaired {dst_name}: 渲染后还有占位符 {leftover[0]}")
+                return
+            if not dry_run:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "w", encoding="utf-8") as df:
+                    df.write(content)
+            repaired_items.append(f"Restored rendered file {dst_name}")
 
         # 1. 修复必须文件
         copy_static_file(".pre-commit-config.yaml", ".pre-commit-config.yaml")
@@ -277,5 +416,22 @@ class PythonProjectService:
                 "PM_SESSION_{{ project_id }}.md.jinja",
                 f"PM_SESSION_{project_id}.md"
             )
+
+        # pyproject 声明的包目录（TD-SW008-566）：不存在就照模板建一个只有 __init__.py 的包，不声明空包
+        pyproject_path = os.path.join(project_path, "pyproject.toml")
+        if os.path.isfile(pyproject_path):
+            with open(pyproject_path, encoding="utf-8") as f:
+                packages = declared_packages(f.read())
+        else:
+            packages = [package_name] if any(i == "Restored rendered file pyproject.toml" for i in repaired_items) else []
+        for package in packages:
+            if not os.path.isdir(os.path.join(project_path, package)):
+                render_jinja_file(os.path.join("{{ package_name }}", "__init__.py.jinja"), os.path.join(package, "__init__.py"))
+                if not os.path.isfile(os.path.join(tpl_path, "{{ package_name }}", "__init__.py.jinja")):
+                    if not dry_run:
+                        os.makedirs(os.path.join(project_path, package), exist_ok=True)
+                        with open(os.path.join(project_path, package, "__init__.py"), "w", encoding="utf-8") as f:
+                            f.write(f'"""{project_name}"""\n')
+                    repaired_items.append(f"Created package {package}/__init__.py")
 
         return repaired_items

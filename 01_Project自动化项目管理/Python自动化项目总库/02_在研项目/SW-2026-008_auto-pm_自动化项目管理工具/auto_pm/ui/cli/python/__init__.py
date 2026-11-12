@@ -236,14 +236,23 @@ def cmd_repair(
     templates_dir = os.path.join(package_dir, "templates")
     py_svc = PythonProjectService(app_ctx.workspace_root, templates_dir=templates_dir)
 
-    repaired = py_svc.repair_project_spec(proj.path, project_id, dry_run=dry_run)
-    if dry_run:
-        console.print("[yellow][DRY-RUN] 将执行以下修复工作：[/yellow]")
-    else:
-        console.print("[green]成功修复以下规范项目：[/green]")
-    for item in repaired:
-        console.print(f"  - {item}")
-    if not repaired:
+    items = py_svc.repair_project_spec(proj.path, project_id, dry_run=dry_run)
+    # TD-SW008-566：渲染不了的文件如实报“没修”，不混进“成功修复”，退出码 1
+    not_repaired = [i for i in items if i.startswith("Not repaired")]
+    repaired = [i for i in items if not i.startswith("Not repaired")]
+    if repaired:
+        if dry_run:
+            console.print("[yellow][DRY-RUN] 将执行以下修复工作：[/yellow]")
+        else:
+            console.print("[green]成功修复以下规范项目：[/green]")
+        for item in repaired:
+            console.print(f"  - {item}")
+    if not_repaired:
+        console.print("[red]以下项目没修好：[/red]")
+        for item in not_repaired:
+            console.print(f"  - {item}")
+        ctx.exit(1)
+    if not items:
         console.print("[green]项目完全合规，无需修复。[/green]")
 
 

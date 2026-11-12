@@ -358,3 +358,34 @@ def test_python_check_all_exits_1_when_one_project_fails(cli_runner: CliRunner, 
     assert result.exit_code == 1, result.output
     assert "SW-2026-001" in result.output
     assert "有不合格项的项目: SW-2026-002" in result.output
+
+
+@pytest.mark.cli
+def test_a_freshly_created_python_project_passes_python_check(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """TD-SW008-566/567：模板生成的工程自己能过 python check（含新加的占位符和包目录两项），退出码 0"""
+    created = cli_runner.invoke(cli, ["-w", str(tmp_path), "python", "init", "SW-2026-903", "--name", "Data Tool"],
+                                catch_exceptions=False)
+    assert created.exit_code == 0, created.output
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "python", "check", "SW-2026-903", "--json"],
+                               catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    checks = {c["name"]: c["ok"] for c in json.loads(result.output)[0]["checks"]}
+    assert checks["没渲染的模板占位符"] is True
+    assert checks["pyproject.toml: 声明的包目录存在"] is True
+
+
+@pytest.mark.cli
+def test_python_repair_reports_what_it_could_not_render(cli_runner: CliRunner, tmp_path: Path,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """TD-SW008-566：模板渲染失败的文件不报“成功修复”，单独列“没修好”，退出码 1"""
+    from auto_pm.application.core.python_service import PythonProjectService
+
+    _make_python_project(tmp_path, "SW-2026-PYT", complete=False)
+    monkeypatch.setattr(PythonProjectService, "repair_project_spec",
+                        lambda self, path, pid, dry_run=False: ["Restored file .ruff.toml",
+                                                                "Not repaired README.md: 模板渲染失败（x）"])
+    monkeypatch.setenv("AUTO_PM_AUDIT_DIR", "off")
+    result = cli_runner.invoke(cli, ["-w", str(tmp_path), "python", "repair", "SW-2026-PYT", "--dry-run"])
+    assert result.exit_code == 1, result.output
+    assert "以下项目没修好" in result.output and "Not repaired README.md" in result.output
+    assert result.output.index("Restored file .ruff.toml") < result.output.index("以下项目没修好")
