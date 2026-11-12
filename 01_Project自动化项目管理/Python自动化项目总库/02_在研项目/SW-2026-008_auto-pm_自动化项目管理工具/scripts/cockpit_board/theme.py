@@ -99,6 +99,8 @@ DARK = Tokens(
 
 # 三态标签（没检查 / 断网未知 / 读不懂）的语义色：前两种是灰（不知道），读不懂是风险色（读到了但看不懂，要人看）。
 STATE_SEV = {"unchecked": "na", "offline": "na", "unreadable": "risk"}
+# 项目健康 → 语义色。旧账（D-324：项目下已没有开着的卡时留下的账本问题）走提示色，不走风险色
+HEALTH_SEV = {"ok": "ok", "risk": "risk", "block": "block", "old": "hint", "nodata": "na", "off": "na"}
 
 # 语义名 -> (主色字段, 浅底字段)。严重度、健康、检查结果都只用这五种语义色。
 SEMANTIC = {

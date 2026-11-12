@@ -26,8 +26,12 @@ import pm_dashboard as pd  # noqa: E402 - scripts/pm_dashboard.py 数据层
 
 SEV_RANK = {"block": 3, "risk": 2, "hint": 1}
 SEV_LABEL = {"block": "阻塞", "risk": "风险", "hint": "提醒"}
-HEALTH_LABEL = {"ok": "正常", "risk": "有风险", "block": "受阻", "nodata": "无数据", "off": "未接入"}
-HEALTH_RANK = {"block": 4, "risk": 3, "nodata": 2, "ok": 1, "off": 0}
+HEALTH_LABEL = {"ok": "正常", "risk": "有风险", "block": "受阻", "old": "旧账", "nodata": "无数据", "off": "未接入"}
+HEALTH_RANK = {"block": 5, "risk": 4, "old": 3, "nodata": 2, "ok": 1, "off": 0}
+# D-324：项目下已没有开着的卡（全部 CLOSED / CANCELLED，或没有卡）时，账本一致性检查留下的问题算“旧账”：
+# 降一级成提示、项目标“旧账”不标“有风险”，首页格子分开写“在干 X，旧账 Y”；不隐藏。
+OLD_BASIS = "账本一致性检查（项目下已没有开着的卡，算旧账）"
+CLOSED_STATES = ("CLOSED", "CANCELLED")
 LOST_HOURS = 1  # 执行者失联：卡开着 + 租约过期 + 最近断点都超过这么久
 USER = "你"
 
@@ -68,6 +72,7 @@ class Check:
     unit: str = ""
     note: str = ""
     soft: bool = False  # 数是真的，但有没跑 / 没声明的，0 也不给绿
+    split: str = ""  # 分开写的数（D-324：“在干 X，旧账 Y”）；有它时格子显示它，颜色仍按 value（在干的数）
 
     @property
     def sev(self) -> str:
@@ -83,6 +88,8 @@ class Check:
             return "没检查"
         if self.state == "offline":
             return "断网未知"
+        if self.split:
+            return self.split
         return f"{self.value} {self.unit}".strip()
 
 
@@ -115,6 +122,7 @@ class ProjectCard:
     last_text: str
     issues: list[Issue] = field(default_factory=list)
     decisions: list[Decision] = field(default_factory=list)
+    closed: bool = False  # 项目下已没有开着的卡（D-324）
 
     @property
     def health_label(self) -> str:
@@ -263,6 +271,11 @@ def _open(project: pd.Project) -> list[pd.MissionInfo]:
     return [m for m in project.missions if m.column != "已关"]
 
 
+def project_closed(project: pd.Project) -> bool:
+    """D-324 判据（审计裁定）：项目下没有开着的卡＝全部卡是 CLOSED 或 CANCELLED，或者没有卡。不用旧文件里的“阶段”。"""
+    return all(m.state in CLOSED_STATES for m in project.missions)
+
+
 # ---------------------------------------------------------------- 问题三档
 
 
@@ -271,6 +284,7 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
     pid = project.project_id
     if not project.registered:
         return issues
+    closed = project_closed(project)
     for m in _open(project):
         if m.state == "BLOCKED":
             issues.append(
@@ -353,7 +367,10 @@ def project_issues(project: pd.Project, now: datetime) -> list[Issue]:
             "工作项卡住": ("risk", "主执行"),
         }.get(a.what, ("hint", "主执行"))
         title = {"执行记录没结账": "账本遗留", "收口停在半路": "账本对不上"}.get(a.what, a.what)
-        issues.append(Issue(sev, pid, title, a.detail, who, "账本一致性检查", a.since))
+        if closed:
+            issues.append(Issue("hint", pid, title, a.detail, who, OLD_BASIS, a.since))
+        else:
+            issues.append(Issue(sev, pid, title, a.detail, who, "账本一致性检查", a.since))
     for c in project.changes:
         if c.status.startswith("待批"):
             issues.append(
@@ -456,6 +473,8 @@ def health_of(project: pd.Project, issues: list[Issue], coverage: Coverage) -> s
         return "block"
     if top == 2:
         return "risk"
+    if project_closed(project) and any(i.basis == OLD_BASIS for i in issues):
+        return "old"
     if not _open(project) or not (coverage.ledger and coverage.git):
         return "nodata"
     return "ok"
@@ -501,6 +520,7 @@ def project_card(
         issues=issues,
     )
     card.health = health_of(project, issues, cov)
+    card.closed = project.registered and project_closed(project)
     card.decisions = decisions_from(issues)
     extra = legacy_decision(project, card.decisions)
     if extra is not None:
@@ -775,7 +795,9 @@ def checks_of(
         gate = Check(gate.key, gate.label, "offline", note=gate.note)
         safety = Check(safety.key, safety.label, "offline", note=safety.note)
     lost = sum(1 for c in cards for i in c.issues if i.title == "执行者失联")
-    mismatch = sum(1 for c in cards for i in c.issues if i.title in ("账本对不上", "工作项卡住"))
+    mismatch_titles = ("账本对不上", "工作项卡住")
+    mismatch = sum(1 for c in cards if not c.closed for i in c.issues if i.title in mismatch_titles)
+    mismatch_old = sum(1 for c in cards if c.closed for i in c.issues if i.title in mismatch_titles)
     unverified = sum(
         1
         for p in board.projects
@@ -790,7 +812,11 @@ def checks_of(
             "只查账本路线：已关的卡收口单是否 COMPLETED。PR 路线（审计编号）算不出",
         ),
         safety,
-        Check("mismatch", "账本对不上", "number", mismatch, "条", "收口单与卡状态、工作项 BLOCKED"),
+        Check(
+            "mismatch", "账本对不上", "number", mismatch, "条",
+            "收口单与卡状态、工作项 BLOCKED；旧账＝项目下已没有开着的卡时留下的，分开计、不算风险",
+            soft=bool(mismatch_old), split=f"在干 {mismatch}，旧账 {mismatch_old}" if mismatch_old else "",
+        ),
         Check(
             "lost", "执行者失联", "number", lost, "个",
             "卡开着 + 租约过期 + 最近断点超过 1 小时；只覆盖写账本的执行者",
@@ -940,9 +966,10 @@ def project_vm(
         columns.append(BoardColumn(name, note, card_rows))
     evidence = [
         EvidenceRow(
-            "ok" if not any(i.title == "账本对不上" for i in card.issues) else "risk",
+            "ok" if not any(i.title == "账本对不上" for i in card.issues) else "na" if card.closed else "risk",
             "账本一致性",
-            "收口单与卡状态、工作项、过期执行记录（本机账本副本）",
+            "收口单与卡状态、工作项、过期执行记录（本机账本副本）"
+            + ("；项目下已没有开着的卡，留下的算旧账，不算风险" if card.closed else ""),
         ),
         EvidenceRow(
             "ok" if not any(m.state == "CLOSED" and m.closure_state not in ("", "COMPLETED") for m in project.missions) else "block",

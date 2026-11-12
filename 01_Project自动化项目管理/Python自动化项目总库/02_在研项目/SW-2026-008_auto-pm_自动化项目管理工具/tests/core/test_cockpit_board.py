@@ -910,3 +910,34 @@ def test_b1_04_a_running_run_with_an_expired_lease_is_still_lost(tmp_path: Path)
     home = vm.home_vm(board, OFFSET, online=None, use_git=False)
     assert any(i.title == "执行者失联" for i in _card(home).issues)
     assert next(k for k in home.checks if k.key == "lost").value == 1
+
+
+def test_b1_05_a_closed_project_keeps_its_leftovers_as_old_records_not_risk(tmp_path: Path) -> None:
+    """D-324（TD-SW008-589）：项目下的卡全关了，账本一致性留下的两条算旧账：降成提示、项目标“旧账”，首页分开计，不隐藏。"""
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "CLOSED", "早关了的一张", 20), ("DJ-2026-101", "CANCELLED", "作废的一张", 20)],
+        "UPDATE work_items SET state = 'BLOCKED'",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    old = [i for i in card.issues if i.title == "工作项卡住"]
+    assert len(old) == 2 and {(i.sev, i.basis) for i in old} == {("hint", vm.OLD_BASIS)}
+    assert (card.health, card.health_label, card.closed) == ("old", "旧账", True)
+    mismatch = next(k for k in home.checks if k.key == "mismatch")
+    assert (mismatch.value, mismatch.text, mismatch.soft) == (0, "在干 0，旧账 2", True)
+
+
+def test_b1_06_an_open_project_with_a_blocked_work_item_is_still_at_risk(tmp_path: Path) -> None:
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "ACTIVE", "在干的一张", 0.01), ("DJ-2026-101", "CLOSED", "早关了的一张", 20)],
+        "UPDATE work_items SET state = 'BLOCKED' WHERE title = '早关了的一张'",
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    card = _card(home)
+    stuck = [i for i in card.issues if i.title == "工作项卡住"]
+    assert [(i.sev, i.basis) for i in stuck] == [("risk", "账本一致性检查")]
+    assert (card.health, card.closed) == ("risk", False)
+    mismatch = next(k for k in home.checks if k.key == "mismatch")
+    assert (mismatch.value, mismatch.text) == (1, "1 条")

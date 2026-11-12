@@ -67,7 +67,7 @@ def project_tile(card: ProjectCard, on_project: Callable[[str], None]) -> QFrame
     frame.mouseReleaseEvent = lambda _event: on_project(card.project_id)  # type: ignore[method-assign]
     head = c.hrow(
         c.label(card.project_id + ("  工具" if card.tool else ""), "mono", wrap=False), 1,
-        c.chip(card.health_label, "ok" if card.health == "ok" else card.health if card.health in ("risk", "block") else "na"),
+        c.chip(card.health_label, theme.HEALTH_SEV.get(card.health, "na")),
     )
     layout.addWidget(head)
     layout.addWidget(c.label(card.name, "section"))
