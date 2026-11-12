@@ -480,9 +480,8 @@ def test_project_create_plc_initializes_dynamic_spec_snapshot(
     check_payload = json.loads(check_result.output)
     assert check_result.exit_code == 0
     assert check_payload["warn_count"] == 0
-    assert {
-        item["status"] for item in check_payload["items"] if item["item"] == "Spec Snapshot"
-    } == {"pass"}
+    # Spec Snapshot 检查已退役（TD-SW008-561）
+    assert [item for item in check_payload["items"] if item["item"] == "Spec Snapshot"] == []
 
 
 def test_project_create_plc_requires_registry_before_generation(
@@ -806,7 +805,7 @@ class TestProjectSnapshot:
 class TestProjectRetrofit:
     """project retrofit 命令测试"""
 
-    def test_retrofit_populates_copier_answers_and_spec_snapshot(
+    def test_retrofit_populates_copier_answers_without_spec_snapshot(
         self, cli_runner: CliRunner, tmp_path: Path
     ) -> None:
         workspace = _setup_retrofit_workspace(tmp_path, _PM_SESSION_NO_TABLE.replace("SW-2026-TEST", "DJ-2026-TEST"))
@@ -820,10 +819,9 @@ class TestProjectRetrofit:
         assert result.exit_code == 0
         project_dir = tmp_path / "DJ-2026-TEST_补齐项目"
         assert (project_dir / ".copier-answers.yml").exists()
+        # Spec Snapshot 检查已退役（TD-SW008-561）：retrofit 不再因为它去往 PM_SESSION 里补快照表
         pm_session = (project_dir / "PM_SESSION_DJ-2026-TEST.md").read_text(encoding="utf-8")
-        assert "## Spec Snapshot" in pm_session
-        assert "| LSP-905 | V1.2.0 |" in pm_session
-        assert "| LSP-907 | V1.3.0 |" in pm_session
+        assert "## Spec Snapshot" not in pm_session
 
 
 def _setup_doc_refresh_workspace(tmp_path: Path) -> Path:

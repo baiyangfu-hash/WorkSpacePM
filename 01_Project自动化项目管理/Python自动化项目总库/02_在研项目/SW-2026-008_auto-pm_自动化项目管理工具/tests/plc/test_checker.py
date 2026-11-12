@@ -596,13 +596,13 @@ class TestCheckItemsList:
     """P3-9: plc check --list 检查项清单测试"""
 
     def test_check_items_count(self) -> None:
-        """CHECK_ITEMS 应包含 10 项检查"""
-        assert len(PlcChecker.CHECK_ITEMS) == 10
+        """CHECK_ITEMS 应包含 9 项检查（Spec Snapshot 已退役，TD-SW008-561）"""
+        assert len(PlcChecker.CHECK_ITEMS) == 9
 
     def test_check_items_categories(self) -> None:
-        """CHECK_ITEMS 应覆盖 4 个分类（配置/文档/结构/规范）"""
+        """CHECK_ITEMS 应覆盖 3 个分类（配置/文档/结构）；“规范”分类只有已退役的 Spec Snapshot 一项"""
         categories = {item["category"] for item in PlcChecker.CHECK_ITEMS}
-        assert categories == {"配置", "文档", "结构", "规范"}
+        assert categories == {"配置", "文档", "结构"}
 
     def test_check_items_have_spec(self) -> None:
         """每项检查应有非空 spec 规范引用"""
@@ -611,10 +611,10 @@ class TestCheckItemsList:
             assert isinstance(item["spec"], str)
 
     def test_check_items_ids_unique(self) -> None:
-        """检查项 id 应唯一（1-10）"""
+        """检查项 id 应唯一（1-9）"""
         ids = [item["id"] for item in PlcChecker.CHECK_ITEMS]
         assert len(ids) == len(set(ids)), f"检查项 id 存在重复: {ids}"
-        assert sorted(ids, key=int) == [str(i) for i in range(1, 11)]
+        assert sorted(ids, key=int) == [str(i) for i in range(1, 10)]
 
     def test_plc_check_list_cli(self, tmp_path: Path) -> None:
         """plc check --list 应输出检查项清单表格"""
@@ -630,8 +630,9 @@ class TestCheckItemsList:
         )
         assert result.exit_code == 0
         assert "PLC 检查项清单" in result.output
-        # 验证 4 个分类均出现
-        for cat in ["配置", "文档", "结构", "规范"]:
+        # 验证 3 个分类均出现
+        for cat in ["配置", "文档", "结构"]:
             assert cat in result.output
+        assert "Spec Snapshot" not in result.output
         # 验证检查项数量提示
-        assert "共 10 项检查" in result.output
+        assert "共 9 项检查" in result.output

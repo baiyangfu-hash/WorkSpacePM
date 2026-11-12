@@ -8,7 +8,8 @@
 PLC 项目结构检查器（LSP-907 907_项目配置规范_LSP）
 
 迁移自 SW-2026-005 的 PlcProjectService.check_project/check_workspace。
-检查项：.plc.json / PM_SESSION / PRD 文档 / 目录结构 / Spec Snapshot 规范漂移。
+检查项：.plc.json / PM_SESSION / PRD 文档 / 目录结构。
+“Spec Snapshot 规范漂移”一项已退役（TD-SW008-561）：它读已退役的 PM_SESSION 里的快照表，老工程永远报失败。
 """
 
 from __future__ import annotations
@@ -40,11 +41,6 @@ from auto_pm.plc.models import (
 )
 from auto_pm.plc.scheme_doc import scheme_items
 from auto_pm.plc.scl_linter import SclLinter
-from auto_pm.plc.spec_snapshot import (
-    compare_versions,
-    load_spec_registry,
-    parse_spec_snapshot,
-)
 
 log = logging.getLogger(__name__)
 
@@ -137,13 +133,6 @@ class _LegacyPlcCheckerCore:
             "description": "检查 12 个标准目录是否存在（01_启动/00_项目管理、01_需求与设计、02_PLC程序、03_HMI设计、04_现场调试、04_驱动器与设备、05_测试与验证、06_文档与交付、07_技术支持、08_备件管理、09_项目总结、10_知识库）",
             "spec": "LSP-907 §3.1",
         },
-        {
-            "id": "10",
-            "category": "规范",
-            "item": "Spec Snapshot",
-            "description": "检查 PM_SESSION 中的 Spec Snapshot 表格与 spec_registry.json 是否一致，检测主版本/次版本/补丁版本漂移",
-            "spec": "V2.0.3",
-        },
     ]
 
     def __init__(self, workspace_root: str, language_service: LanguageService | None = None) -> None:
@@ -219,8 +208,7 @@ class _LegacyPlcCheckerCore:
         # 4.5. 检查目录唯一性与影子冗余冲突（DEV-001/DEV-003/LSP-907）
         self._check_naming_and_shadow_duplicates(project_path, result)
 
-        # 5. 检查 Spec Snapshot 规范漂移
-        self._check_spec_snapshot(project_path, result)
+        # 5. （已退役）Spec Snapshot 规范漂移：读已退役的 PM_SESSION，TD-SW008-561
 
         # 6. 检查 SCL 代码语法与命名规范 (LSP-905)
         self._check_scl_code_compliance(project_path, result)
@@ -603,84 +591,6 @@ class _LegacyPlcCheckerCore:
         except OSError:
             return 0
         return count
-
-    def _check_spec_snapshot(self, project_path: str, result: CheckResult) -> None:
-        """检查 Spec Snapshot 规范漂移（V2.0.3）
-
-        解析 PM_SESSION 中的 Spec Snapshot 表格，对比 spec_registry.json，
-        根据漂移级别设置检查项状态：
-        - major 漂移 → FAIL
-        - minor/patch 漂移 → WARN
-        - 无漂移 → PASS
-
-        边界情况：
-        - PM_SESSION 不存在 → 跳过（已在 PM_SESSION 检查中报告）
-        - spec_registry.json 缺失 → WARN
-        - Spec Snapshot 表格缺失 → WARN
-        """
-        # 查找 PM_SESSION 文件路径（复用现有查找逻辑）
-        project_id = self.resolve_project_id(project_path)
-        pm_session = os.path.join(project_path, f"PM_SESSION_{project_id}.md")
-        if not os.path.isfile(pm_session):
-            # 尝试模糊匹配
-            found = None
-            try:
-                for f in os.listdir(project_path):
-                    if f.startswith("PM_SESSION_") and f.endswith(".md"):
-                        found = f
-                        break
-            except OSError:
-                pass
-            if found:
-                pm_session = os.path.join(project_path, found)
-            else:
-                # PM_SESSION 不存在，已在第 2 项检查中报告
-                return
-
-        # 加载 spec_registry.json
-        registry = load_spec_registry(self.workspace_root)
-        if registry is None:
-            result.add(
-                "Spec Snapshot",
-                "warn",
-                "未找到 spec_registry.json，跳过漂移检测",
-            )
-            return
-
-        # 解析 Spec Snapshot 表格
-        snapshot = parse_spec_snapshot(pm_session)
-        if not snapshot:
-            result.add(
-                "Spec Snapshot",
-                "warn",
-                "PM_SESSION 缺少 Spec Snapshot 表格",
-            )
-            return
-
-        # 对比版本
-        drifts = compare_versions(snapshot, registry)
-        if not drifts:
-            result.add(
-                "Spec Snapshot",
-                "pass",
-                "Spec Snapshot 与 spec_registry.json 一致",
-            )
-            return
-
-        # 根据漂移级别设置状态
-        level_names = {
-            "major": "主版本漂移",
-            "minor": "次版本漂移",
-            "patch": "补丁漂移",
-        }
-        drift_msgs = [
-            f"{d.spec_id}: {d.snapshot_version} → {d.registry_version} "
-            f"({level_names[d.drift_level]})"
-            for d in drifts
-        ]
-        has_major = any(d.drift_level == "major" for d in drifts)
-        status = "fail" if has_major else "warn"
-        result.add("Spec Snapshot", status, "; ".join(drift_msgs))
 
     def _check_prd_docs(self, project_path: str, result: CheckResult) -> None:
         """检查 PRD 文档完整性"""
@@ -1278,7 +1188,6 @@ class _CheckGroupBase:
 class _PlcConfigChecks(_CheckGroupBase):
     _check_plc_json = _LegacyPlcCheckerCore._check_plc_json
     _check_pm_session = _LegacyPlcCheckerCore._check_pm_session
-    _check_spec_snapshot = _LegacyPlcCheckerCore._check_spec_snapshot
     _check_prd_docs = _LegacyPlcCheckerCore._check_prd_docs
     _check_sub_prd_substance = _LegacyPlcCheckerCore._check_sub_prd_substance
     _check_fb_prd_docs = _LegacyPlcCheckerCore._check_fb_prd_docs
