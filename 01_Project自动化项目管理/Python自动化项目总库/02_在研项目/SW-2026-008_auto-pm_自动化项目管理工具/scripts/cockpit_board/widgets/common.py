@@ -290,8 +290,12 @@ def placeholder(title: str, reason: str, command: str = "") -> QFrame:
     return frame
 
 
-def read_block(status: str, raw: str, state: str = "") -> QFrame:
-    """“读取状态 + 原文”块：上面一行写读得怎么样（state 给了就配三态标签），下面原样放命令输出（纯文本、可选中）。"""
+def read_block(status: str, raw: str, state: str = "", folded: bool = False) -> QFrame:
+    """“读取状态 + 原文”块：上面一行写读得怎么样（state 给了就配三态标签），下面原样放命令输出（纯文本、可选中）。
+
+    folded＝True（读到了、读懂了、要点已经列在上面）时不贴原文，只写一行“原文已收起”和它有多长（D-316）：
+    像 HMI 上数值已经显示了，就不再把整段原始报文铺在画面上。没读到、读不懂时照旧贴原文，排查要看。
+    """
     frame, layout = inner("pre")
     head = [label(status, "muted")]
     if state:
@@ -299,6 +303,10 @@ def read_block(status: str, raw: str, state: str = "") -> QFrame:
     row = hrow(*head)
     fill(row, head[-1])
     layout.addWidget(row)
+    if folded:
+        lines = len(raw.splitlines())
+        layout.addWidget(label(f"原文 {lines} 行已收起，要点见上；要看全文，在命令行运行上面这条命令", "small"))
+        return frame
     shown = raw if len(raw) <= RAW_LIMIT else raw[:RAW_LIMIT] + f"\n……（截断，后面还有 {len(raw) - RAW_LIMIT} 字）"
     layout.addWidget(label(shown or "（没有输出）", "mono"))
     return frame
@@ -442,13 +450,16 @@ class ReadPage(QWidget):
             frame, layout = card()
             layout.addWidget(label(result.command, "heading"))
             state, status = read_state(result)
+            rows: list[tuple[str, str]] = []
             if shows_values(result):
                 rows = self.summary(result.reader, result.parsed.data)
                 if rows:
                     layout.addWidget(kv(rows))
             outcome = result.outcome
             raw = "" if outcome is None else (outcome.stdout if outcome.kind == "ok" else (outcome.stderr or outcome.stdout))
-            layout.addWidget(read_block(status, raw, state))
+            # 这次真读到、读懂了、要点也列出来了才收起原文；用的是快照或没读懂的，原文照贴
+            folded = bool(rows) and state == "" and outcome is not None and outcome.kind == "ok"
+            layout.addWidget(read_block(status, raw, state, folded=folded))
             self.reads.addWidget(frame)
 
 

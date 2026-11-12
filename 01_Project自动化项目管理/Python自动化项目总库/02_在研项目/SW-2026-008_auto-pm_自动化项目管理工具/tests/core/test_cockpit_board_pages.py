@@ -578,3 +578,97 @@ def test_decisions_page_reads_a_project_that_only_has_a_pending_card(qapp: QAppl
     window._refresh_decisions()
     assert asked and "SW-2026-008" in asked[-1] and "DJ-2026-101" in asked[-1]
     window.close()
+
+
+# ---- D-316：读懂了就收起原文；D-317：写明审计读了哪些目录 ----------------------------------------------
+
+
+def test_raw_json_is_folded_when_the_summary_is_shown(qapp: QApplication) -> None:
+    page = attention.AttentionPage()
+    results = []
+    for read in shell.page_reads()["attention"]:
+        outcome = _outcome("ok", read.reader)
+        results.append(c.ReadResult(read.reader, "x", outcome, readers.parse(read.reader, outcome.stdout)))
+    page.show_results("项目：SW-2026-008", results)
+    texts = _texts(page)
+    assert not any('"schema_version"' in t for t in texts)  # 原始 JSON 不再铺在页面上
+    folded = [t for t in texts if t.startswith("原文 ") and "已收起" in t]
+    assert len(folded) == len(results)
+    assert folded[0] == f"原文 {len(results[0].outcome.stdout.splitlines())} 行已收起，要点见上；要看全文，在命令行运行上面这条命令"
+
+
+@pytest.mark.parametrize("mode", ["garbage", "missing", "offline"])
+def test_raw_text_stays_when_the_read_failed(qapp: QApplication, mode: str) -> None:
+    page = tasks.TasksPage()
+    read = shell.page_reads()["tasks"][0]
+    outcome = _outcome(mode, read.reader)
+    parsed = readers.parse(read.reader, outcome.stdout) if mode == "garbage" else None
+    page.show_results("项目：SW-2026-008", [c.ReadResult(read.reader, "x", outcome, parsed)])
+    texts = _texts(page)
+    assert not any("已收起" in t for t in texts)
+    assert any((outcome.stdout or outcome.stderr).strip()[:20] in t for t in texts)  # 排查要看原文
+
+
+def test_snapshot_values_keep_the_raw_text(qapp: QApplication) -> None:
+    """用的是上次的快照（这次没读到）：要点照列，原文照贴，不收起，免得旧数据显得像这次读到的。"""
+    page = tasks.TasksPage()
+    read = shell.page_reads()["tasks"][0]
+    good = _outcome("ok", read.reader)
+    offline = _outcome("offline", read.reader)
+    page.show_results("项目：SW-2026-008", [c.ReadResult(read.reader, "x", offline, readers.parse(read.reader, good.stdout),
+                                                         last_note="上次读取：5 分钟前")])
+    assert not any("已收起" in t for t in _texts(page))
+
+
+def test_prs_page_names_the_audit_folders_it_read(qapp: QApplication, tmp_path: Path) -> None:
+    audit = gh.Audit(27, "27_review_and_fix_audit_tool.md", "pass", "通过")
+    snapshot = gh.Snapshot("o/r", "ok", NOW, NOW, audits=[gh.Audit(18, "18_audit_pr3_envport.md", "pass", "通过"), audit])
+    rows = dict(prs.audit_rows(snapshot, [tmp_path / "reviews"]))
+    # D-317 加码：没有开着的 PR 时分不出哪份是当前的，两份都只算旧报告，不列在“当前审计报告”下
+    assert rows["当前审计报告"].startswith("分不出") and rows["另有旧报告"].startswith("2 份")
+    assert str(tmp_path / "reviews") in rows["读的目录"] and "--reviews-dir" in rows["读的目录"]
+    assert "读的目录" not in dict(prs.audit_rows(snapshot))  # 没给目录就不写这一行
+    assert "另有旧报告" not in dict(prs.audit_rows(gh.Snapshot("o/r", "ok", NOW, NOW)))
+    page = prs.PrsPage()
+    page.reviews_dirs = [tmp_path / "reviews"]
+    page.show_github(snapshot, disabled=False)
+    assert any("--reviews-dir" in t for t in _texts(page))
+
+
+def test_the_window_hands_its_review_folders_to_the_prs_page(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    extra = tmp_path / "shared_reviews"
+    window = gui_tests._window(qapp, root, db, read_runner=_runner("ok"), reviews_dirs=[root / "reviews", extra])
+    assert window.prs.reviews_dirs == [root / "reviews", extra]
+    window.close()
+
+
+def test_b1_12_only_reports_of_open_prs_are_current_and_each_names_source_and_date(qapp: QApplication, tmp_path: Path) -> None:
+    """D-317 加码（TD-SW008-582 看板侧）：①列出的每份报告标来源和日期；②旧报告不放在“当前审计报告”名下；③读不到写“读不到”。"""
+    reviews = tmp_path / "reviews"
+    reviews.mkdir()
+    (reviews / "30_audit_pr758.md").write_text("# 审计 PR #758\n\n审阅时间：2026-11-12\n\n## 结论\n\n**通过。**\n", encoding="utf-8")
+    (reviews / "18_audit_pr3_envport.md").write_text("# 审计 PR #3\n\n## 结论\n\n**通过。**\n", encoding="utf-8")
+    missing = tmp_path / "shared_reviews"
+    audits, problems = gh.read_audits_checked([reviews, missing])
+    snapshot = _snapshot("ok")
+    snapshot.audits, snapshot.audit_problems = audits, problems
+    snapshot.pulls[0].audit = gh.audit_for(snapshot.pulls[0], audits)
+    rows = prs.audit_rows(snapshot, [reviews, missing])
+    table = dict(rows)
+    assert table["当前审计报告"] == "1 份（对上了开着的 PR）"
+    assert "来源 reviews/" in table["PR #758"] and "日期 2026-11-12" in table["PR #758"]
+    assert table["另有旧报告"].startswith("1 份没对上开着的 PR，不当作当前审计报告")
+    assert not any(key == "PR #3" for key, _ in rows)
+    assert "读不到" in table and str(missing) in table["读不到"]
+    old = next(a for a in audits if a.file.startswith("18_"))
+    assert old.date.endswith("（文件修改时间）")  # 正文没写日期，用文件时间并注明
+
+
+def test_b1_12b_unreadable_audit_folders_are_not_shown_as_no_reports(qapp: QApplication, tmp_path: Path) -> None:
+    audits, problems = gh.read_audits_checked([tmp_path / "nowhere"])
+    snapshot = _snapshot("ok")
+    snapshot.audits, snapshot.audit_problems = audits, problems
+    table = dict(prs.audit_rows(snapshot))
+    assert table["当前审计报告"] == "读不到" and "nowhere" in table["读不到"]
+    assert not any("没有" == v for v in table.values())

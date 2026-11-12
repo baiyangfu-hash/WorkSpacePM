@@ -120,3 +120,20 @@ def test_the_project_page_shows_the_more_line_and_newest_first(qapp: QApplicatio
     assert any(t.startswith("还有 3 条") for t in texts)  # 33 张已收口的单，列最近 30，余 3；没收口的业务变更另外列
     ids = [t for t in texts if t.startswith("CHG-PLC-2026-")]
     assert ids[0] == "CHG-PLC-2026-033" and len(ids) == 30
+
+
+def test_b1_05_a_closed_project_shows_an_old_records_chip_on_both_pages(qapp: QApplication, tmp_path: Path) -> None:
+    """D-324（TD-SW008-589）：卡全关了的项目，首页小方块和项目页都挂“旧账”标签，颜色走提示，不走风险。"""
+    from cockpit_board.widgets.home import project_tile
+
+    board = board_tests._edited_board(
+        tmp_path, [("DJ-2026-101", "CLOSED", "早关了的一张", 20)], "UPDATE work_items SET state = 'BLOCKED'"
+    )
+    home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
+    card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
+    tile = project_tile(card, lambda _pid: None)
+    page = ProjectPage(lambda: None, lambda _text: None)
+    page.show_view(vm.project_vm(board, card, board_tests.OFFSET, False), board_tests.NOW, False)
+    for holder in (tile, page):
+        chips = [label for label in holder.findChildren(QLabel) if label.text() == "旧账"]
+        assert [label.property("sev") for label in chips] == ["hint"]

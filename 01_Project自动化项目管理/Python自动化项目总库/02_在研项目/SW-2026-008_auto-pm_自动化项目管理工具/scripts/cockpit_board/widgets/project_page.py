@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
+from cockpit_board import theme
 from cockpit_board.viewmodel import PHASES, ProjectVM
 from cockpit_board.widgets import common as c
 from cockpit_board.widgets.delivery import github_block
@@ -41,7 +42,7 @@ class ProjectPage(QWidget):
         back = c.button("‹ 今天", "ghost", "回首页")
         back.clicked.connect(self.on_back)
         lay.addWidget(c.hrow(back, c.label(card.project_id, "mono", wrap=False), c.label(card.name, "title"),
-                             c.chip(card.health_label, card.health if card.health in ("ok", "risk", "block") else "na"), 1))
+                             c.chip(card.health_label, theme.HEALTH_SEV.get(card.health, "na")), 1))
         lay.addWidget(c.hrow(c.label(card.milestone, "muted", wrap=False), c.label("到期 " + card.due_text, "muted", wrap=False),
                              c.label("数据覆盖 " + card.coverage.text(), "muted", wrap=False),
                              c.label("最后动静 " + card.last_text, "muted", wrap=False), 1))
