@@ -75,7 +75,17 @@ def uncommitted_blockers(workspace_root: str | Path, project_path: str | Path) -
 
     try:
         done = run_git_bounded_strict_text(
-            ["git", "status", "--porcelain", "--untracked-files=all", "--", str(project_path)],
+            # core.quotePath=false：中文等非 ASCII 路径照原字显示，不让 Git 写成八进制转义码（D-360）。
+            [
+                "git",
+                "-c",
+                "core.quotePath=false",
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--",
+                str(project_path),
+            ],
             default_timeout=60.0,
             error_cls=ProjectDeleteError,
             where=workspace_root,
