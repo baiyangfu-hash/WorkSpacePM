@@ -12,13 +12,21 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -203,3 +211,253 @@ def test_the_projects_page_hides_archived_until_the_box_is_ticked(qapp: QApplica
 
     page.show_view([card for card in cards if not card.archived])
     assert page.show_archived.text() == "显示已归档（0 个）"
+
+
+# ---------------------------------------------------------------- 项目详情页“项目状态”一块、全部项目页的跳页按钮（CHG-SCPT-2026-654）
+
+
+def _lifecycle_page(qapp: QApplication, tmp_path: Path, fake: Any, *, archived: bool = False, probe: bool = True) -> tuple[Any, Any, dict[str, Any]]:
+    """项目详情页 + 真的“决定”控制器（命令运行器是假的）；返回 (页面, 控制器, 各项目的 ProjectVM)。"""
+    from cockpit_board.decision_controller import DecisionController
+
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    root, db = base._workspace(tmp_path, [])
+    if archived:
+        registry = root / pd.REGISTRY_RELATIVE
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        data["projects"][0].update({"kind": "equipment", "status": "archived"})  # DJ-2026-101
+        registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    board = pd.build_board(root, db, board_tests.NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
+    views = {card.project_id: vm.project_vm(board, card, board_tests.OFFSET, False) for card in home.hot + home.rest}
+    controller = DecisionController(tmp_path, lambda _t: None, lambda: None, runner=fake, now=lambda: dw.NOW)
+    page = ProjectPage(lambda: None, lambda _text: None)
+    page.set_lifecycle(controller)
+    if probe:
+        controller.probe_lifecycle()
+        dw._wait(controller, qapp)
+    return page, controller, views
+
+
+def _lifecycle_buttons(page: ProjectPage) -> dict[str, QPushButton]:
+    words = {"归档…", "重新激活…", "重新检查", "确认归档", "确认重新激活"}
+    found = {str(b.text()): b for b in page.findChildren(QPushButton) if str(b.text()) in words}
+    assert len(found) == len([b for b in page.findChildren(QPushButton) if str(b.text()) in words])  # 没有重复的键
+    return found
+
+
+def _show(page: ProjectPage, views: dict[str, Any], project_id: str) -> None:
+    page.show_view(views[project_id], board_tests.NOW, False)
+
+
+def _texts_of(page: ProjectPage) -> list[str]:
+    return [str(label.text()) for label in page.findChildren(QLabel)]
+
+
+def test_project_state_block_without_a_controller_only_tells_the_status(qapp: QApplication, tmp_path: Path) -> None:
+    page, _controller, views = _lifecycle_page(qapp, tmp_path, None, probe=False)
+    plain = ProjectPage(lambda: None, lambda _text: None)  # 没接线的页面（别的测试里就是这样用的）：只写状态，没有按钮
+    _show(plain, views, "DJ-2026-101")
+    assert "项目状态" in _texts_of(plain) and "在研" in _texts_of(plain) and _lifecycle_buttons(plain) == {}
+
+
+def test_archive_entry_is_grey_until_probed_and_grey_with_a_reason_when_the_command_is_missing(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 8 条（项目详情页一侧）：没探测到、命令不存在都灰着并写明原因；探测到了才可点。"""
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    page, controller, views = _lifecycle_page(qapp, tmp_path, dw.LifecycleCli(missing=("archive", "reactivate")), probe=False)
+    _show(page, views, "DJ-2026-101")
+    buttons = _lifecycle_buttons(page)
+    assert list(buttons) == ["归档…"] and not buttons["归档…"].isEnabled()
+    assert "正在探测本机有没有这条命令……" in _texts_of(page)
+    controller.probe_lifecycle()
+    dw._wait(controller, qapp)  # 探测完页面自己重画
+    buttons = _lifecycle_buttons(page)
+    assert list(buttons) == ["归档…"] and not buttons["归档…"].isEnabled()
+    assert any(t.startswith("本机发布版太旧：没有这条命令（等部署新版本后再看）") for t in _texts_of(page))
+    page.start_dry_run("archive")  # 灰着的键就算被调到，命令那头也只会照实报没有这条命令；这里确认页面没有亮出确认键
+    dw._wait(controller, qapp)
+    assert "确认归档" not in _lifecycle_buttons(page)
+    controller.runner = dw.LifecycleCli()
+    controller.reset_lifecycle_probe()
+    controller.probe_lifecycle()
+    dw._wait(controller, qapp)
+    page.void_dry_run()
+    buttons = _lifecycle_buttons(page)
+    assert list(buttons) == ["归档…"] and buttons["归档…"].isEnabled()
+    for button in buttons.values():  # 按钮文字和提示里没有项目经理看板的禁用词
+        from cockpit_board import policy
+
+        assert not any(word in (button.text() + button.toolTip()).lower() for word in policy.PM_FORBIDDEN_WORDS)
+        assert button.text() in policy.PM_BUTTONS
+
+
+def test_archived_project_offers_reactivate_and_unregistered_offers_nothing(qapp: QApplication, tmp_path: Path) -> None:
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    fake = dw.LifecycleCli(dry_out="将要改的那一行：DJ-2026-101 状态 已归档 → 在研\n预演（没加 --confirm）：什么都没改。要真的改回在研，请用户本人加 --confirm 再运行。\n")
+    page, controller, views = _lifecycle_page(qapp, tmp_path, fake, archived=True)
+    _show(page, views, "DJ-2026-101")
+    assert list(_lifecycle_buttons(page)) == ["重新激活…"] and "已归档" in _texts_of(page)
+    _lifecycle_buttons(page)["重新激活…"].click()
+    dw._wait(controller, qapp)
+    assert fake.calls[-1] == ["project", "reactivate", "DJ-2026-101"]
+    assert set(_lifecycle_buttons(page)) == {"确认重新激活", "重新检查"}
+    _show(page, views, "DJ-2026-102")  # 只有文件夹、没登记的项目
+    assert _lifecycle_buttons(page) == {} and any("还没登记" in t for t in _texts_of(page))
+
+
+def test_a_blocked_dry_run_shows_the_output_verbatim_and_only_offers_a_recheck(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 5 条：预演不过，页面上没有“确认归档”，只有“重新检查”；输出原样显示，一行不少。页面上没有任何输入框。"""
+    from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QLineEdit, QPlainTextEdit, QTextEdit
+
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    fake = dw.LifecycleCli(dry_rc=1, dry_out=dw.DRY_BLOCKED)
+    page, controller, views = _lifecycle_page(qapp, tmp_path, fake)
+    _show(page, views, "DJ-2026-101")
+    _lifecycle_buttons(page)["归档…"].click()
+    assert page.dry_running == "DJ-2026-101" and not _lifecycle_buttons(page)["归档…"].isEnabled()  # 正在预演：不能连点
+    dw._wait(controller, qapp)
+    assert fake.calls[-1] == ["project", "archive", "DJ-2026-101"]
+    assert list(_lifecycle_buttons(page)) == ["重新检查"]
+    outputs = [label for label in page.findChildren(QLabel) if label.property("role") == "dry_run_output"]
+    assert [str(label.text()) for label in outputs] == [dw.DRY_BLOCKED]
+    assert any("退出码：rc 1" in t for t in _texts_of(page))
+    for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
+        assert page.findChildren(kind) == [], kind.__name__
+    fake.dry_rc, fake.dry_out = 0, dw.DRY_PASS  # 处理完再点“重新检查”：这回通过，出现确认键
+    _lifecycle_buttons(page)["重新检查"].click()
+    dw._wait(controller, qapp)
+    assert set(_lifecycle_buttons(page)) == {"确认归档", "重新检查"}
+    silent = dw.LifecycleCli(dry_rc=0, dry_out="将要改的那一行：…\n")  # 退出码 0 但没有“预演”那一句：也没有确认键
+    controller.runner = silent
+    _lifecycle_buttons(page)["重新检查"].click()
+    dw._wait(controller, qapp)
+    assert list(_lifecycle_buttons(page)) == ["重新检查"]
+
+
+def test_the_confirm_key_belongs_to_the_project_of_the_dry_run(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验收第 13 条：甲预演通过、出现“确认归档”后，换到乙的详情页，确认键没有了；回到甲点“重新读取”，确认键也没有了；
+    不换页直接确认时，起的命令里的项目号等于预演的项目号。"""
+    from cockpit_board.widgets.decisions import ConfirmDialog
+    from PySide6.QtWidgets import QDialog
+
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda _self: QDialog.DialogCode.Accepted)
+    fake = dw.LifecycleCli()
+    fake.write_out = "项目已归档"
+    page, controller, views = _lifecycle_page(qapp, tmp_path, fake)
+    first, second = "DJ-2026-101", "SW-2026-008"
+
+    def dry_run_first() -> None:
+        _show(page, views, first)
+        _lifecycle_buttons(page)["归档…"].click()
+        dw._wait(controller, qapp)
+        assert set(_lifecycle_buttons(page)) == {"确认归档", "重新检查"} and page.dry_run.project_id == first
+
+    dry_run_first()
+    _show(page, views, first)  # 同一个项目重画（比如网络探测回来）：预演还在
+    assert "确认归档" in _lifecycle_buttons(page)
+    _show(page, views, second)  # 换到乙：确认键没有了，乙要自己从“归档…”点起
+    assert list(_lifecycle_buttons(page)) == ["归档…"] and page.dry_run is None
+    assert not [label for label in page.findChildren(QLabel) if label.property("role") == "dry_run_output"]
+    _show(page, views, first)  # 再回到甲：那份预演不会回来
+    assert list(_lifecycle_buttons(page)) == ["归档…"]
+
+    dry_run_first()
+    page.void_dry_run()  # app.reload()（“重新读取”）调的就是它
+    assert list(_lifecycle_buttons(page)) == ["归档…"] and page.dry_run is None
+
+    dry_run_first()
+    before = len(fake.calls)
+    _lifecycle_buttons(page)["确认归档"].click()
+    dw._wait(controller, qapp)
+    assert len(fake.calls) == before + 1 and fake.calls[-1][:4] == ["project", "archive", first, "--confirm"]
+    assert "确认归档" not in _lifecycle_buttons(page)  # 一次预演只确认一次
+    receipts = [str(label.text()) for label in page.findChildren(QLabel) if label.property("role") == "lifecycle_receipt"]
+    assert receipts == ["项目已归档"]  # 回执也显示在项目详情页
+    assert controller.page.receipts[-1].output == "项目已归档"  # “决定”页的记录里也有
+
+    # 项目号取预演记下的那个，不取页面当时显示的：就算页面上的项目被换掉（没经过 show_view），命令里仍是预演的项目
+    dry_run_first()
+    page.vm = views[second]
+    page.confirm()
+    dw._wait(controller, qapp)
+    assert fake.calls[-1][:4] == ["project", "archive", first, "--confirm"]
+
+
+def test_a_dry_run_that_finishes_after_the_page_moved_on_is_dropped(qapp: QApplication, tmp_path: Path) -> None:
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    page, controller, views = _lifecycle_page(qapp, tmp_path, dw.LifecycleCli())
+    _show(page, views, "DJ-2026-101")
+    page.start_dry_run("archive")
+    _show(page, views, "SW-2026-008")  # 预演还在跑就换了项目
+    dw._wait(controller, qapp)
+    assert page.dry_run is None and list(_lifecycle_buttons(page)) == ["归档…"]
+    _show(page, views, "DJ-2026-101")
+    page.start_dry_run("archive")
+    page.void_dry_run()  # 预演还在跑就点了“重新读取”
+    dw._wait(controller, qapp)
+    assert page.dry_run is None and list(_lifecycle_buttons(page)) == ["归档…"]
+
+
+def test_projects_page_has_one_jump_button_that_only_calls_back(qapp: QApplication, tmp_path: Path) -> None:
+    from cockpit_board import policy
+    from cockpit_board.widgets.projects import ProjectsPage
+
+    jumped: list[int] = []
+    page = ProjectsPage(lambda _pid: None, lambda: jumped.append(1))
+    buttons = [b for b in page.findChildren(QPushButton) if b.text()]
+    assert [str(b.text()) for b in buttons] == ["新建项目…"] and buttons[0].isEnabled()
+    assert not any(word in (buttons[0].text() + buttons[0].toolTip()).lower() for word in policy.PM_FORBIDDEN_WORDS)
+    buttons[0].click()
+    assert jumped == [1]
+    alone = ProjectsPage(lambda _pid: None)  # 没接跳页（旧的用法）：键在，但灰着
+    assert [b.isEnabled() for b in alone.findChildren(QPushButton) if b.text()] == [False]
+
+
+def test_a_dry_run_of_another_project_never_lights_this_projects_confirm_key(qapp: QApplication, tmp_path: Path) -> None:
+    """第二道闸：就算页面手里留着别的项目的预演（换项目时本该清掉），这个项目的“项目状态”一块也不认它。"""
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    page, controller, views = _lifecycle_page(qapp, tmp_path, dw.LifecycleCli())
+    _show(page, views, "DJ-2026-101")
+    _lifecycle_buttons(page)["归档…"].click()
+    dw._wait(controller, qapp)
+    kept = page.dry_run
+    assert kept.passed and "确认归档" in _lifecycle_buttons(page)
+    _show(page, views, "SW-2026-008")
+    page.dry_run = kept  # 硬塞回去
+    page._redraw()
+    assert list(_lifecycle_buttons(page)) == ["归档…"]
+    assert not [label for label in page.findChildren(QLabel) if label.property("role") == "dry_run_output"]
+
+
+def test_confirm_does_nothing_when_the_dry_run_did_not_pass(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """第二道闸：预演不过时页面上本来就没有确认键；就算 confirm() 被调到，也不弹确认框、不起命令。"""
+    from cockpit_board.widgets.decisions import ConfirmDialog
+    from PySide6.QtWidgets import QDialog
+
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    opened: list[int] = []
+
+    def accept(_self: Any) -> Any:
+        opened.append(1)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ConfirmDialog, "exec", accept)
+    fake = dw.LifecycleCli(dry_rc=1, dry_out=dw.DRY_BLOCKED)
+    page, controller, views = _lifecycle_page(qapp, tmp_path, fake)
+    _show(page, views, "DJ-2026-101")
+    _lifecycle_buttons(page)["归档…"].click()
+    dw._wait(controller, qapp)
+    assert page.dry_run is not None and not page.dry_run.passed
+    before = len(fake.calls)
+    page.confirm()
+    dw._wait(controller, qapp)
+    assert opened == [] and len(fake.calls) == before and controller.last_dialog is None

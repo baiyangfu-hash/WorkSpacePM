@@ -270,7 +270,7 @@ class CockpitWindow(QMainWindow):
         self.router = shell.Router(self.stack)
         self.home = HomePage(self.open_project, self.copy_text)
         self.issues = IssuesPage(self.open_project)
-        self.projects = ProjectsPage(self.open_project)
+        self.projects = ProjectsPage(self.open_project, self.new_project)
         self.project = ProjectPage(lambda: self.goto("home"), self.copy_text)
         self.station = StationPage(self.open_project, self.copy_text)
         self.station.action.connect(self.run_action)
@@ -279,6 +279,10 @@ class CockpitWindow(QMainWindow):
         self.decisions = DecisionController(options.root, self.copy_text, self.reload)
         self.flow = FlowPage()
         self.tools = ToolsPage(options.root)
+        # 项目生命周期入口（CHG-SCPT-2026-654）：项目详情页借“决定”控制器跑预演、弹确认框；工具页“项目”页签借它的探测结果
+        self.project.set_lifecycle(self.decisions)
+        self.tools.on_project_tab = self.decisions.probe_lifecycle
+        self.decisions.lifecycle_listeners.append(lambda: self.tools.set_register_kind(*self.decisions.register_kind()))
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
         # 骨架 D：4 个读命令的页 + PR 与审计（用窗口的 GitHub 采集）+ 两个只读数据文件的页
         self.attention, self.tasks, self.worktrees, self.release = AttentionPage(), TasksPage(), WorktreesPage(), ReleasePage()
@@ -388,12 +392,18 @@ class CockpitWindow(QMainWindow):
         missions = [m for p in self.board.projects for m in p.missions]
         self.decisions.refresh(project_ids, missions)
 
+    def new_project(self) -> None:
+        """“全部项目”页的“新建项目…”：只跳到工具页并选中“项目”页签。"""
+        self.goto("tools")
+        self.tools.select_tab("project")
+
     def open_project(self, project_id: str) -> None:
         if self.board is None or self.home_vm is None:
             return
         card = next((p for p in self.home_vm.hot + self.home_vm.rest if p.project_id == project_id), None)
         if card is None:
             return
+        self.decisions.probe_lifecycle()  # 本机有没有归档、重新激活这两条命令：这个窗口里只探测一次，点“重新读取”才重探
         self.project.show_view(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github),
                             self.board.generated_at, self.online)
         self.goto("project")
@@ -424,6 +434,11 @@ class CockpitWindow(QMainWindow):
         self.reload(with_legacy=False)
 
     def reload(self, _checked: bool = False, *, with_legacy: bool = True) -> None:
+        if with_legacy:  # 手动“重新读取”（和写命令成功后的重读）：项目详情页的预演作废，命令探测忘掉重来；10 分钟定时那一轮不动
+            self.project.void_dry_run()
+            self.decisions.reset_lifecycle_probe()
+            if self.current == "project" or (self.current == "tools" and self.tools.tab_buttons["project"].isChecked()):
+                self.decisions.probe_lifecycle()
         if any(t.isRunning() for t in self._threads):
             return
         self._legacy_this_round = with_legacy
@@ -520,12 +535,14 @@ class CockpitWindow(QMainWindow):
     def _feed_flow_and_tools(self, board: pd.Board) -> None:
         """账本读完把项目和任务交给“工具”“流程图”两页；数据没变就不动，正在填的表单不被打断。"""
         projects = [(p.project_id, p.root) for p in board.projects]
+        unregistered = [p.project_id for p in board.projects if not p.registered]  # 工作区里找到、还没登记的：给登记表单的下拉
         cards = flowgraph.card_positions(board.projects)
-        key = (projects, [(c.project_id, c.mission_id, c.title, c.mission_state, c.run_state) for c in cards])
+        key = (projects, [(c.project_id, c.mission_id, c.title, c.mission_state, c.run_state) for c in cards], unregistered)
         if key == self._flow_tools_key:
             return
         self._flow_tools_key = key
         self.tools.set_projects(projects)
+        self.tools.set_unregistered(unregistered)
         self.flow.show_cards(cards)
 
     # ------------------------------------------------ 工程工位动作

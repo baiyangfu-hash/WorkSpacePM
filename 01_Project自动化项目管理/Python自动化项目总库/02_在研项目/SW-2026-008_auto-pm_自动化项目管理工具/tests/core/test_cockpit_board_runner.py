@@ -162,9 +162,22 @@ def test_run_check_uses_the_python_that_started_the_board(tmp_path: Path) -> Non
 
 
 def test_no_bare_python_left_in_the_board_package() -> None:
+    """不许靠 PATH 上的 python 起进程（D-293）。只放过一行：tool_actions.py 里的栈名常量（project create --stack 的取值，
+    CHG-SCPT-2026-654），它是命令的一个参数值，不是可执行文件名；别处照旧不许有。"""
     package = SCRIPTS / "cockpit_board"
-    hits = [str(p) for p in package.rglob("*.py") if '"python"' in p.read_text(encoding="utf-8")]
-    assert hits == []
+    hits = [
+        f"{path.relative_to(package).as_posix()}:{number}: {line.strip()}"
+        for path in sorted(package.rglob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if '"python"' in line
+    ]
+    assert len(hits) == 1, hits
+    assert hits[0].startswith("tool_actions.py:") and "PROJECT_STACKS = (" in hits[0], hits
+    from cockpit_board import tool_actions
+
+    assert tool_actions.PROJECT_STACKS == ("plc", "python")
+    command = tool_actions.full_command(Path("/控制根"), ["project", "create", "--stack", tool_actions.PROJECT_STACKS[1]])
+    assert command[0] == sys.executable  # 起进程用的仍是看板自己的解释器，栈名只出现在参数里
 
 
 def test_source_version_reads_the_short_head_without_prompting(tmp_path: Path) -> None:

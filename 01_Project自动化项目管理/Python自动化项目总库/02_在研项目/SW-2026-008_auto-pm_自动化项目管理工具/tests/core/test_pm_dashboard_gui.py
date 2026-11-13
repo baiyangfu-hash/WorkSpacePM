@@ -1,6 +1,7 @@
 """驾驶舱总控屏桌面界面 ``scripts/pm_dashboard_gui.py`` → ``scripts/cockpit_board/``：
 
-项目经理看板只读（按钮只在 policy.PM_BUTTONS 里）、工程工位按钮只在 policy.STATION_BUTTONS 里且
+项目经理看板除决定类按钮外只读（按钮只在 policy.PM_BUTTONS 里；CHG-SCPT-2026-654 起项目详情页多出归档、重新激活的
+预演和确认键，全部项目页多一个只跳页的“新建项目…”，各页有哪些键由下面的测试逐页清点）、工程工位按钮只在 policy.STATION_BUTTONS 里且
 批准 / 开工 / 提交灰着、输入框只在 BC 表单里、不写工作空间、纯文本标签、没检查显示“没检查”不显示 0、
 先快读再接老后台（TD-105 已合并，默认接；--no-legacy 可关）、读失败窗口不挂、双击 bat 不在 releases/ 里、
 子进程和写文件只在 actions.py；GitHub 区块显示“数据截至”，没真读到时一格绿都没有。
@@ -113,6 +114,8 @@ def _files(root: Path) -> dict[str, int]:
 
 
 def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
+    """规矩（policy.py，CHG-SCPT-2026-654 改）：项目经理看板除决定类按钮外只读。这里清点的仍是同一件事：
+    这几页上的按钮文字只能取自 PM_BUTTONS、没有禁用词、没有任何能打字的地方、没有菜单。"""
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "待批准", 1)])
     window = _window(qapp, root, db, examples=True)
     window.open_project("DJ-2026-101")  # 项目详情页也要画出来一起清点
@@ -642,4 +645,190 @@ def test_decisions_page_reads_at_most_the_project_limit(qapp: QApplication, tmp_
     assert len(ids) == limit and len(set(ids)) == limit
     assert ids[0] == "DJ-2026-201" and "DJ-2026-200" not in ids  # 只有已关的卡的项目不读
     assert len(missions) == limit + 5  # 看板里的卡全部交给页面，只有“要读的项目”被截断
+    window.close()
+
+
+# ---------------------------------------------------------------- 项目生命周期入口（CHG-SCPT-2026-654）
+
+LIFECYCLE_WORDS = {"归档…", "重新激活…", "确认归档", "确认重新激活", "重新检查"}
+NEW_PROJECT = "新建项目…"
+
+
+def _archive_first_project(root: Path) -> None:
+    import json
+
+    registry = root / pd_module.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0].update({"kind": "equipment", "status": "archived"})  # DJ-2026-101
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _wait_decisions(window: Any, qapp: QApplication) -> None:
+    for _ in range(200):
+        for job in list(window.decisions._jobs):
+            job.wait(2000)
+        qapp.processEvents()
+        if not window.decisions._jobs:
+            break
+    qapp.processEvents()
+
+
+def _click(page: QWidget, text: str) -> None:
+    button = next(b for b in _buttons(page) if b.text() == text)
+    assert button.isEnabled(), text
+    button.click()
+
+
+def test_lifecycle_buttons_only_appear_on_their_own_page(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 12 条：PM_BUTTONS 是几页共用的白名单，拦不住按钮跑错页，所以逐页清点：
+    “归档…”“重新激活…”“确认归档”“确认重新激活”“重新检查”只在项目详情页；“新建项目…”只在全部项目页。"""
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    root, db = base._workspace(tmp_path, [("SW-2026-008", "ACTIVE", "写通讯层", 0.1)])
+    _archive_first_project(root)
+    window = _window(qapp, root, db, no_github=True)
+    fake = dw.LifecycleCli()
+    window.decisions.runner = fake
+    seen: dict[str, set[str]] = {"home": set(), "issues": set(), "projects": set(), "project": set()}
+
+    def count() -> None:
+        for key in seen:
+            page = getattr(window, key)
+            seen[key] |= {b.text() for b in _buttons(page)}
+            for button in _buttons(page):
+                lowered = (button.text() + button.toolTip()).lower()
+                assert not any(word in lowered for word in policy.PM_FORBIDDEN_WORDS), button.text()
+
+    count()
+    window.open_project("SW-2026-008")  # 在研的项目：归档…
+    _wait_decisions(window, qapp)
+    count()
+    _click(window.project, "归档…")
+    _wait_decisions(window, qapp)
+    count()
+    window.open_project("DJ-2026-101")  # 已归档的项目：重新激活…
+    count()
+    _click(window.project, "重新激活…")
+    _wait_decisions(window, qapp)
+    count()
+    for key in ("home", "issues", "projects", "tools", "decisions"):
+        window.goto(key)
+        qapp.processEvents()
+        count()
+    assert seen["project"] & LIFECYCLE_WORDS == LIFECYCLE_WORDS  # 五个键都真的画出来过，不是空清点
+    for key in ("home", "issues", "projects"):
+        assert not seen[key] & LIFECYCLE_WORDS, (key, seen[key] & LIFECYCLE_WORDS)
+    assert NEW_PROJECT in seen["projects"]
+    for key in ("home", "issues", "project"):
+        assert NEW_PROJECT not in seen[key], key
+    everywhere = {b.text() for b in _buttons(window)}
+    assert not {text for text in everywhere if "删除" in text or "恢复" in text}  # 删除、恢复两个动作没有任何入口
+    assert not (LIFECYCLE_WORDS | {NEW_PROJECT}) & {b.text() for b in _buttons(window.tools)}
+    assert not (LIFECYCLE_WORDS | {NEW_PROJECT}) & {b.text() for b in _buttons(window.decisions.page)}
+    assert seen["home"] | seen["issues"] | seen["projects"] | seen["project"] <= policy.PM_BUTTONS
+    assert not any("--confirm" in call for call in fake.calls)  # 只点了预演：没有任何一条带 --confirm 的命令
+    for kind in (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox):
+        assert window.project.findChildren(kind) == [], kind.__name__  # 预演之后项目详情页也没有任何能输字的地方
+    window.close()
+
+
+def test_new_project_button_jumps_to_the_project_tab_and_asks_for_a_probe(qapp: QApplication, tmp_path: Path) -> None:
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+    fake = dw.LifecycleCli(help_kind=False)
+    window.decisions.runner = fake
+    window.goto("projects")
+    _click(window.projects, NEW_PROJECT)
+    _wait_decisions(window, qapp)
+    assert window.current == "tools" and window.stack.currentWidget() is window.tools
+    assert window.tools.tab_buttons["project"].isChecked() and window.tools.pages["project"].isVisibleTo(window.tools)
+    assert [call for call in fake.calls if "--help" in call] == [
+        ["project", "archive", "--help"], ["project", "reactivate", "--help"], ["project", "register", "--help"]]
+    assert all("--help" in call for call in fake.calls)  # 跳页只探测，不起别的命令
+    # 本机的 register 没有 --kind：登记表单的“性质”灰着，写明原因
+    assert not window.tools.inputs["register_kind"].isEnabled()
+    assert window.tools.register_kind_note.text() == "发版切换后可填；现在登记后显示‘未分类’"
+    # 工作区里找到、还没登记的项目递进了登记表单的下拉
+    pick = window.tools.inputs["register_pick"]
+    assert [pick.itemData(i) for i in range(pick.count())] == ["", "DJ-2026-102"]
+    window.close()
+
+
+def test_missing_commands_grey_the_lifecycle_buttons_until_a_manual_reload_finds_them(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 8 条（整窗）：探测报 No such command → 两个键灰着，旁边有“本机发布版太旧”那句；探测超时也灰着；
+    换成正常的命令后点“重新读取”，重探，变亮。10 分钟定时那一轮不重探。"""
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+
+    def archive_button() -> Any:
+        return next(b for b in _buttons(window.project) if b.text() == "归档…")
+
+    window.decisions.runner = dw.LifecycleCli(missing=("archive", "reactivate"))
+    window.open_project("DJ-2026-101")
+    _wait_decisions(window, qapp)
+    assert not archive_button().isEnabled()
+    assert any(t.startswith("本机发布版太旧：没有这条命令（等部署新版本后再看）") for t in _texts(window.project))
+    window.tools.select_tab("project")
+    assert window.tools.inputs["register_kind"].isEnabled()  # register 这条有 --kind：性质可填
+
+    window.decisions.runner = dw.LifecycleCli(timeout=True)
+    window.auto_reload()  # 定时刷新：不重探，仍是上一轮的结果
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
+    assert any(t.startswith("本机发布版太旧") for t in _texts(window.project))
+    window.reload()  # 手动“重新读取”：重探；这回超时，照样灰着，不当成有这条命令
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
+    assert not archive_button().isEnabled()
+    assert any(t.startswith("没探测成，不当成有这条命令：") and "超时" in t for t in _texts(window.project))
+    assert not window.tools.inputs["register_kind"].isEnabled() and "超时" in window.tools.register_kind_note.text()
+
+    fake = dw.LifecycleCli()
+    window.decisions.runner = fake
+    window.reload()
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
+    assert archive_button().isEnabled() and window.tools.inputs["register_kind"].isEnabled()
+    assert window.tools.register_kind_note.text() == ""
+    window.close()
+
+
+def test_manual_reload_voids_the_dry_run_but_the_timer_round_does_not(qapp: QApplication, tmp_path: Path) -> None:
+    from tests.core import test_cockpit_decisions_widgets as dw
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+    window.decisions.runner = dw.LifecycleCli()
+    window.open_project("DJ-2026-101")
+    _wait_decisions(window, qapp)
+    _click(window.project, "归档…")
+    _wait_decisions(window, qapp)
+    assert {"确认归档", "重新检查"} <= {b.text() for b in _buttons(window.project)}
+    window.auto_reload()
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
+    assert "确认归档" in {b.text() for b in _buttons(window.project)}  # 定时刷新、别的重画：预演还在
+    window.reload()
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
+    texts = {b.text() for b in _buttons(window.project)}
+    assert "确认归档" not in texts and "重新检查" not in texts and "归档…" in texts  # 点了“重新读取”：要重新点“归档…”
+    window.close()
+
+
+def test_without_an_entry_script_the_window_never_spawns_a_probe(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """控制根里没有 main.py（测试用的假工作区就是这样）：探测不起进程，按钮灰着并写明原因。"""
+    from cockpit_board import actions as actions_module
+
+    monkeypatch.setattr(actions_module, "run_read", lambda *_a, **_k: pytest.fail("不该起进程"))
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = _window(qapp, root, db, no_github=True)
+    window.open_project("DJ-2026-101")
+    assert window.decisions._jobs == []
+    button = next(b for b in _buttons(window.project) if b.text() == "归档…")
+    assert not button.isEnabled() and any("控制根里没有 main.py" in t for t in _texts(window.project))
     window.close()

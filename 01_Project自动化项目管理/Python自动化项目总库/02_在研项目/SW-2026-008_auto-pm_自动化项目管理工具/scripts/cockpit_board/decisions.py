@@ -47,7 +47,8 @@ class Field:
 
 @dataclass(frozen=True)
 class Decision:
-    """一个决定按钮。``kind`` 说明它作用在什么对象上：mission（一张卡）、scope_card（待批准的范围卡）、inbox（收件箱条目）。"""
+    """一个决定按钮。``kind`` 说明它作用在什么对象上：mission（一张卡）、scope_card（待批准的范围卡）、inbox（收件箱条目）、
+    project（一个项目；只在项目详情页出现，“决定”页不挑这一类）。"""
 
     key: str
     label: str
@@ -122,22 +123,75 @@ DECISIONS: tuple[Decision, ...] = (
         ("pm", "inbox", "reject"), user_words=True, pin=True,
         fields=(Field("note", "驳回理由", "一行"),),
     ),
+    # 项目生命周期（CHG-SCPT-2026-654）：只在项目详情页的“项目状态”一块出现，而且要先跑过不带 --confirm 的预演、预演通过才出现。
+    Decision(
+        "project_archive", "确认归档", "project",
+        "归档这个项目：只把登记表里的项目状态改成“已归档”，目录不搬，编号和路径不变。命令自己会再查一遍五项，有一项不过就拒绝。",
+        ("project", "archive"), pin=True, user_words=True,
+    ),
+    Decision(
+        "project_reactivate", "确认重新激活", "project",
+        "把这个“已归档”的项目改回“在研”：只改登记表里的项目状态，目录不动。不是“已归档”的项目命令会拒绝。",
+        ("project", "reactivate"), pin=True, user_words=True,
+    ),
 )
 
 BY_KEY = {item.key: item for item in DECISIONS}
 
 # 决定页上允许出现的按钮文字，另加弹窗里的两个确认键。测试按它清点。
+# （“确认归档”“确认重新激活”也在 DECISIONS 里，但“决定”页不画它们：build_vm 只挑 mission、scope_card、inbox 三类。）
 DECISION_BUTTONS = frozenset({item.label for item in DECISIONS}) | frozenset({
     "确认并运行", "在终端窗口里运行", "取消", "知道了", "复制命令", "展开控制台", "收起控制台",
 })
 # 永远不加的动作（同 policy.NEVER，另加几条本页特有的）；按钮文字、对话框文字里都不许出现。
 NEVER_WORDS = (*policy.NEVER, "启动 agent", "强推")
 
+# 看板自己会起的只读命令。这张表里的命令一律不带 --confirm、--apply、--approval-evidence-ref（测试清点）。
 READ_ONLY_COMMANDS = {
     "pending": ("pm", "pending", "--project-id"),
     "inbox": ("pm", "inbox", "list", "--project-id"),
     "pin_status": ("pm", "approver-pin", "status"),
+    # 项目生命周期（CHG-SCPT-2026-654）。两条预演：后面只接项目号，不带 --confirm，命令只查不改；
+    "project_archive_dry_run": ("project", "archive"),
+    "project_reactivate_dry_run": ("project", "reactivate"),
+    # 三条探测：本机发布版有没有这条命令、register 有没有 --kind（--help 不改任何东西）。
+    "project_archive_help": ("project", "archive", "--help"),
+    "project_reactivate_help": ("project", "reactivate", "--help"),
+    "project_register_help": ("project", "register", "--help"),
 }
+LIFECYCLE_PROBES = ("project_archive_help", "project_reactivate_help", "project_register_help")
+
+
+@dataclass(frozen=True)
+class Lifecycle:
+    """项目详情页“项目状态”一块的一个入口：先点 ``dry_label`` 跑预演，预演通过才出现 ``decision`` 那个确认键。"""
+
+    decision: str  # DECISIONS 里的键
+    dry_label: str  # 预演按钮的文字
+    dry_run: str  # READ_ONLY_COMMANDS 里的键：预演
+    probe: str  # READ_ONLY_COMMANDS 里的键：探测本机有没有这条命令
+
+
+LIFECYCLES = {
+    "archive": Lifecycle("project_archive", "归档…", "project_archive_dry_run", "project_archive_help"),
+    "reactivate": Lifecycle("project_reactivate", "重新激活…", "project_reactivate_dry_run", "project_reactivate_help"),
+}
+RECHECK_LABEL = "重新检查"
+# 看板凭这一句认“这是一次预演、而且走到了头”（auto_pm/ui/cli/project.py 里归档、重新激活各打印一次，测试对照源文本）。
+DRY_RUN_MARK = "预演（没加 --confirm）"
+REGISTER_KIND_OPTION = "--kind"
+
+
+def dry_run_args(key: str, project_id: str) -> list[str]:
+    """预演命令：``project archive <项目号>`` / ``project reactivate <项目号>``，不带任何别的选项。"""
+
+    return [*READ_ONLY_COMMANDS[LIFECYCLES[key].dry_run], _ident(project_id, "项目编号")]
+
+
+def dry_run_passed(rc: int | None, output: str) -> bool:
+    """只看两样：退出码是 0，并且输出里有“预演（没加 --confirm）”这一句。不数“通过”有几个。"""
+
+    return rc == 0 and DRY_RUN_MARK in (output or "")
 
 # ---------------------------------------------------------------- 对象和命令行
 
@@ -236,7 +290,7 @@ def build_args(
     approver = _free(approver, "批准人")
     evidence = ""
     if decision.user_words:
-        subject = target.mission_id or target.request_id or target.item_id
+        subject = target.project_id if decision.kind == "project" else (target.mission_id or target.request_id or target.item_id)
         evidence = click_evidence(decision.key, subject, now)
 
     if decision.key == "approve_card":
@@ -261,6 +315,8 @@ def build_args(
                  "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
         if value.get("note"):
             args += ["--note", value["note"]]
+    elif decision.kind == "project":  # 归档 / 重新激活：项目号 + --confirm + “用户亲手点了这个按钮”的凭据
+        args += [_ident(target.project_id, "项目编号"), "--confirm", "--approval-evidence-ref", evidence]
     else:  # pragma: no cover - 新按钮必须在这里接线，test_every_decision_builds_a_command 会拦住
         raise DecisionError(f"按钮 {decision.key} 没有接线")
     return args

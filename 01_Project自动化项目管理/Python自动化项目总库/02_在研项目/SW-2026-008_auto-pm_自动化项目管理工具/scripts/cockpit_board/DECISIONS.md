@@ -29,6 +29,24 @@
 
 读状态用的只读命令：`pm approver-pin status`（口令是否生效）、`pm pending --project-id P`、`pm inbox list --project-id P`。
 
+## 项目详情页的两个按钮（CHG-SCPT-2026-654）
+
+这两个按钮也登记在 `DECISIONS` 里（`kind` 是 `project`），但**不在“决定”页上**（`build_vm` 只挑 `mission`、`scope_card`、`inbox` 三类），
+只在项目详情页概览的“项目状态”一块出现，由同一个控制器（`decision_controller.py`）起命令，回执两边都显示。
+
+| 按钮 | 作用对象 | 出现在 | 命令（`main.py` 之后） | 要用户填 | 口令生效时 |
+|---|---|---|---|---|---|
+| 确认归档 | 一个项目（在研或暂停） | 项目详情页；先点“归档…”跑过预演，并且预演通过 | `project archive P --confirm --approval-evidence-ref E` | — | 只有“在终端窗口里运行”，命令在终端问口令 |
+| 确认重新激活 | 一个项目（已归档） | 项目详情页；先点“重新激活…”跑过预演，并且预演通过 | `project reactivate P --confirm --approval-evidence-ref E` | — | 同上 |
+
+- **预演**：“归档…”“重新激活…”“重新检查”三个按钮不在 `DECISIONS` 里，只跑 `project archive P` / `project reactivate P`（不带 `--confirm`，只查不改），
+  命令登记在 `decisions.READ_ONLY_COMMANDS`。输出原样摆出来；“预演通过”只看两样：退出码 0，并且输出里有“预演（没加 --confirm）”这一句（`decisions.DRY_RUN_MARK`）。
+- **确认键和预演绑在同一个项目上**：换到另一个项目的详情页，或点“重新读取”，预演作废、确认键消失；确认时命令里的项目号取预演记下的那个。
+- **发版切换前的降级**：打开项目详情页或工具页“项目”页签时后台探测一次 `project archive --help`、`project reactivate --help`、`project register --help`
+  （也登记在 `READ_ONLY_COMMANDS`），结果在这个窗口里记着，点“重新读取”才重探。命令不存在时两个预演按钮灰着，旁边写“本机发布版太旧：没有这条命令”；探测没读成也灰着并写明原因。
+- 凭据 E 同下一节（`click_evidence`，“用户亲手点了这个按钮”）；看板不预填用户原话、不收口令。命令带 agent 标记时自己会拒绝，回执照实显示。
+- 项目的“删除”“恢复”不上看板。
+
 ## 凭据 E 从哪来
 
 口令**未生效**时，命令要的“用户原话凭据”由本页在点击那一刻生成：

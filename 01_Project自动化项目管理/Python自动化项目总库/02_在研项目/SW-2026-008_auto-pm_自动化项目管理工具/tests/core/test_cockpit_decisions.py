@@ -40,10 +40,19 @@ def _args(decision: decisions.Decision, *, pin: bool = False, approver: str = "b
     return list(decisions.build_args(decision, TARGET, values or VALUES, approver=approver, pin_enforced=pin, now=NOW))
 
 
+def _root_cli() -> click.Group:
+    from auto_pm.ui.cli.__main__ import cli
+
+    assert isinstance(cli, click.Group)
+    return cli
+
+
 def _resolve(args: list[str]) -> tuple[click.Command, list[str]]:
-    """沿命令树往下找到被调用的那条命令，返回 (命令, 剩下的参数)。"""
-    command: click.Command = pm_group
-    rest = list(args[1:])  # 第一个词是 pm
+    """从命令行的根沿命令树往下找到被调用的那条命令，返回 (命令, 剩下的参数)。第一个词不限于 pm（CHG-SCPT-2026-654 起有 project）。"""
+    root = _root_cli()
+    assert root.get_command(click.Context(root), "pm") is pm_group  # 根上的 pm 就是原来核对的那一组
+    command: click.Command = root
+    rest = list(args)
     while isinstance(command, click.Group) and rest and not rest[0].startswith("-"):
         sub = command.get_command(click.Context(command), rest[0])
         assert sub is not None, f"命令行里没有 {' '.join(args[:2])}"
@@ -64,6 +73,96 @@ def test_every_decision_builds_a_command_the_cli_accepts(decision: decisions.Dec
         required = {param.opts[0] for param in command.params if isinstance(param, click.Option) and param.required}
         if not (decision.key == "approve_card" and pin):  # 口令生效时批准人和凭据由口令决定，命令也允许不传
             assert required <= set(used) | {a for a in rest if a == "--pid"}, f"{decision.key} 缺必填选项 {required - set(used)}"
+
+
+# ---------------------------------------------------------------- 项目生命周期：归档、重新激活（CHG-SCPT-2026-654）
+
+PROJECT_CLI = Path(__file__).resolve().parents[2] / "auto_pm" / "ui" / "cli" / "project.py"
+POLICY_FILE = SCRIPTS / "cockpit_board" / "policy.py"
+
+
+@pytest.mark.parametrize(("key", "word"), [("project_archive", "archive"), ("project_reactivate", "reactivate")])
+def test_project_decisions_build_the_confirm_command_with_click_evidence(key: str, word: str) -> None:
+    decision = decisions.BY_KEY[key]
+    assert decision.kind == "project" and decision.pin and decision.user_words and decision.fields == ()
+    for pin in (False, True):
+        args = _args(decision, pin=pin, approver="")
+        assert args[:5] == ["project", word, "DJ-2026-009", "--confirm", "--approval-evidence-ref"] and len(args) == 6
+        assert args[5] == decisions.click_evidence(key, "DJ-2026-009", NOW)
+        assert args[5].startswith("user-confirmation:gui-click-") and not user_evidence_problem(args[5])
+    with pytest.raises(decisions.DecisionError, match="项目编号"):
+        decisions.build_args(decision, decisions.Target(), {}, approver="", pin_enforced=False, now=NOW)
+    with pytest.raises(decisions.DecisionError, match="格式不对"):
+        decisions.build_args(decision, decisions.Target(project_id="--confirm"), {}, approver="", pin_enforced=False, now=NOW)
+
+
+def test_the_decisions_page_never_draws_the_project_buttons() -> None:
+    """“决定”页只挑 mission、scope_card、inbox 三类；归档、重新激活只在项目详情页。"""
+    missions = [SimpleNamespace(mission_id=f"M{i}", project_id="DJ-1", title="t", state=state, column="在干")
+                for i, state in enumerate(sorted({s for d in DECISIONS_ALL for s in d.states}))]
+    target = decisions.Target(project_id="DJ-1", request_id="R1", plan_hash="h" * 64, item_id="I1", ticket_hash="k" * 64)
+    view = decisions.build_vm(missions, {"DJ-1": [target]}, {"DJ-1": [target]}, "off")
+    drawn = {d.key for card in view.cards for d in card.decisions}
+    assert drawn and not drawn & {"project_archive", "project_reactivate"}
+    assert {d.kind for card in view.cards for d in card.decisions} == {"mission", "scope_card", "inbox"}
+
+
+def test_dry_runs_and_probes_are_registered_read_only_commands() -> None:
+    """验收第 14 条：两条预演和三条 --help 探测都登记在 READ_ONLY_COMMANDS；这张表里任何一条都不带会改东西的选项。"""
+    table = decisions.READ_ONLY_COMMANDS
+    assert table["project_archive_dry_run"] == ("project", "archive")
+    assert table["project_reactivate_dry_run"] == ("project", "reactivate")
+    assert table["project_archive_help"] == ("project", "archive", "--help")
+    assert table["project_reactivate_help"] == ("project", "reactivate", "--help")
+    assert table["project_register_help"] == ("project", "register", "--help")
+    assert decisions.LIFECYCLE_PROBES == ("project_archive_help", "project_reactivate_help", "project_register_help")
+    for name, command in table.items():
+        for word in ("--confirm", "--apply", "--approval-evidence-ref"):
+            assert word not in command, (name, command)
+    for key, word in (("archive", "archive"), ("reactivate", "reactivate")):
+        args = decisions.dry_run_args(key, "DJ-2026-009")
+        assert args == ["project", word, "DJ-2026-009"]  # 预演：只有项目号，没有任何选项
+        entry = decisions.LIFECYCLES[key]
+        assert entry.dry_run in table and entry.probe in table and entry.decision in decisions.BY_KEY
+        resolved, rest = _resolve(args)
+        assert resolved.name == word and rest == ["DJ-2026-009"]
+    with pytest.raises(decisions.DecisionError):
+        decisions.dry_run_args("archive", "--confirm")  # 项目号冒充选项：不拼
+    for name in decisions.LIFECYCLE_PROBES:  # 探测的三条命令在真实命令行里都有
+        resolved, rest = _resolve(list(table[name]))
+        assert resolved.name == table[name][1] and rest == ["--help"]
+    comment = "".join(line for line in POLICY_FILE.read_text(encoding="utf-8").splitlines(keepends=True) if line.startswith("#"))
+    assert "除决定类按钮外只读" in comment and "只跑预演（不带 --confirm）" in comment and "decisions.READ_ONLY_COMMANDS" in comment
+    for label in ("归档…", "重新激活…", "重新检查"):
+        assert label in comment and label not in {d.label for d in DECISIONS_ALL}
+
+
+def test_the_dry_run_sentence_matches_the_real_command_source() -> None:
+    """验收第 15 条：看板认“预演通过”的那句话，在 project.py 的源文本里正好出现两次（归档、重新激活各一次）。
+    只读源文本，不真跑命令；命令那头哪天改了这句话，这里会红，提醒看板跟着改。"""
+    assert decisions.DRY_RUN_MARK == "预演（没加 --confirm）"
+    source = PROJECT_CLI.read_text(encoding="utf-8")
+    assert source.count(decisions.DRY_RUN_MARK) == 2
+    lines = [line for line in source.splitlines() if decisions.DRY_RUN_MARK in line]
+    assert any("要真的归档" in line for line in lines) and any("要真的改回在研" in line for line in lines)
+
+
+@pytest.mark.parametrize(("rc", "output", "expected"), [
+    (0, "将要改的那一行：x\n预演（没加 --confirm）：什么都没改。", True),
+    (1, "预演（没加 --confirm）：什么都没改。", False),  # 退出码不是 0
+    (0, "归档前的五项检查：\n  [通过] 卡全关\n  [通过] 收口走完", False),  # 没有那一句：不靠数“通过”有几个
+    (None, "预演（没加 --confirm）", False),
+    (0, "", False),
+])
+def test_a_dry_run_passes_only_with_exit_code_zero_and_the_sentence(rc: int | None, output: str, expected: bool) -> None:
+    assert decisions.dry_run_passed(rc, output) is expected
+
+
+def test_register_help_really_lists_the_kind_option_the_board_looks_for() -> None:
+    """降级靠在 --help 输出里找 --kind：真实命令里这个选项的名字得是它。"""
+    register, _rest = _resolve(["project", "register"])
+    options = {opt for param in register.params if isinstance(param, click.Option) for opt in param.opts}
+    assert decisions.REGISTER_KIND_OPTION in options
 
 
 def test_decision_keys_are_unique_and_labels_are_whitelisted() -> None:

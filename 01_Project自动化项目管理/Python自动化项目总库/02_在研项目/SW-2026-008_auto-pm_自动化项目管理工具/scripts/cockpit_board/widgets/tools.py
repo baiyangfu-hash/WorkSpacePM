@@ -1,9 +1,11 @@
-"""工程工具页：变更单（看、建、转状态）、决策（看）、变量表（IO 查重）、入箱（记一条新事项），以及“打开高级工作台”。
+"""工程工具页：变更单（看、建、转状态）、决策（看）、变量表（IO 查重）、入箱（记一条新事项）、项目（新建、登记），以及“打开高级工作台”。
 
 界面是命令行的另一层皮：每个按钮对应 tool_actions.TOOLS 白名单里的一条命令，命令和退出码都进“最近动作”。
 会写文件的（建变更单、转状态、入箱）先点“预览命令”，看过整条命令再点运行；表单一改，预览作废。
 批准类状态（已批准、有条件批准）这里不提供，只在终端里由你本人做。
 入箱只记一条 PROPOSED 的条目，确认、驳回照旧在“决定”页；“用户原话”一栏只能由人亲手填，看板不预填、不拷、不给默认值。
+项目页签（CHG-SCPT-2026-654）：新建、登记两个表单各有一个默认勾着的“只试一次，不写（--dry-run）”；看板不提交登记表。
+本机命令没有 --kind 时（发版切换前）登记的“性质”一栏灰着，探测由 decision_controller 做，结果经 set_register_kind 递进来。
 真正起子进程的是 tool_actions.py，这里只发请求、收回执。
 """
 
@@ -31,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"), ("inbox", "入箱"))
+TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"), ("inbox", "入箱"), ("project", "项目"))
 DOMAIN_ZH = {"ELEC": "电气", "MECH": "机械", "PLC": "PLC", "HMI": "HMI", "SCPT": "脚本", "DOCU": "文档", "SAFE": "安全", "SPEC": "规范"}
 NATURE_ZH = {"REQ": "需求变更", "DEF": "缺陷修复", "OPT": "优化", "CFG": "配置调整", "EMRG": "紧急处理"}
 SCOPE_ZH = {"LOCAL": "局部", "MODULE": "模块", "SYSTEM": "系统", "CROSS": "跨系统", "SAFE": "安全"}
@@ -41,6 +43,19 @@ INBOX_KIND_ZH = {"iteration": "迭代", "bug": "缺陷", "change": "变更", "ur
 INBOX_ACTION_ZH = {"add": "新增", "modify": "修改", "reduce": "缩减", "freeze": "冻结", "remove": "去掉"}
 INBOX_DISPOSITION_ZH = {"interrupt_now": "马上插进来", "after_current": "手上这张做完再做", "inbox_wait": "先放收件箱", "reject": "建议不做"}
 INBOX_CRITERION_ZH = {"safety": "安全", "data_loss": "丢数据", "blocks_all": "全部卡住", "wrong_output": "输出错误"}
+# 项目页签的几个下拉框（取值照 tool_actions.PROJECT_*，测试对照）
+KIND_ZH = {"equipment": "设备", "library": "公共库", "tool": "工具", "test": "测试"}
+STACK_ZH = dict(zip(tool_actions.PROJECT_STACKS, ("PLC", "Python"), strict=True))
+MODE_ZH = {"standard-project": "标准项目", "shared-library": "共享库", "test-suite": "测试套件"}
+PROJECT_TYPE_ZH = {"single_machine": "单机", "line_project": "产线", "retrofit_project": "改造", "maintenance_project": "维保",
+                   "shared_library": "共享库", "test_suite": "测试套件"}
+BY_KIND = "（不选：按性质的默认）"
+UNCLASSIFIED = "（不填：登记后显示“未分类”）"
+PICK_UNREGISTERED = "（从工作区里找到、还没登记的项目里选）"
+DRY_RUN_TEXT = "只试一次，不写（--dry-run）"
+KIND_NOT_PROBED = "还没探测本机的 project register 有没有 --kind；打开这个页签时会探测"
+KIND_UNAVAILABLE = "发版切换后可填；现在登记后显示‘未分类’"
+REGISTERED_NOTES = ("登记表有一处没提交的改动，提交后这个项目才能开工", "下一步：去「入箱」记这个项目的第一件事")
 NOT_CHANGE = "（类别不是变更时不填）"
 INFER = "（不填：按项目推断）"
 NONE = "（不填）"
@@ -86,6 +101,10 @@ class ToolsPage(QWidget):
         self.inputs: dict[str, QLineEdit | QComboBox | QPlainTextEdit] = {}
         self.scope_boxes: dict[str, QCheckBox] = {}
         self.inbox_scope_boxes: dict[str, QCheckBox] = {}
+        self.project_boxes: dict[str, QCheckBox] = {}  # 项目页签的勾选框：两个“只试一次”和“显示高级选项”
+        self.on_project_tab: Callable[[], None] | None = None  # 打开“项目”页签时叫一声（app 用它起一次后台探测）
+        self.register_kind_available = False  # 本机的 project register 有没有 --kind；探测到了才亮
+        self._last_params: dict[str, dict[str, Any]] = {}
         self.clock: Callable[[], str] = tool_actions.board_request_id  # 入箱请求号；测试可换成固定的
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -128,7 +147,7 @@ class ToolsPage(QWidget):
         items.append(self.workbench_button)
         lay.addWidget(c.hrow(*items))
         lay.addWidget(self._boxed(c.hrow(c.label("项目", "muted", wrap=False), self.project_box, 1)))
-        builders = (self._change_tab, self._decision_tab, self._vartable_tab, self._inbox_tab)
+        builders = (self._change_tab, self._decision_tab, self._vartable_tab, self._inbox_tab, self._project_tab)
         for (key, _text), builder in zip(TABS, builders, strict=True):
             self.pages[key] = builder()  # 几页都放进布局，选哪页就显示哪页（不用 QStackedWidget：它按最高那页撑高，其余页会被拉出大空白）
             lay.addWidget(self.pages[key])
@@ -172,7 +191,7 @@ class ToolsPage(QWidget):
         if blank:
             box.addItem(blank, "")
         for value, text in choices.items():
-            box.addItem(f"{text}（{value}）", value)
+            box.addItem(f"{text}（{value}）" if text else value, value)
         box.currentIndexChanged.connect(self._clear_preview)
         self.inputs[key] = box
         return box
@@ -318,6 +337,80 @@ class ToolsPage(QWidget):
         lay.addWidget(c.label("请求号由看板按时间生成（board-<UTC 时间>），提出者写 cockpit-board；同一次预览只记一次。", "small"))
         return page
 
+    def _check(self, key: str, text: str, checked: bool) -> QCheckBox:
+        box = QCheckBox(text)
+        box.setObjectName("tool_" + key)
+        box.setChecked(checked)
+        box.toggled.connect(self._clear_preview)
+        self.project_boxes[key] = box
+        return box
+
+    def _project_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        # 新建
+        lay.addWidget(c.section("新建项目", "project create：先预览命令，看过再运行；“只试一次”勾着时只显示将建在哪、用哪套模板，什么都不写"))
+        frame, grid = self._form()
+        kind = self._combo("create_kind", KIND_ZH, PICK)
+        kind.currentIndexChanged.connect(self._kind_changed)
+        self.kind_note = c.label("", "small")
+        rows: list[tuple[str, QWidget]] = [
+            ("项目名称", self._edit("create_name", "例如 上料机改造")),
+            ("性质", kind),
+            ("", self.kind_note),
+            ("技术栈", self._combo("create_stack", STACK_ZH, BY_KIND)),
+            ("模板（只在 PLC 时用）", self._combo("create_mode", MODE_ZH, BY_KIND)),
+            ("业务线（自动编号用）", self._combo("create_business_line", dict.fromkeys(tool_actions.PROJECT_BUSINESS_LINES, ""), BY_KIND)),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        advanced_toggle = self._check("create_advanced", "显示高级选项（手填编号、描述、项目类型、PLC 品牌和型号、存放目录）", False)
+        grid.addWidget(advanced_toggle, len(rows), 1)
+        lay.addWidget(frame)
+        self.advanced_frame, grid = self._form()
+        rows = [
+            ("项目编号（手填）", self._edit("create_id", "不填＝自动编号；填了就不再自动编号，例如 DJ-2026-010")),
+            ("项目描述", self._edit("create_desc", "可不填")),
+            ("项目类型", self._combo("create_project_type", PROJECT_TYPE_ZH, NONE)),
+            ("PLC 品牌", self._combo("create_plc_vendor", dict.fromkeys(tool_actions.PROJECT_PLC_VENDORS, ""), NONE)),
+            ("PLC 型号", self._edit("create_plc_model", "可不填，例如 S7-1200")),
+            ("存放目录", self._edit("create_dest_dir", "可不填：默认放工作区的分类目录")),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        self.advanced_frame.setVisible(False)
+        advanced_toggle.toggled.connect(self.advanced_frame.setVisible)
+        lay.addWidget(self.advanced_frame)
+        lay.addWidget(self._boxed(self._check("create_dry_run", DRY_RUN_TEXT, True)))
+        lay.addWidget(self._preview_row("project_create", "新建项目", self._project_create_params))
+        # 登记
+        lay.addWidget(c.section("登记", "project register：把已有项目记进工作区登记表；先预览命令，看过再运行。看板不提交登记表"))
+        frame, grid = self._form()
+        pick = self._combo("register_pick", {}, PICK_UNREGISTERED)
+        pick.currentIndexChanged.connect(self._picked_unregistered)
+        register_kind = self._combo("register_kind", KIND_ZH, UNCLASSIFIED)
+        register_kind.setEnabled(False)
+        self.register_kind_note = c.label(KIND_NOT_PROBED, "small")
+        rows = [
+            ("项目编号", self._edit("register_pid", "要登记的项目编号，例如 DJ-2026-010")),
+            ("", pick),
+            ("性质", register_kind),
+            ("", self.register_kind_note),
+        ]
+        for index, (label, widget) in enumerate(rows):
+            grid.addWidget(c.label(label, "muted", wrap=False), index, 0)
+            grid.addWidget(widget, index, 1)
+        lay.addWidget(frame)
+        lay.addWidget(self._boxed(self._check("register_dry_run", DRY_RUN_TEXT, True)))
+        lay.addWidget(self._preview_row("project_register", "登记", self._project_register_params))
+        self.register_note = c.label("", "small")
+        lay.addWidget(self.register_note)
+        lay.addWidget(c.label("归档、重新激活在项目详情页的“项目状态”一块；这里不提交登记表，也没有别的项目动作。", "small"))
+        return page
+
     def _preview_row(self, key: str, run_text: str, params: Callable[[], dict[str, Any]]) -> QWidget:
         preview = c.button("预览命令", "", "只显示要运行的整条命令，不运行")
         preview.clicked.connect(lambda: self.preview_command(key, params()))
@@ -361,6 +454,24 @@ class ToolsPage(QWidget):
             "asks": self._value("inbox_asks"),
         }
 
+    def _project_create_params(self) -> dict[str, Any]:
+        return {
+            "name": self._value("create_name"), "kind": self._value("create_kind"), "stack": self._value("create_stack"),
+            "mode": self._value("create_mode"), "business_line": self._value("create_business_line"),
+            "project_id": self._value("create_id"), "desc": self._value("create_desc"),
+            "project_type": self._value("create_project_type"), "plc_vendor": self._value("create_plc_vendor"),
+            "plc_model": self._value("create_plc_model"), "dest_dir": self._value("create_dest_dir"),
+            "dry_run": self.project_boxes["create_dry_run"].isChecked(),
+        }
+
+    def _project_register_params(self) -> dict[str, Any]:
+        """本机命令没有 --kind（或还没探测到）时不传性质：那一栏灰着，填不了。"""
+        return {
+            "project_id": self._value("register_pid"),
+            "kind": self._value("register_kind") if self.register_kind_available else "",
+            "dry_run": self.project_boxes["register_dry_run"].isChecked(),
+        }
+
     def _transition_params(self) -> dict[str, Any]:
         return {
             "pid": self.pid(), "number": self._value("number"), "to": self._value("to"), "comment": self._value("comment"),
@@ -384,6 +495,24 @@ class ToolsPage(QWidget):
         self.project_box.blockSignals(False)
         self._clear_preview()
 
+    def set_unregistered(self, project_ids: list[str]) -> None:
+        """工作区里找到、还没登记的项目（板数据里 registered 为假的那些）：填进登记表单的下拉，选一个就写进“项目编号”。"""
+        box = self.inputs["register_pick"]
+        assert isinstance(box, QComboBox)
+        box.blockSignals(True)
+        box.clear()
+        box.addItem(PICK_UNREGISTERED, "")
+        for project_id in project_ids:
+            box.addItem(project_id, project_id)
+        box.blockSignals(False)
+
+    def set_register_kind(self, available: bool, reason: str = "") -> None:
+        """探测结果：本机的 project register 有 --kind 才让填“性质”；没有、没读成都灰着并写明原因。"""
+        self.register_kind_available = available
+        self.inputs["register_kind"].setEnabled(available)
+        self.register_kind_note.setText("" if available else (reason or KIND_UNAVAILABLE))
+        self._clear_preview()
+
     # ------------------------------------------------ 动作
 
     def select_tab(self, key: str) -> None:
@@ -392,6 +521,27 @@ class ToolsPage(QWidget):
         for name, page in self.pages.items():
             page.setVisible(name == key)
         self._clear_preview()
+        if key == "project" and self.on_project_tab is not None:
+            self.on_project_tab()
+
+    def _kind_changed(self, *_args: object) -> None:
+        self.kind_note.setText(tool_actions.TEST_KIND_NOTE if self._value("create_kind") == "test" else "")
+
+    def _picked_unregistered(self, *_args: object) -> None:
+        picked = self._value("register_pick")
+        if picked:
+            self.inputs["register_pid"].setText(picked)  # type: ignore[union-attr]
+
+    def _carry_to_register(self, params: dict[str, Any], output: str) -> None:
+        """真建成功：把表单带到登记一步。编号读不出来就留空让你自己填，不猜。"""
+        project_id = tool_actions.created_project_id(params, output)
+        self.inputs["register_pid"].setText(project_id)  # type: ignore[union-attr]
+        box = self.inputs["register_kind"]
+        assert isinstance(box, QComboBox)
+        box.setCurrentIndex(max(box.findData(params.get("kind", "")), 0))
+        self.register_note.setText(
+            f"项目建好了。下一步：登记（编号 {project_id} 和性质已带到上面的登记表单）。" if project_id
+            else "项目建好了。下一步：登记。回执里没读出项目编号，请自己填到上面的登记表单。")
 
     def _clear_preview(self, *_args: object) -> None:
         self.preview, self.preview_text = None, ""
@@ -425,6 +575,7 @@ class ToolsPage(QWidget):
             self.note.setText("没法运行：" + str(error))
             return
         self.note.setText("正在运行……")
+        self._last_params[key] = dict(params)
         self._dispatch(lambda: self.runner(self.root, key, params), key)
 
     def _dispatch(self, job: Callable[[], Any], key: str) -> None:
@@ -448,6 +599,12 @@ class ToolsPage(QWidget):
         self.output.setPlainText(f"{receipt.command}\n退出码：{receipt.rc_text}\n\n{text}")
         self.note.setText("")
         self.add_receipt(receipt)
+        params = self._last_params.pop(key, {})
+        if receipt.rc == 0 and not params.get("dry_run"):  # 真写成功才往下带；只试一次的不算
+            if key == "project_create":
+                self._carry_to_register(params, receipt.output)
+            elif key == "project_register":
+                self.register_note.setText("\n".join(REGISTERED_NOTES))
 
     def _duplicate_report(self, stdout: str) -> str:
         try:
