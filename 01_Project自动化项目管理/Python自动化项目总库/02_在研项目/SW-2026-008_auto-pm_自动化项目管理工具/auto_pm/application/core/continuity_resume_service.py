@@ -24,7 +24,7 @@ from auto_pm.contracts.continuity_resume import (
     ResumeResidue,
     ResumeRunCandidate,
 )
-from auto_pm.contracts.intake import IntakeSummary
+from auto_pm.contracts.intake import IntakeNoteSummary, IntakeSummary
 from auto_pm.contracts.interlock_matrix import exit_hint
 from auto_pm.contracts.mission import Mission, MissionState
 from auto_pm.infrastructure.continuity_store import (
@@ -205,9 +205,13 @@ class ContinuityResumeService:
                 raise ContinuityResumeError(f"Continuity Store 无法读取: {error}") from error
 
         intake = IntakeSummary()
+        notes = IntakeNoteSummary()
         if db_exists:
             try:
-                intake = IntakeStore(self._root).summary(context.subject_project_id)
+                intake_store = IntakeStore(self._root)
+                intake = intake_store.summary(context.subject_project_id)
+                # D-357: raw notes waiting for triage.  Read-only like the summary above: no ledger, no table is created.
+                notes = intake_store.note_summary(context.subject_project_id)
             except ContinuityStoreError as error:
                 raise ContinuityResumeError(f"收件箱无法读取: {error}") from error
 
@@ -230,7 +234,9 @@ class ContinuityResumeService:
             # TD-SW008-569: a registered project with nothing on the ledger yet starts by recording the user's request
             # (``pm inbox add``).  Only this exact state gets it; every fail-closed state above keeps an empty action, and
             # nothing here opens or creates the store.
-            next_action = "USE_INBOX"
+            # D-357: raw notes take over this one state only (somebody already said what they want; triage it first).
+            # Every other state keeps its own next action; the ``notes`` block is reported in all of them.
+            next_action = "USE_INBOX" if notes.is_empty else "TRIAGE_NOTES"
         if conflicts == ["LEASE_EXPIRED"]:
             # 只有租约过期这一个冲突时的出口是回收（continuity run reclaim）：申请人必须换一个名字（原持有者续租被拒、
             # 自己回收自己也被拒），原持有者进程判不出时还须用户本人 pm sign-risk 签字。settle-expired 要另开恢复
@@ -258,6 +264,8 @@ class ContinuityResumeService:
         }
         if not intake.is_empty:
             seed["intake"] = intake.model_dump(mode="json")
+        if not notes.is_empty:  # a project without raw notes keeps the evidence_id it had before D-357
+            seed["notes"] = notes.model_dump(mode="json")
         if residue:
             seed["residue"] = [item.model_dump(mode="json") for item in residue]
         if mission_candidates:
@@ -287,6 +295,7 @@ class ContinuityResumeService:
             next_legal_action=next_action,
             read_set=read_set,
             intake=intake,
+            notes=notes,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
 

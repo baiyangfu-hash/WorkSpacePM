@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from auto_pm.contracts.continuity import CheckpointItem, RunItem, WorkItem
 from auto_pm.contracts.continuity_query import ContinuityQuery, plain_payload, validation_summary
-from auto_pm.contracts.intake import IntakeSummary
+from auto_pm.contracts.intake import IntakeNoteSummary, IntakeSummary
 from auto_pm.contracts.mission import Mission
 from auto_pm.contracts.workspace_context import WorkspaceContext
 
@@ -73,6 +73,9 @@ class ContinuityResume(BaseModel):
     next_legal_action: str = ""
     read_set: tuple[str, ...] = ()
     intake: IntakeSummary = Field(default_factory=IntakeSummary)
+    # D-357: raw notes waiting for triage.  A top-level block (this model does not forbid extras), never a field of ``intake``:
+    # ``IntakeSummary`` forbids extras, so an older release would refuse the whole answer.
+    notes: IntakeNoteSummary = Field(default_factory=IntakeNoteSummary)
     evidence_id: str
     query: ContinuityQuery | None = None
 

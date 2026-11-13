@@ -11,7 +11,7 @@
     "never": 12,
     "read": 68,
     "user_only": 24,
-    "write": 118
+    "write": 119
   },
   "commands": {
     "change create": {
@@ -432,6 +432,9 @@
     },
     "pm inbox list": {
       "class": "read"
+    },
+    "pm inbox note": {
+      "class": "write"
     },
     "pm inbox reject": {
       "class": "user_only",

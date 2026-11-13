@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -16,6 +17,7 @@ from pydantic import ValidationError
 from auto_pm import __version__
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.acceptance_runner import refusal_reason
+from auto_pm.application.core.agent_worktree_service import caller_agent
 from auto_pm.application.core.claim_service import ClaimService, claim_overlap
 from auto_pm.application.core.control_root_sync import (
     ControlRootSyncService,
@@ -40,13 +42,17 @@ from auto_pm.contracts.continuity_query import QueriedAction
 from auto_pm.contracts.continuity_resume import ContinuityResume, validate_query_resume
 from auto_pm.contracts.execution_adapter import ExecutionAdapterKind
 from auto_pm.contracts.intake import (
+    NOTE_ACTOR_NO_MARKER,
+    NOTE_ACTOR_UNKNOWN,
     ChangeAction,
     Disposition,
     IntakeClassification,
     IntakeKind,
     IntakeStatus,
+    NoteStatus,
     TriageTicket,
     UrgentCriterion,
+    note_actor_label,
 )
 from auto_pm.contracts.plan_checklist import (
     SAFETY_CIRCUIT_CHOICES,
@@ -830,6 +836,19 @@ def _intake(ctx: click.Context) -> PmIntakeService:
     return PmIntakeService(app_ctx.control_root)
 
 
+def _note_actor() -> str:
+    """Who the command sees in its environment (D-357); there is no option to state it.
+
+    No agent marker at all is recorded as ``no-agent-marker``, never as "user": an agent that forgot ``AUTO_PM_AGENT``
+    looks the same.  A marker that names nobody on the roster is recorded as ``unknown-agent``, not refused.
+    """
+
+    caller = caller_agent()
+    if not caller:
+        return NOTE_ACTOR_NO_MARKER
+    return NOTE_ACTOR_UNKNOWN if caller == "?" else caller
+
+
 def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> None:
     payload: dict[str, Any] = {"schema_version": "pm-inbox-item.v1"}
     if created is not None:
@@ -873,6 +892,12 @@ def _emit_item(item_json: dict[str, Any], *, created: bool | None = None) -> Non
 @click.option("--cost-risk", required=True, help="成本与风险估计")
 @click.option("--ask", "decisions_for_user", multiple=True, help="需要用户决定的点，可重复")
 @click.option("--proposed-by", default="pm-cli", show_default=True, help="提出者标识")
+@click.option(
+    "--from-note",
+    "from_note",
+    default="",
+    help="把这条待整理记录（NOTE-…）转成正式条目：--original-words 必须和记录里的原话逐字相同，一条记录只能转一次",
+)
 @click.pass_context
 def inbox_add(
     ctx: click.Context,
@@ -895,6 +920,7 @@ def inbox_add(
     cost_risk: str,
     decisions_for_user: tuple[str, ...],
     proposed_by: str,
+    from_note: str,
 ) -> None:
     """把一条新事项连同分诊单记入收件箱（状态 PROPOSED，等待用户确认）。"""
     try:
@@ -938,10 +964,51 @@ def inbox_add(
             classification=classification,
             ticket=ticket,
             proposed_by=proposed_by,
+            from_note=from_note,
+            triaged_by=_note_actor() if from_note else "",
         )
     except (PmIntakeError, ValueError, WorktreePolicyError) as error:
         raise click.ClickException(_plain_error(error)) from error
     _emit_item(item.model_dump(mode="json"), created=created)
+
+
+@inbox_group.command(name="note")
+@click.option("--project-id", required=True, help="项目 PID")
+@click.option("--title", required=True, help="一句话（至多 120 字）")
+@click.option("--original-words", required=True, help="原话，照原样记")
+@click.option(
+    "--kind",
+    default=IntakeKind.ITERATION.value.lower(),
+    show_default=True,
+    type=click.Choice(_KIND_CHOICES, case_sensitive=False),
+    help="类别，只是提示；整理成正式条目时重新判",
+)
+@click.option("--request-id", default="", help="幂等标识；不给就自动生成。同一标识重放同一内容不会重复记")
+@click.pass_context
+def inbox_note(ctx: click.Context, project_id: str, title: str, original_words: str, kind: str, request_id: str) -> None:
+    """记一条待整理记录：只记一句话和原话，不是分诊单；之后由 AI 用 pm inbox add --from-note 整理成正式条目。"""
+    try:
+        service = _intake(ctx)
+        require_runtime_identity(ctx, project_id)
+        _control_root_sync_notice(ctx, project_id=project_id)
+        _ensure_continuity_store(ctx)  # first use of a fresh clone (D6); only after the identity check
+        note, created = service.note(
+            request_id=request_id or f"NOTE-REQ-{uuid.uuid4().hex}",
+            project_id=project_id,
+            title=title,
+            original_words=original_words,
+            kind_hint=IntakeKind(kind.upper()),
+            recorded_by=_note_actor(),
+        )
+    except (PmIntakeError, ValueError, WorktreePolicyError) as error:
+        raise click.ClickException(_plain_error(error)) from error
+    click.echo(
+        json.dumps(
+            {"schema_version": "pm-inbox-note.v1", "created": created, "note": note.model_dump(mode="json")},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @inbox_group.command(name="list")
@@ -953,13 +1020,17 @@ def inbox_add(
     type=click.Choice(_STATUS_CHOICES, case_sensitive=False),
     help="按状态过滤，可重复；缺省列出未处理的（proposed、confirmed）",
 )
+@click.option("--notes-only", "notes_only", is_flag=True, help="只看待整理记录（items 为空）")
 @click.pass_context
-def inbox_list(ctx: click.Context, project_id: str, statuses: tuple[str, ...]) -> None:
-    """列出项目的收件箱条目。"""
+def inbox_list(ctx: click.Context, project_id: str, statuses: tuple[str, ...], notes_only: bool) -> None:
+    """列出项目的收件箱条目，后面跟着还没整理的待整理记录。"""
     try:
         service = _intake(ctx)
         wanted = tuple(IntakeStatus(item.upper()) for item in statuses)
         items = service.list_items(project_id, wanted) if wanted else service.list_items(project_id)
+        if notes_only:
+            items = ()
+        notes = service.list_notes(project_id, (NoteStatus.RAW,))
     except (PmIntakeError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
     click.echo(
@@ -968,6 +1039,7 @@ def inbox_list(ctx: click.Context, project_id: str, statuses: tuple[str, ...]) -
                 "schema_version": "pm-inbox.v1",
                 "project_id": project_id,
                 "items": [item.model_dump(mode="json") for item in items],
+                "notes": [note.model_dump(mode="json") for note in notes],
             },
             ensure_ascii=False,
             indent=2,
@@ -1531,6 +1603,12 @@ def _echo_resume_text(payload: ContinuityResume) -> None:
                 f"（{brief.status.value}，建议 {brief.disposition.value}）"
             )
         click.echo("建议顺序和每条的下一步: python main.py pm triage <项目编号>（只读）")
+    if not payload.notes.is_empty:
+        click.echo(
+            f"待整理记录: {payload.notes.waiting} 条，最早一条 {payload.notes.oldest_note_id}"
+            f"（{note_actor_label(payload.notes.oldest_recorded_by)} 记于 {payload.notes.oldest_created_at}）；"
+            "整理办法：查重、取证后用 pm inbox add … --from-note <NOTE-ID> 转成正式条目"
+        )
     for path in payload.read_set:
         click.echo(f"证据: {path}")
     query = payload.query

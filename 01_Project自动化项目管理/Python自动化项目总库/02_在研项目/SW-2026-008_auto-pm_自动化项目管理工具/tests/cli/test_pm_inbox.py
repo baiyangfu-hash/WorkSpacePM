@@ -707,3 +707,259 @@ def test_td572_approve_marks_say_they_apply_only_when_approving_with_the_full_ar
         assert _option_help("approve", flag).startswith("【带全参数批准时必填】"), flag
     assert _option_help("approve", "--plan-hash").startswith("【必填】")
     assert _option_help("approve", "--request-id").startswith("【必填】")
+
+
+# ---------------------------------------------------------------- D-357: raw notes (pm inbox note, --from-note)
+
+WORDS = "登录页有时候是白的，刷新才好"
+AGENT_ENV = ("AUTO_PM_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT")
+
+
+def _caller(monkeypatch: pytest.MonkeyPatch, marker: str = "") -> None:
+    """Make the command see exactly this caller: no agent marker at all, or ``AUTO_PM_AGENT=<marker>``."""
+
+    import os
+
+    for name in (*AGENT_ENV, *(key for key in os.environ if key.upper().startswith("CODEX_"))):
+        monkeypatch.delenv(name, raising=False)
+    if marker:
+        monkeypatch.setenv("AUTO_PM_AGENT", marker)
+
+
+def _note(runner: CliRunner, root: Path, *extra: str, title: str = "登录页偶发白屏", words: str = WORDS, project: str = PROJECT) -> Result:
+    return _run(runner, root, "inbox", "note", "--project-id", project, "--title", title, "--original-words", words, *extra)
+
+
+def _noted(result: Result) -> dict[str, Any]:
+    payload = _json(result)
+    assert payload["schema_version"] == "pm-inbox-note.v1"
+    note: dict[str, Any] = payload["note"]
+    return note
+
+
+def _inbox(runner: CliRunner, root: Path, *extra: str) -> dict[str, Any]:
+    payload: dict[str, Any] = _json(_run(runner, root, "inbox", "list", "--project-id", PROJECT, *extra))
+    return payload
+
+
+def _event_types(root: Path) -> list[str]:
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        return [str(row[0]) for row in conn.execute("SELECT event_type FROM events ORDER BY rowid")]
+
+
+def test_d357_a_note_round_trips_and_a_replay_records_nothing_twice(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 2：记一条回 NOTE-<项目>-0001、RAW；同号同内容重放不重复记；同号不同内容拒绝。"""
+    _caller(monkeypatch)
+    first = _json(_note(cli_runner, root, "--request-id", "REQ-NOTE-1"))
+    note = first["note"]
+    assert first["schema_version"] == "pm-inbox-note.v1" and first["created"] is True
+    assert (note["note_id"], note["status"], note["schema_version"]) == (f"NOTE-{PROJECT}-0001", "RAW", "intake-note.v1")
+    assert (note["title"], note["original_words"], note["kind_hint"]) == ("登录页偶发白屏", WORDS, "ITERATION")
+    assert (note["item_id"], note["triaged_by"], note["triaged_at"]) == ("", "", "")
+    assert _event_types(root)[-1] == "INTAKE_NOTE_RECORDED"
+    events = _events(root)
+
+    again = _json(_note(cli_runner, root, "--request-id", "REQ-NOTE-1"))
+    assert again["created"] is False and again["note"] == note
+    assert _count(root, "intake_notes") == 1 and _events(root) == events
+
+    other = _note(cli_runner, root, "--request-id", "REQ-NOTE-1", words="换了一句话")
+    assert other.exit_code != 0 and "request_id 已绑定不同内容" in other.output
+    assert _count(root, "intake_notes") == 1 and _events(root) == events
+    assert _count(root, "intake_items") == 0
+
+
+def test_d357_a_note_without_a_request_id_gets_one_and_the_kind_is_only_a_hint(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _caller(monkeypatch)
+    one = _noted(_note(cli_runner, root, "--kind", "bug"))
+    two = _noted(_note(cli_runner, root, title="另一件事"))
+    assert one["kind_hint"] == "BUG" and two["kind_hint"] == "ITERATION"
+    assert one["request_id"] and two["request_id"] and one["request_id"] != two["request_id"]
+    assert [one["note_id"], two["note_id"]] == [f"NOTE-{PROJECT}-0001", f"NOTE-{PROJECT}-0002"]
+
+
+def test_d357_duplicate_titles_are_refused_and_the_refusal_names_what_it_hit(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 3：记录和记录、记录和未处理的正式条目、正式条目和记录，三个方向都查重。"""
+    _caller(monkeypatch)
+    note = _noted(_note(cli_runner, root))
+    same = _note(cli_runner, root, title="登录页偶发白屏 ".upper(), words="另一句")
+    assert same.exit_code != 0 and f"已有同名待整理记录: {note['note_id']}" in same.output
+
+    item = _item(_add(cli_runner, root, title="导出按钮没反应", request_id="REQ-ITEM-1"))
+    against_item = _note(cli_runner, root, title="导出按钮没反应")
+    assert against_item.exit_code != 0 and f"已有同名未处理条目: {item['item_id']}" in against_item.output
+
+    plain_add = _add(cli_runner, root, request_id="REQ-ITEM-2")  # same title as the raw note, no --from-note
+    assert plain_add.exit_code != 0
+    assert f"已有同名待整理记录: {note['note_id']}；要转正它请加 --from-note {note['note_id']}" in plain_add.output
+    assert _count(root, "intake_notes") == 1 and _count(root, "intake_items") == 1
+
+
+def test_d357_who_recorded_is_never_stated_by_the_caller_and_never_says_user(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 4：没有自报选项；没带标记记成 no-agent-marker；认得出的记基名；认不出的记 unknown-agent。"""
+    help_text = _run(cli_runner, root, "inbox", "note", "--help").output
+    assert "--recorded-by" not in help_text and "--triaged-by" not in _run(cli_runner, root, "inbox", "add", "--help").output
+    refused = _note(cli_runner, root, "--recorded-by", "user")
+    assert refused.exit_code != 0 and _count(root, "intake_notes") == 0
+
+    _caller(monkeypatch)
+    bare = _noted(_note(cli_runner, root, title="没带标记"))
+    _caller(monkeypatch, "trae:cn")
+    named = _noted(_note(cli_runner, root, title="带了名册里的标记"))
+    _caller(monkeypatch, "nobody-on-the-roster")
+    unknown = _noted(_note(cli_runner, root, title="带了认不出的标记"))
+    assert [bare["recorded_by"], named["recorded_by"], unknown["recorded_by"]] == ["no-agent-marker", "trae", "unknown-agent"]
+
+    _caller(monkeypatch, "cursor")
+    item = _item(_add_from(cli_runner, root, named["note_id"], title="带了名册里的标记", proposed_by="随便写"))
+    assert item["proposed_by"] == "随便写"
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        stored = [json.loads(row[0]) for row in conn.execute("SELECT note_json FROM intake_notes ORDER BY seq")]
+    assert stored[1]["triaged_by"] == "cursor" and stored[1]["recorded_by"] == "trae"
+    assert all("user" not in (note["recorded_by"], note["triaged_by"]) for note in stored)
+
+
+def test_d357_a_note_turned_by_a_terminal_without_marker_is_not_signed_as_user(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _caller(monkeypatch, "claude")
+    note = _noted(_note(cli_runner, root))
+    _caller(monkeypatch)
+    _item(_add_from(cli_runner, root, note["note_id"]))
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        stored = json.loads(conn.execute("SELECT note_json FROM intake_notes").fetchone()[0])
+    assert (stored["recorded_by"], stored["triaged_by"]) == ("claude", "no-agent-marker")
+
+
+def _add_from(runner: CliRunner, root: Path, note_id: str, **overrides: Any) -> Result:
+    return _run(runner, root, "inbox", "add", *_options(**overrides), "--from-note", note_id)
+
+
+def test_d357_from_note_refuses_changed_words_a_second_turn_and_another_project(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 5：三条硬规矩各一条；三种情况下 intake_items 行数都不变。"""
+    _caller(monkeypatch, "claude")
+    note = _noted(_note(cli_runner, root))
+
+    changed = _add_from(cli_runner, root, note["note_id"], original_words=WORDS + "。")
+    assert changed.exit_code != 0 and "不逐字相同" in changed.output
+    assert _count(root, "intake_items") == 0 and _inbox(cli_runner, root)["notes"][0]["status"] == "RAW"
+
+    missing = _add_from(cli_runner, root, f"NOTE-{PROJECT}-0009")
+    assert missing.exit_code != 0 and f"待整理记录不存在: NOTE-{PROJECT}-0009" in missing.output
+    assert _count(root, "intake_items") == 0
+
+    (root / ANCHORED).mkdir()
+    (root / ANCHORED / ".copier-answers.yml").write_text(f"project_id: {ANCHORED}\nproject_name: Other\nstack: python\n", encoding="utf-8")
+    registry_path = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["projects"].append({"project_id": ANCHORED, "project_root": ANCHORED, "development_root": ANCHORED})
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    elsewhere = _add_from(cli_runner, root, note["note_id"], project_id=ANCHORED, domain=None)
+    assert elsewhere.exit_code != 0 and f"属于项目 {PROJECT}" in elsewhere.output
+    assert _count(root, "intake_items") == 0
+
+    item = _item(_add_from(cli_runner, root, note["note_id"]))
+    again = _add_from(cli_runner, root, note["note_id"], request_id="REQ-INBOX-002", title="换个标题再转一次")
+    assert again.exit_code != 0 and f"已经转成 {item['item_id']}" in again.output
+    assert _count(root, "intake_items") == 1
+
+
+def test_d357_turning_a_note_writes_the_item_and_the_note_in_one_transaction(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 6：事件依次是条目入箱、记录转正；写记录那一步失败，正式条目也没写进去。"""
+    from auto_pm.infrastructure.intake_store import IntakeStore
+
+    _caller(monkeypatch, "claude")
+    note = _noted(_note(cli_runner, root))
+    before = (_events(root), _count(root, "intake_items"))
+    real = IntakeStore._store_note
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise sqlite3.OperationalError("disk I/O error (test)")
+
+    monkeypatch.setattr(IntakeStore, "_store_note", staticmethod(broken))
+    failed = _add_from(cli_runner, root, note["note_id"])
+    assert failed.exit_code != 0
+    assert (_events(root), _count(root, "intake_items")) == before
+    assert _inbox(cli_runner, root)["notes"][0]["status"] == "RAW"
+
+    monkeypatch.setattr(IntakeStore, "_store_note", staticmethod(real))
+    item = _item(_add_from(cli_runner, root, note["note_id"]))
+    assert item["status"] == "PROPOSED" and item["ticket"]["original_words"] == WORDS
+    assert _event_types(root)[-2:] == ["INTAKE_ITEM_RECORDED", "INTAKE_NOTE_TRIAGED"]
+    with closing(sqlite3.connect(root / ".auto-pm" / "continuity.db")) as conn:
+        row = conn.execute("SELECT status, item_id, note_json FROM intake_notes").fetchone()
+    stored = json.loads(row[2])
+    assert (row[0], row[1]) == ("TRIAGED", item["item_id"])
+    assert (stored["status"], stored["item_id"], stored["triaged_by"]) == ("TRIAGED", item["item_id"], "claude")
+    assert stored["triaged_at"] and stored["original_words"] == WORDS
+
+    events = _events(root)
+    replay = _json(_add_from(cli_runner, root, note["note_id"]))  # same request id: the note already points at this item
+    assert replay["created"] is False and replay["item"] == item and _events(root) == events
+
+    second = _noted(_note(cli_runner, root, title="另一件事", words="另一句"))
+    crossed = _add_from(cli_runner, root, second["note_id"])  # same request id, but that item came from the first note
+    assert crossed.exit_code != 0 and f"不是由待整理记录 {second['note_id']} 转来的" in crossed.output
+    assert _events(root) == events + 1  # only the second note itself was recorded
+    assert _inbox(cli_runner, root, "--notes-only")["notes"][0]["note_id"] == second["note_id"]
+
+
+def test_d357_inbox_list_keeps_items_as_they_were_and_adds_the_notes(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 7：items 的内容和顺序不变，多一栏 notes；--notes-only 时 items 为空；已转正的记录不再列。"""
+    _caller(monkeypatch, "claude")
+    item = _item(_add(cli_runner, root, title="导出按钮没反应"))
+    before = _listed(cli_runner, root)
+    assert before == [item]
+    waiting = _noted(_note(cli_runner, root))
+    turned = _noted(_note(cli_runner, root, title="已经整理过的", words="另一句"))
+    made = _item(_add_from(cli_runner, root, turned["note_id"], request_id="REQ-INBOX-002", title="已经整理过的", original_words="另一句"))
+
+    full = _inbox(cli_runner, root)
+    assert list(full) == ["schema_version", "project_id", "items", "notes"] and full["schema_version"] == "pm-inbox.v1"
+    assert full["items"] == [item, made] and full["notes"] == [waiting]
+    only = _inbox(cli_runner, root, "--notes-only")
+    assert only["items"] == [] and only["notes"] == [waiting]
+    assert _inbox(cli_runner, root, "--status", "rejected")["notes"] == [waiting]
+
+
+def test_d357_read_commands_never_create_the_table_or_the_ledger(
+    cli_runner: CliRunner, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """验收 12（收件箱这两条）：老账本没有 intake_notes 表时只读命令不建表、账本字节不变；没有账本时不新建。"""
+    import hashlib
+    import shutil
+
+    _caller(monkeypatch)
+    shutil.rmtree(root / ".auto-pm")  # a workspace that never had a ledger
+    for arguments in (("inbox", "list", "--project-id", PROJECT), ("inbox", "list", "--project-id", PROJECT, "--notes-only")):
+        payload = _json(_run(cli_runner, root, *arguments))
+        assert payload["items"] == [] and payload["notes"] == []
+        assert not (root / ".auto-pm").exists()
+
+    item = _item(_add(cli_runner, root))
+    db = root / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute("DROP TABLE intake_notes")
+        conn.commit()
+    digest = hashlib.sha256(db.read_bytes()).hexdigest()
+    for arguments in (("inbox", "list", "--project-id", PROJECT), ("inbox", "list", "--project-id", PROJECT, "--notes-only")):
+        payload = _json(_run(cli_runner, root, *arguments))
+        assert payload["notes"] == [] and payload["items"] == ([] if "--notes-only" in arguments else [item])
+        assert hashlib.sha256(db.read_bytes()).hexdigest() == digest
+    assert _count(root, "intake_notes") == 0
+    with closing(sqlite3.connect(db)) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='intake_notes'").fetchone() is None
