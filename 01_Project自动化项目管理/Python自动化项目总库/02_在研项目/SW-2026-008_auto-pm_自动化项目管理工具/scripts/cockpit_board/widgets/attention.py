@@ -71,9 +71,7 @@ def counted_lines(count: AttentionCount | None) -> list[tuple[str, str]]:
 class AttentionPage(c.ReadPage):
     def __init__(self) -> None:
         empty_text, error_text = shell.page_texts()["attention"]
-        super().__init__("attention", "要你出手", "现在有没有等你本人拍板的事", (
-            ("规则、门禁、安全类的 PR 等你点", "要读 GitHub 的检查结果，还没接", ""),
-        ), empty_text, error_text)
+        super().__init__("attention", "要你出手", "现在有没有等你本人拍板的事", (), empty_text, error_text)
         self.count: AttentionCount | None = None
         self.read_at = ""  # 明细是几点读的（show_results 时记）
         self._draw_top()

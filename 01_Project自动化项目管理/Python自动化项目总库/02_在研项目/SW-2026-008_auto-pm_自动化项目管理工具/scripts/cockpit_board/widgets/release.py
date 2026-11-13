@@ -42,10 +42,7 @@ def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
 class ReleasePage(c.ReadPage):
     def __init__(self) -> None:
         empty_text, error_text = shell.page_texts()["release"]
-        super().__init__("release", "发版", "门禁跑到哪了、能不能准备发版", (
-            ("本机生效发布版和候选包", "要读 active_release.json 和 doctor，还没接", "main.py doctor"),
-            ("连续两轮完整门禁的对照", "M4 的判据，还没做", ""),
-        ), empty_text, error_text)
+        super().__init__("release", "发版", "门禁跑到哪了、能不能准备发版", (), empty_text, error_text)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)

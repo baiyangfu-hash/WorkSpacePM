@@ -69,8 +69,8 @@ def audit_rows(snapshot: Any, dirs: Sequence[Path] = ()) -> list[tuple[str, str]
         when = f"，日期 {dated[0]}～{dated[-1]}" if dated else ""
         rows.append(("另有旧报告", f"{len(others)} 份没对上开着的 PR，不当作当前审计报告{when}"))
     if dirs:
-        rows.append(("读的目录", "、".join(str(d) for d in dirs)
-                     + "；只认这些目录里“编号_*.md”的报告，写在别处的（如共享库）这里看不到，可启动时加 --reviews-dir"))
+        rows.append(("读的审计目录", "、".join(str(d) for d in dirs)
+                     + "；只认这些目录里“编号_*.md”的报告，写在别处的（如共享库）这里看不到；要多读一个目录，见看板说明"))
     return rows
 
 class PrsPage(QWidget):
@@ -89,7 +89,6 @@ class PrsPage(QWidget):
         self.empty_text, self.error_text = shell.page_texts()["prs"]
         self.status: tuple[str, str] = ("", "")
         self.reviews_dirs: list[Path] = []  # 窗口启动时填 options.reviews_dirs（<root>/reviews 加 --reviews-dir 给的）
-        body.addWidget(c.placeholder("每个 PR 的检查、审计逐条对照", "采集里已有这些字段，还没排版", ""))
         self.show_github(None, disabled=False)
 
     def show_github(self, snapshot: Any, disabled: bool) -> None:

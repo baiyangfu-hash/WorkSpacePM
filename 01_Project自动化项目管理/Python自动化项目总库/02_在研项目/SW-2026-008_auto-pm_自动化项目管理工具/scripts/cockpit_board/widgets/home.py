@@ -139,13 +139,13 @@ class HomePage(QWidget):
             lay.addWidget(c.section("交出去的东西", "GitHub 上开着的 PR · 门禁 · 安全签字 · 审计 · 没读到就写“未知”"))
             lay.addWidget(github_block(vm.github, vm.github.rows, "没有开着的 PR。"))
 
-        lay.addWidget(c.section("要留意的项目", f"{len(vm.hot)} 个受阻或有风险 · 点进去看详情"))
+        lay.addWidget(c.section("要留意的项目", f"{len(vm.hot)} 个挡路或有风险 · 点进去看详情"))
         if vm.hot:
             holder, grid = c.grid(CARD_COLUMNS)
             c.fill_grid(grid, [project_tile(p, self.on_project) for p in vm.hot], CARD_COLUMNS)
             lay.addWidget(holder)
         else:
-            lay.addWidget(c.label("没有受阻或有风险的项目。", "muted"))
+            lay.addWidget(c.label("没有挡路或有风险的项目。", "muted"))
         rest_text = rest_summary(vm.rest)
         fold = c.button("收起" if self.fold_open else "展开", "ghost", rest_text)
         fold.setObjectName("fold")

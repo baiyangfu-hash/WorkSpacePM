@@ -633,13 +633,17 @@ def test_prs_page_names_the_audit_folders_it_read(qapp: QApplication, tmp_path: 
     rows = dict(prs.audit_rows(snapshot, [tmp_path / "reviews"]))
     # D-317 加码：没有开着的 PR 时分不出哪份是当前的，两份都只算旧报告，不列在“当前审计报告”下
     assert rows["当前审计报告"].startswith("分不出") and rows["另有旧报告"].startswith("2 份")
-    assert str(tmp_path / "reviews") in rows["读的目录"] and "--reviews-dir" in rows["读的目录"]
-    assert "读的目录" not in dict(prs.audit_rows(snapshot))  # 没给目录就不写这一行
+    # CHG-SCPT-2026-653：行名叫“读的审计目录”，不写命令行参数，只说去哪看
+    assert str(tmp_path / "reviews") in rows["读的审计目录"] and "见看板说明" in rows["读的审计目录"]
+    assert "读的目录" not in rows and "--reviews-dir" not in "".join(rows.values())
+    assert "读的审计目录" not in dict(prs.audit_rows(snapshot))  # 没给目录就不写这一行
     assert "另有旧报告" not in dict(prs.audit_rows(gh.Snapshot("o/r", "ok", NOW, NOW)))
     page = prs.PrsPage()
     page.reviews_dirs = [tmp_path / "reviews"]
     page.show_github(snapshot, disabled=False)
-    assert any("--reviews-dir" in t for t in _texts(page))
+    texts = _texts(page)
+    assert not any("--reviews-dir" in t for t in texts)
+    assert "读的审计目录" in texts and any(str(tmp_path / "reviews") in t for t in texts)
 
 
 def test_the_window_hands_its_review_folders_to_the_prs_page(qapp: QApplication, tmp_path: Path) -> None:
@@ -756,3 +760,44 @@ def test_attention_counted_block_follows_the_home_page_in_the_same_round(qapp: Q
     assert _counted(page)[1] == f"{window.home_vm.decisions_total} 件"
     assert page.results == details and "明细读于" in page.project_line.text()  # 明细不动
     window.close()
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-653 词表与显示清理
+
+
+def test_653_tasks_page_counts_only_recently_closed_cards() -> None:
+    """D-347：“已关”只数近 14 天关的；更早的另写一句；没有日期的算更早的，不冒充近期。"""
+    def closed(days: float | None) -> dict[str, Any]:
+        return {"mission_id": "M", "title": "t", **({} if days is None else {"updated_at": (NOW - timedelta(days=days)).isoformat()})}
+
+    data = {"active": [], "waiting": [], "parked": [], "closed": [closed(3), closed(30), closed(None)]}
+    rows = dict(tasks.summarize("missions", data, NOW))
+    assert rows[f"已关（近 {tasks.RECENT_CLOSED_DAYS} 天）"] == "1 张；另有 2 张更早关的" and "已关" not in rows
+    assert tasks.RECENT_CLOSED_DAYS == 14
+    edge = {"closed": [closed(tasks.RECENT_CLOSED_DAYS), closed(tasks.RECENT_CLOSED_DAYS + 0.01)]}
+    assert dict(tasks.summarize("missions", edge, NOW))["已关（近 14 天）"] == "1 张；另有 1 张更早关的"
+    assert dict(tasks.summarize("missions", {"closed": [closed(1), closed(2)]}, NOW))["已关（近 14 天）"] == "2 张"
+    assert dict(tasks.summarize("missions", {"closed": [closed(40)]}, NOW))["已关（近 14 天）"] == "没有；另有 1 张更早关的"
+    assert dict(tasks.summarize("missions", {"closed": []}, NOW))["已关（近 14 天）"] == "没有"
+    # 不给“现在几点”就取当前时间：刚关的算近期
+    fresh = {"closed": [{"mission_id": "M", "updated_at": datetime.now(UTC).isoformat()}]}
+    assert dict(tasks.summarize("missions", fresh))["已关（近 14 天）"] == "1 张"
+
+
+def test_653_pr_release_and_attention_pages_have_no_placeholder_cards(qapp: QApplication) -> None:
+    """D-325：这三页不再摆“还没接”“还没做”的占位卡。"""
+    for page in (prs.PrsPage(), release.ReleasePage(), attention.AttentionPage()):
+        frames = [w for w in page.findChildren(QWidget) if w.property("placeholder") == "true"]
+        assert frames == [], type(page).__name__
+        assert not any("还没接" in t or "还没做" in t or "还没排版" in t for t in _texts(page)), type(page).__name__
+
+
+def test_653_issue_card_puts_the_internal_id_on_its_own_last_line(qapp: QApplication) -> None:
+    from cockpit_board import viewmodel as vm
+    from cockpit_board.widgets import issues
+
+    with_ref = vm.Issue("risk", "DJ-2026-101", "账本对不上", "CHG-B1 的收口单的状态是“备好了，没走完”", "主执行对账", "账本一致性检查", NOW, ref="CLOSURE-MISSION-2")
+    texts = _texts(issues.issue_card(with_ref, NOW, None))
+    assert texts[-1] == "编号：CLOSURE-MISSION-2" and with_ref.detail in texts
+    plain = vm.Issue("hint", "DJ-2026-101", "批准范围", "一张卡", "你", "账本", NOW)
+    assert not any(t.startswith("编号：") for t in _texts(issues.issue_card(plain, NOW, None)))

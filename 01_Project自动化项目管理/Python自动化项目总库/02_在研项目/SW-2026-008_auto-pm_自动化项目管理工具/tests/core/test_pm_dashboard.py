@@ -265,7 +265,7 @@ def test_recent_events_and_change_matrix(tmp_path: Path) -> None:
     )
     board = pd.build_board(root, db, NOW, use_git=False, use_legacy=False)
     events = pd.recent_events(board)
-    assert [event[2] for event in events] == ["已收口：这周收口的"]
+    assert [event[2] for event in events] == ["已关闭：这周收口的"]
     page = pd.render_page(board, timezone.utc)
     assert '<td class="mono">BC-DJ-2026-101-001</td>' in page
     assert "点开看全部 1 条变更" in page
