@@ -326,3 +326,41 @@ def test_653_state_words_on_the_board_are_the_graph_node_names_and_cover_every_s
         assert set(table) == {m.value for m in enum}, graph_id
     assert set(pd.CLOSURE_LABEL) == {m.value for m in ClosureState}
     assert all(word and not word.isascii() for word in pd.CLOSURE_LABEL.values())
+
+
+# ---------------------------------------------------------------- 选卡下拉框（CHG-SCPT-2026-655）
+
+ALL_CAPS_CODE = re.compile(r"\b[A-Z]{3,}(?:_[A-Z]+)*\b")
+
+
+def test_655_card_chooser_shows_node_names_not_state_codes(qapp: QApplication, graphs: dict[str, Graph]) -> None:
+    """验收 9：下拉框每一项末尾写任务流程图里同名节点的中文名，不露全大写的状态码。"""
+    states = [node.id for node in graphs["mission"].nodes]
+    page = FlowPage()
+    page.show_cards(flowgraph.card_positions([_project("DJ-1", *[(f"m{i}", f"卡{i}", state, None) for i, state in enumerate(states)])]))
+    items = [page.card_box.itemText(i) for i in range(1, page.card_box.count())]
+    assert len(items) == len(states) == 9
+    for text in items:
+        assert not ALL_CAPS_CODE.search(text), text
+    assert {text.rsplit(" · ", 1)[1] for text in items} == {graphs["mission"].label_of(state) for state in states}
+    for state in states:
+        assert page.state_name(state) == graphs["mission"].label_of(state) != state
+
+
+def test_655_card_chooser_falls_back_to_the_code_when_the_node_is_unknown(qapp: QApplication) -> None:
+    """读不到节点名（账本里出了图上没有的状态）时照原样显示状态码，不留空。"""
+    page = FlowPage()
+    page.show_cards(flowgraph.card_positions([_project("DJ-1", ("m1", "新状态的卡", "SOMETHING_NEW", None))]))
+    assert page.card_box.itemText(1).endswith(" · SOMETHING_NEW")
+    assert page.state_name("") == ""
+
+
+def test_655_select_card_picks_by_mission_id_and_shows_the_mission_graph(qapp: QApplication) -> None:
+    """首页点卡行过来：按卡号选中下拉框里那一项，并回到任务状态那张图；找不到这张卡就不动。"""
+    page = FlowPage()
+    page.show_cards(flowgraph.card_positions([_project("DJ-1", ("M1", "a", "ACTIVE", "RUNNING"), ("M2", "b", "PARKED", None))]))
+    page.select_graph("run")
+    assert page.select_card("M2") is True
+    assert page.card_box.currentData() == "M2" and page.graph_id == "mission" and _lit(page) == "PARKED"
+    assert page.select_card("没有这张") is False and page.select_card("") is False
+    assert page.card_box.currentData() == "M2"

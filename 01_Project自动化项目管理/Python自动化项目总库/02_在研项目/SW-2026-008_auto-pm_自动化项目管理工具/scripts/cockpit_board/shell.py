@@ -38,9 +38,9 @@ class PageSpec:
 
 
 PAGES: tuple[PageSpec, ...] = (
-    PageSpec("home", "今天", "日常", "今天要看的：挡路、有风险、要你决定的"),
-    PageSpec("issues", "问题", "日常", "所有项目的挡路、风险、提醒，一张表"),
+    PageSpec("home", "今天", "日常", "现在最该你办的一件、四个数、每张开着的卡走到哪一格、机器检查灯"),
     PageSpec("decisions", "决定", "日常", "待你批准、验收的卡；每个按钮背后是同一条 main.py 命令"),
+    PageSpec("issues", "问题", "日常", "所有项目的挡路、风险、提醒，一张表"),
     PageSpec("attention", "要你出手", "日常", "等你本人拍板的范围卡和收件箱条目，只读"),
     PageSpec("projects", "全部项目", "受管项目", "受管的全部项目"),
     PageSpec("project", "项目详情", "受管项目", nav=False),

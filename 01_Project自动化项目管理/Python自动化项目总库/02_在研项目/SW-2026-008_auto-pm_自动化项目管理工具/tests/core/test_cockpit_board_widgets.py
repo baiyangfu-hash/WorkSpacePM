@@ -19,8 +19,11 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -132,25 +135,34 @@ def test_the_project_page_shows_the_more_line_and_newest_first(qapp: QApplicatio
 
 
 def test_b1_05_a_closed_project_shows_an_old_records_chip_on_both_pages(qapp: QApplication, tmp_path: Path) -> None:
-    """D-324（TD-SW008-589）：卡全关了的项目，首页小方块和项目页都挂“旧账”标签，颜色走提示，不走风险。"""
-    from cockpit_board.widgets.home import project_tile
+    """D-324（TD-SW008-589）：卡全关了的项目，项目页挂“旧账”标签，颜色走提示，不走风险。
+    CHG-SCPT-2026-655：首页不再有项目小方块；这种项目收在“其余 N 个项目没有开着的卡”里，写明留有旧账几条，四个数里计在“旧账”。"""
+    from cockpit_board.widgets.home import HomePage
 
     board = board_tests._edited_board(
         tmp_path, [("DJ-2026-101", "CLOSED", "早关了的一张", 20)], "UPDATE work_items SET state = 'BLOCKED'"
     )
     home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
     card = next(c for c in home.hot + home.rest if c.project_id == "DJ-2026-101")
-    tile = project_tile(card, lambda _pid: None)
     page = ProjectPage(lambda: None, lambda _text: None)
     page.show_view(vm.project_vm(board, card, board_tests.OFFSET, False), board_tests.NOW, False)
-    for holder in (tile, page):
-        chips = [label for label in holder.findChildren(QLabel) if label.text() == "旧账"]
-        assert [label.property("sev") for label in chips] == ["hint"]
+    chips = [label for label in page.findChildren(QLabel) if label.text() == "旧账"]
+    assert [label.property("sev") for label in chips] == ["hint"]
+    old = sum(1 for issue in card.issues if issue.basis == vm.OLD_BASIS)
+    front = HomePage(lambda _pid: None, lambda _text: None)
+    front.show_board(home, board_tests.NOW)
+    texts = [label.text() for label in front.findChildren(QLabel)]
+    assert old >= 1 and f"其余 3 个项目没有开着的卡；其中 1 个留有旧账 {old} 条" in texts
+    assert f"DJ-2026-101 甲 · 旧账 {old} 条" in texts
+    assert next(n for n in home.numbers if n.key == "old").value == old
+    box = next(f for f in front.findChildren(c.ClickBox) if f.property("number_key") == "old")
+    assert box.property("sev") == "na"  # 旧账是灰的，不走风险色
 
 
 def test_a_tile_shows_kind_and_status_and_the_fold_counts_archived(qapp: QApplication, tmp_path: Path) -> None:
-    """CHG-SCPT-2026-650：小方块写“性质 · 状态”，不再按名单挂“工具”；折叠那一句单独点出已归档几个。"""
-    from cockpit_board.widgets.home import project_tile, rest_summary
+    """CHG-SCPT-2026-650：项目卡带“性质”“状态”两个词，不再按名单挂“工具”。
+    CHG-SCPT-2026-655：首页不再有项目小方块（性质、状态在“全部项目”页和项目详情页看）；首页折叠行末尾单独点出已归档几个。"""
+    from cockpit_board.widgets.home import HomePage
 
     root, db = base._workspace(tmp_path, [])
     registry = root / pd.REGISTRY_RELATIVE
@@ -160,15 +172,22 @@ def test_a_tile_shows_kind_and_status_and_the_fold_counts_archived(qapp: QApplic
     board = pd.build_board(root, db, board_tests.NOW, use_git=False, use_legacy=False)
     home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
     card = next(c for c in home.rest if c.project_id == "DJ-2026-101")
-    tile = project_tile(card, lambda _pid: None)
-    texts = [label.text() for label in tile.findChildren(QLabel)]
-    assert "设备 · 已归档" in texts
+    assert (card.kind_label, card.status_label) == ("设备", "已归档")
     tool = next(c for c in home.hot + home.rest if c.project_id == "SW-2026-008")
-    tool_tile = project_tile(tool, lambda _pid: None)
-    tool_texts = [label.text() for label in tool_tile.findChildren(QLabel)]
-    assert "工具 · 在研" in tool_texts and not any(t.endswith("  工具") for t in tool_texts)
-    assert rest_summary(home.rest).endswith("，1 个已归档")
-    assert "已归档" not in rest_summary([c for c in home.rest if not c.archived])
+    assert (tool.kind_label, tool.status_label) == ("工具", "在研")
+    front = HomePage(lambda _pid: None, lambda _text: None)
+    front.show_board(home, board_tests.NOW)
+    texts = [label.text() for label in front.findChildren(QLabel)]
+    assert "另有 1 个已归档（到「全部项目」页勾选“显示已归档”可看）" in texts
+    assert not any(t.endswith("  工具") for t in texts)
+    # 已归档的不进“项目和卡”，也不进“其余 N 个项目”（它那条待批的业务变更照旧算在“要你办”里，判定没改）
+    assert [g.project_id for g in home.groups] == [] and "DJ-2026-101" not in [pid for pid, _name, _old in home.quiet]
+    assert not any(t.startswith("DJ-2026-101 ") for t in texts)
+    assert front.findChildren(c.ClickBox, "projectrow") == []
+    home.archived_count = 0
+    front.show_board(home, board_tests.NOW)
+    texts = [label.text() for label in front.findChildren(QLabel)]
+    assert "没有已归档的项目" in texts and not any(t.startswith("另有") for t in texts)
 
 
 def test_the_projects_page_hides_archived_until_the_box_is_ticked(qapp: QApplication, tmp_path: Path) -> None:
@@ -461,3 +480,165 @@ def test_confirm_does_nothing_when_the_dry_run_did_not_pass(qapp: QApplication, 
     page.confirm()
     dw._wait(controller, qapp)
     assert opened == [] and len(fake.calls) == before and controller.last_dialog is None
+
+
+# ---------------------------------------------------------------- 首页小部件和问题页筛选（CHG-SCPT-2026-655）
+
+
+def test_655_click_box_fires_on_left_click_enter_and_space_only(qapp: QApplication) -> None:
+    box = c.click_row("cardrow", "第 1 张卡", "到流程图页看这张卡走到哪一步", c.quiet("写通讯层"), 1)
+    fired: list[int] = []
+    box.activated.connect(lambda: fired.append(1))
+    box.resize(300, 30)
+    box.show()
+    qapp.processEvents()
+    assert box.focusPolicy() == Qt.FocusPolicy.StrongFocus and box.accessibleName() == "第 1 张卡"
+    QTest.mouseClick(box, Qt.MouseButton.LeftButton)
+    assert len(fired) == 1
+    QTest.mouseClick(box, Qt.MouseButton.RightButton)
+    assert len(fired) == 1
+    for key, total in ((Qt.Key.Key_Return, 2), (Qt.Key.Key_Enter, 3), (Qt.Key.Key_Space, 4), (Qt.Key.Key_A, 4), (Qt.Key.Key_Escape, 4)):
+        QTest.keyClick(box, key)
+        assert len(fired) == total, key
+    # 框里的字不拦鼠标：点在字上也算点框
+    label = box.findChildren(QLabel)[0]
+    assert label.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    QTest.mouseClick(box, Qt.MouseButton.LeftButton, pos=label.geometry().center())
+    assert len(fired) == 5
+    assert box.findChildren(QPushButton) == []  # 框不是按钮，里面也没有按钮
+
+
+def test_655_fold_opens_and_closes_and_reports_it(qapp: QApplication) -> None:
+    fold = c.Fold("依据和编号", key="focus")
+    fold.box.addWidget(c.label("卡号"))
+    seen: list[bool] = []
+    fold.toggled.connect(seen.append)
+    fold.show()
+    qapp.processEvents()
+    assert not fold.opened and not fold.body.isVisible() and fold.arrow.text() == "▸"
+    QTest.mouseClick(fold.head, Qt.MouseButton.LeftButton)
+    assert fold.opened and fold.body.isVisible() and fold.arrow.text() == "▾"
+    QTest.keyClick(fold.head, Qt.Key.Key_Space)
+    assert not fold.opened and not fold.body.isVisible() and seen == [True, False]
+    opened = c.Fold("最近 7 天发生了什么", opened=True)
+    assert opened.opened and opened.arrow.text() == "▾"
+
+
+def test_655_strip_draws_ticks_before_and_shape_on_the_current_cell(qapp: QApplication) -> None:
+    cells = ("草稿", "等批准", "进行中", "等验收", "已验收", "已关闭")
+
+    def drawn(holder: QWidget) -> list[tuple[str, str, str]]:
+        return [(label.text(), label.property("at"), label.property("sev") or "") for label in holder.findChildren(QLabel)]
+
+    assert drawn(c.strip(cells, 3, "受阻", "block", "■")) == [
+        ("✓ 草稿", "done", ""), ("✓ 等批准", "done", ""), ("■ 受阻", "current", "block"),
+        ("等验收", "todo", ""), ("已验收", "todo", ""), ("已关闭", "todo", "")]
+    assert drawn(c.strip(cells, 1, "草稿"))[:2] == [("草稿", "current", ""), ("等批准", "todo", "")]  # 草稿不给第 2 格画“✓”
+    assert drawn(c.strip(cells, 6, "收口没走完", "risk", "●"))[-1] == ("● 收口没走完", "current", "risk")
+    assert [text for text, at, _sev in drawn(c.strip(cells, 6, "收口没走完", "risk", "●")) if at == "done"] == [
+        "✓ 草稿", "✓ 等批准", "✓ 进行中", "✓ 等验收", "✓ 已验收"]
+
+
+def test_655_lamp_is_hollow_and_grey_when_not_checked(qapp: QApplication) -> None:
+    def dot(box: QWidget) -> tuple[str, str]:
+        label = next(item for item in box.findChildren(QLabel) if item.objectName() == "dot")
+        return label.text(), label.property("sev")
+
+    ok = c.lamp("lost", "名字", "0 个", "ok", "number", "第 1 盏检查灯", "点开看这项检查的说明")
+    bad = c.lamp("lost", "名字", "1 个", "block", "number", "第 1 盏检查灯", "点开看这项检查的说明")
+    unchecked = c.lamp("scope", "名字", "没检查", "na", "unchecked", "第 2 盏检查灯", "点开看这项检查的说明")
+    offline = c.lamp("gate_red", "名字", "断网未知", "na", "offline", "第 3 盏检查灯", "点开看这项检查的说明")
+    assert (dot(ok), dot(bad), dot(unchecked), dot(offline)) == (("●", "ok"), ("●", "block"), ("○", "na"), ("○", "na"))
+    assert (bad.property("sev"), unchecked.property("state")) == ("block", "unchecked")
+    from cockpit_board import theme
+
+    qss = theme.build_qss(theme.LIGHT)
+    assert f'QFrame#lamp[sev="block"] {{ background: {theme.LIGHT.block_soft}; border: 1px solid {theme.LIGHT.block}; }}' in qss
+    assert f'QLabel#cell[at="current"][sev="risk"] {{ background: {theme.LIGHT.risk_soft}; border: 1px solid {theme.LIGHT.risk}; }}' in qss
+    # 风险色只当底色和图形，不当正文字色：格子里的字、数的字都用正文色
+    assert f'QLabel#cell[at="current"] {{ color: {theme.LIGHT.fg};' in qss
+    assert 'QLabel#num[' not in qss and 'QLabel#lampvalue[sev' not in qss
+
+
+def _filter_issues() -> list[Any]:
+    from datetime import datetime
+
+    when = datetime(2026, 11, 1, 12, 0)
+
+    def issue(sev: str, title: str, owner: str, basis: str = "依据") -> Any:
+        return vm.Issue(sev, "DJ-2026-101", title, "说明", "谁", basis, when, owner=owner)
+
+    return [issue("block", "受阻，要拿主意", vm.OWNER_USER), issue("hint", "批准范围", vm.OWNER_USER),
+            issue("block", "执行者失联", vm.OWNER_LEAD), issue("hint", "草稿，没有工作项，也没有批准记录", vm.OWNER_LEAD),
+            issue("risk", "PR #470 门禁红", ""),
+            issue("hint", "账本遗留", vm.OWNER_LEAD, vm.OLD_BASIS), issue("hint", "工作项受阻", vm.OWNER_LEAD, vm.OLD_BASIS)]
+
+
+def _issue_titles(page: IssuesPage) -> list[str]:
+    return [issue.title for issue in page.shown]
+
+
+def _tab(page: IssuesPage, prop: str, key: str) -> QPushButton:
+    found: QPushButton = next(b for b in page.findChildren(QPushButton) if b.property(prop) == key)
+    return found
+
+
+def test_655_issues_page_hides_old_records_until_the_box_is_ticked(qapp: QApplication) -> None:
+    """问题页默认只藏旧账，“提醒”档不藏；勾“显示旧账（N 条）”才列。"""
+    from datetime import datetime
+
+    from cockpit_board import policy
+
+    page = IssuesPage(lambda _pid: None)
+    page.show_view(_filter_issues(), datetime(2026, 11, 1, 12, 0))
+    box = page.findChild(QCheckBox, "show_old")
+    assert box is not None and box.text() == "显示旧账（2 条）" and not box.isChecked()
+    assert len(page.shown) == 5 and "账本遗留" not in _issue_titles(page) and "批准范围" in _issue_titles(page)
+    counts = {b.property("filter"): b.toolTip() for b in page.findChildren(QPushButton) if b.property("filter")}
+    assert counts == {"all": "只看全部（5 条）", "block": "只看阻塞（2 条）", "risk": "只看风险（1 条）", "hint": "只看提醒（2 条）"}
+    box.click()
+    box = page.findChild(QCheckBox, "show_old")
+    assert box is not None and box.isChecked() and len(page.shown) == 7 and page.old == "show"
+    box.click()
+    assert page.old == "hide" and len(page.shown) == 5
+    # “谁来办”那一排是三个固定文字的键，都在白名单里，没有禁用词
+    who = [b for b in page.findChildren(QPushButton) if b.property("who")]
+    assert [b.text() for b in who] == ["全部", "要你办", "AI 那边要收拾"]
+    for button in who:
+        assert button.text() in policy.PM_BUTTONS
+        assert not any(word in (button.text() + button.toolTip()).lower() for word in policy.PM_FORBIDDEN_WORDS)
+
+
+def test_655_issues_page_who_filter_and_the_outside_entry(qapp: QApplication) -> None:
+    from datetime import datetime
+
+    page = IssuesPage(lambda _pid: None)
+    page.set_view("lead")  # 还没画过：只记下，不炸
+    assert (page.who, page.old) == ("lead", "hide") and page.layout_.count() == 0
+    page.show_view(_filter_issues(), datetime(2026, 11, 1, 12, 0), (), 5, 3)
+    assert _issue_titles(page) == ["执行者失联", "草稿，没有工作项，也没有批准记录"]
+    assert _tab(page, "who", "lead").isChecked() and not any(label.property("user_line") for label in page.findChildren(QLabel))
+    _tab(page, "who", "user").click()
+    assert _issue_titles(page) == ["受阻，要拿主意", "批准范围"]
+    line = next(label.text() for label in page.findChildren(QLabel) if label.property("user_line"))
+    assert line == "要你办共 5 件：这页列 2 条；另有 3 件是 PR 上等你签的、老后台补的，在「要你出手」页和「PR 与审计」页"
+    _tab(page, "filter", "block").click()  # 两排筛选一起生效
+    assert _issue_titles(page) == ["受阻，要拿主意"]
+    page.set_view("old")  # 首页“旧账”那个数点过来：只列旧账，严重度回到全部
+    assert (page.filter, page.who, page.old) == ("all", "all", "only")
+    assert _issue_titles(page) == ["账本遗留", "工作项受阻"]
+    box = page.findChild(QCheckBox, "show_old")
+    assert box is not None and box.isChecked()
+    box.click()  # 去掉勾回到平常的样子
+    assert page.old == "hide" and len(page.shown) == 5
+    page.set_view("user")
+    page.show_view(_filter_issues(), datetime(2026, 11, 1, 12, 0), (), 2, 0)
+    line = next(label.text() for label in page.findChildren(QLabel) if label.property("user_line"))
+    assert line == "要你办共 2 件：这页列 2 条"  # K 为 0 时不写后半句
+    _tab(page, "who", "all").click()
+    assert len(page.shown) == 5 and not any(label.property("user_line") for label in page.findChildren(QLabel))
+    for bad in ("", "all", "block", "running"):
+        with pytest.raises(ValueError, match="不认识的筛选"):
+            page.set_view(bad)
+    with pytest.raises(ValueError, match="旧账"):
+        page.set_old("sometimes")

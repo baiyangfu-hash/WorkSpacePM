@@ -160,3 +160,15 @@ def test_tokens_v2_cover_sidebar_and_states_with_token_colors_only() -> None:
     for path in (SCRIPTS / "cockpit_board").rglob("*.py"):
         if path.name != "theme.py":
             assert not re.search(r"#[0-9a-fA-F]{6}\b", path.read_text(encoding="utf-8")), path.name
+
+
+def test_655_decisions_sits_right_below_today_in_the_sidebar(qapp: QApplication) -> None:
+    """侧栏“决定”排到“今天”下面第一位；“今天”的说明讲的是新首页。"""
+    daily = [p.text for p in shell.PAGES if p.group == "日常" and p.nav]
+    assert daily == ["今天", "决定", "问题", "要你出手"]
+    bar = shell.Sidebar()
+    shown = [b.text() for b in bar.findChildren(QAbstractButton) if b.objectName() == "nav"]
+    assert shown[:4] == daily
+    tip = shell.spec("home").tip
+    assert "最该你办的一件" in tip and "灯" in tip
+    assert not any(word in tip.lower() for word in policy.PM_FORBIDDEN_WORDS)

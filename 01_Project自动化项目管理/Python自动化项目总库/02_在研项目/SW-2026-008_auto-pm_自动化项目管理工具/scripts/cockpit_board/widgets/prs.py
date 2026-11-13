@@ -13,6 +13,7 @@ from typing import Any
 
 from cockpit_board import shell
 from cockpit_board.widgets import common as c
+from cockpit_board.widgets.delivery import github_block
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 VERDICT_ZH = {"pass": "通过", "fail": "不通过", "conditional": "有条件", "unknown": "看不出"}
@@ -89,7 +90,22 @@ class PrsPage(QWidget):
         self.empty_text, self.error_text = shell.page_texts()["prs"]
         self.status: tuple[str, str] = ("", "")
         self.reviews_dirs: list[Path] = []  # 窗口启动时填 options.reviews_dirs（<root>/reviews 加 --reviews-dir 给的）
+        # 交出去的东西（CHG-SCPT-2026-655 从首页搬来）：每个开着的 PR 一行，门禁、安全签字、规则批准、审计各一格
+        body.addWidget(c.section("交出去的东西", "GitHub 上开着的 PR · 门禁 · 安全签字 · 审计 · 没读到就写“未知”"))
+        delivery = QWidget()
+        self.delivery = QVBoxLayout(delivery)
+        self.delivery.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(delivery)
         self.show_github(None, disabled=False)
+        self.show_delivery(None)
+
+    def show_delivery(self, github: Any) -> None:
+        """github＝viewmodel.GithubVM（首页那一份 HomeVM.github）；还没有就写一行“还没读”。只调用 delivery.github_block，没有按钮。"""
+        c.clear(self.delivery)
+        if github is None:
+            self.delivery.addWidget(c.state_line("unchecked", "还没读到 GitHub 的数据"))
+            return
+        self.delivery.addWidget(github_block(github, github.rows, "没有开着的 PR。"))
 
     def show_github(self, snapshot: Any, disabled: bool) -> None:
         c.clear(self.box)

@@ -160,13 +160,13 @@
       "pages": [
         "tasks"
       ],
-      "done_when": "任务状态已过‘待批准’，记批准人和时间",
+      "done_when": "任务状态已过‘等批准’，记批准人和时间",
       "source": [
         "mission.state",
         "事件时间"
       ],
       "when_unreadable": "waiting_you",
-      "unreadable_text": "状态是待批准就是‘等你’"
+      "unreadable_text": "状态是等批准就是‘等你’"
     },
     {
       "n": 5,
@@ -302,7 +302,7 @@
         "mission.state"
       ],
       "when_unreadable": "none_needed",
-      "unreadable_text": "待验收、已验收未收口各有当前态"
+      "unreadable_text": "等验收、已验收未收口各有当前态"
     }
   ],
   "off_spine": [

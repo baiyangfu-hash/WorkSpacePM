@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from cockpit_board import theme
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
@@ -263,6 +264,160 @@ def kv(rows: list[tuple[str, str]]) -> QWidget:
     return holder
 
 
+# ---------------------------------------------------------------- 首页小部件（CHG-SCPT-2026-655）：可点的框、折叠块、状态灯、格子条
+#
+# 文字会变的可点东西（数、灯、卡行、项目行）一律做成“可点的框”，不做成按钮：按钮文字受白名单约束（policy.PM_BUTTONS），框不受。
+# 所以框只许做两件事：换页，或者展开收起。它自己只发一个信号，不起命令、不写文件；接到哪里由页面定，测试逐个点过去核。
+
+
+def quiet(text: str, name: str = "") -> QLabel:
+    """放在可点的框里的字：不拦鼠标（点在字上也算点框），不能选中。"""
+    item = label(text, name, wrap=False)
+    item.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+    item.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    return item
+
+
+class ClickBox(QFrame):
+    """可点的框：鼠标点一下、Tab 选中后按回车或空格，都只发 activated 这一个信号。"""
+
+    activated = Signal()
+
+    def __init__(self, name: str, accessible: str, tip: str = "") -> None:
+        super().__init__()
+        self.setObjectName(name)
+        self.setProperty("clickable", "true")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(accessible)
+        self.setToolTip(tip)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt 接口名
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.activated.emit()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.activated.emit()
+        else:
+            super().keyPressEvent(event)
+
+
+def click_row(name: str, accessible: str, tip: str, *widgets: QWidget | int) -> ClickBox:
+    """一行可点的框：里面的东西横着排。"""
+    box = ClickBox(name, accessible, tip)
+    row = QHBoxLayout(box)
+    row.setContentsMargins(theme.SPACE // 2, 2, theme.SPACE // 2, 2)
+    row.setSpacing(theme.SPACE)
+    for item in widgets:
+        if isinstance(item, int):
+            row.addStretch(item)
+        else:
+            row.addWidget(item)
+    return box
+
+
+FOLD_CLOSED, FOLD_OPEN = "▸", "▾"
+# 脊柱图页、任务页原来各有一张“每张卡走到第几步”的占位卡，首页有了格子条以后改成这一行字
+WHERE_IS_EACH_CARD = "每张卡在任务状态上走到哪一步，看首页的格子条或流程图页"
+
+
+class Fold(QWidget):
+    """折叠块：一行可点的标题，点了展开或收起下面的内容。只动自己的显示，不做别的。"""
+
+    toggled = Signal(bool)
+
+    def __init__(self, title: str, opened: bool = False, key: str = "") -> None:
+        super().__init__()
+        self.setProperty("fold", key)
+        self.arrow = quiet(FOLD_OPEN if opened else FOLD_CLOSED, "small")
+        self.title = quiet(title, "small")
+        self.head = click_row("foldhead", "折叠项", "点一下展开，再点一下收起", self.arrow, self.title)
+        self.body = QWidget()
+        self.box = QVBoxLayout(self.body)
+        self.box.setContentsMargins(theme.SPACE * 2, 0, 0, 0)
+        self.box.setSpacing(theme.SPACE // 2)
+        self.body.setVisible(opened)
+        self.opened = opened
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(theme.SPACE // 2)
+        self.head_row = hrow(self.head, 1)
+        outer.addWidget(self.head_row)
+        outer.addWidget(self.body)
+        self.head.activated.connect(lambda: self.set_open(not self.opened))
+
+    def set_open(self, opened: bool) -> None:
+        self.opened = opened
+        self.arrow.setText(FOLD_OPEN if opened else FOLD_CLOSED)
+        self.body.setVisible(opened)
+        self.toggled.emit(opened)
+
+
+def strip(cells: Sequence[str], current: int, text: str, sev: str = "", shape: str = "") -> QWidget:
+    """六格工位条：当前格之前的格画“✓”（走过），当前格写它的字（有问题时加方块或圆点和底色），后面的格只写格名。"""
+    items: list[QWidget] = []
+    for index, name in enumerate(cells, start=1):
+        if index < current:
+            cell = quiet("✓ " + name, "cell")
+            cell.setProperty("at", "done")
+        elif index == current:
+            cell = quiet(f"{shape} {text}".strip(), "cell")
+            cell.setProperty("at", "current")
+            cell.setProperty("sev", sev)
+        else:
+            cell = quiet(name, "cell")
+            cell.setProperty("at", "todo")
+        cell.setMinimumWidth(STRIP_CELL_WIDTH)  # 各行的格子上下大致对齐；当前格字多时自己撑宽
+        cell.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        items.append(cell)
+    holder = hrow(*items, spacing=2)
+    holder.setProperty("strip", "true")
+    holder.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    return holder
+
+
+STRIP_CELL_WIDTH = theme.SPACE * 9
+LAMP_DOT = {"number": "●", "unchecked": "○", "offline": "○"}
+
+
+def lamp(key: str, name: str, value: str, sev: str, state: str, accessible: str, tip: str) -> ClickBox:
+    """状态灯：小点 + 白话名字 + 数。正常是绿点；异常是黄或红点加浅底和边框；没检查、断网是空心灰圈。"""
+    box = ClickBox("lamp", accessible, tip)
+    box.setProperty("lamp_key", key)
+    box.setProperty("sev", sev)
+    box.setProperty("state", state)
+    dot = quiet(LAMP_DOT.get(state, "○"), "dot")
+    dot.setProperty("sev", sev)
+    text = quiet(value, "lampvalue")
+    text.setProperty("state", state)
+    layout = QVBoxLayout(box)
+    layout.setContentsMargins(theme.SPACE, theme.SPACE // 2, theme.SPACE, theme.SPACE // 2)
+    layout.setSpacing(0)
+    head = hrow(dot, quiet(name, "small"), 1, spacing=theme.SPACE // 2)
+    head.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    layout.addWidget(head)
+    layout.addWidget(text)
+    return box
+
+
+def number_box(key: str, name: str, value: str, sev: str, tip: str, clickable: bool) -> QFrame:
+    """总览的一个数：大字的数 + 名字。能点的是可点的框，不能点的是普通框。"""
+    box: QFrame = ClickBox("numbox", name, tip) if clickable else QFrame()
+    if not clickable:
+        box.setObjectName("numbox")
+        box.setToolTip(tip)
+    box.setProperty("number_key", key)
+    box.setProperty("sev", sev)
+    row = QHBoxLayout(box)
+    row.setContentsMargins(theme.SPACE * 2, theme.SPACE // 2, theme.SPACE * 2, theme.SPACE // 2)
+    row.setSpacing(theme.SPACE)
+    row.addWidget(quiet(value, "num"))
+    row.addWidget(quiet(name, "muted"))
+    row.addStretch(1)
+    return box
+
+
 # ---------------------------------------------------------------- 骨架通用件（CHG-SCPT-2026-628 A）
 
 # 三态标签：读不到数的三种说法。汇总数没数据源时画面只许出现这三个字样之一，不许画 0 或绿。
@@ -386,7 +541,7 @@ def shows_values(result: ReadResult) -> bool:
 
 
 class ReadPage(QWidget):
-    """骨架页：顶上标题和一句话，中间每条命令一块（状态、要点、原文），底下是还没做的功能占位卡。
+    """骨架页：顶上标题和一句话，中间每条命令一块（状态、要点、原文），底下是还没做的功能占位卡和说明现状的小字（notes）。
 
     子类写 summary()：把 readers 解析出的 data 变成几行“名字 → 值”；写 is_empty()：这条命令读到的算不算“空”。
     不起子进程、不写文件，命令由 app 在后台线程跑完后调用 show_results()。
@@ -401,6 +556,7 @@ class ReadPage(QWidget):
         todo: Sequence[tuple[str, str, str]] = (),
         empty_text: str = "",
         error_text: str = "",
+        notes: Sequence[str] = (),
     ) -> None:
         super().__init__()
         self.key = key
@@ -426,6 +582,8 @@ class ReadPage(QWidget):
         body.addWidget(holder)
         for name, reason, command in todo:
             body.addWidget(placeholder(name, reason, command))
+        for note in notes:  # 说明现状的一行小字（不是占位卡）
+            body.addWidget(label(note, "small"))
         self.results: list[ReadResult] = []
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:

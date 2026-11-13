@@ -1214,3 +1214,386 @@ def test_653_small_grey_text_is_readable_on_every_ground(tokens: theme.Tokens, g
 def test_653_contrast_formula_is_the_wcag_one() -> None:
     assert round(_contrast("#000000", "#ffffff"), 1) == 21.0 and _contrast("#777777", "#777777") == 1.0
     assert _contrast("#8b93a0", theme.LIGHT.side) < 4.5  # 旧的浅色灰字在侧栏上不够，这条测试拦得住
+
+
+# ---------------------------------------------------------------- 首页按方案丙重做（CHG-SCPT-2026-655）：owner、工位条、四个数、焦点事项
+
+
+def _mission(state: str, mission_id: str = "M-1", closure: str = "", **extra: Any) -> Any:
+    return pd.MissionInfo(mission_id, "DJ-2026-101", "一张卡", state, NOW - timedelta(days=1), closure_state=closure, **extra)
+
+
+def _issue(owner: str, mission_id: str = "M-1", title: str = "批准范围") -> Any:
+    return vm.Issue("hint", "DJ-2026-101", title, "一张卡", "谁", "依据", NOW - timedelta(days=2), owner=owner, mission_id=mission_id)
+
+
+STRIP_TABLE = [  # 账本状态, 收口记录 → 当前格（1 起）, 当前格的字
+    ("DRAFT", "", 1, "草稿"),
+    ("AWAITING_APPROVAL", "", 2, "等批准"),
+    ("ACTIVE", "", 3, "进行中"),
+    ("BLOCKED", "", 3, "受阻"),
+    ("PARKED", "", 3, "搁着"),
+    ("ACCEPTANCE_PENDING", "", 4, "等验收"),
+    ("ACCEPTED", "", 5, "已验收，等收口"),
+    ("CLOSED", "PREPARED", 6, "收口没走完"),
+]
+
+
+@pytest.mark.parametrize(("state", "closure", "at", "text"), STRIP_TABLE)
+def test_655_strip_position_and_word_follow_the_ledger_state_only(state: str, closure: str, at: int, text: str) -> None:
+    """验收 2：位置表每一行各造一张卡，当前格的位置、字和“✓”的格数逐个对；格名取 STATE_LABEL。"""
+    strip = vm.strip_of(_mission(state, closure=closure), [])
+    assert strip is not None
+    assert (strip.current, strip.text, strip.done) == (at, text, at - 1)
+    assert strip.cells == ("草稿", "等批准", "进行中", "等验收", "已验收", "已关闭")
+    assert strip.cells == tuple(pd.STATE_LABEL[s] for s in vm.STRIP_STATES)
+    # 位置不看问题：名下有问题时位置和字不变
+    for owner in (vm.OWNER_USER, vm.OWNER_LEAD):
+        again = vm.strip_of(_mission(state, closure=closure), [_issue(owner)])
+        assert again is not None and (again.current, again.text) == (at, text)
+
+
+@pytest.mark.parametrize(("state", "closure"), [("CLOSED", "COMPLETED"), ("CLOSED", ""), ("CANCELLED", "")])
+def test_655_closed_cards_without_an_unfinished_closure_stay_off_the_home_page(state: str, closure: str) -> None:
+    """收口走完的、没有收口记录的（D-330 的老卡）、已取消的卡不进首页。"""
+    assert vm.strip_of(_mission(state, closure=closure), [_issue(vm.OWNER_USER)]) is None
+    assert vm.card_row(_mission(state, closure=closure), [], NOW) is None
+
+
+def test_655_strip_colour_and_shape_follow_the_issues_of_this_card_only() -> None:
+    """验收 2：颜色表三行各造一张；别的卡名下的问题不算数；user 和 lead 都有时按 user。"""
+    mission = _mission("AWAITING_APPROVAL")
+    red = vm.strip_of(mission, [_issue(vm.OWNER_USER)])
+    yellow = vm.strip_of(mission, [_issue(vm.OWNER_LEAD)])
+    plain = vm.strip_of(mission, [])
+    assert red is not None and yellow is not None and plain is not None
+    assert (red.sev, red.shape) == ("block", "■")
+    assert (yellow.sev, yellow.shape) == ("risk", "●")
+    assert (plain.sev, plain.shape) == ("", "")
+    other = vm.strip_of(mission, [_issue(vm.OWNER_USER, mission_id="M-2"), _issue(vm.OWNER_USER, mission_id="")])
+    assert other is not None and other.sev == ""
+    both = vm.strip_of(mission, [_issue(vm.OWNER_LEAD), _issue(vm.OWNER_USER)])
+    assert both is not None and both.sev == "block"
+    nobody = vm.strip_of(mission, [_issue("")])
+    assert nobody is not None and nobody.sev == ""
+    # 两行例外：收口没走完固定黄底圆点（问题不带卡号）；已验收等收口不标色
+    unfinished = vm.strip_of(_mission("CLOSED", closure="PREPARED"), [])
+    accepted = vm.strip_of(_mission("ACCEPTED"), [])
+    assert unfinished is not None and (unfinished.sev, unfinished.shape) == ("risk", "●")
+    assert accepted is not None and (accepted.sev, accepted.shape) == ("", "")
+
+
+def test_655_card_row_right_text() -> None:
+    red = vm.card_row(_mission("AWAITING_APPROVAL"), [_issue(vm.OWNER_USER)], NOW)
+    late = vm.card_row(_mission("AWAITING_APPROVAL"), [_issue(vm.OWNER_USER, title="等你超过 3 天：批准范围")], NOW)
+    yellow = vm.card_row(_mission("ACTIVE"), [_issue(vm.OWNER_LEAD, title="执行者失联")], NOW)
+    assert red is not None and red.right == "等你：批准范围 · 等了 2 天"
+    assert late is not None and late.right == "等你超过 3 天：批准范围 · 等了 2 天"
+    assert yellow is not None and yellow.right == "主执行：执行者失联"
+    run = pd.RunInfo("RUN-1", "RUNNING", "Trae", NOW + timedelta(hours=1), "", "wt", NOW)
+    running = vm.card_row(_mission("ACTIVE", run=run), [], NOW)
+    stopped = vm.card_row(_mission("ACTIVE", run=pd.RunInfo("RUN-1", "CANCELLED", "Trae", None, "", "wt", NOW)), [], NOW)
+    assert running is not None and running.right == "Trae"
+    assert stopped is not None and stopped.right == ""
+    accepted = vm.card_row(_mission("ACCEPTED"), [], NOW)
+    unfinished = vm.card_row(_mission("CLOSED", closure="PREPARED"), [], NOW)
+    assert accepted is not None and accepted.right == "「决定」页有“收口”按钮"
+    assert unfinished is not None and unfinished.right == "主执行对账"
+
+
+def test_655_closure_unfinished_is_the_same_condition_as_the_unverified_check(tmp_path: Path) -> None:
+    """“收口没走完”那一行和“说完成但机器没过”那一格共用一个条件。"""
+    board = _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "CLOSED", "收口没走完的", 5), ("DJ-2026-101", "CLOSED", "正常收口的", 5),
+         ("DJ-2026-101", "CLOSED", "旧办法关的", 5), ("DJ-2026-101", "ACTIVE", "在干的一张", 0.005)],
+        _closure("MISSION-0", "PREPARED", 5), _closure("MISSION-1", "COMPLETED", 5),
+    )
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    missions = [m for p in board.projects for m in p.missions]
+    assert [m.title for m in missions if vm.closure_unfinished(m)] == ["收口没走完的"]
+    assert next(k for k in home.checks if k.key == "unverified").value == 1
+    group = next(g for g in home.groups if g.project_id == "DJ-2026-101")
+    assert [(r.title, r.strip.text) for r in group.cards] == [("收口没走完的", "收口没走完"), ("在干的一张", "进行中")]
+    assert group.open_count == 1  # “开着 N 张卡”只数开着的；跟着列出的已关卡不算
+
+
+OWNER_TABLE = {  # 第 1.1 节那张表：(问题标题, owner, 带不带卡号)
+    ("受阻，要拿主意", "user", True),
+    ("草稿，没有工作项，也没有批准记录", "lead", True),
+    ("等你超过 3 天：批准范围", "user", True),  # 等你一栏，超过 3 天
+    ("等你超过 3 天：验收结果", "user", True),
+    ("验收结果", "user", True),  # 等你一栏，没超过 3 天
+    ("核对需求", "user", True),  # 有工作项的草稿
+    ("卡开着，但下面没有在跑的执行", "lead", True),
+    ("执行者失联", "lead", True),
+    ("搁了超过 7 天", "user", True),
+    ("开着的卡超过 8 张", "user", False),
+    ("业务变更待批", "user", False),
+    ("批准范围", "user", False),  # 范围卡
+    ("核对需求", "user", False),  # 收件箱
+    ("实施卡待批准派工", "user", False),
+    ("14 天没动静", "user", False),
+    ("账本遗留", "lead", False),
+    ("账本对不上", "lead", False),
+    ("说完成但机器没过", "lead", False),
+    ("工作项受阻", "lead", False),
+    ("PR #470 门禁红", "", False),
+}
+
+
+def _owner_board(tmp_path: Path) -> Any:
+    """造数覆盖 owner 表每一行。账本能造的用账本造；范围卡、收件箱、实施卡、账本一致性那几条直接挂到读出来的项目上。"""
+    board = _edited_board(
+        tmp_path,
+        [
+            ("DJ-2026-101", "BLOCKED", "受阻的", 0.5),  # MISSION-0
+            ("DJ-2026-101", "DRAFT", "没开起来的草稿", 6),  # MISSION-1：去掉工作项
+            ("DJ-2026-101", "AWAITING_APPROVAL", "等批很久", 4),  # MISSION-2
+            ("DJ-2026-101", "ACCEPTANCE_PENDING", "等验收的", 1),  # MISSION-3
+            ("DJ-2026-101", "ACTIVE", "早就停了的活", 3),  # MISSION-4：执行取消
+            ("DJ-2026-101", "ACTIVE", "失联的", 2 / 24),  # MISSION-5
+            ("DJ-2026-101", "PARKED", "搁很久", 9),  # MISSION-6
+            ("DJ-2026-101", "DRAFT", "草稿甲", 0.1),
+            ("DJ-2026-101", "DRAFT", "草稿乙", 0.1),
+            ("SW-2026-008", "ACCEPTANCE_PENDING", "很久没动的", 20),
+        ],
+        "UPDATE mission_items SET root_work_id = NULL WHERE mission_id = 'MISSION-1'",
+        "UPDATE run_items SET state = 'CANCELLED' WHERE run_id = 'RUN-4'",
+        "DELETE FROM execution_leases WHERE run_id = 'RUN-4'",
+    )
+    project = next(p for p in board.projects if p.project_id == "DJ-2026-101")
+    project.asks += [
+        pd.PendingAsk("DJ-2026-101", "scope", "REQ-1", "改节拍", NOW - timedelta(days=1), 1),
+        pd.PendingAsk("DJ-2026-101", "inbox", "INBOX-1", "加一个传感器", NOW - timedelta(days=1)),
+    ]
+    project.cards.append(pd.CardInfo("CARD-DJ-2026-101-009", "换气缸", "待批准派工"))
+    project.attention += [
+        pd.Attention("DJ-2026-101", "执行记录没结账", NOW - timedelta(days=3), "一条执行没结账"),
+        pd.Attention("DJ-2026-101", "收口停在半路", NOW - timedelta(days=3), "收口单停着", mission_state="ACTIVE"),
+        pd.Attention("DJ-2026-101", "收口停在半路", NOW - timedelta(days=3), "卡关了收口没走完", mission_state="CLOSED"),
+        pd.Attention("DJ-2026-101", "工作项受阻", NOW - timedelta(days=3), "一个工作项受阻"),
+    ]
+    return board
+
+
+def _old_decisions_from(issues: list[Any]) -> list[Any]:
+    """改之前的 decisions_from：按“谁来办”那句字是不是以“你”开头来挑（照抄 0f11b341 上的写法，对照用）。"""
+    out = [(i.sev, i.project_id, i.title, i.detail, vm._reply(i), i.basis, i.since, i.example) for i in issues if i.who.startswith(vm.USER)]
+    far = datetime.max.replace(tzinfo=UTC)
+    return sorted(out, key=lambda d: (-vm.SEV_RANK[d[0]], d[6] or far))
+
+
+def test_655_owner_table_row_by_row_and_decisions_are_the_same_as_before(tmp_path: Path) -> None:
+    """验收 4：表里每一行造一条；owner == user 和“那句字以‘你’开头”逐条相同；decisions_from 的结果和改之前一样。"""
+    board = _owner_board(tmp_path)
+    snapshot = _snapshot([_pull(470, ["DJ-2026-101"], [("sw008-ci", "fail")])])
+    home = vm.home_vm(board, OFFSET, online=True, use_git=False, github=snapshot)
+    issues = vm.all_issues(home)
+    seen = {(i.title, i.owner, bool(i.mission_id)) for i in issues}
+    assert seen == OWNER_TABLE
+    for issue in issues:
+        assert (issue.owner == vm.OWNER_USER) == issue.who.startswith(vm.USER), issue.title
+    for card in home.hot + home.rest:
+        new = [(d.sev, d.project_id, d.ask, d.why, d.reply, d.basis, d.since, d.example) for d in vm.decisions_from(card.issues)]
+        assert new == _old_decisions_from(card.issues)
+    # 类别：对应卡的是 mission；范围卡、收件箱各归各；其余看板里没有能办的页
+    kinds = {(d.ask, bool(d.mission_id)): d.kind for c in home.hot + home.rest for d in c.decisions}
+    assert kinds[("受阻，要拿主意", True)] == kinds[("等你超过 3 天：批准范围", True)] == kinds[("搁了超过 7 天", True)] == "mission"
+    assert kinds[("核对需求", True)] == "mission"
+    assert (kinds[("批准范围", False)], kinds[("核对需求", False)]) == ("scope", "inbox")
+    for ask in ("业务变更待批", "实施卡待批准派工", "开着的卡超过 8 张", "14 天没动静"):
+        assert kinds[(ask, False)] == "other", ask
+    assert {kind for (_ask, has_card), kind in kinds.items() if has_card} == {"mission"}
+
+
+def test_655_red_cell_if_and_only_if_the_card_has_a_user_issue(tmp_path: Path) -> None:
+    """验收 2 的不变式：一张卡是红格，当且仅当它名下有一条 owner == user 的问题；mission 类的焦点事项指的那张卡一定是红格。"""
+    home = vm.home_vm(_owner_board(tmp_path), OFFSET, online=None, use_git=False)
+    issues = vm.all_issues(home)
+    user_cards = {i.mission_id for i in issues if i.owner == vm.OWNER_USER and i.mission_id}
+    lead_cards = {i.mission_id for i in issues if i.owner == vm.OWNER_LEAD and i.mission_id}
+    board = _owner_board(tmp_path / "again")
+    rows = [row for p in board.projects for m in p.missions if (row := vm.card_row(m, issues, NOW)) is not None]
+    assert len(rows) == 10 and user_cards and lead_cards
+    shown = [row for group in home.groups for row in group.cards]
+    assert shown and all(row in rows for row in shown)  # 首页列的就是这些行（每个项目最多 8 张）
+    for row in rows:
+        assert (row.strip.sev == "block") == (row.mission_id in user_cards), row.title
+        assert (row.strip.sev == "risk") == (row.mission_id in lead_cards - user_cards), row.title
+    assert {r.mission_id for r in rows if r.strip.sev == "block"} == user_cards
+    by_title = {r.title: r.strip for r in rows}
+    # 审计预核点的四处现状：有工作项的草稿红；没工作项没批准的草稿黄；失联黄；搁超过 7 天红
+    assert (by_title["草稿甲"].sev, by_title["没开起来的草稿"].sev, by_title["失联的"].sev, by_title["搁很久"].sev) == (
+        "block", "risk", "risk", "block")
+    assert home.focus is not None and home.focus.decision.kind == "mission"
+    assert home.focus.decision.mission_id in {r.mission_id for r in shown if r.strip.sev == "block"}
+    # 排序：每个项目里红格在前，其次黄格
+    for group in home.groups:
+        ranks = [{"block": 0, "risk": 1}.get(r.strip.sev, 2) for r in group.cards]
+        assert ranks == sorted(ranks)
+
+
+def test_655_parked_within_seven_days_has_no_colour(tmp_path: Path) -> None:
+    home = vm.home_vm(_board(tmp_path, [("DJ-2026-101", "PARKED", "刚搁下", 2)]), OFFSET, online=None, use_git=False)
+    row = home.groups[0].cards[0]
+    assert (row.strip.current, row.strip.text, row.strip.sev, row.right) == (3, "搁着", "", "")
+
+
+def _numbers(home: Any) -> dict[str, Any]:
+    return {n.key: n for n in home.numbers}
+
+
+def _numbers_board(tmp_path: Path) -> Any:
+    """四个数各不为 0：101 有一张等你的（要你办）、一张真在跑的（AI 在干）、一张失联的（AI 那边要收拾）；008 全关了留一条旧账。"""
+    return _edited_board(
+        tmp_path,
+        [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 1), ("DJ-2026-101", "ACTIVE", "真在跑的", 0.005),
+         ("DJ-2026-101", "ACTIVE", "失联的", 2 / 24), ("SW-2026-008", "CLOSED", "早关了的", 20)],
+        "UPDATE work_items SET state = 'BLOCKED' WHERE title = '早关了的'",
+    )
+
+
+def test_655_four_numbers_and_how_each_is_counted(tmp_path: Path) -> None:
+    """验收 3（数据层）：四个数各不为 0，各按写明的口径数。"""
+    home = vm.home_vm(_numbers_board(tmp_path), OFFSET, online=None, use_git=False)
+    numbers = _numbers(home)
+    issues = vm.all_issues(home)
+    assert [n.key for n in home.numbers] == ["user", "running", "lead", "old"]
+    assert [n.label for n in home.numbers] == ["要你办", "AI 在干", "AI 那边要收拾", "旧账"]
+    assert numbers["user"].value == home.decisions_total == 2  # 等批的 + 那条待批的业务变更
+    assert (numbers["running"].value, numbers["running"].cards) == (1, ("真在跑的",))  # 失联的那张名下有问题，不算在干
+    assert numbers["lead"].value == sum(1 for i in issues if i.owner == vm.OWNER_LEAD and i.basis != vm.OLD_BASIS) == 1
+    assert numbers["old"].value == sum(1 for i in issues if i.basis == vm.OLD_BASIS) == 2  # 工作项受阻、账本遗留各一条
+    assert all(n.read and n.text == str(n.value) for n in home.numbers)
+    assert home.decisions_without_issue == 0
+    # 其余项目：008 没有开着的卡、留有旧账 1 条；102 没登记也没卡
+    assert [(pid, old) for pid, _name, old in home.quiet] == [("DJ-2026-102", 0), ("SW-2026-008", 2)]
+
+
+def test_655_running_card_of_an_archived_project_is_not_counted(tmp_path: Path) -> None:
+    board = _numbers_board(tmp_path)
+    next(p for p in board.projects if p.project_id == "DJ-2026-101").status = "archived"
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert _numbers(home)["running"].value == 0
+
+
+def test_655_numbers_say_unchecked_when_the_ledger_was_not_read(tmp_path: Path) -> None:
+    """验收 3、5：账本读不到时四个数写“没检查”，不写 0；焦点事项那一块也不能说“没有要你办的”。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 1)])
+    db.unlink()
+    for suffix in ("-wal", "-shm"):
+        Path(str(db) + suffix).unlink(missing_ok=True)
+    home = vm.home_vm(pd.build_board(root, db, NOW, use_git=False, use_legacy=False), OFFSET, online=None, use_git=False)
+    assert home.ledger_ok is False
+    assert [n.text for n in home.numbers] == ["没检查"] * 4
+    assert all(not n.read for n in home.numbers)
+    ok = vm.home_vm(_board(tmp_path / "ok", []), OFFSET, online=None, use_git=False)
+    assert ok.ledger_ok is True and all(n.read for n in ok.numbers)
+
+
+def test_655_pr_signature_counts_in_the_total_but_has_no_issue_row(tmp_path: Path) -> None:
+    """验收 3：要你办 N ＝ 问题页归你办的 M 条 ＋ 问题页没有行的 K 件（PR 上等你签的）。"""
+    import github_collector as gh
+
+    pull = _pull(471, ["DJ-2026-101"], [("plc-ci", "pass")])
+    pull.safety = gh.Safety("waiting", "是", "等签")
+    home = vm.home_vm(_numbers_board(tmp_path), OFFSET, online=True, use_git=False, github=_snapshot([pull]))
+    listed = sum(1 for i in vm.all_issues(home) if i.owner == vm.OWNER_USER)
+    assert home.decisions_without_issue == 1
+    assert listed + home.decisions_without_issue == home.decisions_total == _numbers(home)["user"].value == 3
+    assert home.focus is not None and (home.focus.decision.kind, home.focus.page) == ("pr", "prs")
+
+
+def test_655_focus_item_kinds_pages_and_plain_words(tmp_path: Path) -> None:
+    """验收 5：焦点事项＝decisions[0]，接下来最多 2 条；mission 去决定页，范围卡、收件箱去要你出手页，other 没有能去的页。"""
+    empty = vm.home_vm(_board(tmp_path / "empty", [("SW-2026-008", "ACTIVE", "真在跑的", 0.005)]), OFFSET, online=None, use_git=False)
+    # 假工作空间里 101 自带一条待批的业务变更：只有它时焦点是 other 类
+    assert empty.focus is not None and (empty.focus.decision.kind, empty.focus.page) == ("other", "")
+    assert empty.focus.matter == "业务变更待批" and empty.focus.ask.startswith("回一句：")
+    home = vm.home_vm(_owner_board(tmp_path / "full"), OFFSET, online=None, use_git=False)
+    assert home.focus is not None and home.focus.decision == home.decisions[0]
+    assert [f.decision for f in home.focus_next] == home.decisions[1:] and len(home.focus_next) == pd.MAX_DECISIONS - 1
+    names = {c.project_id: c.name for c in home.hot + home.rest}
+    assert home.focus.project_name == names[home.focus.decision.project_id] and names["DJ-2026-101"] == "甲"
+    pages = {}
+    for card in home.hot + home.rest:
+        for decision in card.decisions:
+            focus = vm.focus_of(decision, names)
+            pages[(decision.ask, bool(decision.mission_id))] = focus.page
+            assert focus.matter and focus.ask
+    assert pages[("受阻，要拿主意", True)] == pages[("搁了超过 7 天", True)] == pages[("核对需求", True)] == "decisions"
+    assert pages[("批准范围", False)] == pages[("核对需求", False)] == "attention"
+    for ask in ("业务变更待批", "实施卡待批准派工", "开着的卡超过 8 张", "14 天没动静"):
+        assert pages[(ask, False)] == "", ask
+    blocked = vm.focus_of(next(d for c in home.hot for d in c.decisions if d.ask == "受阻，要拿主意"), names)
+    assert (blocked.matter, blocked.ask) == ("一张卡受阻了", "怎么往下走")
+    late = vm.focus_of(next(d for c in home.hot for d in c.decisions if d.ask == "等你超过 3 天：批准范围"), names)
+    assert (late.matter, late.ask) == ("一张卡的范围等你点头", "范围认不认")
+
+
+def test_655_no_decisions_means_no_focus(tmp_path: Path) -> None:
+    board = _board(tmp_path, [])
+    next(p for p in board.projects if p.project_id == "DJ-2026-101").changes.clear()
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert home.decisions_total == 0 and home.focus is None and home.focus_next == [] and home.ledger_ok
+
+
+def test_655_approved_draft_without_work_shows_the_retire_command_and_change_id(tmp_path: Path) -> None:
+    """“收掉”只能在终端办：折叠项里给完整命令（只显示）。有工作项的卡、别的状态不给。"""
+    board = _edited_board(tmp_path, [("DJ-2026-101", "DRAFT", "批了还没开工", 6), ("DJ-2026-101", "ACCEPTANCE_PENDING", "等验收的", 5)],
+                          "UPDATE mission_items SET root_work_id = NULL WHERE mission_id = 'MISSION-0'",
+                          "DELETE FROM execution_leases", *_with_approval("DEC-B1-OK", 20))
+    next(m for p in board.projects for m in p.missions if m.mission_id == "MISSION-0").change_id = "CHG-DOCU-2026-055"
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    by_card = {d.mission_id: d for c in home.hot + home.rest for d in c.decisions if d.mission_id}
+    draft = by_card["MISSION-0"]
+    assert draft.command == "main.py pm retire --pid DJ-2026-101 --mission-id MISSION-0"
+    assert draft.change_id == "CHG-DOCU-2026-055"
+    assert by_card["MISSION-1"].command == ""
+    focus = vm.focus_of(draft, {})
+    assert (focus.matter, focus.ask, focus.page) == ("一张卡批准了，还没开工", "开工，还是收掉这张卡", "decisions")
+    assert "647" in vm.RETIRE_NOTE and "No such command" in vm.RETIRE_NOTE
+    # 两个条件各自单独管用：草稿卡下面有工作项不给；没有工作项但不是草稿、等批准的也不给
+    cards = {"M-1": _mission("DRAFT", "M-1"), "M-2": _mission("DRAFT", "M-2", work_id="WORK-9"),
+             "M-3": _mission("ACTIVE", "M-3"), "M-4": _mission("AWAITING_APPROVAL", "M-4")}
+    made = vm.decisions_from([_issue(vm.OWNER_USER, mission_id) for mission_id in cards], cards)
+    assert {d.mission_id: bool(d.command) for d in made} == {"M-1": True, "M-2": False, "M-3": False, "M-4": True}
+
+
+def test_655_archived_projects_stay_out_of_projects_and_cards(tmp_path: Path) -> None:
+    """验收 7：已归档的项目不进“项目和卡”，也不进“其余 N 个项目”，只点数。"""
+    board = _board(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 1), ("SW-2026-008", "ACTIVE", "真在跑的", 0.005)])
+    before = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert [g.project_id for g in before.groups] == ["DJ-2026-101", "SW-2026-008"] and before.archived_count == 0
+    next(p for p in board.projects if p.project_id == "DJ-2026-101").status = "archived"
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert [g.project_id for g in home.groups] == ["SW-2026-008"]
+    assert home.archived_count == 1 and "DJ-2026-101" not in [pid for pid, _name, _old in home.quiet]
+
+
+def test_655_a_project_lists_at_most_eight_cards_and_counts_the_rest(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "DRAFT", f"草稿{i}", 0.1 + i / 100) for i in range(11)])
+    group = vm.home_vm(board, OFFSET, online=None, use_git=False).groups[0]
+    assert (len(group.cards), group.more, group.open_count) == (pd.OPEN_SOFT_LIMIT, 3, 11)
+
+
+def test_655_accepted_card_is_listed_only_next_to_an_open_card(tmp_path: Path) -> None:
+    alone = vm.home_vm(_board(tmp_path / "a", [("DJ-2026-101", "ACCEPTED", "验收过的", 1)]), OFFSET, online=None, use_git=False)
+    assert alone.groups == []
+    both = vm.home_vm(_board(tmp_path / "b", [("DJ-2026-101", "ACCEPTED", "验收过的", 1), ("DJ-2026-101", "ACTIVE", "在跑的", 0.005)]),
+                      OFFSET, online=None, use_git=False)
+    assert sorted((r.title, r.strip.current, r.strip.sev) for r in both.groups[0].cards) == [("在跑的", 3, ""), ("验收过的", 5, "")]
+    assert both.groups[0].open_count == 1
+
+
+def test_655_groups_put_red_projects_first_then_yellow(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("SW-2026-008", "AWAITING_APPROVAL", "等批的", 1), ("DJ-2026-101", "ACTIVE", "失联的", 2 / 24)])
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    assert [(g.project_id, g.cards[0].strip.sev) for g in home.groups] == [("SW-2026-008", "block"), ("DJ-2026-101", "risk")]
+
+
+def test_655_mismatch_note_uses_the_word_from_the_table(tmp_path: Path) -> None:
+    home = vm.home_vm(_board(tmp_path, []), OFFSET, online=None, use_git=False)
+    note = next(k for k in home.checks if k.key == "mismatch").note
+    assert "工作项受阻" in note and "BLOCKED" not in note

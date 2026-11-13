@@ -268,7 +268,8 @@ class CockpitWindow(QMainWindow):
         main.addWidget(self.scope)
         self.stack = QStackedWidget()
         self.router = shell.Router(self.stack)
-        self.home = HomePage(self.open_project, self.copy_text)
+        # 首页（CHG-SCPT-2026-655）：能点的东西只换页。大卡的“去办”和 GitHub 灯 → goto；三个数 → 问题页带筛选；卡行 → 流程图页选中这张卡
+        self.home = HomePage(self.open_project, self.copy_text, self.goto, self.open_issues, self.open_card)
         self.issues = IssuesPage(self.open_project)
         self.projects = ProjectsPage(self.open_project, self.new_project)
         self.project = ProjectPage(lambda: self.goto("home"), self.copy_text)
@@ -397,6 +398,16 @@ class CockpitWindow(QMainWindow):
         self.goto("tools")
         self.tools.select_tab("project")
 
+    def open_issues(self, key: str) -> None:
+        """首页的数点过来：问题页先设好筛选（user 要你办 / lead AI 那边要收拾 / old 只看旧账）再换页。"""
+        self.issues.set_view(key)
+        self.goto("issues")
+
+    def open_card(self, mission_id: str) -> None:
+        """首页的卡行点过来：流程图页用它现成的下拉框选中这张卡，再换页。"""
+        self.flow.select_card(mission_id)
+        self.goto("flow")
+
     def open_project(self, project_id: str) -> None:
         if self.board is None or self.home_vm is None:
             return
@@ -512,7 +523,8 @@ class CockpitWindow(QMainWindow):
         self.home.show_board(self.home_vm, now)
         # D-342：“要你出手”分页的“计入”块和首页同一轮、同一份 HomeVM，首页一重算就重画，不等下一轮读取
         self.attention.show_counted(vm.attention_count(self.home_vm, ask_project_ids(board, self.options.station_project)))
-        self.issues.show_view(vm.all_issues(self.home_vm), now, self.home_vm.issue_notes)
+        self.issues.show_view(vm.all_issues(self.home_vm), now, self.home_vm.issue_notes,
+                              self.home_vm.decisions_total, self.home_vm.decisions_without_issue)
         self.projects.show_view(self.home_vm.hot + self.home_vm.rest)
         identity = {
             "source": self.options.source_version, "configured": self.options.source_version,
@@ -527,6 +539,7 @@ class CockpitWindow(QMainWindow):
         self._feed_flow_and_tools(board)
         self.prs.reviews_dirs = list(getattr(self.options, "reviews_dirs", []))
         self.prs.show_github(self.github, bool(self.options.no_github))
+        self.prs.show_delivery(self.home_vm.github)
         if self.stack.currentWidget() is self.project and self.project.vm is not None:
             self.open_project(self.project.vm.card.project_id)
         if self.stack.currentWidget() in (self.home, self.station):

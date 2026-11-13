@@ -18,12 +18,12 @@
 | 按钮 | 作用对象 | 出现在 | 命令（`main.py` 之后） | 要用户填 | 口令生效时 |
 |---|---|---|---|---|---|
 | 批准范围 | 待批准范围卡（`pm pending` 读出） | 范围卡 | `pm approve --request-id R --plan-hash H --approver A --approval-evidence-ref E` | 撞车放行（可空） | 不传 A、E；命令在终端问口令 |
-| 确认开工 | 一张卡 | 草稿、待批准 | `pm confirm-start --mission-id M` | — | 不问口令 |
-| 确认验收 | 一张卡 | 待验收 | `pm accept --mission-id M` | — | 命令在终端问口令 |
+| 确认开工 | 一张卡 | 草稿、等批准 | `pm confirm-start --mission-id M` | — | 不问口令 |
+| 确认验收 | 一张卡 | 等验收 | `pm accept --mission-id M` | — | 命令在终端问口令 |
 | 收口 | 一张卡 | 已验收（含“重试同步”） | `pm close --mission-id M` | — | 不问口令 |
 | 搁着 | 一张卡 | 在干 | `pm park --mission-id M --reason … --summary … --approval-evidence-ref E` | 原因、断点 | 命令在终端问口令 |
-| 拿回 | 一张卡 | 搁着、卡住 | `pm unpark --mission-id M --as 谁 --approval-evidence-ref E` | 谁来接着干 | 命令在终端问口令 |
-| 插急活 | 一张卡（要改干的那张） | 搁着、草稿、待批准（同项目有“在干”的卡时） | `pm switch --pid P --to M --reason … --summary … --as 谁 --approval-evidence-ref E` | 原因、断点、谁来干 | 命令在终端问口令 |
+| 拿回 | 一张卡 | 搁着、受阻 | `pm unpark --mission-id M --as 谁 --approval-evidence-ref E` | 谁来接着干 | 命令在终端问口令 |
+| 插急活 | 一张卡（要改干的那张） | 搁着、草稿、等批准（同项目有“在干”的卡时） | `pm switch --pid P --to M --reason … --summary … --as 谁 --approval-evidence-ref E` | 原因、断点、谁来干 | 命令在终端问口令 |
 | 确认入箱 | 收件箱条目（`pm inbox list` 读出） | 收件箱 | `pm inbox confirm 条目 --ticket-hash T --approver A --approval-evidence-ref E` | 备注（可空） | 同上 |
 | 驳回入箱 | 收件箱条目 | 收件箱 | `pm inbox reject 条目 --ticket-hash T --approver A --approval-evidence-ref E --note …` | 驳回理由 | 同上 |
 

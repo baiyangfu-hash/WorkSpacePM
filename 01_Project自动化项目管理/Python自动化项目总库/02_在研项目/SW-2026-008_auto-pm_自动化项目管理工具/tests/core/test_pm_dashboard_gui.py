@@ -26,7 +26,8 @@ pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the p
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QAbstractButton,
     QAbstractSpinBox,
@@ -67,6 +68,8 @@ sys.path.insert(0, str(PACKAGE.parent))
 import pm_dashboard as pd_module  # noqa: E402
 from cockpit_board import app as app_module  # noqa: E402
 from cockpit_board import policy, tool_policy
+from cockpit_board import viewmodel as vm_module
+from cockpit_board.widgets import common as board_widgets
 
 
 def _options(root: Path, db: Path, **extra: object) -> argparse.Namespace:
@@ -231,6 +234,12 @@ def test_recent_activity_text_is_not_squeezed_into_a_narrow_column(qapp: QApplic
     window.show()
     qapp.processEvents()
     for page in (window.home,):
+        # CHG-SCPT-2026-655：首页的“最近 7 天发生了什么”默认收起，先点开再量
+        fold = next(f for f in page.findChildren(board_widgets.Fold) if f.property("fold") == "activity")
+        assert not fold.body.isVisible()
+        QTest.mouseClick(fold.head, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        assert fold.body.isVisible()
         label = next(item for item in page.findChildren(QLabel) if item.text().startswith("进行中：") and long_title[:6] in item.text())
         assert label.width() > 400, label.width()  # 窄一列时只有 100 来像素
         assert label.height() < 40, label.height()  # 没被挤成好几行
@@ -334,15 +343,22 @@ def test_bc_write_only_after_preview_and_appends_one_line(qapp: QApplication, tm
 def test_checks_show_unchecked_not_zero(qapp: QApplication, tmp_path: Path) -> None:
     root, db = base._workspace(tmp_path, [])
     window = _window(qapp, root, db)
-    values = [label for label in window.home.findChildren(QLabel) if label.objectName() == "check"]
-    assert len(values) == 6
+    # CHG-SCPT-2026-655：六项检查从格子改成一行灯，另加一盏 GitHub 汇总灯
+    lamps = [frame for frame in window.home.findChildren(board_widgets.ClickBox) if frame.objectName() == "lamp"]
+    assert len(lamps) == 7 and [lamp.property("lamp_key") for lamp in lamps][-1] == "github"
+    values = [label for lamp in lamps for label in lamp.findChildren(QLabel) if label.objectName() == "lampvalue"]
+    assert len(values) == 7
     states = {label.property("state") for label in values}
     assert "unchecked" in states
-    for label in values:
+    for lamp, label in zip(lamps, values, strict=True):
+        assert lamp.property("state") == label.property("state")
         if label.property("state") != "number":
             assert label.text() in policy.UNCHECKED_TEXTS
             assert label.text() != "0"
-    assert any("没检查的灰色，不是 0" in text for text in _texts(window.home))
+            assert lamp.property("sev") == "na"  # 没检查的不标色，更不是绿
+            dot = next(item for item in lamp.findChildren(QLabel) if item.objectName() == "dot")
+            assert dot.text() == "○"
+    assert any("空心灰圈是没检查，不是 0" in text for text in _texts(window.home))
     window.close()
 
 
@@ -524,7 +540,10 @@ def test_github_block_shows_as_of_and_never_green_when_stale(qapp: QApplication,
         window.open_project("DJ-2026-101")
         window.project.set_tab("io")
         qapp.processEvents()
-        for page in (window.home, window.project):
+        # CHG-SCPT-2026-655：“交出去的东西”那一块从首页搬到了“PR 与审计”页，首页只留一盏汇总灯
+        assert [f for f in window.home.findChildren(QFrame) if f.property("github_state")] == []
+        assert any(t == "交出去的东西" for t in _texts(window.prs))
+        for page in (window.prs, window.project):
             blocks = [f for f in page.findChildren(QFrame) if f.property("github_state")]
             assert len(blocks) == 1
             texts = _texts(blocks[0])
@@ -831,4 +850,374 @@ def test_without_an_entry_script_the_window_never_spawns_a_probe(qapp: QApplicat
     assert window.decisions._jobs == []
     button = next(b for b in _buttons(window.project) if b.text() == "归档…")
     assert not button.isEnabled() and any("控制根里没有 main.py" in t for t in _texts(window.project))
+    window.close()
+
+
+# ---------------------------------------------------------------- 首页按方案丙重做（CHG-SCPT-2026-655）
+
+SIX_L_WORDS = ("归档…", "重新激活…", "确认归档", "确认重新激活", "重新检查", "新建项目…")
+
+
+def _boxes(window: Any, name: str = "") -> list[Any]:
+    return [box for box in window.home.findChildren(board_widgets.ClickBox) if not name or box.objectName() == name]
+
+
+def _number(window: Any, key: str) -> Any:
+    return next(f for f in window.home.findChildren(QFrame) if f.objectName() == "numbox" and f.property("number_key") == key)
+
+
+def _number_text(window: Any, key: str) -> str:
+    return str(next(label.text() for label in _number(window, key).findChildren(QLabel) if label.objectName() == "num"))
+
+
+def _numbers_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """四个数各不为 0（同 test_cockpit_board._numbers_board）：101 一张等你的、一张真在跑的、一张失联的；008 全关了留旧账。"""
+    import sqlite3
+
+    root, db = base._workspace(
+        tmp_path,
+        [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 1), ("DJ-2026-101", "ACTIVE", "真在跑的", 0.005),
+         ("DJ-2026-101", "ACTIVE", "失联的", 2 / 24), ("SW-2026-008", "CLOSED", "早关了的", 20)],
+    )
+    connection = sqlite3.connect(db)
+    connection.execute("UPDATE work_items SET state = 'BLOCKED' WHERE title = '早关了的'")
+    connection.commit()
+    connection.close()
+    return root, db
+
+
+def _waiting_signature() -> Any:
+    import github_collector as gh
+
+    pull = gh.PullInfo(7, "改 OB1", "https://example.invalid/pull/7", "baiyangfu-hash", "a" * 40, "claude/x", False, "2026-10-22T09:00:00Z",
+                       projects=["DJ-2026-101"], plc=True, ci=[gh.CiState("plc-ci", "pass", "过")], safety=gh.Safety("waiting", "是", "等签"))
+    return gh.Snapshot("o/r", "ok", NOW, NOW, pulls=[pull], authenticated=True)
+
+
+def test_655_home_buttons_are_two_fixed_words_and_none_runs_a_command(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 5、6、14：首页真按钮只有“去「决定」页办”“复制”，都在白名单里、没有禁用词；单 L 的六个词不上首页。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 5)])
+    copied: list[str] = []
+    window = _window(qapp, root, db)
+    window.copy_text = copied.append
+    window.home.on_copy = copied.append
+    window._refresh_decisions = lambda: None  # 只看跳没跳到那一页；决定页自己读什么由它的测试管
+    window._render()
+    buttons = {b.text(): b for b in _buttons(window.home)}
+    assert set(buttons) == {"去「决定」页办", "复制"} and set(buttons) <= policy.PM_BUTTONS
+    for button in buttons.values():
+        lowered = (button.text() + button.toolTip()).lower()
+        assert not any(word in lowered for word in policy.PM_FORBIDDEN_WORDS), button.text()
+    assert not set(SIX_L_WORDS) & set(_texts(window.home)) and not set(SIX_L_WORDS) & set(buttons)
+    assert window.home_vm.focus.decision.kind == "mission"
+    texts = _texts(window.home)
+    assert "要你定：范围认不认" in texts and any(t.startswith("等了 5 天 · 从卡停到这一步那天算") for t in texts)
+    assert f"共 {window.home_vm.decisions_total} 件" in texts and "这件事不对应某一张卡" not in texts
+    # mission 类的事指的那张卡是红格
+    red = [box.property("mission_id") for box in _boxes(window, "cardrow") if box.property("strip_sev") == "block"]
+    assert window.home_vm.focus.decision.mission_id in red
+    buttons["复制"].click()
+    assert copied == [window.home_vm.focus.decision.reply] and window.stack.currentWidget() is window.home
+    buttons["去「决定」页办"].click()
+    assert window.stack.currentWidget() is window.decisions.page
+    window.close()
+
+
+def test_655_focus_block_other_kind_empty_and_unread_ledger(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 5：other 类的事不出现“去「决定」页办”；没有要办的写“现在没有要你办的。”；账本读不到写“没检查”。"""
+    root, db = base._workspace(tmp_path / "other", [("DJ-2026-101", "ACTIVE", "真在跑的", 0.005)])
+    window = _window(qapp, root, db)  # 假工作空间自带一条待批的业务变更：other 类
+    assert window.home_vm.focus.decision.kind == "other"
+    assert {b.text() for b in _buttons(window.home)} == {"复制"}
+    texts = _texts(window.home)
+    assert "这件事在线程里回一句话，由主执行去办" in texts and "这件事不对应某一张卡" in texts
+    # 没有要办的
+    for project in window.board.projects:
+        project.changes.clear()
+    window._render()
+    assert window.home_vm.decisions_total == 0
+    assert "现在没有要你办的。" in _texts(window.home) and _buttons(window.home) == []
+    window.close()
+    # 账本读不到：不能写“没有要你办的”
+    root, db = base._workspace(tmp_path / "unread", [])
+    db.unlink()
+    for suffix in ("-wal", "-shm"):
+        Path(str(db) + suffix).unlink(missing_ok=True)
+    window = _window(qapp, root, db)
+    for project in window.board.projects:
+        project.changes.clear()
+    window._render()
+    texts = _texts(window.home)
+    assert "现在没有要你办的。" not in texts and "现在没有开着的卡。" not in texts
+    focus_block = window.home.blocks[1]
+    assert [label.text() for label in focus_block.findChildren(QLabel) if label.objectName() == "state"] == ["没检查"]
+    assert not any(t.startswith("其余 ") for t in texts)  # 哪些项目没有开着的卡也不知道
+    # 四个数都写“没检查”，四个数里没有“0”
+    for key in ("user", "running", "lead", "old"):
+        assert _number_text(window, key) == "没检查"
+        assert not any(ch.isdigit() for label in _number(window, key).findChildren(QLabel) for ch in label.text())
+        assert _number(window, key).property("sev") == "na"
+    window.close()
+
+
+def test_655_the_three_numbers_jump_to_the_issues_page_with_the_same_counts(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 3：四个数各不为 0；点“旧账”问题页只列旧账、条数相同；“AI 那边要收拾”同理；
+    点“要你办”那一行写的 N 等于首页的数，列出的 M 条加写明的 K 件等于 N（造数里有一条 PR 等签字，K 不为 0）。"""
+    root, db = _numbers_workspace(tmp_path)
+    window = _window(qapp, root, db)
+    window.github = _waiting_signature()
+    window._render()
+    shown = {key: int(_number_text(window, key)) for key in ("user", "running", "lead", "old")}
+    assert all(value > 0 for value in shown.values()), shown
+    assert not isinstance(_number(window, "running"), board_widgets.ClickBox)  # “AI 在干”不可点
+    assert "真在跑的" in _number(window, "running").toolTip()
+
+    def issue_cards() -> list[Any]:
+        return [f for f in window.issues.findChildren(QFrame) if f.objectName() == "card" and f.property("sev") in ("block", "risk", "hint")]
+
+    QTest.mouseClick(_number(window, "old"), Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is window.issues
+    assert len(window.issues.shown) == len(issue_cards()) == shown["old"]
+    assert all(issue.basis == vm_module.OLD_BASIS for issue in window.issues.shown)
+    assert any(t.startswith("现在只列旧账") for t in _texts(window.issues))
+
+    window.goto("home")
+    QTest.mouseClick(_number(window, "lead"), Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is window.issues
+    assert len(window.issues.shown) == len(issue_cards()) == shown["lead"]
+    assert all(i.owner == vm_module.OWNER_LEAD and i.basis != vm_module.OLD_BASIS for i in window.issues.shown)
+
+    window.goto("home")
+    QTest.mouseClick(_number(window, "user"), Qt.MouseButton.LeftButton)
+    assert window.stack.currentWidget() is window.issues
+    line = next(label.text() for label in window.issues.findChildren(QLabel) if label.property("user_line"))
+    found = re.fullmatch(r"要你办共 (\d+) 件：这页列 (\d+) 条；另有 (\d+) 件是 PR 上等你签的、老后台补的，在「要你出手」页和「PR 与审计」页", line)
+    assert found is not None, line
+    total, listed, elsewhere = (int(group) for group in found.groups())
+    assert total == shown["user"] == window.home_vm.decisions_total
+    assert listed == len(window.issues.shown) == len(issue_cards()) and all(i.owner == vm_module.OWNER_USER for i in window.issues.shown)
+    assert elsewhere == 1 and listed + elsewhere == total
+    # 没有 PR 等签字时不写后半句
+    window.github = None
+    window._render()
+    line = next(label.text() for label in window.issues.findChildren(QLabel) if label.property("user_line"))
+    assert re.fullmatch(r"要你办共 (\d+) 件：这页列 \1 条", line), line
+    window.close()
+
+
+def _first_screen_window(qapp: QApplication, tmp_path: Path) -> Any:
+    """验收 8 的固定造数：1 件要办（假工作空间自带的那条业务变更）、2 个项目各 1 张卡。标题不含编号和英文。"""
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.005), ("SW-2026-008", "ACTIVE", "改看板首页", 0.005)])
+    window = _window(qapp, root, db)
+    assert window.home_vm.decisions_total == 1 and [len(g.cards) for g in window.home_vm.groups] == [1, 1]
+    window.resize(1366, 768)
+    window.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    return window
+
+
+def test_655_first_screen_needs_no_scrolling_at_1366_by_768(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 8：窗口 1366×768，第 1～4 块每块的底边都在滚动区可见范围内，并留 24 像素余量。按几何位置判，不比像素。"""
+    window = _first_screen_window(qapp, tmp_path)
+    assert (window.width(), window.height()) == (1366, 768)
+    viewport = window.home.scroll_area.viewport()
+    assert window.home.scroll_area.verticalScrollBar().value() == 0
+    previous = -1
+    for number in (1, 2, 3, 4):
+        block = window.home.blocks[number]
+        assert block.isVisible() and block.height() > 0
+        bottom = block.mapTo(viewport, QPoint(0, block.height())).y()
+        assert previous < bottom <= viewport.height() - 24, (number, bottom, viewport.height())
+        previous = bottom
+    assert window.home.blocks[5].isVisible()
+    window.close()
+
+
+def test_655_first_screen_shows_no_internal_ids_and_no_placeholder(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 9：首页没有占位卡；首屏看得见的字里没有 CLOSURE- 这类编号、没有 --xxx 命令参数、没有连写三个以上的大写英文。"""
+    window = _first_screen_window(qapp, tmp_path)
+    assert [f for f in window.home.findChildren(QFrame) if f.property("placeholder")] == []
+    visible = [label.text() for label in window.home.findChildren(QLabel) if label.isVisible()]
+    assert len(visible) > 30
+    for pattern in (r"[A-Z]{3,}-[A-Z0-9]", r"--[a-z]", r"[A-Z]{3,}"):
+        assert [t for t in visible if re.search(pattern, t)] == [], pattern
+    assert not any("这一块还没做" in t for t in _texts(window.home))
+    window.close()
+
+
+def test_655_every_click_box_takes_keyboard_focus_and_enter_equals_a_click(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 11：首页每个可点的框都能拿到键盘焦点；对着“旧账”那个数按回车，和鼠标点它一样跳到问题页并只列旧账。"""
+    root, db = _numbers_workspace(tmp_path)
+    window = _window(qapp, root, db)
+    window.show()
+    qapp.processEvents()
+    boxes = _boxes(window)
+    assert {box.objectName() for box in boxes} == {"numbox", "lamp", "cardrow", "projectrow", "foldhead"}
+    for box in boxes:
+        assert box.focusPolicy() == Qt.FocusPolicy.StrongFocus, box.objectName()
+        box.setFocus()
+        qapp.processEvents()
+        assert box.hasFocus(), box.objectName()
+    old = _number(window, "old")
+    old.setFocus()
+    QTest.keyClick(old, Qt.Key.Key_Return)
+    assert window.stack.currentWidget() is window.issues
+    assert window.issues.shown and all(issue.basis == vm_module.OLD_BASIS for issue in window.issues.shown)
+    by_mouse = list(window.issues.shown)
+    window.issues.set_old("hide")
+    window.goto("home")
+    QTest.keyClick(_number(window, "old"), Qt.Key.Key_Space)
+    assert window.stack.currentWidget() is window.issues and window.issues.shown == by_mouse
+    window.goto("home")
+    QTest.keyClick(_number(window, "old"), Qt.Key.Key_A)  # 别的键不算
+    assert window.stack.currentWidget() is window.home
+    window.close()
+
+
+@pytest.mark.parametrize("how", ["mouse", "keyboard"])
+def test_655_click_boxes_only_change_page_or_fold(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str) -> None:
+    """验收 12：首页所有可点的框逐个点一遍（鼠标）、逐个触发一遍（键盘）。每次之后：只换了页、设了筛选或展开收起；
+    没有起任何命令（起命令的入口全换成一碰就记账并报错的替身）；工作区每个文件的修改时间都没变；
+    框自己的提示和无障碍名称里没有禁用词。"""
+    from cockpit_board import actions as actions_module
+    from cockpit_board import tool_actions as tool_actions_module
+
+    spawned: list[str] = []
+
+    def trap(name: str) -> Any:
+        def boom(*_args: Any, **_kwargs: Any) -> Any:
+            spawned.append(name)
+            raise AssertionError(f"首页可点的框不该起命令：{name}")
+        return boom
+
+    for name in ("run_cli", "run_read", "open_console", "run_check"):
+        monkeypatch.setattr(actions_module, name, trap(name))
+    for name in ("run_tool", "open_workbench"):
+        monkeypatch.setattr(tool_actions_module, name, trap(name))
+    root, db = _numbers_workspace(tmp_path)
+    window = _window(qapp, root, db)
+    window.github = _waiting_signature()
+    window._render()
+    window.show()
+    qapp.processEvents()
+    before = _files(root)
+    count = len(_boxes(window))
+    kinds: set[str] = set()
+    assert count >= 15
+    for index in range(count):
+        window.goto("home")
+        box = _boxes(window)[index]
+        kind = box.objectName()
+        kinds.add(kind)
+        for text in (box.toolTip(), box.accessibleName()):
+            assert text and not any(word in text.lower() for word in policy.PM_FORBIDDEN_WORDS), (kind, text)
+        folded = {fold.property("fold"): fold.opened for fold in window.home.findChildren(board_widgets.Fold)}
+        if how == "mouse":
+            QTest.mouseClick(box, Qt.MouseButton.LeftButton)
+        else:
+            box.setFocus()
+            QTest.keyClick(box, Qt.Key.Key_Return)
+        qapp.processEvents()
+        current = window.stack.currentWidget()
+        if kind == "numbox":
+            assert current is window.issues
+            wanted = {"user": ("user", "hide"), "lead": ("lead", "hide"), "old": ("all", "only")}[box.property("number_key")]
+            assert (window.issues.who, window.issues.old) == wanted and window.issues.filter == "all"
+        elif kind == "lamp" and box.property("lamp_key") == "github":
+            assert current is window.prs
+        elif kind == "lamp":
+            # 点一盏灯：下面展开这项检查的说明；再点同一盏收起。别的什么都不动
+            check = next(k for k in window.home_vm.checks if k.key == box.property("lamp_key"))
+            assert current is window.home and window.home.lamp_note.isVisible()
+            assert window.home.lamp_note.text() == f"{check.label}：{check.note}"
+            QTest.mouseClick(box, Qt.MouseButton.LeftButton)
+            assert window.stack.currentWidget() is window.home and not window.home.lamp_note.isVisible()
+        elif kind == "cardrow":
+            assert current is window.flow and window.flow.card_box.currentData() == box.property("mission_id")
+            assert window.flow.graph_id == "mission"
+        elif kind == "projectrow":
+            assert current is window.project and window.project.vm.card.project_id == box.property("project_id")
+        else:
+            assert kind == "foldhead" and current is window.home
+            now = {fold.property("fold"): fold.opened for fold in window.home.findChildren(board_widgets.Fold)}
+            assert sum(1 for key in now if now[key] != folded[key]) == 1
+        assert spawned == []
+        assert window.decisions._jobs == []
+        assert _files(root) == before, kind
+    assert kinds == {"numbox", "lamp", "cardrow", "projectrow", "foldhead"}
+    window.close()
+
+
+def test_655_archived_projects_are_only_counted_on_the_home_page(qapp: QApplication, tmp_path: Path) -> None:
+    """验收 7：已归档的项目不进“项目和卡”，折叠行末尾写“另有 N 个已归档”。"""
+    import json
+
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 1), ("SW-2026-008", "ACTIVE", "真在跑的", 0.005)])
+    registry = root / pd_module.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0]["status"] = "archived"
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    window = _window(qapp, root, db)
+    assert [box.property("project_id") for box in _boxes(window, "projectrow")] == ["SW-2026-008"]
+    texts = _texts(window.home)
+    assert "另有 1 个已归档（到「全部项目」页勾选“显示已归档”可看）" in texts
+    assert not any("等批的" in t for t in _texts(window.home.blocks[3]))  # “项目和卡”那一块里没有已归档项目的卡
+    window.close()
+
+
+def test_655_projects_and_cards_block_rows_strip_and_quiet_fold(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = _numbers_workspace(tmp_path)
+    window = _window(qapp, root, db)
+    rows = {next(label.text() for label in box.findChildren(QLabel)): box for box in _boxes(window, "cardrow")}
+    assert set(rows) == {"等批的", "真在跑的", "失联的"}
+
+    def cells(box: Any) -> list[tuple[str, str, str]]:
+        return [(label.text(), label.property("at"), label.property("sev") or "")
+                for label in box.findChildren(QLabel) if label.objectName() == "cell"]
+
+    assert cells(rows["等批的"]) == [("✓ 草稿", "done", ""), ("■ 等批准", "current", "block"), ("进行中", "todo", ""),
+                                  ("等验收", "todo", ""), ("已验收", "todo", ""), ("已关闭", "todo", "")]
+    assert cells(rows["失联的"])[2] == ("● 进行中", "current", "risk")
+    assert cells(rows["真在跑的"])[2] == ("进行中", "current", "")
+    texts = _texts(window.home)
+    assert "开着 3 张卡" in texts and "主执行：执行者失联" in texts and any(t.startswith("等你：批准范围 · 等了") for t in texts)
+    assert "其余 2 个项目没有开着的卡；其中 1 个留有旧账 2 条" in texts and "没有已归档的项目" in texts
+    fold = next(f for f in window.home.findChildren(board_widgets.Fold) if f.property("fold") == "quiet")
+    assert not fold.body.isVisible()
+    fold.set_open(True)
+    window._render()  # 重画以后折叠项还开着
+    fold = next(f for f in window.home.findChildren(board_widgets.Fold) if f.property("fold") == "quiet")
+    assert fold.opened and "SW-2026-008 SW-2026-008 · 旧账 2 条" in _texts(fold.body)
+    window.close()
+
+
+def test_655_no_open_cards_says_so(qapp: QApplication, tmp_path: Path) -> None:
+    root, db = base._workspace(tmp_path, [])
+    window = _window(qapp, root, db)
+    assert "现在没有开着的卡。" in _texts(window.home) and _boxes(window, "cardrow") == []
+    window.close()
+
+
+def test_655_focus_fold_shows_card_id_basis_and_the_display_only_command(qapp: QApplication, tmp_path: Path) -> None:
+    """用户亲手验第 3 步：点“依据和编号”，能看到卡号和要办时用的命令；命令只是字，后面跟固定的那句提醒。"""
+    from cockpit_board import viewmodel
+    from cockpit_board.widgets import home as home_module
+
+    decision = viewmodel.Decision("block", "DJ-2026-101", "等你超过 3 天：已批准，还没开工", "批了还没开工", "批了还没开工 看过了", "依据句",
+                                  NOW - timedelta(days=6), kind="mission", mission_id="MISSION-0", change_id="CHG-DOCU-2026-055",
+                                  command="main.py pm retire --pid DJ-2026-101 --mission-id MISSION-0")
+    rows = dict(home_module.focus_details(viewmodel.focus_of(decision, {"DJ-2026-101": "甲"})))
+    assert rows["卡号"] == "MISSION-0" and rows["变更单号"] == "CHG-DOCU-2026-055" and rows["依据"] == "依据句"
+    command = rows["要收掉这张卡，在终端运行（这里只显示）"]
+    assert command == "main.py pm retire --pid DJ-2026-101 --mission-id MISSION-0（这条命令要本机发布版在 647 之后才有；报 No such command 就先别收）"
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "AWAITING_APPROVAL", "等批的", 5)])
+    window = _window(qapp, root, db)
+    window.show()
+    qapp.processEvents()
+    fold = next(f for f in window.home.findChildren(board_widgets.Fold) if f.property("fold") == "focus")
+    assert not fold.body.isVisible() and "MISSION-0" in _texts(fold.body)
+    QTest.mouseClick(fold.head, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert fold.body.isVisible() and _buttons(fold) == []
     window.close()

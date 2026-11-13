@@ -1,7 +1,7 @@
 """脊柱图页（CHG-SCPT-2026-628 骨架 D）：一张卡从进门到收口的十步，谁做、跑哪条命令、做完的判据。
 
 只读 `flow/spine.json`（契约测试已对过：十步齐、命令都登记过、页面都存在）。像设备的工艺流程卡：
-先把标准步骤贴在墙上；“哪张卡走到第几步”要按卡读账本，还没做，用占位卡写明。
+先把标准步骤贴在墙上；“哪张卡走到第几步”这一页不画，页尾一行字指到首页的格子条和流程图页。
 """
 
 from __future__ import annotations
@@ -76,5 +76,4 @@ class SpinePage(QWidget):
                 layout.addWidget(c.label(title, "heading", wrap=False))
                 layout.addWidget(c.kv(rows))
                 body.addWidget(frame)
-        body.addWidget(c.placeholder("每张卡走到第几步", "要按卡读账本的证据（完成 / 当前 / 等你 / 失联 / 没记录），还没做",
-                                     "main.py pm orient <项目> --json"))
+        body.addWidget(c.label(c.WHERE_IS_EACH_CARD, "small"))
