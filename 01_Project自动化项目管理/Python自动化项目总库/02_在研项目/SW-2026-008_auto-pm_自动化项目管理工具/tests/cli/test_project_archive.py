@@ -75,6 +75,7 @@ def test_archive_without_confirm_lists_the_five_checks_and_writes_nothing(desk: 
     assert result.exit_code == 0, result.output
     for name in ("卡全关", "收口走完", "没有已验收没收口的卡", "没有没提交的改动", "收件箱没有待处理条目"):
         assert f"[通过] {name}" in result.output
+    assert "怎么办" not in result.output
     assert "在研 → 已归档" in result.output and "预演" in result.output
     assert desk.site.snapshot() == before and desk.audit == [] and desk.status() == ""
 
@@ -149,6 +150,9 @@ def test_archive_confirm_with_a_failed_check_is_refused_with_the_reason(desk: De
     for name in ("没有已验收没收口的卡", "没有没提交的改动", "收件箱没有待处理条目"):
         assert f"[不过] {name}" in result.output
     assert "MISSION-1" in result.output and "登录页偶发白屏" in result.output
+    flat = result.output.replace("\n", "")
+    assert "PROPOSED 待确认" in flat and "pm inbox confirm" in flat  # 不过的那一项下面写怎么办
+    assert "pm missions --pid" not in flat  # 通过的那一项不写
     assert desk.site.registry.read_bytes() == before and desk.audit == []
 
 
@@ -346,3 +350,12 @@ def test_with_a_committed_pin_archive_needs_the_pin_typed_in_a_terminal(desk: De
     assert desk.status() == "archived"
     assert desk.audit[-1]["approval_evidence_ref"].startswith("user-confirmation:pin-")
     assert "project-archive" in desk.audit[-1]["approval_evidence_ref"]
+
+
+def test_open_cards_get_a_what_to_do_line_and_chinese_state_names(desk: Desk) -> None:
+    desk.site.work("WORK-1", "IN_PROGRESS")
+    result = desk.run("archive", PID)
+    flat = result.output.replace("\n", "")
+    assert result.exit_code == 1 and "[不过] 卡全关" in flat
+    assert "开着的 Work WORK-1（IN_PROGRESS）" in flat  # 和 project delete 共用的原因文字原样
+    assert "怎么办：" in flat and "pm missions --pid" in flat and "状态码：IN_PROGRESS 在干" in flat

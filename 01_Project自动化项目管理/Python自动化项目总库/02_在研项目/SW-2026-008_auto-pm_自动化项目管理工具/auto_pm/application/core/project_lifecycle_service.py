@@ -50,6 +50,41 @@ CHECK_ACCEPTED = "没有已验收没收口的卡"
 CHECK_UNCOMMITTED = "没有没提交的改动"
 CHECK_INBOX = "收件箱没有待处理条目"
 
+ADVICE_OPEN_WORK = (
+    "怎么办：先把这些卡做完并验收收口，或由用户决定作废，再来归档；"
+    "pm missions --pid <项目编号> 能看这个项目的卡都在哪一栏"
+)
+ADVICE_INBOX = (
+    "怎么办：先把这些条目处理掉再归档——待确认的由用户确认（pm inbox confirm）或拒绝（pm inbox reject），"
+    "已确认的排进计划或拒绝；pm inbox list 能看全部"
+)
+#: 开着的卡那一项的原因来自 ``open_work_blockers``（和 project delete 共用，不改它的文字），状态码是英文；
+#: 归档时在“怎么办”后面把出现了的状态码用中文注一遍。
+OPEN_STATE_LABELS: dict[str, str] = {
+    "DRAFT": "草稿",
+    "AWAITING_APPROVAL": "待批准",
+    "ACTIVE": "在干",
+    "BLOCKED": "卡住",
+    "PARKED": "搁着",
+    "ACCEPTANCE_PENDING": "待验收",
+    "PLANNED": "已计划",
+    "READY": "待开工",
+    "IN_PROGRESS": "在干",
+    "VERIFYING": "验证中",
+    "RUNNING": "在跑",
+    "PENDING": "等待中",
+}
+
+
+def _open_work_advice(problems: tuple[str, ...]) -> str:
+    text = "\n".join(problems)
+    seen = [f"{code} {label}" for code, label in OPEN_STATE_LABELS.items() if f"（{code}" in text]
+    return ADVICE_OPEN_WORK + (f"。状态码：{'、'.join(seen)}" if seen else "")
+
+
+#: 收件箱状态码旁边的中文；只有这两种算“待处理”（``OPEN_INTAKE_STATUSES``）。
+INBOX_STATUS_LABELS: dict[str, str] = {"PROPOSED": "待确认", "CONFIRMED": "已确认，还没排进计划"}
+
 
 class ProjectLifecycleError(RuntimeError):
     """The project cannot be archived or reactivated; nothing was written."""
@@ -61,6 +96,7 @@ class LifecycleCheck:
 
     name: str
     problems: tuple[str, ...]
+    advice: str = ""  # 这一项不过时怎么办（给人看的一句话）；通过时不显示
 
     @property
     def passed(self) -> bool:
@@ -161,7 +197,10 @@ def inbox_blockers(control_root: str | Path, project_id: str) -> list[str]:
         items = PmIntakeService(control_root).list_items(project_id)
     except Exception as error:  # 读不出来一律不放行
         return [f"读不出收件箱，无法确认有没有待处理条目：{error}"]
-    return [f"收件箱条目 {item.item_id}（{item.status.value}）：{item.title}" for item in items]
+    return [
+        f"收件箱条目 {item.item_id}（{item.status.value} {INBOX_STATUS_LABELS.get(item.status.value, '待处理')}）：{item.title}"
+        for item in items
+    ]
 
 
 def open_change_hints(workspace_root: str | Path, project_id: str) -> list[str]:
@@ -176,17 +215,22 @@ def open_change_hints(workspace_root: str | Path, project_id: str) -> list[str]:
     )
 
 
+def _open_work_check(control_root: str | Path, project_id: str) -> LifecycleCheck:
+    problems = tuple(open_work_blockers(control_root, project_id))
+    return LifecycleCheck(CHECK_OPEN_WORK, problems, _open_work_advice(problems))
+
+
 def archive_checks(
     workspace_root: str | Path, project_id: str, project_path: str | Path, *, control_root: str | Path
 ) -> tuple[LifecycleCheck, ...]:
     """Run the five checks; read-only."""
 
     return (
-        LifecycleCheck(CHECK_OPEN_WORK, tuple(open_work_blockers(control_root, project_id))),
+        _open_work_check(control_root, project_id),
         LifecycleCheck(CHECK_CLOSURE, tuple(closure_blockers(control_root, project_id))),
         LifecycleCheck(CHECK_ACCEPTED, tuple(accepted_blockers(control_root, project_id))),
         LifecycleCheck(CHECK_UNCOMMITTED, tuple(uncommitted_blockers(workspace_root, project_path))),
-        LifecycleCheck(CHECK_INBOX, tuple(inbox_blockers(control_root, project_id))),
+        LifecycleCheck(CHECK_INBOX, tuple(inbox_blockers(control_root, project_id)), ADVICE_INBOX),
     )
 
 
@@ -244,6 +288,20 @@ def apply_plan(workspace_root: str | Path, plan: LifecyclePlan) -> StatusChange:
     if change is None or not change.written:
         raise ProjectLifecycleError(f"登记表里找不到项目 {plan.project_id}，没有改")
     return change
+
+
+def record_status_change(action: str, change: StatusChange, approval_evidence_ref: str) -> None:
+    """Audit log entry for a written archive / reactivate: project, status before and after, where the user said so."""
+
+    from auto_pm.infrastructure.logging.audit import audit_log
+
+    audit_log(
+        action,
+        project_id=change.project_id,
+        status_before=change.before or "active",
+        status_after=change.after,
+        approval_evidence_ref=approval_evidence_ref,
+    )
 
 
 def deleted_projects(workspace_root: str | Path) -> list[DeletedProject]:

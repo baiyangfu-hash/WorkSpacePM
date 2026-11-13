@@ -940,6 +940,7 @@ def cmd_archive(ctx: click.Context, project_id: str, confirm: bool, approval_evi
         ProjectLifecycleError,
         apply_plan,
         plan_archive,
+        record_status_change,
     )
 
     app_ctx: AppContext = ctx.obj
@@ -957,6 +958,8 @@ def cmd_archive(ctx: click.Context, project_id: str, confirm: bool, approval_evi
         console.print(f"  [{'通过' if check.passed else '不过'}] {check.name}", markup=False)
         for problem in check.problems:
             console.print(f"      - {problem}", markup=False)
+        if check.problems and check.advice:
+            console.print(f"      {check.advice}", markup=False)
     if plan.change_hints:
         console.print("没完成的变更单（只是提示，不挡）：归档前请确认这些单要不要先收口")
         for hint in plan.change_hints:
@@ -986,15 +989,7 @@ def cmd_archive(ctx: click.Context, project_id: str, confirm: bool, approval_evi
         console.print(f"[red]归档失败: {e}[/red]")
         ctx.exit(1)
 
-    from auto_pm.infrastructure.logging.audit import audit_log
-
-    audit_log(
-        "project_archive",
-        project_id=project_id,
-        status_before=change.before or "active",
-        status_after=change.after,
-        approval_evidence_ref=evidence,
-    )
+    record_status_change("project_archive", change, evidence)
     console.print(f"[green]项目已归档: {project_id}[/green]（目录没动；要改回在研：project reactivate {project_id}）")
 
 
@@ -1016,6 +1011,7 @@ def cmd_reactivate(ctx: click.Context, project_id: str, confirm: bool, approval_
         ProjectLifecycleError,
         apply_plan,
         plan_reactivate,
+        record_status_change,
     )
 
     app_ctx: AppContext = ctx.obj
@@ -1048,15 +1044,7 @@ def cmd_reactivate(ctx: click.Context, project_id: str, confirm: bool, approval_
         console.print(f"[red]重新激活失败: {e}[/red]")
         ctx.exit(1)
 
-    from auto_pm.infrastructure.logging.audit import audit_log
-
-    audit_log(
-        "project_reactivate",
-        project_id=project_id,
-        status_before=change.before,
-        status_after=change.after,
-        approval_evidence_ref=evidence,
-    )
+    record_status_change("project_reactivate", change, evidence)
     console.print(f"[green]项目已改回在研: {project_id}[/green]")
 
 

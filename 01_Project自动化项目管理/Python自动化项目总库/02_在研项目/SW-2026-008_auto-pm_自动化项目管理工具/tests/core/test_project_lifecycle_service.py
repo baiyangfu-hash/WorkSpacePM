@@ -228,6 +228,7 @@ def test_a_project_with_no_ledger_and_a_clean_tree_passes_all_five(site: Site) -
     plan = site.plan()
     assert tuple(check.name for check in plan.checks) == ALL_CHECKS
     assert plan.blockers == () and (plan.status_before, plan.status_after) == ("", "archived")
+    assert "状态码" not in plan.checks[0].advice  # 没有开着的卡就没有状态码要注
     assert not site.db.exists()  # 预演不替人建账本
 
 
@@ -244,6 +245,9 @@ def test_check_1_open_work_refuses(site: Site) -> None:
     site.work("WORK-1", "IN_PROGRESS")
     assert site.failed() == (lifecycle.CHECK_OPEN_WORK,)
     assert any("开着的 Work WORK-1" in blocker for blocker in site.plan().blockers)
+    advice = site.plan().checks[0].advice  # 归档这一层补的“怎么办”和中文状态名；project delete 共用的原因文字不改
+    assert advice.startswith("怎么办：") and "pm missions --pid" in advice
+    assert advice.endswith("状态码：IN_PROGRESS 在干")
 
 
 @pytest.mark.parametrize("closure", ["PREPARED", None])
@@ -289,7 +293,9 @@ def test_check_5_one_proposed_inbox_item_refuses_and_is_listed_by_id_and_title(s
     assert item.status is IntakeStatus.PROPOSED
     assert site.failed() == (lifecycle.CHECK_INBOX,)
     (blocker,) = site.plan().blockers
-    assert item.item_id in blocker and "登录页偶发白屏" in blocker and "PROPOSED" in blocker
+    assert item.item_id in blocker and "登录页偶发白屏" in blocker and "PROPOSED 待确认" in blocker
+    advice = site.plan().checks[-1].advice
+    assert advice.startswith("怎么办：") and "pm inbox confirm" in advice and "pm inbox reject" in advice
 
 
 def test_check_5_a_confirmed_item_still_blocks_and_a_rejected_one_does_not(site: Site) -> None:
@@ -298,7 +304,8 @@ def test_check_5_a_confirmed_item_still_blocks_and_a_rejected_one_does_not(site:
     site.decide(confirmed, IntakeStatus.CONFIRMED)
     site.decide(rejected, IntakeStatus.REJECTED)
     (blocker,) = site.plan().blockers
-    assert confirmed.item_id in blocker and "CONFIRMED" in blocker and rejected.item_id not in blocker
+    assert confirmed.item_id in blocker and "CONFIRMED 已确认，还没排进计划" in blocker
+    assert rejected.item_id not in blocker
 
 
 def test_an_unreadable_ledger_refuses_every_check_that_reads_it(site: Site) -> None:
