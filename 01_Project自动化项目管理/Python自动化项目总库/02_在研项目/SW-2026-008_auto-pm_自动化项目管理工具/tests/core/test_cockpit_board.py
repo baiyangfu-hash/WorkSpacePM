@@ -1597,3 +1597,64 @@ def test_655_mismatch_note_uses_the_word_from_the_table(tmp_path: Path) -> None:
     home = vm.home_vm(_board(tmp_path, []), OFFSET, online=None, use_git=False)
     note = next(k for k in home.checks if k.key == "mismatch").note
     assert "工作项受阻" in note and "BLOCKED" not in note
+
+
+# ---------------------------------------------------------------- D-364：证据表“越界检查”一行读 pr-gate 的结果
+
+SCOPE_TAIL = "（读的是 pr-gate 整个作业的结论：越界检查和撞车检查在同一个作业里）"
+
+
+def _d364_pr(number: int, pr_gate: vm.Cell | None, project_id: str = "DJ-2026-101") -> vm.PrRow:
+    ci = [("sw008-ci", vm.Cell("过", "ok"))] + ([("pr-gate", pr_gate)] if pr_gate else [])
+    return vm.PrRow(number, f"PR{number}", "u", "claude", [project_id], vm.Cell("过", "ok"), ci,
+                    vm.Cell("不涉及", "na"), vm.Cell("没审计记录", "na"))
+
+
+def _d364_evidence(tmp_path: Path, github: vm.GithubVM | None) -> dict[str, vm.EvidenceRow]:
+    board = _board(tmp_path, [("DJ-2026-101", "ACTIVE", "一张卡", 0.1)])
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    page = vm.project_vm(board, _card(home), OFFSET, True, github)
+    titles = [row.title for row in page.evidence]
+    assert titles.count("越界检查") == 1  # 只有一行，不是新旧各一行
+    assert titles.index("越界检查") == titles.index("独立审计") + 1  # 紧跟在另外三行后面
+    assert not any("pr-scope-check 未合" in row.detail for row in page.evidence)
+    return {row.title: row for row in page.evidence}
+
+
+def _d364_github(rows: list[vm.PrRow], state: str = "ok", fresh: bool = True) -> vm.GithubVM:
+    return vm.GithubVM(state, fresh, "读不到 GitHub", "数据截至 11-13 07:00", [], rows, [])
+
+
+def test_d364_scope_row_without_collector_or_fresh_data_or_pulls(tmp_path: Path) -> None:
+    for name, github in (("none", None), ("off", _d364_github([], state="disabled"))):
+        scope = _d364_evidence(tmp_path / name, github)["越界检查"]
+        assert (scope.state, scope.detail) == ("na", "没检查：GitHub 采集没开")
+
+    stale = _d364_evidence(tmp_path / "stale", _d364_github([_d364_pr(7, vm.Cell("红", "block"))], "offline", False))
+    assert stale["越界检查"].state == "na"  # 旧数据里是红也不报红
+    assert stale["越界检查"].detail == stale["门禁"].detail == "未知：读不到 GitHub；数据截至 11-13 07:00"
+
+    other = _d364_pr(7, vm.Cell("红", "block"), project_id="SW-2026-008")  # 开着的 PR 没改到这个项目
+    empty = _d364_evidence(tmp_path / "empty", _d364_github([other]))
+    assert (empty["越界检查"].state, empty["越界检查"].detail) == (
+        "na", "没有改到这个项目的开着的 PR · 数据截至 11-13 07:00")
+
+
+@pytest.mark.parametrize(
+    ("cell", "lamp", "word"),
+    [(vm.Cell("过", "ok"), "ok", "过"), (vm.Cell("红", "block"), "block", "红"), (vm.Cell("在跑", "hint"), "na", "在跑"),
+     (vm.Cell("没跑", "na", "应跑没跑"), "na", "没跑"), (None, "na", "没读到")],
+)
+def test_d364_scope_row_shows_the_pr_gate_result_of_one_pull(tmp_path: Path, cell: vm.Cell | None, lamp: str, word: str) -> None:
+    scope = _d364_evidence(tmp_path, _d364_github([_d364_pr(7, cell)]))["越界检查"]
+    assert (scope.state, scope.detail) == (lamp, f"#7 {word} · 数据截至 11-13 07:00{SCOPE_TAIL}")
+
+
+def test_d364_scope_row_with_two_pulls_takes_the_worst_and_names_both(tmp_path: Path) -> None:
+    rows = [_d364_pr(7, vm.Cell("过", "ok")), _d364_pr(8, vm.Cell("红", "block"))]
+    evidence = _d364_evidence(tmp_path, _d364_github(rows))
+    scope = evidence["越界检查"]
+    assert scope.state == "block" and scope.detail == f"#7 过；#8 红 · 数据截至 11-13 07:00{SCOPE_TAIL}"
+    assert evidence["门禁"].state == "ok"  # 这一行读的是 pr-gate 那一项，不是合起来的门禁
+    both_pass = _d364_evidence(tmp_path / "ok", _d364_github([_d364_pr(7, vm.Cell("过", "ok")), _d364_pr(8, vm.Cell("过", "ok"))]))
+    assert both_pass["越界检查"].state == "ok"

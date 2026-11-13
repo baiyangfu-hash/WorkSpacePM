@@ -879,12 +879,25 @@ def _rows_of(github: GithubVM | None, project_id: str) -> list[PrRow]:
     return [r for r in (github.rows if github else []) if project_id in r.projects]
 
 
+#: 越界检查（Scope check）是 pr-gate 工作流里的一步，和撞车检查在同一个作业里；看板只读得到整个作业的结论（D-364）。
+SCOPE_WORKFLOW = "pr-gate"
+SCOPE_ROW = "越界检查"
+SCOPE_SOURCE = "（读的是 pr-gate 整个作业的结论：越界检查和撞车检查在同一个作业里）"
+SCOPE_NOT_READ = "没读到"
+
+
+def _scope_cell(row: PrRow) -> Cell:
+    """这个 PR 的 pr-gate 一项；检查清单里找不到就是“没读到”，灰。"""
+    return next((cell for name, cell in row.ci if name == SCOPE_WORKFLOW), Cell(SCOPE_NOT_READ, "na"))
+
+
 def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow]:
     if github is None or github.state == "disabled":
         return [
             EvidenceRow("na", "门禁", "没检查：GitHub 采集没开"),
             EvidenceRow("na", "安全区签字", "没检查：GitHub 采集没开"),
             EvidenceRow("na", "独立审计", "没检查：GitHub 采集没开"),
+            EvidenceRow("na", SCOPE_ROW, "没检查：GitHub 采集没开"),
         ]
     if not github.fresh:
         why = f"未知：{github.headline}；{github.as_of}"
@@ -893,11 +906,12 @@ def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow
             EvidenceRow("na", "门禁", why),
             EvidenceRow("na", "安全区签字", why),
             EvidenceRow("na", "独立审计", f"本机审计目录读到：{audit}（PR 是旧数据，不判过）"),
+            EvidenceRow("na", SCOPE_ROW, why),
         ]
     if not rows:
         none = f"没有改到这个项目的开着的 PR · {github.as_of}"
         return [EvidenceRow("na", "门禁", none), EvidenceRow("na", "安全区签字", none),
-                EvidenceRow("na", "独立审计", none)]
+                EvidenceRow("na", "独立审计", none), EvidenceRow("na", SCOPE_ROW, none)]
 
     def worst(cells: list[Cell]) -> str:
         sevs = [c.sev for c in cells]
@@ -913,6 +927,7 @@ def _gh_evidence(github: GithubVM | None, rows: list[PrRow]) -> list[EvidenceRow
         EvidenceRow(worst([r.gate for r in rows]), "门禁", line(lambda r: r.gate)),
         EvidenceRow(worst([r.safety for r in rows]), "安全区签字", line(lambda r: r.safety)),
         EvidenceRow(worst([r.audit for r in rows]), "独立审计", line(lambda r: r.audit)),
+        EvidenceRow(worst([_scope_cell(r) for r in rows]), SCOPE_ROW, line(_scope_cell) + SCOPE_SOURCE),
     ]
 
 
@@ -1296,7 +1311,6 @@ def project_vm(
             "已关的卡收口单是否已走完（账本路线）",
         ),
         *_gh_evidence(github, rows),
-        EvidenceRow("na", "越界检查", "没检查：pr-scope-check 未合"),
         EvidenceRow("na", "仿真实跑", "无记录：现场回传设计稿 D09 后落地"),
     ]
     dated = [
