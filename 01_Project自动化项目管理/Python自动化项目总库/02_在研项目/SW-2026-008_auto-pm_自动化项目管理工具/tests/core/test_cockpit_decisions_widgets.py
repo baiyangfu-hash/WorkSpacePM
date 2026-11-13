@@ -439,3 +439,249 @@ def test_stdout_data_wins_over_a_different_json_on_stderr(qapp: QApplication, tm
     texts = _texts(controller.page, QLabel)
     assert any("真数据" in t for t in texts) and not any("杂音" in t for t in texts)
     assert controller.page.vm.failures == ()
+
+
+# ---------------------------------------------------------------- 项目生命周期：探测、预演、确认（CHG-SCPT-2026-654）
+
+from cockpit_board import decision_controller as controller_module  # noqa: E402
+from PySide6.QtWidgets import QComboBox, QDialog, QLineEdit, QTextEdit  # noqa: E402
+
+DRY_PASS = ("归档前的五项检查（项目 DJ-1）：\n  [通过] 卡全关\n  [通过] 收口走完\n将要改的那一行：DJ-1 状态 在研 → 已归档\n"
+            "预演（没加 --confirm）：什么都没改。要真的归档，请用户本人加 --confirm 再运行。\n")
+DRY_BLOCKED = ("归档前的五项检查（项目 DJ-1）：\n  [不过] 卡全关\n      - M-0007 还开着\n      先把这张卡收口或作废\n"
+               "拒绝: 项目 DJ-1 现在不能归档，先处理下面的事：\n  - M-0007 还开着\n")
+HELP_WITH_KIND = "Usage: main.py project register [OPTIONS] PROJECT_ID\n  --path TEXT\n  --kind [equipment|library|test|tool]\n  --dry-run\n"
+HELP_WITHOUT_KIND = "Usage: main.py project register [OPTIONS] PROJECT_ID\n  --path TEXT\n  --dry-run\n"
+
+
+class LifecycleCli(FakeCli):
+    """在 FakeCli 上加 project 这一组：--help 探测、预演、确认；记下每次调用带的环境变量。"""
+
+    def __init__(self, *, missing: tuple[str, ...] = (), help_kind: bool = True, dry_rc: int = 0, dry_out: str = DRY_PASS,
+                 timeout: bool = False, pin_text: str = "批准口令：未生效（Git HEAD 里没有 x），批准只做格式检查") -> None:
+        super().__init__(pin_text=pin_text)
+        self.missing, self.help_kind, self.dry_rc, self.dry_out, self.timeout = missing, help_kind, dry_rc, dry_out, timeout
+        self.envs: list[dict[str, str]] = []
+
+    def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        args = command[3:]
+        if args[:1] != ["project"]:
+            self.envs.append(dict(kwargs.get("env") or {}))
+            return super().__call__(command, **kwargs)
+        self.calls.append(args)
+        self.envs.append(dict(kwargs.get("env") or {}))
+        if "--help" in args:
+            if self.timeout:
+                raise subprocess.TimeoutExpired(command, 30)
+            if args[1] in self.missing:
+                return subprocess.CompletedProcess(command, 2, "", f"Usage: main.py project [OPTIONS] COMMAND [ARGS]...\nError: No such command '{args[1]}'.")
+            text = (HELP_WITH_KIND if self.help_kind else HELP_WITHOUT_KIND) if args[1] == "register" else f"Usage: main.py project {args[1]} [OPTIONS] PROJECT_ID"
+            return subprocess.CompletedProcess(command, 0, text, "launcher: release verified via manifest")
+        if "--confirm" in args:
+            return subprocess.CompletedProcess(command, self.write_rc, self.write_out, "")
+        return subprocess.CompletedProcess(command, self.dry_rc, self.dry_out, "")
+
+
+def _lifecycle(tmp_path: Path, fake: LifecycleCli, changed: list[int] | None = None) -> DecisionController:
+    return DecisionController(tmp_path, lambda _t: None, lambda: (changed if changed is not None else []).append(1), runner=fake, now=lambda: NOW)
+
+
+def _dry(controller: DecisionController, qapp: QApplication, key: str = "archive", project_id: str = "DJ-1") -> Any:
+    got: list[Any] = []
+    controller.dry_run(key, project_id, got.append)
+    _wait(controller, qapp)
+    assert len(got) == 1
+    return got[0]
+
+
+def test_probe_runs_three_help_commands_once_and_everything_lights_up(qapp: QApplication, tmp_path: Path) -> None:
+    fake, told = LifecycleCli(), []
+    controller = _lifecycle(tmp_path, fake)
+    controller.lifecycle_listeners.append(lambda: told.append(1))
+    assert controller.lifecycle_available("archive") == (False, controller_module.PROBING_TEXT)  # 还没探测：不亮
+    assert controller.register_kind() == (False, controller_module.PROBING_TEXT)
+    controller.probe_lifecycle()
+    controller.probe_lifecycle()  # 正在探测：不叠第二轮
+    _wait(controller, qapp)
+    assert fake.calls == [["project", "archive", "--help"], ["project", "reactivate", "--help"], ["project", "register", "--help"]]
+    assert told == [1]
+    assert controller.lifecycle_available("archive") == (True, "") and controller.lifecycle_available("reactivate") == (True, "")
+    assert controller.register_kind() == (True, "")
+    controller.probe_lifecycle()  # 探测过了：这个窗口里记着，不再起
+    _wait(controller, qapp)
+    assert len(fake.calls) == 3
+    controller.reset_lifecycle_probe()  # 点“重新读取”：忘掉，重探
+    assert controller.lifecycle_available("archive") == (False, controller_module.PROBING_TEXT) and told == [1, 1]
+    controller.probe_lifecycle()
+    _wait(controller, qapp)
+    assert len(fake.calls) == 6 and controller.lifecycle_available("archive") == (True, "")
+
+
+def test_a_missing_command_keeps_its_button_grey_with_the_old_release_sentence(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 8 条：--help 报 No such command → 灰着，旁边是“本机发布版太旧”那句；另一条有的命令照常亮。"""
+    controller = _lifecycle(tmp_path, LifecycleCli(missing=("archive", "reactivate")))
+    controller.probe_lifecycle()
+    _wait(controller, qapp)
+    for key in ("archive", "reactivate"):
+        ok, reason = controller.lifecycle_available(key)
+        assert not ok and reason.startswith(actions.READ_TEXT["missing_command"]) and "本机发布版太旧：没有这条命令" in reason
+    assert controller.register_kind() == (True, "")
+    only_one = _lifecycle(tmp_path, LifecycleCli(missing=("reactivate",)))
+    only_one.probe_lifecycle()
+    _wait(only_one, qapp)
+    assert only_one.lifecycle_available("archive") == (True, "") and not only_one.lifecycle_available("reactivate")[0]
+
+
+def test_register_without_the_kind_option_greys_the_kind_field(qapp: QApplication, tmp_path: Path) -> None:
+    controller = _lifecycle(tmp_path, LifecycleCli(help_kind=False))
+    controller.probe_lifecycle()
+    _wait(controller, qapp)
+    assert controller.register_kind() == (False, "发版切换后可填；现在登记后显示‘未分类’")
+    assert controller.lifecycle_available("archive") == (True, "")
+
+
+def test_a_probe_that_times_out_or_cannot_start_is_never_taken_as_available(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _lifecycle(tmp_path, LifecycleCli(timeout=True))
+    controller.probe_lifecycle()
+    _wait(controller, qapp)
+    for ok, reason in (controller.lifecycle_available("archive"), controller.lifecycle_available("reactivate"), controller.register_kind()):
+        assert not ok and reason.startswith(controller_module.PROBE_FAILED_PREFIX) and "超时" in reason
+
+    def broken(command: list[str], **_kwargs: Any) -> Any:
+        raise OSError("没有这个解释器")
+
+    spawn = DecisionController(tmp_path, lambda _t: None, lambda: None, runner=broken, now=lambda: NOW)
+    spawn.probe_lifecycle()
+    _wait(spawn, qapp)
+    ok, reason = spawn.lifecycle_available("archive")
+    assert not ok and "命令没起来" in reason and "没有这个解释器" in reason
+    # 没给假的运行器、控制根里又没有 main.py：一定起不来，不起进程，照实记“没读成”
+    monkeypatch.setattr(actions, "run_read", lambda *_a, **_k: pytest.fail("不该起进程"))
+    bare = DecisionController(tmp_path, lambda _t: None, lambda: None, now=lambda: NOW)
+    bare.probe_lifecycle()
+    assert bare._jobs == []
+    ok, reason = bare.lifecycle_available("archive")
+    assert not ok and controller_module.NO_ENTRY_TEXT in reason and bare.register_kind()[0] is False
+
+
+def test_dry_run_is_the_bare_command_and_a_pass_needs_the_sentence(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 4 条：点“归档…”起的命令里没有 --confirm，也没有 --approval-evidence-ref。"""
+    fake = LifecycleCli()
+    controller = _lifecycle(tmp_path, fake)
+    run = _dry(controller, qapp)
+    assert fake.calls == [["pm", "approver-pin", "status"], ["project", "archive", "DJ-1"]]
+    assert not any(word in call for call in fake.calls for word in ("--confirm", "--approval-evidence-ref", "--apply"))
+    assert (run.key, run.project_id, run.passed, run.receipt.rc) == ("archive", "DJ-1", True, 0)
+    assert run.receipt.output == DRY_PASS and run.receipt.action == "归档预演"
+    assert controller.pin_mode == "off" and controller.page.receipts[-1] is run.receipt
+    again = _dry(controller, qapp, "reactivate", "DJ-2")
+    assert fake.calls[2:] == [["project", "reactivate", "DJ-2"]] and again.receipt.action == "重新激活预演"  # 口令状态读过了，不再读
+
+
+def test_a_blocked_dry_run_does_not_pass_and_is_not_painted_as_a_failed_decision(qapp: QApplication, tmp_path: Path) -> None:
+    controller = _lifecycle(tmp_path, LifecycleCli(dry_rc=1, dry_out=DRY_BLOCKED))
+    run = _dry(controller, qapp)
+    assert not run.passed and run.receipt.rc == 1 and run.receipt.output == DRY_BLOCKED  # 输出一行不少
+    assert controller.page.failure is None and controller.page.receipts[-1] is run.receipt
+    silent = _lifecycle(tmp_path, LifecycleCli(dry_rc=0, dry_out="将要改的那一行：…\n"))  # 退出码 0 但没有那一句：也不算通过
+    assert not _dry(silent, qapp).passed
+    refused: list[Any] = []
+    controller.dry_run("archive", "--confirm", refused.append)  # 项目号不合格：不起任何命令
+    assert len(refused) == 1 and not refused[0].passed and refused[0].receipt.command == "(未运行)"
+
+
+def test_confirm_dialog_shows_the_whole_command_and_has_no_place_to_type(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 6 条：口令没启用 → “确认并运行”，凭据是 gui-click 开头；确认框里没有任何输入框（没有口令框，也没有预填的用户原话）。"""
+    controller = _lifecycle(tmp_path, LifecycleCli())
+    run = _dry(controller, qapp)
+    dialog = controller.confirm_project(run, "DJ-1 上料机", lambda _r: None, execute=False)
+    assert dialog.run_button.text() == "确认并运行" and not dialog.via_terminal and dialog.run_button.isEnabled()
+    assert dialog.command_text.startswith("main.py project archive DJ-1 --confirm --approval-evidence-ref user-confirmation:gui-click-")
+    assert dialog.command_label.text() == dialog.command_text
+    for kind in (QLineEdit, QPlainTextEdit, QTextEdit, QComboBox):
+        assert dialog.findChildren(kind) == [], kind.__name__
+    assert dialog.inputs == {} and dialog.values() == {}
+    labels = [str(w.text()) for w in dialog.findChildren(QLabel)]
+    assert "确认归档" in labels and "DJ-1 上料机" in labels
+    assert {str(b.text()) for b in dialog.findChildren(QPushButton)} == {"复制命令", "取消", "确认并运行"}
+
+
+def test_with_a_live_pin_the_dialog_only_offers_the_terminal_and_the_board_takes_no_password(
+        qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验收第 6 条：口令启用时确认框里只有“在终端窗口里运行”，起的是 open_console；没有任何能输口令的输入框。"""
+    fake = LifecycleCli(pin_text="批准口令：已生效；批准人 baiyang（ab12cd34）")
+    opened: list[Any] = []
+
+    def fake_console(_root: Path, label: str, args: Any, **_k: Any) -> actions.Receipt:
+        opened.append((label, list(args)))
+        return actions.Receipt("13:40", label, "cmd", None, False, "已在新的终端窗口打开")
+
+    monkeypatch.setattr(actions, "open_console", fake_console)
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda _self: QDialog.DialogCode.Accepted)
+    changed: list[int] = []
+    controller = _lifecycle(tmp_path, fake, changed)
+    run = _dry(controller, qapp, "reactivate")
+    assert controller.pin_mode == "enforced"  # 预演时顺带读到的口令状态
+    got: list[actions.Receipt] = []
+    dialog = controller.confirm_project(run, "", got.append)
+    _wait(controller, qapp)
+    assert dialog.via_terminal and {str(b.text()) for b in dialog.findChildren(QPushButton)} == {"复制命令", "取消", "在终端窗口里运行"}
+    for kind in (QLineEdit, QPlainTextEdit, QTextEdit):
+        assert dialog.findChildren(kind) == [], kind.__name__
+    assert len(opened) == 1 and opened[0][0] == "确认重新激活"
+    assert opened[0][1][:5] == ["project", "reactivate", "DJ-1", "--confirm", "--approval-evidence-ref"]
+    assert not any("--confirm" in call for call in fake.calls)  # 没有在后台悄悄再跑一遍
+    assert len(got) == 1 and got[0].rc is None and changed == []  # 终端里的结果界面看不到：不当成成功，不自动重读
+
+
+def test_confirm_runs_the_recorded_project_and_shows_the_receipt_on_both_pages(
+        qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda _self: QDialog.DialogCode.Accepted)
+    fake = LifecycleCli()
+    changed: list[int] = []
+    fake.write_out = "项目已归档: DJ-1"
+    controller = _lifecycle(tmp_path, fake, changed)
+    run = _dry(controller, qapp)
+    got: list[actions.Receipt] = []
+    controller.confirm_project(run, "DJ-1 上料机", got.append)
+    _wait(controller, qapp)
+    confirm = fake.calls[-1]
+    assert confirm[:5] == ["project", "archive", "DJ-1", "--confirm", "--approval-evidence-ref"]
+    assert confirm[5].startswith("user-confirmation:gui-click-") and len(confirm) == 6
+    assert len(got) == 1 and got[0].rc == 0 and controller.page.receipts[-1] is got[0] and changed == [1]
+    fake.write_rc, fake.write_out = 1, "拒绝: 归档项目只听用户本人，当前环境带 agent 标记（CLAUDECODE）。"
+    controller.confirm_project(_dry(controller, qapp), "", got.append)
+    _wait(controller, qapp)
+    assert got[-1].rc == 1 and "agent 标记" in got[-1].output and changed == [1]  # 命令自己拒绝：回执照实显示，不重读
+    assert controller.page.failure is got[-1]
+
+
+def test_cancelling_the_dialog_runs_nothing(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda _self: QDialog.DialogCode.Rejected)
+    fake = LifecycleCli()
+    controller = _lifecycle(tmp_path, fake)
+    got: list[actions.Receipt] = []
+    controller.confirm_project(_dry(controller, qapp), "", got.append)
+    _wait(controller, qapp)
+    assert got == [] and not any("--confirm" in call for call in fake.calls)
+
+
+def test_dry_run_and_confirm_pass_the_agent_markers_through_untouched(
+        qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验收第 7 条（预演、确认两次）：子进程的环境里 AUTO_PM_AGENT、CLAUDECODE 都在、值没变；看板不替命令摘掉 agent 标记。"""
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae:cn")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CODEX_SANDBOX", "seatbelt")
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda _self: QDialog.DialogCode.Accepted)
+    fake = LifecycleCli()
+    controller = _lifecycle(tmp_path, fake)
+    controller.probe_lifecycle()
+    _wait(controller, qapp)
+    controller.confirm_project(_dry(controller, qapp), "", lambda _r: None)
+    _wait(controller, qapp)
+    assert len(fake.envs) == 6 and fake.calls[-2:] != []  # 三条探测、口令状态、预演、确认
+    assert any("--confirm" in call for call in fake.calls)
+    for env in fake.envs:
+        assert (env["AUTO_PM_AGENT"], env["CLAUDECODE"], env["CODEX_SANDBOX"]) == ("trae:cn", "1", "seatbelt")
+        extra = {"PYTHONUTF8", "PYTHONIOENCODING"}
+        assert {k: v for k, v in env.items() if k not in extra} == {k: v for k, v in os.environ.items() if k not in extra}

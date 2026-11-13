@@ -9,6 +9,8 @@
 整个包里起子进程的只有 actions.py 和本文件，test_cockpit_board_tools.py 会数。
 
 入箱（pm inbox add）只记一条 PROPOSED 的条目，确认、驳回照旧在“决定”页由你做；“用户原话”一栏看板从不预填。
+新建项目（project create）、登记（project register）也在这里（CHG-SCPT-2026-654）：表单上“只试一次，不写”勾着时带 --dry-run；
+看板不提交登记表，归档、重新激活在项目详情页走决定类按钮（decisions.py），删除、恢复不上看板。
 
 永远没有：批准（approved、有条件批准）、合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
 批准变更单只能用户本人在终端里做（有口令要输口令），这里连选项都不给。
@@ -17,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -58,6 +61,35 @@ INBOX_CRITERIA = ("safety", "data_loss", "blocks_all", "wrong_output")
 INBOX_EVIDENCE_KINDS = ("file", "cmd", "ledger", "chg", "commit")
 INBOX_PROPOSED_BY = "cockpit-board"  # 看板入箱时的提出者；看板以你的身份运行，不冒充别的 agent
 
+# 新建项目（`project create`）和登记（`project register`）的选项。取值照两条命令的 --help，测试会对照真实命令。
+PROJECT_STACKS = ("plc", "python")  # 栈名常量：整个看板包里只有这一行出现带引号的 python（test_no_bare_python_left_in_the_board_package）
+PROJECT_MODES = ("shared-library", "test-suite", "standard-project")  # PLC 项目的模板；只在技术栈是 plc 时传
+PROJECT_BUSINESS_LINES = ("SW", "DJ", "ZD", "XT", "WX")
+PROJECT_TYPES = ("single_machine", "line_project", "retrofit_project", "maintenance_project", "shared_library", "test_suite")
+PROJECT_PLC_VENDORS = ("Siemens", "Mitsubishi", "Omron", "Keyence", "Beckhoff", "Delta", "Other")
+PROJECT_KINDS = ("equipment", "library", "test", "tool")  # 项目性质（`project register --kind`）
+_PLC, _PY = PROJECT_STACKS
+
+
+@dataclass(frozen=True)
+class KindDefaults:
+    """选了性质以后带出来的默认值；空＝不给默认。用户在表单里另选的，以用户选的为准。"""
+
+    stack: str = ""
+    mode: str = ""
+    business_line: str = ""
+
+
+# 性质到默认值的对照（CHG-SCPT-2026-654 第 1.2 节）：设备＝PLC、标准项目、DJ；公共库＝PLC、共享库、DJ；工具＝Python、SW；
+# 测试＝不给默认，必须自己选技术栈。
+KIND_DEFAULTS: dict[str, KindDefaults] = {
+    "equipment": KindDefaults(_PLC, "standard-project", "DJ"),
+    "library": KindDefaults(_PLC, "shared-library", "DJ"),
+    "tool": KindDefaults(_PY, "", "SW"),
+    "test": KindDefaults(),
+}
+TEST_KIND_NOTE = "测试套件临时项目一般不登记"
+
 
 class ToolError(ValueError):
     """表单没填好或不在白名单里；文字直接显示给用户，不跑任何命令。"""
@@ -79,6 +111,8 @@ TOOLS: dict[str, ToolSpec] = {
     "decision_show": ToolSpec("decision show", False),
     "vartable_parse": ToolSpec("vartable parse", False),
     "inbox_add": ToolSpec("pm inbox add", True),
+    "project_create": ToolSpec("project create", True),
+    "project_register": ToolSpec("project register", True),
 }
 
 
@@ -121,6 +155,10 @@ def build_command(key: str, params: dict[str, Any]) -> list[str]:
         return _change_transition(params)
     if key == "inbox_add":
         return _inbox_add(params)
+    if key == "project_create":
+        return _project_create(params)
+    if key == "project_register":
+        return _project_register(params)
     if key == "decision_list":
         args = ["decision", "list"]
         for name, option, label in (("pid", "--pid", "项目编号"), ("change_id", "--change-id", "变更单号")):
@@ -247,6 +285,66 @@ def _inbox_add(params: dict[str, Any]) -> list[str]:
     for ask in _lines(params, "asks", "要你决定的点"):
         args += ["--ask", ask]
     return args + ["--proposed-by", INBOX_PROPOSED_BY]
+
+
+def _given(params: dict[str, Any], name: str) -> str:
+    return str(params.get(name, "") or "").strip()
+
+
+def _project_create(params: dict[str, Any]) -> list[str]:
+    """project create：性质不进这条命令（带给下一步登记），只用来带出技术栈、模板、业务线的默认值。"""
+    missing = [label for name, label in (("name", "项目名称"), ("kind", "性质")) if not _given(params, name)]
+    if missing:
+        raise ToolError("还没填：" + "、".join(missing))
+    defaults = KIND_DEFAULTS[_choice(params, "kind", PROJECT_KINDS, "性质")]
+    stack = _given(params, "stack") or defaults.stack
+    if not stack:
+        raise ToolError("性质是“测试”时没有默认的技术栈，请自己选技术栈")
+    stack = _choice({"stack": stack}, "stack", PROJECT_STACKS, "技术栈")
+    args = ["project", "create", "--stack", stack, "--name", _flag_text(params["name"], "项目名称")]
+    line = _given(params, "business_line")
+    if _given(params, "project_id"):  # 手填编号：不带 --auto-id（两样互斥）；业务线只在用户自己选了时才传
+        args += ["--id", _flag_text(params["project_id"], "项目编号")]
+    else:
+        args += ["--auto-id"]
+        line = line or defaults.business_line
+    if line:
+        args += ["--business-line", _choice({"business_line": line}, "business_line", PROJECT_BUSINESS_LINES, "业务线")]
+    mode = _given(params, "mode") or defaults.mode
+    if stack == _PLC and mode:  # 模板只在 PLC 时传；别的技术栈选了也不传，预览里看得到
+        args += ["--mode", _choice({"mode": mode}, "mode", PROJECT_MODES, "模板")]
+    if _given(params, "desc"):
+        args += ["--desc", _flag_text(params["desc"], "项目描述")]
+    if _given(params, "project_type"):
+        args += ["--project-type", _choice(params, "project_type", PROJECT_TYPES, "项目类型")]
+    if _given(params, "plc_vendor"):
+        args += ["--plc-vendor", _choice(params, "plc_vendor", PROJECT_PLC_VENDORS, "PLC 品牌")]
+    if _given(params, "plc_model"):
+        args += ["--plc-model", _flag_text(params["plc_model"], "PLC 型号")]
+    if _given(params, "dest_dir"):
+        args += ["--dest-dir", _flag_text(params["dest_dir"], "存放目录")]
+    return args + (["--dry-run"] if params.get("dry_run") else [])
+
+
+def _project_register(params: dict[str, Any]) -> list[str]:
+    """project register：从不传 --status（新登记的按命令的默认就是在研）；性质可空。"""
+    if not _given(params, "project_id"):
+        raise ToolError("还没填：项目编号")
+    args = ["project", "register", _flag_text(params["project_id"], "项目编号")]
+    if _given(params, "kind"):
+        args += ["--kind", _choice(params, "kind", PROJECT_KINDS, "性质")]
+    return args + (["--dry-run"] if params.get("dry_run") else [])
+
+
+_AUTO_ID_LINE = re.compile(r"^自动生成项目编号: (\S+)\s*$", re.MULTILINE)
+
+
+def created_project_id(params: dict[str, Any], output: str) -> str:
+    """真建成功后的项目编号：手填的就是手填的那个；自动编号的从回执里那一行读，读不出来（没有或不止一个）返回空，不猜。"""
+    if _given(params, "project_id"):
+        return _given(params, "project_id")
+    found = _AUTO_ID_LINE.findall(output or "")
+    return found[0] if len(found) == 1 else ""
 
 
 def board_request_id(now: datetime | None = None) -> str:

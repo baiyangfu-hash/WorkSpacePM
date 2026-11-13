@@ -1,4 +1,4 @@
-"""全部项目：一张表，30 个项目时用。只读。"""
+"""全部项目：一张表，30 个项目时用。只读；顶上的“新建项目…”只跳到工具页的“项目”页签，自己不起任何命令。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ HEALTH_COLUMN = HEADERS.index("健康")
 
 
 class ProjectsPage(QWidget):
-    def __init__(self, on_project: Callable[[str], None]) -> None:
+    def __init__(self, on_project: Callable[[str], None], on_new_project: Callable[[], None] | None = None) -> None:
         super().__init__()
         self.on_project = on_project
         layout = QVBoxLayout(self)
@@ -35,7 +35,11 @@ class ProjectsPage(QWidget):
         self.show_archived.setObjectName("show_archived")
         self.show_archived.setChecked(False)
         self.show_archived.toggled.connect(lambda _checked: self._render())
-        layout.addWidget(self.show_archived)
+        # CHG-SCPT-2026-654：只跳页（工具页“项目”页签），新建、登记都在那边先预览再运行
+        self.new_button = c.button("新建项目…", "", "去“工具”页的“项目”页签：新建项目、登记都在那里", enabled=on_new_project is not None)
+        if on_new_project is not None:
+            self.new_button.clicked.connect(lambda _checked=False: on_new_project())
+        layout.addWidget(c.hrow(self.show_archived, 1, self.new_button))
         self.table = QTableWidget(0, len(HEADERS))
         self.table.setObjectName("projects")
         self.table.setHorizontalHeaderLabels(HEADERS)

@@ -125,6 +125,9 @@ def test_every_tool_command_exists_with_the_options_we_pass() -> None:
             "--affects", "--duplicate-check", "--duplicate-of", "--evidence", "--urgent-criterion", "--disposition", "--rationale",
             "--alternative", "--cost-risk", "--ask", "--proposed-by",
         },
+        "project create": {"--stack", "--name", "--id", "--auto-id", "--business-line", "--mode", "--desc", "--project-type",
+                           "--plc-vendor", "--plc-model", "--dest-dir", "--dry-run"},
+        "project register": {"--kind", "--dry-run"},
     }
     for label, flags in needs.items():
         command = cli
@@ -132,6 +135,117 @@ def test_every_tool_command_exists_with_the_options_we_pass() -> None:
             command = command.commands[word]
         have = {opt for p in command.params for opt in getattr(p, "opts", [])}
         assert flags <= have, (label, flags - have)
+
+
+def _project_create(**changes: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {"name": "上料机改造", "kind": "equipment", "dry_run": True}
+    values.update(changes)
+    return values
+
+
+def _flags(args: list[str]) -> set[str]:
+    return {item for item in args if item.startswith("--")}
+
+
+def test_project_choices_match_the_real_project_commands() -> None:
+    create = _cli().commands["project"].commands["create"]
+    register = _cli().commands["project"].commands["register"]
+    assert tool_actions.PROJECT_STACKS == _choices(create, "stack")
+    assert tool_actions.PROJECT_MODES == _choices(create, "mode")
+    assert tool_actions.PROJECT_BUSINESS_LINES == _choices(create, "business_line")
+    assert tool_actions.PROJECT_TYPES == _choices(create, "project_type")
+    assert tool_actions.PROJECT_PLC_VENDORS == _choices(create, "plc_vendor")
+    assert tool_actions.PROJECT_KINDS == _choices(register, "kind")
+    assert set(tool_actions.KIND_DEFAULTS) == set(tool_actions.PROJECT_KINDS)
+
+
+def test_every_option_the_project_tools_can_emit_exists_in_the_real_commands() -> None:
+    """验收第 2 条：把每一栏都填上，拼出的每个选项真实命令里都有；--status 从不传。"""
+    cli = _cli()
+    full = _project_create(stack="plc", mode="test-suite", business_line="ZD", desc="描述", project_type="single_machine",
+                           plc_vendor="Siemens", plc_model="S7-1200", dest_dir="D:/项目")
+    cases = [
+        ("create", tool_actions.build_command("project_create", full)),
+        ("create", tool_actions.build_command("project_create", {**full, "project_id": "DJ-2026-010"})),
+        ("register", tool_actions.build_command("project_register", {"project_id": "DJ-2026-010", "kind": "equipment", "dry_run": True})),
+    ]
+    seen: set[str] = set()
+    for name, args in cases:
+        assert args[:2] == ["project", name]
+        have = {opt for p in cli.commands["project"].commands[name].params for opt in getattr(p, "opts", [])}
+        assert _flags(args) <= have, (name, _flags(args) - have)
+        seen |= _flags(args)
+    assert seen == {"--stack", "--name", "--id", "--auto-id", "--business-line", "--mode", "--desc", "--project-type", "--plc-vendor",
+                    "--plc-model", "--dest-dir", "--dry-run", "--kind"}
+    assert "--status" not in seen and "--path" not in seen
+
+
+@pytest.mark.parametrize(("kind", "expected"), [
+    ("equipment", ["project", "create", "--stack", "plc", "--name", "上料机改造", "--auto-id", "--business-line", "DJ", "--mode", "standard-project"]),
+    ("library", ["project", "create", "--stack", "plc", "--name", "上料机改造", "--auto-id", "--business-line", "DJ", "--mode", "shared-library"]),
+    ("tool", ["project", "create", "--stack", "python", "--name", "上料机改造", "--auto-id", "--business-line", "SW"]),
+])
+def test_kind_brings_its_default_stack_template_and_business_line(kind: str, expected: list[str]) -> None:
+    """验收第 3 条：性质到技术栈、模板、业务线的默认对照，逐行。性质本身不进 project create。"""
+    assert tool_actions.build_command("project_create", _project_create(kind=kind, dry_run=False)) == expected
+    assert tool_actions.build_command("project_create", _project_create(kind=kind)) == [*expected, "--dry-run"]
+    assert "--kind" not in expected and kind not in expected
+
+
+def test_kind_defaults_table_is_exactly_the_approved_one() -> None:
+    defaults = tool_actions.KIND_DEFAULTS
+    plc, py = tool_actions.PROJECT_STACKS
+    assert (defaults["equipment"].stack, defaults["equipment"].mode, defaults["equipment"].business_line) == (plc, "standard-project", "DJ")
+    assert (defaults["library"].stack, defaults["library"].mode, defaults["library"].business_line) == (plc, "shared-library", "DJ")
+    assert (defaults["tool"].stack, defaults["tool"].mode, defaults["tool"].business_line) == (py, "", "SW")
+    assert (defaults["test"].stack, defaults["test"].mode, defaults["test"].business_line) == ("", "", "")
+    assert tool_actions.TEST_KIND_NOTE == "测试套件临时项目一般不登记"
+
+
+def test_test_kind_has_no_default_stack_and_cannot_build_until_one_is_picked() -> None:
+    with pytest.raises(ERR, match="自己选技术栈"):
+        tool_actions.build_command("project_create", _project_create(kind="test"))
+    assert tool_actions.build_command("project_create", _project_create(kind="test", stack="python", dry_run=False)) == [
+        "project", "create", "--stack", "python", "--name", "上料机改造", "--auto-id"]  # 业务线没有默认：不传，命令按自己的默认
+    assert tool_actions.build_command("project_create", _project_create(kind="test", stack="plc", mode="test-suite", business_line="SW")) == [
+        "project", "create", "--stack", "plc", "--name", "上料机改造", "--auto-id", "--business-line", "SW", "--mode", "test-suite", "--dry-run"]
+
+
+def test_project_create_choices_override_defaults_and_manual_id_drops_auto_id() -> None:
+    b = tool_actions.build_command
+    # 用户另选的以用户选的为准；模板只在 PLC 时传
+    assert b("project_create", _project_create(stack="python", dry_run=False)) == [
+        "project", "create", "--stack", "python", "--name", "上料机改造", "--auto-id", "--business-line", "DJ"]
+    assert b("project_create", _project_create(kind="tool", mode="standard-project", dry_run=False)) == [
+        "project", "create", "--stack", "python", "--name", "上料机改造", "--auto-id", "--business-line", "SW"]
+    # 手填编号：--id 和 --auto-id 互斥；业务线只在自己选了时才传
+    manual = b("project_create", _project_create(project_id="DJ-2026-010", dry_run=False))
+    assert manual == ["project", "create", "--stack", "plc", "--name", "上料机改造", "--id", "DJ-2026-010", "--mode", "standard-project"]
+    assert "--auto-id" not in manual and "--business-line" not in manual
+    assert b("project_create", _project_create(project_id="DJ-2026-010", business_line="DJ", dry_run=False))[6:10] == [
+        "--id", "DJ-2026-010", "--business-line", "DJ"]
+    advanced = b("project_create", _project_create(desc="改 上料", project_type="retrofit_project", plc_vendor="Mitsubishi",
+                                                   plc_model="FX5U", dest_dir="D:/项目", dry_run=False))
+    assert advanced[11:] == ["--desc", "改 上料", "--project-type", "retrofit_project", "--plc-vendor", "Mitsubishi", "--plc-model", "FX5U",
+                             "--dest-dir", "D:/项目"]
+
+
+def test_project_register_exact_argv_and_never_passes_status() -> None:
+    b = tool_actions.build_command
+    assert b("project_register", {"project_id": "DJ-2026-010", "dry_run": True}) == ["project", "register", "DJ-2026-010", "--dry-run"]
+    assert b("project_register", {"project_id": "DJ-2026-010", "kind": "library", "dry_run": False}) == [
+        "project", "register", "DJ-2026-010", "--kind", "library"]
+    assert b("project_register", {"project_id": "DJ-2026-010", "kind": "", "status": "archived"}) == ["project", "register", "DJ-2026-010"]
+
+
+def test_created_project_id_is_read_from_the_receipt_or_left_blank() -> None:
+    read = tool_actions.created_project_id
+    assert read({"project_id": "DJ-2026-010"}, "随便什么输出") == "DJ-2026-010"  # 手填的就是它
+    assert read({}, "自动生成项目编号: DJ-2026-011\n项目已创建") == "DJ-2026-011"
+    assert read({}, "项目已创建") == ""  # 读不出来：留空，不猜
+    assert read({}, "自动生成项目编号: DJ-2026-011\n自动生成项目编号: DJ-2026-012\n") == ""  # 不止一个：也不猜
+    source = (TOOL_ROOT / "auto_pm" / "ui" / "cli" / "project.py").read_text(encoding="utf-8")
+    assert source.count("自动生成项目编号: {project_id}") == 1  # 回执里那一行的写法和真实命令对得上
 
 
 # ---------------------------------------------------------------- 拼命令
@@ -215,6 +329,19 @@ def test_every_other_target_is_allowed_given_its_required_fields() -> None:
     ("decision_show", {"decision_id": "-h"}, "不能以 - 开头"),
     ("vartable_parse", {}, "还没填"),
     ("vartable_parse", {"file": "--format x"}, "不能以 - 开头"),
+    ("project_create", {"name": "", "kind": "equipment"}, "还没填：项目名称"),
+    ("project_create", {"name": "上料机", "kind": ""}, "还没填：性质"),
+    ("project_create", {"name": "上料机", "kind": "robot"}, "性质只能是"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "stack": "java"}, "技术栈只能是"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "mode": "big"}, "模板只能是"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "business_line": "QQ"}, "业务线只能是"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "project_type": "x"}, "项目类型只能是"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "plc_vendor": "x"}, "PLC 品牌只能是"),
+    ("project_create", {"name": "--dry-run", "kind": "equipment"}, "不能以 - 开头"),
+    ("project_create", {"name": "上料机", "kind": "equipment", "project_id": "--auto-id"}, "不能以 - 开头"),
+    ("project_register", {"project_id": ""}, "还没填：项目编号"),
+    ("project_register", {"project_id": "--status"}, "不能以 - 开头"),
+    ("project_register", {"project_id": "DJ-1", "kind": "robot"}, "性质只能是"),
     ("inbox_add", _inbox(original_words=""), "还没填：original_words"),
     ("inbox_add", _inbox(original_words="  \n "), "还没填：original_words"),
     ("inbox_add", _inbox(original_words="--project-id X"), "不能以 - 开头"),
@@ -250,7 +377,10 @@ def test_bad_input_is_refused_before_any_command_runs(key: str, params: dict[str
 def test_whitelist_has_no_dangerous_verbs() -> None:
     for spec in tool_actions.TOOLS.values():
         assert not any(word in spec.label for word in ("merge", "delete", "approve", "sign", "release", "codex"))
-    assert {k for k, s in tool_actions.TOOLS.items() if s.writes} == {"change_create", "change_transition", "inbox_add"}
+    assert {k for k, s in tool_actions.TOOLS.items() if s.writes} == {
+        "change_create", "change_transition", "inbox_add", "project_create", "project_register"}
+    labels = {spec.label for spec in tool_actions.TOOLS.values()}
+    assert not {"project archive", "project reactivate", "project delete", "project restore"} & labels  # 这四条不在工具页
 
 
 # ---------------------------------------------------------------- 跑
@@ -437,6 +567,11 @@ EXPECTED_CONTROLS = {
     "tool_inbox_urgent_criterion", "tool_inbox_rationale", "tool_inbox_alternatives", "tool_inbox_cost_risk", "tool_inbox_asks",
     "tool_inbox_domain",
     "tool_inbox_scope_LOCAL", "tool_inbox_scope_MODULE", "tool_inbox_scope_SYSTEM", "tool_inbox_scope_CROSS", "tool_inbox_scope_SAFE",
+    # 项目：新建、登记（CHG-SCPT-2026-654）
+    "tool_create_name", "tool_create_kind", "tool_create_stack", "tool_create_mode", "tool_create_business_line",
+    "tool_create_advanced", "tool_create_id", "tool_create_desc", "tool_create_project_type", "tool_create_plc_vendor",
+    "tool_create_plc_model", "tool_create_dest_dir", "tool_create_dry_run",
+    "tool_register_pid", "tool_register_pick", "tool_register_kind", "tool_register_dry_run",
     # 输出框（只读）
     "tool_output",
 }
@@ -469,8 +604,15 @@ def test_page_controls_are_exactly_the_expected_list_and_all_in_forms(qapp: QApp
             assert _inside(widget, "tool_form"), widget.objectName()  # 其余全在 tool_form 框里（深色模式靠它着色）
     # 每个输入口都登记在页面里：能读到值的只有这几个，没有“看不见、读不到”的旁路
     registered = {id(w) for w in page.inputs.values()} | {id(w) for w in page.scope_boxes.values()} | {id(page.project_box), id(page.output)}
-    registered |= {id(w) for w in page.inbox_scope_boxes.values()}
+    registered |= {id(w) for w in page.inbox_scope_boxes.values()} | {id(w) for w in page.project_boxes.values()}
     assert {id(w) for w in controls} == registered
+    # 项目页签里没有任何能输口令、能填“用户原话”的栏：多行框一个都没有，单行框只有这六个，都是明文
+    project_controls = [w for w in controls if page.pages["project"].isAncestorOf(w)]
+    assert not [w for w in project_controls if isinstance(w, QPlainTextEdit)]
+    lines = [w for w in project_controls if isinstance(w, QLineEdit)]
+    assert {w.objectName() for w in lines} == {
+        "tool_create_name", "tool_create_id", "tool_create_desc", "tool_create_plc_model", "tool_create_dest_dir", "tool_register_pid"}
+    assert all(w.echoMode() == QLineEdit.EchoMode.Normal and w.text() == "" for w in lines)
 
 
 def test_transition_dropdown_never_offers_approval(qapp: QApplication, tmp_path: Path) -> None:
@@ -574,7 +716,8 @@ def test_project_choice_survives_a_refresh_and_empty_projects_are_handled(qapp: 
 def test_tabs_show_one_page_at_a_time(qapp: QApplication, tmp_path: Path) -> None:
     page = _page(tmp_path)
     page.show()
-    for key in ("decision", "vartable", "inbox", "change"):
+    assert list(page.pages) == ["change", "decision", "vartable", "inbox", "project"] == list(page.tab_buttons)
+    for key in ("decision", "vartable", "inbox", "project", "change"):
         page.select_tab(key)
         assert [name for name, widget in page.pages.items() if widget.isVisible()] == [key]
 
@@ -684,3 +827,220 @@ def test_inbox_add_really_records_a_proposed_item_the_decisions_page_can_read(qa
         ("PROPOSED", "cockpit-board", "登录页有时候是白的，刷新才好")]
     targets = decisions.parse_inbox(listed.output, "SW-TEST-001")
     assert [t.item_id for t in targets] == [items[0]["item_id"]]
+
+
+# ---------------------------------------------------------------- 项目页签：新建、登记（CHG-SCPT-2026-654）
+
+
+def _fill_project(page: ToolsPage, kind: str = "equipment") -> None:
+    page.inputs["create_name"].setText("上料机改造")
+    _pick(page.inputs["create_kind"], kind)
+
+
+def test_project_tab_offers_exactly_the_real_choices(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+
+    def offered(key: str) -> list[str]:
+        box = page.inputs[key]
+        assert isinstance(box, QComboBox)
+        return [str(box.itemData(i)) for i in range(box.count())]
+
+    assert offered("create_kind") == ["", "equipment", "library", "tool", "test"]
+    assert offered("create_stack") == ["", *tool_actions.PROJECT_STACKS]
+    assert sorted(offered("create_mode")) == sorted(["", *tool_actions.PROJECT_MODES])
+    assert offered("create_business_line") == ["", *tool_actions.PROJECT_BUSINESS_LINES]
+    assert offered("create_project_type") == ["", *tool_actions.PROJECT_TYPES]
+    assert offered("create_plc_vendor") == ["", *tool_actions.PROJECT_PLC_VENDORS]
+    assert sorted(offered("register_kind")) == sorted(["", *tool_actions.PROJECT_KINDS])
+    assert offered("register_pick") == [""]
+
+
+def test_dry_run_boxes_start_ticked_and_decide_whether_the_command_writes(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 2 条：“只试一次”勾着时命令里有 --dry-run，取消后没有；改任何一栏（含这个勾）预览作废。"""
+    page = _page(tmp_path)
+    page.set_register_kind(True)
+    create_box, register_box = page.project_boxes["create_dry_run"], page.project_boxes["register_dry_run"]
+    assert create_box.isChecked() and register_box.isChecked()
+    assert create_box.text() == register_box.text() == "只试一次，不写（--dry-run）"
+    button = page.write_buttons["project_create"]
+    page.preview_command("project_create", page._project_create_params())
+    assert not button.isEnabled() and "还没填：项目名称、性质" in page.note.text()
+    _fill_project(page)
+    page.preview_command("project_create", page._project_create_params())
+    assert button.isEnabled() and button.text() == "新建项目"
+    assert page.preview_text == "main.py project create --stack plc --name 上料机改造 --auto-id --business-line DJ --mode standard-project --dry-run"
+    create_box.setChecked(False)  # 取消勾选：预览随之作废
+    assert not button.isEnabled() and page.preview is None
+    page.preview_command("project_create", page._project_create_params())
+    assert button.isEnabled() and "--dry-run" not in page.preview_text
+    for key, change in (("create_name", lambda w: w.setText("另一个名字")), ("create_kind", lambda w: _pick(w, "tool")),
+                        ("create_stack", lambda w: _pick(w, "plc")), ("create_mode", lambda w: _pick(w, "test-suite")),
+                        ("create_business_line", lambda w: _pick(w, "ZD")), ("create_id", lambda w: w.setText("DJ-2026-010")),
+                        ("create_desc", lambda w: w.setText("描述")), ("create_project_type", lambda w: _pick(w, "line_project")),
+                        ("create_plc_vendor", lambda w: _pick(w, "Omron")), ("create_plc_model", lambda w: w.setText("NX1P2")),
+                        ("create_dest_dir", lambda w: w.setText("D:/项目"))):
+        page.preview_command("project_create", page._project_create_params())
+        assert button.isEnabled(), key
+        change(page.inputs[key])
+        assert not button.isEnabled() and page.preview is None, key
+    # 登记
+    button = page.write_buttons["project_register"]
+    assert button.text() == "登记"
+    page.inputs["register_pid"].setText("DJ-2026-010")
+    page.preview_command("project_register", page._project_register_params())
+    assert button.isEnabled() and page.preview_text == "main.py project register DJ-2026-010 --dry-run"
+    register_box.setChecked(False)
+    assert not button.isEnabled() and page.preview is None
+    _pick(page.inputs["register_kind"], "equipment")
+    page.preview_command("project_register", page._project_register_params())
+    assert page.preview_text == "main.py project register DJ-2026-010 --kind equipment"
+    page.inputs["register_pid"].setText("DJ-2026-011")
+    assert not button.isEnabled() and page.preview is None
+
+
+def test_test_kind_shows_the_note_and_needs_a_stack(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    _fill_project(page, "test")
+    assert page.kind_note.text() == "测试套件临时项目一般不登记"
+    page.preview_command("project_create", page._project_create_params())
+    assert not page.write_buttons["project_create"].isEnabled() and "自己选技术栈" in page.note.text()
+    _pick(page.inputs["create_stack"], "python")
+    page.preview_command("project_create", page._project_create_params())
+    assert page.preview_text == "main.py project create --stack python --name 上料机改造 --auto-id --dry-run"
+    _pick(page.inputs["create_kind"], "equipment")
+    assert page.kind_note.text() == ""
+
+
+def test_advanced_rows_are_folded_until_the_box_is_ticked(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    page.show()
+    page.select_tab("project")
+    assert not page.advanced_frame.isVisible() and not page.inputs["create_id"].isVisible()
+    page.project_boxes["create_advanced"].setChecked(True)
+    assert page.advanced_frame.isVisible() and page.inputs["create_id"].isVisible()
+
+
+def test_a_real_create_carries_the_form_to_register_but_a_trial_does_not(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(0, "自动生成项目编号: DJ-2026-011\n项目已创建")
+    page = _page(tmp_path)
+    page.set_register_kind(True)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    _fill_project(page, "library")
+    page.preview_command("project_create", page._project_create_params())
+    page.run_preview()  # 只试一次：跑了，但不往登记带
+    assert fake.calls[0][0][5:7] == ["project", "create"] and fake.calls[0][0][-1] == "--dry-run"
+    assert page.inputs["register_pid"].text() == "" and page.register_note.text() == ""
+    assert "自动生成项目编号: DJ-2026-011" in page.output.toPlainText()  # 回执原样显示
+    page.project_boxes["create_dry_run"].setChecked(False)
+    page.preview_command("project_create", page._project_create_params())
+    page.run_preview()
+    page.run_preview()  # 连点第二下：预览已用掉，不再建
+    assert len(fake.calls) == 2 and "--dry-run" not in fake.calls[1][0]
+    assert page.inputs["register_pid"].text() == "DJ-2026-011" and page.inputs["register_kind"].currentData() == "library"
+    assert "下一步：登记" in page.register_note.text() and "DJ-2026-011" in page.register_note.text()
+    assert page.preview is None  # 带过去只是填表：登记还得自己预览、自己点
+
+
+def test_an_unreadable_receipt_leaves_the_project_id_for_the_user(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(0, "项目已创建（这次回执里没有编号那一行）")
+    page = _page(tmp_path)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    _fill_project(page)
+    page.project_boxes["create_dry_run"].setChecked(False)
+    page.inputs["register_pid"].setText("旧的")
+    page.preview_command("project_create", page._project_create_params())
+    page.run_preview()
+    assert page.inputs["register_pid"].text() == "" and "请自己填" in page.register_note.text()
+
+
+def test_a_failed_create_or_register_carries_nothing_and_shows_the_output(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(1, "", "错误: 目标路径已存在")
+    page = _page(tmp_path)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    _fill_project(page)
+    page.project_boxes["create_dry_run"].setChecked(False)
+    page.preview_command("project_create", page._project_create_params())
+    page.run_preview()
+    assert page.inputs["register_pid"].text() == "" and page.register_note.text() == ""
+    assert "目标路径已存在" in page.output.toPlainText() and page.receipts[0].rc == 1
+    page.inputs["register_pid"].setText("DJ-2026-010")
+    page.project_boxes["register_dry_run"].setChecked(False)
+    page.preview_command("project_register", page._project_register_params())
+    page.run_preview()
+    assert page.register_note.text() == "" and page.receipts[0].rc == 1
+
+
+def test_a_real_register_shows_the_two_fixed_sentences_and_a_trial_does_not(qapp: QApplication, tmp_path: Path) -> None:
+    fake = _Fake(0, "项目已登记: DJ-2026-010")
+    page = _page(tmp_path)
+    page.runner = lambda root, key, params: tool_actions.run_tool(root, key, params, runner=fake)
+    page.inputs["register_pid"].setText("DJ-2026-010")
+    page.preview_command("project_register", page._project_register_params())
+    page.run_preview()
+    assert fake.calls[0][0][5:] == ["project", "register", "DJ-2026-010", "--dry-run"] and page.register_note.text() == ""
+    page.project_boxes["register_dry_run"].setChecked(False)
+    page.preview_command("project_register", page._project_register_params())
+    page.run_preview()
+    assert fake.calls[1][0][5:] == ["project", "register", "DJ-2026-010"]
+    assert page.register_note.text().splitlines() == [
+        "登记表有一处没提交的改动，提交后这个项目才能开工", "下一步：去「入箱」记这个项目的第一件事"]
+    everything = " ".join(w.text() for w in page.pages["project"].findChildren(QPushButton)) + page.register_note.text()
+    assert "提交登记表" not in everything and "git" not in everything.lower()  # 看板不提交登记表，也不提示能替你提交
+    assert all(call[0][5:7] == ["project", "register"] for call in fake.calls)
+
+
+def test_kind_field_stays_grey_until_the_probe_says_the_command_has_it(qapp: QApplication, tmp_path: Path) -> None:
+    """验收第 8 条（工具页一侧）：没探测到、命令没有 --kind、探测没读成，都灰着，拼出的登记命令里没有 --kind。"""
+    page = _page(tmp_path)
+    box = page.inputs["register_kind"]
+    page.inputs["register_pid"].setText("DJ-2026-010")
+    assert not box.isEnabled() and "还没探测" in page.register_kind_note.text()
+    _pick(box, "equipment")  # 就算下拉里有值（比如新建带过来的），灰着时也不传
+    assert "--kind" not in tool_actions.build_command("project_register", page._project_register_params())
+    page.set_register_kind(False)
+    assert not box.isEnabled() and page.register_kind_note.text() == "发版切换后可填；现在登记后显示‘未分类’"
+    assert "--kind" not in tool_actions.build_command("project_register", page._project_register_params())
+    page.set_register_kind(False, "没探测成，不当成有这条命令：超过 30 秒没读完（超时）")
+    assert not box.isEnabled() and "超时" in page.register_kind_note.text()
+    assert "--kind" not in tool_actions.build_command("project_register", page._project_register_params())
+    page.preview_command("project_register", page._project_register_params())
+    assert page.write_buttons["project_register"].isEnabled()
+    page.set_register_kind(True)  # 探测结果变了：预览作废，性质可填
+    assert box.isEnabled() and page.register_kind_note.text() == "" and page.preview is None
+    assert tool_actions.build_command("project_register", page._project_register_params())[3:5] == ["--kind", "equipment"]
+
+
+def test_unregistered_projects_fill_the_pick_list_and_picking_one_fills_the_id(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    page.set_unregistered(["DJ-2026-777", "SW-2026-888"])
+    box = page.inputs["register_pick"]
+    assert [box.itemData(i) for i in range(box.count())] == ["", "DJ-2026-777", "SW-2026-888"]
+    assert page.inputs["register_pid"].text() == ""  # 填下拉不等于替你选
+    _pick(box, "SW-2026-888")
+    assert page.inputs["register_pid"].text() == "SW-2026-888"
+    page.set_unregistered([])
+    assert box.count() == 1 and page.inputs["register_pid"].text() == "SW-2026-888"
+
+
+def test_opening_the_project_tab_asks_for_one_probe(qapp: QApplication, tmp_path: Path) -> None:
+    page = _page(tmp_path)
+    asked: list[int] = []
+    page.on_project_tab = lambda: asked.append(1)
+    page.select_tab("inbox")
+    assert asked == []
+    page.select_tab("project")
+    assert asked == [1]
+
+
+def test_project_tools_pass_the_agent_markers_through_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验收第 7 条（新建、登记两次）：看板进程带着 agent 标记时，子进程的环境里这两个变量都在、值没变。"""
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae:cn")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CODEX_SANDBOX", "seatbelt")
+    for key, params in (("project_create", _project_create(dry_run=False)), ("project_register", {"project_id": "DJ-2026-010"})):
+        fake = _Fake(0, "ok")
+        tool_actions.run_tool(tmp_path, key, params, runner=fake)
+        env = fake.calls[0][1]["env"]
+        assert (env["AUTO_PM_AGENT"], env["CLAUDECODE"], env["CODEX_SANDBOX"]) == ("trae:cn", "1", "seatbelt"), key
+        assert {name: value for name, value in env.items() if name not in ("COLUMNS", "NO_COLOR", "PYTHONIOENCODING", "PYTHONUTF8")} == {
+            name: value for name, value in os.environ.items() if name not in ("COLUMNS", "NO_COLOR", "PYTHONIOENCODING", "PYTHONUTF8")}, key

@@ -1,11 +1,21 @@
-"""项目页：头 + 六个页签（概览 / 卡片 / 证据 / 变更记录 / 依赖与交付 / 规范与模板）。只读。"""
+"""项目页：头 + 六个页签（概览 / 卡片 / 证据 / 变更记录 / 依赖与交付 / 规范与模板）。
+
+除概览里“项目状态”一块外只读（CHG-SCPT-2026-654）。那一块是命令行的另一层皮：
+    “归档…”/“重新激活…”/“重新检查” 只跑不带 --confirm 的预演（只查不改），输出原样摆出来；
+    预演通过（退出码 0 并且有“预演（没加 --confirm）”一句）才出现“确认归档”/“确认重新激活”，点它弹确认框，里面写着整条命令；
+    确认键和预演绑在同一个项目上：换项目、点“重新读取”，预演作废，确认键消失；
+    本机发布版没有这条命令时按钮灰着，旁边写明原因。口令只在终端窗口里输，这一页没有任何输入框。
+真正起命令的是 decision_controller（经 actions.py），这里只画、只转达。
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any, Protocol
 
-from cockpit_board import theme
+from cockpit_board import decisions, theme
+from cockpit_board.actions import Receipt
 from cockpit_board.viewmodel import PHASES, ProjectVM, change_status_text
 from cockpit_board.widgets import common as c
 from cockpit_board.widgets.delivery import github_block
@@ -17,10 +27,28 @@ TABS = (("overview", "概览"), ("board", "卡片"), ("evidence", "证据"), ("c
         ("io", "依赖与交付"), ("recipe", "规范与模板"))
 
 
+class LifecyclePort(Protocol):
+    """项目详情页向 decision_controller.DecisionController 借的四样；页面自己不拼命令、不起进程。"""
+
+    lifecycle_listeners: list[Callable[[], None]]
+
+    def probe_lifecycle(self) -> None: ...
+
+    def lifecycle_available(self, key: str) -> tuple[bool, str]: ...
+
+    def dry_run(self, key: str, project_id: str, done: Callable[[Any], None]) -> None: ...
+
+    def confirm_project(self, run: Any, title: str, on_receipt: Callable[[Receipt], None], parent: QWidget | None = None) -> Any: ...
+
+
 class ProjectPage(QWidget):
     def __init__(self, on_back: Callable[[], None], on_copy: Callable[[str], None]) -> None:
         super().__init__()
         self.on_back, self.on_copy = on_back, on_copy
+        self.lifecycle: LifecyclePort | None = None  # app 接线后才有；没有时“项目状态”一块只写状态，没有按钮
+        self.dry_run: Any = None  # decision_controller.DryRun：最近一次预演（连同它是哪个项目的）
+        self.dry_running = ""  # 正在预演的项目号；空＝没在跑
+        self.lifecycle_receipt: tuple[str, Receipt] | None = None  # （项目号, 确认后那条命令的回执）
         self.tab = "overview"
         self.vm: ProjectVM | None = None
         self.now: datetime | None = None
@@ -30,12 +58,110 @@ class ProjectPage(QWidget):
         self.scroll_area, self.layout_ = c.page()
         outer.addWidget(self.scroll_area)
 
+    # ------------------------------------------------ 项目状态：归档、重新激活
+
+    def set_lifecycle(self, lifecycle: LifecyclePort) -> None:
+        self.lifecycle = lifecycle
+        lifecycle.lifecycle_listeners.append(self._redraw)
+
+    def _redraw(self) -> None:
+        if self.vm is not None and self.now is not None:
+            self.show_view(self.vm, self.now, self.online)
+
+    def void_dry_run(self) -> None:
+        """点“重新读取”时调：这份预演作废，确认键消失，要重新点“归档…”。"""
+        self.dry_run, self.dry_running = None, ""
+        self._redraw()
+
+    def start_dry_run(self, key: str) -> None:
+        if self.lifecycle is None or self.vm is None:
+            return
+        project_id = self.vm.card.project_id
+        self.dry_run, self.dry_running, self.lifecycle_receipt = None, project_id, None
+        self._redraw()
+        self.lifecycle.dry_run(key, project_id, self._dry_run_done)
+
+    def _dry_run_done(self, run: Any) -> None:
+        if run.project_id != self.dry_running:  # 预演跑着的时候换了项目或点了“重新读取”：这份结果不算
+            return
+        self.dry_running = ""
+        self.dry_run = run
+        self._redraw()
+
+    def confirm(self) -> None:
+        """点“确认归档”/“确认重新激活”：项目号取预演记下的那个。一次预演只确认一次。"""
+        run = self.dry_run
+        if self.lifecycle is None or run is None or not run.passed:
+            return
+        title = f"{run.project_id} {self.vm.card.name}" if self.vm is not None and self.vm.card.project_id == run.project_id else run.project_id
+        project_id = str(run.project_id)
+
+        def confirmed(receipt: Receipt) -> None:
+            self._confirmed(project_id, receipt)
+
+        self.lifecycle.confirm_project(run, title, confirmed, self)
+
+    def _confirmed(self, project_id: str, receipt: Receipt) -> None:
+        self.dry_run = None  # 命令已经起了：这份预演用掉了
+        self.lifecycle_receipt = (project_id, receipt)
+        self._redraw()
+
+    def _lifecycle_block(self, vm: ProjectVM) -> None:
+        card = vm.card
+        frame, inner = c.card()
+        frame.setProperty("role", "lifecycle")
+        inner.addWidget(c.hrow(c.label("项目状态", "section"), c.chip(card.status_label, "na" if card.archived else ""), 1))
+        if not card.registered:
+            inner.addWidget(c.label("这个项目还没登记，没有状态；登记在“工具”页的“项目”页签。", "muted"))
+        elif self.lifecycle is not None:
+            key = "reactivate" if card.archived else "archive"
+            entry = decisions.LIFECYCLES[key]
+            available, reason = self.lifecycle.lifecycle_available(key)
+            run = self.dry_run if self.dry_run is not None and self.dry_run.project_id == card.project_id else None
+            command = decisions.shown_command([*decisions.READ_ONLY_COMMANDS[entry.dry_run], card.project_id])
+            tip = f"先预演：{command}（不带 --confirm），只查不改"
+            buttons: list[QWidget | int] = []
+            if run is None:
+                first = c.button(entry.dry_label, "", tip, enabled=available and not self.dry_running)
+                first.clicked.connect(lambda _checked=False, k=key: self.start_dry_run(k))
+                buttons.append(first)
+            else:
+                if run.passed and available:
+                    confirm = c.button(decisions.BY_KEY[entry.decision].label, "", "弹出确认框，里面写着整条命令；确认后才运行")
+                    confirm.clicked.connect(lambda _checked=False: self.confirm())
+                    buttons.append(confirm)
+                again = c.button(decisions.RECHECK_LABEL, "", f"再跑一遍预演：{command}，只查不改", enabled=available)
+                again.clicked.connect(lambda _checked=False, k=key: self.start_dry_run(k))
+                buttons.append(again)
+            inner.addWidget(c.hrow(*buttons, 1))
+            if not available:
+                inner.addWidget(c.label(reason, "muted"))
+            if self.dry_running:
+                inner.addWidget(c.label("正在预演……（只查不改）", "muted"))
+            if run is not None:
+                inner.addWidget(c.label(f"{run.receipt.command}\n退出码：{run.receipt.rc_text}", "mono"))
+                output = c.label(run.receipt.output or "（命令没有输出）", "mono")
+                output.setProperty("role", "dry_run_output")
+                inner.addWidget(output)
+                if not run.passed:
+                    inner.addWidget(c.label("预演没通过，所以没有确认键；照上面的“怎么办”处理后点“重新检查”。", "muted"))
+        if self.lifecycle_receipt is not None and self.lifecycle_receipt[0] == card.project_id:
+            receipt = self.lifecycle_receipt[1]
+            inner.addWidget(c.label(f"{receipt.action}：{receipt.command}\n退出码：{receipt.rc_text}", "mono"))
+            result = c.label(receipt.output or "（命令没有输出）", "mono")
+            result.setProperty("role", "lifecycle_receipt")
+            inner.addWidget(result)
+        self.layout_.addWidget(frame)
+
     def set_tab(self, key: str) -> None:
         self.tab = key
         if self.vm is not None and self.now is not None:
             self.show_view(self.vm, self.now, self.online)
 
     def show_view(self, vm: ProjectVM, now: datetime, online: bool | None) -> None:
+        if self.vm is not None and self.vm.card.project_id != vm.card.project_id:
+            # 换到另一个项目：上一个项目的预演和回执都不带过来，确认键消失
+            self.dry_run, self.dry_running, self.lifecycle_receipt = None, "", None
         self.vm, self.now, self.online = vm, now, online
         c.clear(self.layout_)
         lay, card = self.layout_, vm.card
@@ -69,6 +195,7 @@ class ProjectPage(QWidget):
         inner.addWidget(c.label("现在在干", "section"))
         inner.addWidget(c.kv([("卡", vm.card.now_card), ("谁", vm.card.now_who), ("最后断点", vm.card.now_step or "—")]))
         lay.addWidget(frame)
+        self._lifecycle_block(vm)
         lay.addWidget(c.section(f"问题（{len(vm.card.issues)}）"))
         if not vm.card.issues:
             lay.addWidget(c.label("没有问题", "muted"))
