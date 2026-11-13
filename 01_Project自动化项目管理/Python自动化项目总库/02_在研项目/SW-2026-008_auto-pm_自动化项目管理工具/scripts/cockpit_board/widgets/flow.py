@@ -262,6 +262,9 @@ def _arrow(painter: QPainter, start: QPointF, end: QPointF, color: QColor, size:
     painter.drawPolygon(QPolygonF([end, left, right]))
 
 
+MISSION_GRAPH = "mission"  # flow/graphs.json 里任务状态那张图的 id
+
+
 class FlowPage(QWidget):
     """流程图页：上面选图，中间选卡，下面是图，最下面说“现在在哪、下一步能去哪”。"""
 
@@ -336,11 +339,27 @@ class FlowPage(QWidget):
         self.card_box.clear()
         self.card_box.addItem("（不指定，只看流程）", None)
         for card in cards:
-            self.card_box.addItem(f"{card.project_id} · {card.mission_id} · {card.title} · {card.mission_state}", card.mission_id)
+            self.card_box.addItem(
+                f"{card.project_id} · {card.mission_id} · {card.title} · {self.state_name(card.mission_state)}", card.mission_id
+            )
         index = self.card_box.findData(previous) if previous else -1
         self.card_box.setCurrentIndex(index if index >= 0 else 0)
         self.card_box.blockSignals(False)
         self._apply_current()
+
+    def state_name(self, state: str) -> str:
+        """任务状态码 → 任务流程图里同名节点的中文名；读不到节点名就照原样给状态码，不留空。"""
+        graph = next((g for g in self.graphs if g.id == MISSION_GRAPH), None)
+        return (graph.label_of(state) if graph is not None else "") or state
+
+    def select_card(self, mission_id: str) -> bool:
+        """按卡号选中下拉框里那一项（首页点卡行过来）；找不到这张卡就不动，返回 False。"""
+        index = self.card_box.findData(mission_id) if mission_id else -1
+        if index < 0:
+            return False
+        self.select_graph(MISSION_GRAPH)  # 首页的格子条说的是任务状态，过来就看任务那张图
+        self.card_box.setCurrentIndex(index)
+        return True
 
     # ------------------------------------------------ 动作
 

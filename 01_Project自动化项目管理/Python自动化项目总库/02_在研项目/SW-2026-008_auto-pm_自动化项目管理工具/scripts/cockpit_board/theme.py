@@ -127,6 +127,7 @@ def build_qss(t: Tokens) -> str:
             f'QLabel#mark[sev="{name}"] {{ background: {main_c}; color: {t.card}; }}\n'
             f'QFrame#bar[sev="{name}"] {{ background: {soft_c}; border: 1px solid {main_c}; }}\n'
             f'QLabel#check[sev="{name}"] {{ color: {main_c}; }}\n'
+            f'QLabel#dot[sev="{name}"] {{ color: {main_c}; }}\n'
         )
     states = "".join(
         f'QLabel#state[state="{key}"] {{ background: {getattr(t, SEMANTIC[sev][1])}; color: {getattr(t, SEMANTIC[sev][0])}; }}\n'
@@ -183,6 +184,26 @@ QPlainTextEdit#tool_output {{ background: {t.card2}; border: 1px solid {t.line};
     font-family: {font_css(MONO_STACK)}; }}
 QFrame#pre {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: 4px; }}
 QToolTip {{ background: {t.card}; color: {t.fg}; border: 1px solid {t.line2}; }}
+QFrame[clickable="true"] {{ border: 1px solid transparent; border-radius: 4px; }}
+QFrame[clickable="true"]:hover {{ background: {t.card2}; }}
+QFrame[clickable="true"]:focus {{ border: 1px solid {t.accent}; }}
+QFrame#numbox {{ background: {t.card}; border: 1px solid {t.line}; border-radius: {RADIUS}px; }}
+QFrame#numbox[sev="block"] {{ background: {t.block_soft}; border: 1px solid {t.block}; }}
+QFrame#numbox[sev="risk"] {{ background: {t.risk_soft}; border: 1px solid {t.risk}; }}
+QFrame#numbox:focus {{ border: 2px solid {t.accent}; }}
+QLabel#num {{ font-size: {FONT_SIZE_TITLE_PT}pt; font-weight: 600; }}
+QFrame#lamp {{ background: {t.card}; border: 1px solid {t.line}; border-radius: {RADIUS}px; }}
+QFrame#lamp[sev="block"] {{ background: {t.block_soft}; border: 1px solid {t.block}; }}
+QFrame#lamp[sev="risk"] {{ background: {t.risk_soft}; border: 1px solid {t.risk}; }}
+QFrame#lamp:focus {{ border: 2px solid {t.accent}; }}
+QLabel#lampvalue {{ font-weight: 600; }}
+QLabel#lampvalue[state="unchecked"], QLabel#lampvalue[state="offline"] {{ color: {t.fg3}; font-weight: 400; }}
+QLabel#dot {{ color: {t.na}; }}
+QLabel#cell {{ border: 1px solid {t.line}; padding: 1px 6px; color: {t.fg3}; font-size: {FONT_SIZE_SMALL_PT}pt; }}
+QLabel#cell[at="done"] {{ color: {t.fg2}; background: {t.card2}; }}
+QLabel#cell[at="current"] {{ color: {t.fg}; font-weight: 600; border: 1px solid {t.line2}; }}
+QLabel#cell[at="current"][sev="block"] {{ background: {t.block_soft}; border: 1px solid {t.block}; }}
+QLabel#cell[at="current"][sev="risk"] {{ background: {t.risk_soft}; border: 1px solid {t.risk}; }}
 {"".join(sem)}{states}"""
 
 

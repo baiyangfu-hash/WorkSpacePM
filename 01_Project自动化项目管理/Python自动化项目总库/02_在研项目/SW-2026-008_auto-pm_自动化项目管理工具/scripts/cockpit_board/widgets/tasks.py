@@ -69,10 +69,10 @@ def is_empty(reader: str, data: dict[str, Any]) -> bool | None:
 class TasksPage(c.ReadPage):
     def __init__(self) -> None:
         empty_text, error_text = shell.page_texts()["tasks"]
-        super().__init__("tasks", "任务", "这个项目手上有几张卡、哪张在干、卡在哪", (
-            ("每张卡走到脊柱第几步", "要按卡对照 flow/spine.json 的十步，还没做", "main.py pm orient <项目> --json"),
-            ("换项目看", "现在只读工程工位的默认项目（--station-project）", ""),
-        ), empty_text, error_text)
+        super().__init__("tasks", "任务", "这个项目手上有几张卡、哪张在干、卡在哪", (), empty_text, error_text, notes=(
+            c.WHERE_IS_EACH_CARD,
+            "换项目看：现在只读工程工位的默认项目（--station-project）。",
+        ))
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)

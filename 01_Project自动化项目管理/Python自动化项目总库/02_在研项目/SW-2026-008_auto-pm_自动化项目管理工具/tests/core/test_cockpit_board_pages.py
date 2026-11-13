@@ -801,3 +801,48 @@ def test_653_issue_card_puts_the_internal_id_on_its_own_last_line(qapp: QApplica
     assert texts[-1] == "编号：CLOSURE-MISSION-2" and with_ref.detail in texts
     plain = vm.Issue("hint", "DJ-2026-101", "批准范围", "一张卡", "你", "账本", NOW)
     assert not any(t.startswith("编号：") for t in _texts(issues.issue_card(plain, NOW, None)))
+
+
+# ---- 首页按方案丙重做带到别的页的改动（CHG-SCPT-2026-655）------------------------------------------
+
+
+def test_655_spine_and_tasks_pages_have_no_placeholder_cards(qapp: QApplication) -> None:
+    """验收 9：脊柱图页、任务页不再摆“每张卡走到第几步”的占位卡，改成一行字指到首页的格子条和流程图页；“换项目看”是一行普通小字。"""
+    for page in (spine.SpinePage(), tasks.TasksPage()):
+        frames = [w for w in page.findChildren(QWidget) if w.property("placeholder") == "true"]
+        assert frames == [], type(page).__name__
+        texts = _texts(page)
+        assert not any("这一块还没做" in t or "还没做" in t for t in texts), type(page).__name__
+        assert "每张卡在任务状态上走到哪一步，看首页的格子条或流程图页" in texts, type(page).__name__
+        assert not page.findChildren(QAbstractButton)
+    assert any(t.startswith("换项目看：现在只读工程工位的默认项目") for t in _texts(tasks.TasksPage()))
+
+
+def test_655_prs_page_took_over_the_delivery_block(qapp: QApplication, tmp_path: Path) -> None:
+    """“交出去的东西”（每个开着的 PR 一行）从首页搬到“PR 与审计”页；数据还是首页那份 HomeVM.github，由窗口递过来。"""
+    page = prs.PrsPage()
+    assert "交出去的东西" in _texts(page) and "还没读到 GitHub 的数据" in _texts(page)
+    assert [f for f in page.findChildren(QWidget) if f.property("github_state")] == []
+    root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
+    window = gui_tests._window(qapp, root, db)
+    pull = gh.PullInfo(7, "改 OB1", "u", "baiyangfu-hash", "a" * 40, "claude/x", False, "2026-10-22T09:00:00Z",
+                       projects=["DJ-2026-101"], plc=True, ci=[gh.CiState("plc-ci", "fail", "红")], safety=gh.Safety("signed", "是", "已签"))
+    window.github = gh.Snapshot("o/r", "ok", NOW, NOW, pulls=[pull], authenticated=True)
+    window._render()
+    blocks = [f for f in window.prs.findChildren(QWidget) if f.property("github_state")]
+    assert [b.property("github_state") for b in blocks] == ["ok"]
+    lines = [f for f in blocks[0].findChildren(QWidget) if f.property("pr") == 7]
+    assert len(lines) == 1 and lines[0].property("gate") == "红"
+    assert not window.prs.findChildren(QAbstractButton)
+    # 首页只留一盏汇总灯：门禁红几个写在灯上，点它去这一页
+    lamp = next(f for f in window.home.findChildren(c.ClickBox) if f.property("lamp_key") == "github")
+    assert (lamp.property("sev"), lamp.property("state")) == ("block", "number")
+    assert "开着 1 个，门禁红 1 个" in [label.text() for label in lamp.findChildren(QLabel)]
+    lamp.activated.emit()
+    assert window.stack.currentWidget() is window.prs
+    window.github = gh.Snapshot("o/r", "offline", NOW, None, pulls=[])
+    window._render()
+    lamp = next(f for f in window.home.findChildren(c.ClickBox) if f.property("lamp_key") == "github")
+    assert (lamp.property("sev"), lamp.property("state")) == ("na", "offline")
+    assert "断网未知" in [label.text() for label in lamp.findChildren(QLabel)]
+    window.close()
