@@ -111,6 +111,29 @@ def test_d04_uncommitted_changes_block_the_delete(world: World) -> None:
     assert (world.project / "new.txt").is_file() and world.recycled() == []
 
 
+def test_d04_a_chinese_file_name_is_shown_as_written_not_as_escape_codes(world: World) -> None:
+    """CHG-SCPT-2026-656（D-360）：Git 默认把中文路径写成 "\\345\\267…" 这种转义码，提示里要显示原字。"""
+    (world.project / "接线图_改.txt").write_text("untracked\n", encoding="utf-8")
+    result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1
+    assert "项目目录里有没提交的改动：?? proj/接线图_改.txt\n" in result.output
+    assert "\\" not in result.output
+    assert world.project.is_dir() and world.recycled() == []
+
+
+def test_d04_an_english_path_reads_exactly_as_it_did_before(world: World) -> None:
+    """D-360 只加了 core.quotePath=false：纯英文路径的提示逐字节不变，数也不变。"""
+    (world.project / "src" / "a.py").write_text("print('edited')\n", encoding="utf-8")
+    for index in range(6):
+        (world.project / f"new{index}.txt").write_text("untracked\n", encoding="utf-8")
+    result = world.run("--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert result.exit_code == 1
+    assert (
+        "项目目录里有没提交的改动：M proj/src/a.py；?? proj/new0.txt；?? proj/new1.txt；"
+        "?? proj/new2.txt；?? proj/new3.txt 等共 7 处\n"
+    ) in result.output
+
+
 def test_d05_a_clean_project_moves_into_the_recycle_area_and_can_be_moved_back(
     world: World,
 ) -> None:

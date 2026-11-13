@@ -258,7 +258,12 @@ def test_check_2_a_closed_card_without_a_completed_closure_refuses(site: Site, c
     assert site.failed() == (lifecycle.CHECK_CLOSURE,)
     (blocker,) = plan.blockers
     assert mission_id in blocker and "MISSION-1" not in blocker
-    assert "收口记录不是 COMPLETED" in blocker and "先用 D 单的办法收掉" in blocker
+    # CHG-SCPT-2026-656（D-359）：原来写“先用 D 单的办法收掉”，那个办法并不存在；整句逐字锁住。
+    assert blocker == (
+        f"{lifecycle.CHECK_CLOSURE}：Mission {mission_id} 已关（CLOSED），但收口记录不是 COMPLETED"
+        "（停在 PREPARED，或者查不到收口记录）；"
+        "这类卡现在还没有命令能把收口补走完（缺陷 D-340，待修），请把卡号交给主执行，这个项目先不归档"
+    )
 
 
 def test_check_3_one_accepted_mission_that_was_never_closed_refuses(site: Site) -> None:
@@ -285,6 +290,21 @@ def test_check_4_an_uncommitted_change_refuses(site: Site, tracked: bool) -> Non
     target.write_text("changed\n", encoding="utf-8")
     assert site.failed() == (lifecycle.CHECK_UNCOMMITTED,)
     assert any("没提交的改动" in blocker for blocker in site.plan().blockers)
+
+
+def test_check_4_shows_a_chinese_file_name_as_written_not_as_escape_codes(site: Site) -> None:
+    """CHG-SCPT-2026-656（D-360）：Git 默认把中文路径写成八进制转义码，归档第 4 项要显示原字。"""
+    (site.project / "工位一_说明.txt").write_text("没提交\n", encoding="utf-8")
+    (site.project / "plain.txt").write_text("untracked\n", encoding="utf-8")
+    assert site.failed() == (lifecycle.CHECK_UNCOMMITTED,)
+    (blocker,) = site.plan().blockers
+    folder = site.project.relative_to(site.root).as_posix()  # 项目本身就在中文目录下
+    assert not folder.isascii()
+    assert blocker == (
+        f"{lifecycle.CHECK_UNCOMMITTED}：项目目录里有没提交的改动："
+        f"?? {folder}/plain.txt；?? {folder}/工位一_说明.txt"
+    )
+    assert "\\" not in blocker
 
 
 def test_check_5_one_proposed_inbox_item_refuses_and_is_listed_by_id_and_title(site: Site) -> None:

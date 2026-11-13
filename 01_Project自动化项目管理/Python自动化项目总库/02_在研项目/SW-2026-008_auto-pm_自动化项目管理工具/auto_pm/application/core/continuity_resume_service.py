@@ -90,6 +90,7 @@ class ContinuityResumeService:
         if db_exists:
             try:
                 missions = self._store.list_active_missions(context.subject_project_id)
+                hold_warnings.extend(self._orphan_card_warnings(missions, context.subject_project_id))
                 mission, mission_candidates = self._select_mission(missions, work_id)
                 if mission is None and any(
                     candidate.state is MissionState.ACTIVE for candidate in mission_candidates
@@ -288,6 +289,41 @@ class ContinuityResumeService:
             intake=intake,
             evidence_id=f"RESUME-{digest[:16].upper()}",
         )
+
+    def _orphan_card_warnings(
+        self, missions: tuple[Mission, ...], project_id: str
+    ) -> list[str]:
+        """D-348: an open card whose root Work already ended is said out loud; nothing else changes.
+
+        Only the warning list grows: conflicts, the next legal action and the evidence id stay as they were.  A root
+        Work that cannot be read is reported, never raised: before this the Work of a card that is not in hand was not
+        read at all, and looking at it must not turn a working ``pm orient`` into an error.
+        """
+
+        warnings: list[str] = []
+        for card in missions:
+            if not card.root_work_id:
+                continue
+            try:
+                root_work = self._store.get_work(card.root_work_id)
+            except (ContinuityStoreError, ValueError):  # 缺行、坏行都算读不出
+                warnings.append(
+                    f"读不出卡 {card.mission_id} 的工作项 {card.root_work_id}，没法判断它是不是孤卡"
+                )
+                continue
+            if root_work.state not in TERMINAL_WORK_STATES:
+                continue
+            head = f"孤卡：{card.mission_id} 还开着（{card.state.value}），但它的工作项 {root_work.work_id} "
+            if root_work.state is WorkState.CANCELLED:
+                warnings.append(
+                    f"{head}已取消；请用户本人用 pm retire --pid {project_id} --mission-id {card.mission_id} "
+                    "收掉（不加 --apply 只列出，什么都不写）"
+                )
+            else:
+                warnings.append(
+                    f"{head}已经结束（{root_work.state.value}）；请交主执行查，不要自己改状态"
+                )
+        return warnings
 
     def _stale_residue(self, works: tuple[WorkItem, ...]) -> list[ResumeResidue]:
         now = self._now().astimezone(UTC)

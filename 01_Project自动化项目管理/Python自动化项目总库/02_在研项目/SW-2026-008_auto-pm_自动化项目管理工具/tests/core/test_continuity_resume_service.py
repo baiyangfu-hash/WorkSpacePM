@@ -31,6 +31,7 @@ from auto_pm.application.core.pm_session_projection_service import (
 )
 from auto_pm.application.core.work_registry_service import WorkRegistryService
 from auto_pm.contracts.continuity import RunState, WorkKind, WorkState
+from auto_pm.contracts.continuity_resume import ContinuityResume
 from auto_pm.contracts.decision_package import (
     RUNTIME_CAPABILITY_KEY,
     DecisionPackageDTO,
@@ -45,6 +46,7 @@ from auto_pm.infrastructure.continuity_store import (
     ContinuityStoreError,
     _StoreInventory,
 )
+from auto_pm.ui.cli import pm as pm_module
 
 
 def _workspace(root: Path) -> Path:
@@ -1289,3 +1291,233 @@ def test_ten_renewals_put_a_red_flag_in_orient_but_nine_do_not(tmp_path: Path) -
     warnings = service.collect(project_id="SW-2026-008").hold_warnings
     assert len(warnings) == 1 and "续租 10 次" in warnings[0]
     assert service.collect(project_id="SW-2026-008").conflicts == ()  # a flag, not a block
+
+
+# --- CHG-SCPT-2026-656 第 1.4 节：USE_INBOX 只给“账本上什么都没有”这一种状态（649 遗留的三条） ----------------------
+
+
+def test_a_named_accepted_work_alone_is_not_told_to_use_the_inbox(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _accept_read_only_work(tmp_path, "WORK-ACCEPTED")
+
+    result = ContinuityResumeService(tmp_path).collect(
+        project_id="SW-2026-008", work_id="WORK-ACCEPTED"
+    )
+
+    assert result.mission is None and result.run is None and result.work_candidates == ()
+    assert result.work and result.work.state is WorkState.ACCEPTED
+    assert result.conflicts == ()
+    assert result.next_legal_action != "USE_INBOX"
+
+
+def _stale_leftover(root: Path, work_id: str = "WORK-OLD") -> None:
+    """A Work whose only Run failed on 2026-09-09 and that nobody closed since."""
+
+    _work(root, work_id)
+    _run(root, work_id=work_id, run_id=f"RUN-{work_id}")
+    WorkRegistryService(root, now=lambda: "2026-09-09T12:00:00+00:00").transition(
+        work_id, WorkState.IN_PROGRESS, f"start-{work_id}"
+    )
+    ended = datetime(2026, 9, 9, 12, 5, tzinfo=UTC)
+    ContinuityExecutionService(
+        root, store=ContinuityStore(root, _clock=lambda: ended), now=lambda: ended
+    ).transition_run(f"RUN-{work_id}", RunState.FAILED, "agent-a", "lease-secret", f"fail-{work_id}")
+
+
+def test_a_ledger_with_only_a_stale_leftover_is_not_told_to_use_the_inbox(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _stale_leftover(tmp_path)
+
+    result = ContinuityResumeService(
+        tmp_path, now=lambda: datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    ).collect(project_id="SW-2026-008")
+
+    assert [item.work_id for item in result.residue] == ["WORK-OLD"]
+    assert result.mission is None and result.work is None and result.run is None
+    assert result.mission_candidates == () and result.conflicts == ()
+    assert tuple(candidate.work_id for candidate in result.work_candidates) == ("WORK-OLD",)
+    assert result.next_legal_action != "USE_INBOX"
+
+
+def test_an_empty_ledger_with_a_conflict_is_not_told_to_use_the_inbox(tmp_path: Path) -> None:
+    """The conflict comes from the workspace context (identity not verified); the ledger itself holds nothing."""
+
+    _workspace(tmp_path)
+    service = ContinuityResumeService(tmp_path)
+    real_resolve = service._contexts.resolve
+
+    def resolve_with_identity_conflict(**kwargs: object) -> object:
+        context = real_resolve(**kwargs)  # type: ignore[arg-type]
+        return context.model_copy(update={"conflicts": (*context.conflicts, "RUNTIME_IDENTITY_UNVERIFIED")})
+
+    service._contexts.resolve = resolve_with_identity_conflict  # type: ignore[method-assign,assignment]
+
+    result = service.collect(project_id="SW-2026-008")
+
+    assert result.mission is None and result.work is None and result.run is None
+    assert result.work_candidates == () and result.mission_candidates == ()
+    assert result.conflicts == ("RUNTIME_IDENTITY_UNVERIFIED",)
+    assert result.next_legal_action != "USE_INBOX"
+
+
+# --- CHG-SCPT-2026-656 第 1.3 节（D-348）：卡还开着、工作项已经结束的孤卡，进门定位要说出来 --------------------------
+
+
+def _collect_without_the_orphan_look(root: Path) -> ContinuityResume:
+    """What ``collect`` gave before D-348: the same call with the orphan look switched off."""
+
+    service = ContinuityResumeService(root)
+    service._orphan_card_warnings = lambda missions, project_id: []  # type: ignore[method-assign]
+    return service.collect(project_id="SW-2026-008")
+
+
+def _same_except_the_warning(root: Path, after: ContinuityResume) -> None:
+    before = _collect_without_the_orphan_look(root)
+    assert before.hold_warnings == ()
+    assert after.model_dump(mode="json", exclude={"hold_warnings"}) == before.model_dump(
+        mode="json", exclude={"hold_warnings"}
+    )
+    assert after.evidence_id == before.evidence_id and after.conflicts == before.conflicts
+    assert after.next_legal_action == before.next_legal_action
+
+
+def test_an_open_card_whose_work_was_cancelled_is_named_with_the_retire_command(
+    tmp_path: Path,
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ROOT")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+    WorkRegistryService(tmp_path).transition("WORK-ROOT", WorkState.CANCELLED, "cancel-root")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.hold_warnings == (
+        "孤卡：MISSION-001 还开着（ACTIVE），但它的工作项 WORK-ROOT 已取消；"
+        "请用户本人用 pm retire --pid SW-2026-008 --mission-id MISSION-001 收掉"
+        "（不加 --apply 只列出，什么都不写）",
+    )
+    assert result.conflicts == () and result.next_legal_action == ""
+    assert result.schema_version == "continuity-resume.v2"
+    _same_except_the_warning(tmp_path, result)
+
+
+def test_an_open_card_whose_work_ended_another_way_is_sent_to_the_main_executor(
+    tmp_path: Path,
+) -> None:
+    _workspace(tmp_path)
+    _accept_read_only_work(tmp_path, "WORK-ROOT")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+    WorkRegistryService(tmp_path).transition("WORK-ROOT", WorkState.CLOSED, "close-root")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.hold_warnings == (
+        "孤卡：MISSION-001 还开着（ACTIVE），但它的工作项 WORK-ROOT 已经结束（CLOSED）；"
+        "请交主执行查，不要自己改状态",
+    )
+    assert "pm retire" not in result.hold_warnings[0]
+    _same_except_the_warning(tmp_path, result)
+
+
+def _point_second_card_at(tmp_path: Path, root_work_id: str) -> None:
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute(
+            "UPDATE mission_items SET root_work_id=? WHERE mission_id='MISSION-002'", (root_work_id,)
+        )
+
+
+def test_a_candidate_card_whose_work_cannot_be_read_is_reported_not_raised(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _mission(tmp_path, "MISSION-001")
+    _copy_mission(tmp_path)
+    _point_second_card_at(tmp_path, "WORK-GONE")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.mission is None
+    assert [m.mission_id for m in result.mission_candidates] == ["MISSION-001", "MISSION-002"]
+    assert result.hold_warnings == (
+        "读不出卡 MISSION-002 的工作项 WORK-GONE，没法判断它是不是孤卡",
+    )
+    assert result.conflicts == () and result.next_legal_action == "AWAIT_USER_SWITCH"
+    _same_except_the_warning(tmp_path, result)
+
+
+def test_a_candidate_card_whose_work_row_is_damaged_is_reported_not_raised(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-BAD")
+    _mission(tmp_path, "MISSION-001")
+    _copy_mission(tmp_path)
+    _point_second_card_at(tmp_path, "WORK-BAD")
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute("UPDATE work_items SET state='CLOSED', scope_json='{' WHERE work_id='WORK-BAD'")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert result.hold_warnings == (
+        "读不出卡 MISSION-002 的工作项 WORK-BAD，没法判断它是不是孤卡",
+    )
+    assert result.conflicts == () and result.next_legal_action == "AWAIT_USER_SWITCH"
+
+
+def test_a_candidate_card_whose_work_was_cancelled_is_named_too(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-DROPPED")
+    WorkRegistryService(tmp_path).transition("WORK-DROPPED", WorkState.CANCELLED, "cancel-dropped")
+    _mission(tmp_path, "MISSION-001")
+    _copy_mission(tmp_path)
+    _point_second_card_at(tmp_path, "WORK-DROPPED")
+
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    assert len(result.hold_warnings) == 1
+    assert "孤卡：MISSION-002 还开着（AWAITING_APPROVAL）" in result.hold_warnings[0]
+    assert "--mission-id MISSION-002" in result.hold_warnings[0]
+    assert "MISSION-001" not in result.hold_warnings[0]
+    _same_except_the_warning(tmp_path, result)
+
+
+def test_the_card_in_hand_still_fails_closed_when_its_work_cannot_be_read(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ROOT")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute("UPDATE mission_items SET root_work_id='WORK-GONE'")
+
+    with pytest.raises(ContinuityResumeError, match="Work 不存在: WORK-GONE"):
+        ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+
+@pytest.mark.parametrize("root_state", ["executing", "accepted", "none"])
+def test_a_healthy_card_adds_nothing_to_the_warnings(tmp_path: Path, root_state: str) -> None:
+    _workspace(tmp_path)
+    if root_state == "executing":
+        _work(tmp_path, "WORK-ROOT")
+        _active_mission_with_root(tmp_path, "WORK-ROOT")
+    elif root_state == "accepted":
+        _accept_read_only_work(tmp_path, "WORK-ROOT")
+        _active_mission_with_root(tmp_path, "WORK-ROOT")
+    else:
+        _mission(tmp_path)
+
+    assert ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008").hold_warnings == ()
+
+
+def test_orient_text_shows_the_orphan_card_and_json_keeps_its_fields(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-ROOT")
+    _active_mission_with_root(tmp_path, "WORK-ROOT")
+    WorkRegistryService(tmp_path).transition("WORK-ROOT", WorkState.CANCELLED, "cancel-root")
+    result = ContinuityResumeService(tmp_path).collect(project_id="SW-2026-008")
+
+    pm_module._echo_resume_text(result)
+
+    text = capsys.readouterr().out
+    assert "🔴 孤卡：MISSION-001 还开着（ACTIVE），但它的工作项 WORK-ROOT 已取消" in text
+    assert "pm retire --pid SW-2026-008 --mission-id MISSION-001" in text
+    assert "冲突:" not in text
+    payload = result.model_dump(mode="json")
+    assert set(payload) == set(_collect_without_the_orphan_look(tmp_path).model_dump(mode="json"))
+    assert payload["schema_version"] == "continuity-resume.v2"

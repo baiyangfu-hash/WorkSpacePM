@@ -159,7 +159,8 @@ def closure_blockers(control_root: str | Path, project_id: str) -> list[str]:
         store = ContinuityStore(Path(control_root))
         return [
             f"Mission {mission.mission_id} 已关（CLOSED），但收口记录不是 COMPLETED"
-            "（停在 PREPARED，或者查不到收口记录）；先用 D 单的办法收掉"
+            "（停在 PREPARED，或者查不到收口记录）；这类卡现在还没有命令能把收口补走完（缺陷 D-340，待修），"
+            "请把卡号交给主执行，这个项目先不归档"
             for mission in store.list_missions(project_id, include_terminal=True)
             if mission.state is MissionState.CLOSED and not store.has_completed_closure(mission.mission_id)
         ]
