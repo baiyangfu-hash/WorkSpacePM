@@ -10,7 +10,7 @@
   "counts": {
     "never": 12,
     "read": 68,
-    "user_only": 22,
+    "user_only": 24,
     "write": 118
   },
   "commands": {
@@ -524,6 +524,10 @@
     "pr settle-scan": {
       "class": "read"
     },
+    "project archive": {
+      "class": "user_only",
+      "note": "把登记表里的项目状态改成已归档，只听用户本人（和 project delete 同一口径）；不加 --confirm 只预演"
+    },
     "project create": {
       "class": "write"
     },
@@ -548,6 +552,10 @@
     },
     "project list": {
       "class": "read"
+    },
+    "project reactivate": {
+      "class": "user_only",
+      "note": "把已归档的项目改回在研，只听用户本人；不加 --confirm 只预演"
     },
     "project recycle-list": {
       "class": "read"

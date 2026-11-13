@@ -40,8 +40,9 @@ log = logging.getLogger(__name__)
 
 # CHG-085: 扫描器版本号。scanner 逻辑变更（如 stack/phase 推断规则修改）时递增，
 # 增量同步检测到 DB 缓存的 scanner_version 与当前不一致时强制重扫该项目。
-# 历史：v1=初始版本（仅 mtime 增量判据，存在 scanner 逻辑变更不触发重扫的 P1 缺陷）
-SCANNER_VERSION = "v2"
+# 历史：v1=初始版本（仅 mtime 增量判据，存在 scanner 逻辑变更不触发重扫的 P1 缺陷）；
+# v3＝不再从 PM_SESSION 推阶段（CHG-SCPT-2026-650；版本号由 CHG-SCPT-2026-652 递增，D-349）
+SCANNER_VERSION = "v3"
 
 
 class SyncService:

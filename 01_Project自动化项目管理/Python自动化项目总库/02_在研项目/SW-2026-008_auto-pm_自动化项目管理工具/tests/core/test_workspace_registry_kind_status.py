@@ -164,7 +164,8 @@ def test_mark_deleted_keeps_the_entry_and_every_other_entry_byte_for_byte(tmp_pa
 
     back = WorkspaceRegistryService(tmp_path).mark_restored("DJ-2026-005")
     assert back is not None and back.written and (back.before, back.after) == ("deleted", "paused")
-    assert (_entries(registry)[1]["status"], _entries(registry)[1]["status_before_delete"]) == ("paused", "")
+    assert _entries(registry)[1]["status"] == "paused"
+    assert "status_before_delete" not in _entries(registry)[1]  # CHG-SCPT-2026-652：搬回后不留空键
     assert _entry_bytes(registry)[0] == before[0]
 
 

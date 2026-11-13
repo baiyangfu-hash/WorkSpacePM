@@ -161,3 +161,45 @@ def test_a_tile_shows_kind_and_status_and_the_fold_counts_archived(qapp: QApplic
     assert "工具 · 在研" in tool_texts and not any(t.endswith("  工具") for t in tool_texts)
     assert rest_summary(home.rest).endswith("，1 个已归档")
     assert "已归档" not in rest_summary([c for c in home.rest if not c.archived])
+
+
+def test_the_projects_page_hides_archived_until_the_box_is_ticked(qapp: QApplication, tmp_path: Path) -> None:
+    """CHG-SCPT-2026-652：“全部项目”页默认不列已归档的；勾上才列；双击打开的是显示出来的那一行。"""
+    from cockpit_board.widgets.projects import ProjectsPage
+
+    root, db = base._workspace(tmp_path, [])
+    registry = root / pd.REGISTRY_RELATIVE
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["projects"][0].update({"kind": "equipment", "status": "archived"})  # DJ-2026-101
+    registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    board = pd.build_board(root, db, board_tests.NOW, use_git=False, use_legacy=False)
+    home = vm.home_vm(board, board_tests.OFFSET, online=False, use_git=False)
+    cards = home.hot + home.rest
+    assert [card.project_id for card in cards if card.archived] == ["DJ-2026-101"]
+
+    opened: list[str] = []
+    page = ProjectsPage(opened.append)
+    page.show_view(cards)
+
+    def shown() -> list[str]:
+        return [page.table.item(row, 0).text().split("\n")[0] for row in range(page.table.rowCount())]
+
+    assert not page.show_archived.isChecked() and page.show_archived.text() == "显示已归档（1 个）"
+    assert "DJ-2026-101" not in shown() and shown() == [card.project_id for card in cards if not card.archived]
+    for row, project_id in enumerate(shown()):  # 过滤后每一行双击打开的都是它自己
+        page._open(row, 0)
+        assert opened[-1] == project_id
+
+    page.show_archived.setChecked(True)
+    assert shown() == [card.project_id for card in cards]
+    row = shown().index("DJ-2026-101")
+    page.table.cellDoubleClicked.emit(row, 0)
+    assert opened[-1] == "DJ-2026-101"
+
+    page.show_archived.setChecked(False)
+    assert "DJ-2026-101" not in shown() and len(page.cards) == page.table.rowCount()
+    page._open(len(page.cards), 0)  # 行号越界不打开任何项目
+    assert opened[-1] == "DJ-2026-101"
+
+    page.show_view([card for card in cards if not card.archived])
+    assert page.show_archived.text() == "显示已归档（0 个）"

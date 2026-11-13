@@ -9,6 +9,7 @@ from cockpit_board.widgets import common as c
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QHeaderView,
     QTableWidget,
     QTableWidgetItem,
@@ -26,7 +27,15 @@ class ProjectsPage(QWidget):
         self.on_project = on_project
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 16)
-        layout.addWidget(c.section("全部项目", "受阻和有风险的排前，未接入的排后，已归档的在最后；性质、状态读登记表；双击一行进项目页"))
+        layout.addWidget(
+            c.section("全部项目", "受阻和有风险的排前，未接入的排后；已归档的默认不列，勾上才列在最后；性质、状态读登记表；双击一行进项目页")
+        )
+        # CHG-SCPT-2026-652：默认不列已归档的；只读，勾选只改这一页显示哪些行
+        self.show_archived = QCheckBox(self._archived_text(0))
+        self.show_archived.setObjectName("show_archived")
+        self.show_archived.setChecked(False)
+        self.show_archived.toggled.connect(lambda _checked: self._render())
+        layout.addWidget(self.show_archived)
         self.table = QTableWidget(0, len(HEADERS))
         self.table.setObjectName("projects")
         self.table.setHorizontalHeaderLabels(HEADERS)
@@ -38,9 +47,20 @@ class ProjectsPage(QWidget):
         self.table.setWordWrap(True)
         self.table.cellDoubleClicked.connect(self._open)
         layout.addWidget(self.table, 1)
-        self.cards: list[ProjectCard] = []
+        self.all_cards: list[ProjectCard] = []
+        self.cards: list[ProjectCard] = []  # 只放显示出来的那些行，双击按它找项目
+
+    @staticmethod
+    def _archived_text(count: int) -> str:
+        return f"显示已归档（{count} 个）"
 
     def show_view(self, cards: list[ProjectCard]) -> None:
+        self.all_cards = list(cards)
+        self.show_archived.setText(self._archived_text(sum(1 for card in cards if card.archived)))
+        self._render()
+
+    def _render(self) -> None:
+        cards = [card for card in self.all_cards if self.show_archived.isChecked() or not card.archived]
         self.cards = cards
         self.table.setRowCount(len(cards))
         for row, card in enumerate(cards):

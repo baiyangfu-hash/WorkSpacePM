@@ -18,7 +18,10 @@ GUARDED = {"edit", "snapshot", "hooks install", "hooks uninstall"}
 # gate and recycle area (delete: a broken project must still be removable).  retrofit is guarded once the anchor
 # (.copier-answers.yml) exists (TD-230); with no anchor it is the command that builds it.
 # restore (CHG-SCPT-2026-650) carries its own gate like delete: dry run by default, --apply only from the user in person.
-BOOTSTRAP_OR_SELF_GATED = {"create", "import", "register", "retrofit", "delete", "restore"}
+# archive / reactivate (CHG-SCPT-2026-652) carry the same gate: dry run by default, --confirm only from the user in
+# person; they write one registry field, never the project folder, so an identity conflict inside the project is not
+# theirs to refuse on.
+BOOTSTRAP_OR_SELF_GATED = {"create", "import", "register", "retrofit", "delete", "restore", "archive", "reactivate"}
 READ_ONLY = {"list", "show", "hooks status", "recycle-list"}
 
 
