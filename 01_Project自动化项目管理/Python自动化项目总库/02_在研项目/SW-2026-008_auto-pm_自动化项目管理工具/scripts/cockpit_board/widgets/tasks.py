@@ -9,12 +9,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from cockpit_board import shell, viewmodel
+import pm_dashboard as pd
+from cockpit_board import shell
 from cockpit_board.widgets import common as c
 
 COLUMNS = (("active", "在干"), ("waiting", "等你"), ("parked", "搁着"), ("closed", "已关"))
 TITLES_SHOWN = 3  # 每栏最多列几张卡的标题
-RECENT_CLOSED_DAYS = viewmodel.pd.RECENT_CLOSED_DAYS  # “已关”只数近几天的：和项目页、HTML 看板同一个数
+RECENT_CLOSED_DAYS = pd.RECENT_CLOSED_DAYS  # “已关”只数近几天的：和项目页、HTML 看板同一个数
 
 
 def _titles(rows: list[dict[str, Any]]) -> str:
@@ -26,7 +27,7 @@ def _titles(rows: list[dict[str, Any]]) -> str:
 def _closed_text(items: list[dict[str, Any]], now: datetime) -> str:
     """“已关”一栏只数近 RECENT_CLOSED_DAYS 天关的（和项目页同一个口径，D-347）；更早的另写一句，读不到日期的算更早的，不冒充近期。"""
     floor = now - timedelta(days=RECENT_CLOSED_DAYS)
-    recent = [row for row in items if (when := viewmodel.pd.parse_time(row.get("updated_at"))) is not None and when >= floor]
+    recent = [row for row in items if (when := pd.parse_time(row.get("updated_at"))) is not None and when >= floor]
     older = len(items) - len(recent)
     text = c.count_text(recent, "张")
     return text + (f"；另有 {older} 张更早关的" if older else "")
