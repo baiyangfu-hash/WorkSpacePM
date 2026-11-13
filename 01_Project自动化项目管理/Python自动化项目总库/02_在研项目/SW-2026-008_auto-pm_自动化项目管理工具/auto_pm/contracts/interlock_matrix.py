@@ -145,6 +145,15 @@ COMMANDS: dict[str, CommandSpec] = {
         "CHG-SCPT-2026-650: dry run by default; --apply only from the user in person (agent markers refused, PIN or user words), "
         "moves one recycle entry back and flips the registry status back; refuses when the place is taken",
     ),
+    "project archive": CommandSpec(
+        CommandKind.NORMAL, ("operator=user",), (),
+        "CHG-SCPT-2026-652: dry run by default; --confirm only from the user in person (agent markers refused, PIN or user words); "
+        "sets one registry status to archived after five fail-closed checks; moves no folder",
+    ),
+    "project reactivate": CommandSpec(
+        CommandKind.NORMAL, ("operator=user",), (),
+        "CHG-SCPT-2026-652: dry run by default; --confirm only from the user in person; flips an archived registry status back to active",
+    ),
     # D-39: cross-machine card claims live on GitHub (remote claims/<card> branches), never in the ledger; they must work in a
     # cloud clone with no runtime identity, so they carry no guards.
     "claim list": CommandSpec(CommandKind.READ_ONLY, (), (), "reads the remote claim branches"),

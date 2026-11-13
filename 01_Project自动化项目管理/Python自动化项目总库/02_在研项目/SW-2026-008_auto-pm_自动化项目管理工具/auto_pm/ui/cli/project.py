@@ -15,6 +15,8 @@ Commands:
     delete <ID> --confirm         删除项目
     recycle-list [--older-than N] 只读列出回收区
     restore <ID> [--stamp] [--apply]  把回收区里的项目目录搬回原处（默认只预演，只听用户本人）
+    archive <ID> [--confirm]      把项目状态改成“已归档”（默认只预演，只听用户本人；目录不搬）
+    reactivate <ID> [--confirm]   把“已归档”的项目改回“在研”（默认只预演，只听用户本人）
     retrofit <ID>                 补全 .copier-answers.yml 元数据文件
     import <PATH> [--move]        导入外部项目目录到工作空间
     register <ID> [--path] [--kind] [--status]  把已有项目登记到工作区登记表
@@ -146,7 +148,13 @@ def project_group(ctx: click.Context) -> None:
     "--status",
     type=click.Choice([value for value in STATUS_LABELS if value]),
     default=None,
-    help="按项目状态筛选（登记表里的值；没填的按 active 在研算）",
+    help="按项目状态筛选（登记表里的值；没填的按 active 在研算）；deleted 从登记表列出已删除的项目和能不能搬回",
+)
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="全部列出：含已归档的，加上登记表里已删除的（默认不显示已归档）",
 )
 @click.option(
     "--search",
@@ -168,23 +176,35 @@ def cmd_list(
     kind: str | None,
     status: str | None,
     search: str | None,
+    show_all: bool,
     output_json: bool,
 ) -> None:
-    """列出工作空间内所有项目；性质、状态读登记表（CHG-SCPT-2026-650），没登记的项目两栏显示“未登记”"""
+    """列出工作空间内的项目；性质、状态读登记表（CHG-SCPT-2026-650），没登记的项目两栏显示“未登记”
+
+    默认不显示已归档的（CHG-SCPT-2026-652）：用 --status archived 只看已归档，--all 全看。
+    已删除的项目目录在回收区、扫不到，--status deleted 和 --all 从登记表把它们补出来。
+    """
+    from auto_pm.application.core.project_lifecycle_service import DeletedProject, deleted_projects
+
     app_ctx: AppContext = ctx.obj
     svc = ProjectService(app_ctx.workspace_root)
     projects = svc.list_projects()
+    deleted: list[DeletedProject] = []
+    if (status == "deleted" or (show_all and status is None)) and stack is None and phase is None:
+        # 登记表里没有技术栈、阶段，按这两栏筛时不列已删除的；目录其实还扫得到的（比如手工搬回来了）按扫到的那一行列，不重复
+        scanned = {p.project_id for p in projects}
+        deleted = [d for d in deleted_projects(app_ctx.workspace_root) if d.project_id not in scanned]
 
     if business_line is not None:
         projects = [p for p in projects if p.project_id.split("-", 1)[0] == business_line]
+        deleted = [d for d in deleted if d.project_id.split("-", 1)[0] == business_line]
     if stack is not None:
         projects = [p for p in projects if p.stack == stack]
     if phase is not None:
         projects = [p for p in projects if p.phase == phase]
     if kind is not None:
         projects = [p for p in projects if p.registered and p.kind == kind]
-    if status is not None:
-        projects = [p for p in projects if p.registered and (p.status or "active") == status]
+        deleted = [d for d in deleted if d.kind == kind]
     if search is not None:
         search_lower = search.lower()
         projects = [
@@ -194,16 +214,41 @@ def cmd_list(
             or search_lower in p.name.lower()
             or search_lower in p.description.lower()
         ]
-
-    if not projects:
-        if output_json:
-            click.echo("[]")
-        else:
-            console.print("[yellow]未发现项目[/yellow]")
-        return
+        deleted = [d for d in deleted if search_lower in d.project_id.lower()]
+    hidden_archived = 0
+    if status is not None:
+        projects = [p for p in projects if p.registered and (p.status or "active") == status]
+    elif not show_all:
+        shown = [p for p in projects if not (p.registered and p.status == "archived")]
+        hidden_archived = len(projects) - len(shown)
+        projects = shown
+    archived_note = (
+        f"另有 {hidden_archived} 个已归档，用 `--status archived` 或 `--all` 看" if hidden_archived else ""
+    )
 
     if output_json:
-        click.echo(json.dumps([p.model_dump() for p in projects], ensure_ascii=False, indent=2))
+        rows: list[dict[str, Any]] = [p.model_dump() for p in projects]
+        rows += [
+            {
+                "project_id": d.project_id,
+                "path": d.project_root,
+                "kind": d.kind,
+                "status": "deleted",
+                "registered": True,
+                "restorable": d.restorable,
+            }
+            for d in deleted
+        ]
+        click.echo(json.dumps(rows, ensure_ascii=False, indent=2) if rows else "[]")
+        return
+
+    if not projects and not deleted:
+        console.print("[yellow]未发现项目[/yellow]")
+        if archived_note:
+            console.print(archived_note, markup=False)
+        return
+    if not projects:
+        _print_deleted_projects(deleted)
         return
 
     table = Table(title=f"项目列表 ({len(projects)} 个)")
@@ -230,6 +275,23 @@ def cmd_list(
             os.path.relpath(p.path, app_ctx.workspace_root),
         )
 
+    console.print(table)
+    if deleted:
+        _print_deleted_projects(deleted)
+    if archived_note:
+        console.print(archived_note, markup=False)
+
+
+def _print_deleted_projects(deleted: list[Any]) -> None:
+    """登记表里已删除的项目：目录在回收区，扫不到，所以单独一张表，写明能不能搬回。"""
+    table = Table(title=f"已删除的项目 ({len(deleted)} 个，来自登记表)")
+    table.add_column("项目ID", style="cyan")
+    table.add_column("性质", style="magenta")
+    table.add_column("状态", style="magenta")
+    table.add_column("登记目录", style="dim")
+    table.add_column("回收区", style="white")
+    for item in deleted:
+        table.add_row(item.project_id, kind_label(item.kind), status_label("deleted"), item.project_root, item.hint)
     console.print(table)
 
 
@@ -539,6 +601,8 @@ def cmd_show(ctx: click.Context, project_id: str, output_json: bool) -> None:
         console.print(f"[cyan]技术栈:[/cyan] {proj.stack}")
         console.print(f"[cyan]版本:[/cyan]   {proj.version}")
         console.print(f"[cyan]阶段:[/cyan]   {proj.phase or '-'}")
+        console.print(f"[cyan]性质:[/cyan]   {kind_label(proj.kind) if proj.registered else '未登记'}")
+        console.print(f"[cyan]状态:[/cyan]   {status_label(proj.status) if proj.registered else '未登记'}")
         console.print(f"[cyan]业务线:[/cyan] {proj.business_line or '-'}")
         console.print(
             f"[cyan]项目类型:[/cyan] {get_project_type_label(proj.project_type) if proj.project_type else '-'}"
@@ -842,6 +906,146 @@ def cmd_restore(ctx: click.Context, project_id: str, stamp: str, apply_: bool, a
     )
     console.print(f"[green]项目已搬回: {plan.target_relative}[/green]")
     console.print(f"  {registry_note}")
+
+
+def _refuse_agent_or_continue(ctx: click.Context, action: str) -> None:
+    """只听用户本人的命令：当前环境带 agent 标记就拒绝并退出。"""
+    from auto_pm.application.core.lease_handover_service import agent_markers
+
+    markers = agent_markers(os.environ)
+    if markers:
+        console.print(
+            f"[red]拒绝: {action}只听用户本人，当前环境带 agent 标记（{', '.join(markers)}）。"
+            "请把完整命令交给用户，在用户自己的终端运行；agent 不得索要口令、代填或绕过。[/red]"
+        )
+        ctx.exit(1)
+
+
+@project_group.command(name="archive")
+@click.argument("project_id")
+@click.option("--confirm", is_flag=True, help="真的归档；不加只预演，什么都不改")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
+@click.pass_context
+def cmd_archive(ctx: click.Context, project_id: str, confirm: bool, approval_evidence_ref: str) -> None:
+    """把项目归档（CHG-SCPT-2026-652）：只把登记表里的项目状态改成“已归档”，目录不搬，编号和路径不变。
+
+    默认只预演；--confirm 只听用户本人，和 project delete 同一口径。归档前查五件事，有一件不过就拒绝：
+    卡全关、收口走完、没有已验收没收口的卡、没有没提交的改动、收件箱没有待处理条目。
+    """
+    from auto_pm.application.core.project_lifecycle_service import (
+        ProjectLifecycleError,
+        apply_plan,
+        plan_archive,
+        record_status_change,
+    )
+
+    app_ctx: AppContext = ctx.obj
+    proj = ProjectService(app_ctx.workspace_root).get_project(project_id)
+    if proj is None:
+        console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
+        ctx.exit(1)
+    if confirm:
+        _refuse_agent_or_continue(ctx, "归档项目")
+    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+    plan = plan_archive(app_ctx.workspace_root, project_id, proj.path, control_root=control_root)
+
+    console.print(f"归档前的五项检查（项目 {project_id}）：")
+    for check in plan.checks:
+        console.print(f"  [{'通过' if check.passed else '不过'}] {check.name}", markup=False)
+        for problem in check.problems:
+            console.print(f"      - {problem}", markup=False)
+        if check.problems and check.advice:
+            console.print(f"      {check.advice}", markup=False)
+    if plan.change_hints:
+        console.print("没完成的变更单（只是提示，不挡）：归档前请确认这些单要不要先收口")
+        for hint in plan.change_hints:
+            console.print(f"  - {hint}", markup=False)
+    if plan.blockers:
+        console.print(f"[red]拒绝: 项目 {project_id} 现在不能归档，先处理下面的事：[/red]")
+        for blocker in plan.blockers:
+            console.print(f"  - {blocker}", markup=False)
+        ctx.exit(1)
+    console.print(f"将要改的那一行：{plan.change_line}", markup=False)
+    if not confirm:
+        console.print("[yellow]预演（没加 --confirm）：什么都没改。要真的归档，请用户本人加 --confirm 再运行。[/yellow]")
+        return
+
+    evidence = _user_proof_or_exit(
+        ctx,
+        control_root,
+        summary=f"归档项目 {project_id}：登记表里的项目状态改成“已归档”，目录不搬",
+        purpose="project-archive",
+        subject=project_id,
+        evidence_ref=approval_evidence_ref,
+        action="归档",
+    )
+    try:
+        change = apply_plan(app_ctx.workspace_root, plan)
+    except ProjectLifecycleError as e:
+        console.print(f"[red]归档失败: {e}[/red]")
+        ctx.exit(1)
+
+    record_status_change("project_archive", change, evidence)
+    console.print(f"[green]项目已归档: {project_id}[/green]（目录没动；要改回在研：project reactivate {project_id}）")
+
+
+@project_group.command(name="reactivate")
+@click.argument("project_id")
+@click.option("--confirm", is_flag=True, help="真的改回在研；不加只预演，什么都不改")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；已启用批准口令时改为在终端输入口令",
+)
+@click.pass_context
+def cmd_reactivate(ctx: click.Context, project_id: str, confirm: bool, approval_evidence_ref: str) -> None:
+    """把“已归档”的项目改回“在研”（CHG-SCPT-2026-652）：默认只预演；--confirm 只听用户本人。
+
+    不是“已归档”的项目拒绝，并写明它现在是什么状态。
+    """
+    from auto_pm.application.core.project_lifecycle_service import (
+        ProjectLifecycleError,
+        apply_plan,
+        plan_reactivate,
+        record_status_change,
+    )
+
+    app_ctx: AppContext = ctx.obj
+    if confirm:
+        _refuse_agent_or_continue(ctx, "重新激活项目")
+    plan = plan_reactivate(app_ctx.workspace_root, project_id)
+    if plan.blockers:
+        console.print("[red]拒绝: 不能重新激活：[/red]")
+        for blocker in plan.blockers:
+            console.print(f"  - {blocker}", markup=False)
+        ctx.exit(1)
+    console.print(f"将要改的那一行：{plan.change_line}", markup=False)
+    if not confirm:
+        console.print("[yellow]预演（没加 --confirm）：什么都没改。要真的改回在研，请用户本人加 --confirm 再运行。[/yellow]")
+        return
+
+    control_root = str(getattr(app_ctx, "control_root", "") or app_ctx.workspace_root)
+    evidence = _user_proof_or_exit(
+        ctx,
+        control_root,
+        summary=f"重新激活项目 {project_id}：登记表里的项目状态由“已归档”改回“在研”",
+        purpose="project-reactivate",
+        subject=project_id,
+        evidence_ref=approval_evidence_ref,
+        action="重新激活",
+    )
+    try:
+        change = apply_plan(app_ctx.workspace_root, plan)
+    except ProjectLifecycleError as e:
+        console.print(f"[red]重新激活失败: {e}[/red]")
+        ctx.exit(1)
+
+    record_status_change("project_reactivate", change, evidence)
+    console.print(f"[green]项目已改回在研: {project_id}[/green]")
 
 
 @project_group.command(name="retrofit")

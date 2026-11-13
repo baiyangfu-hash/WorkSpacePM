@@ -179,8 +179,29 @@ class WorkspaceRegistryService:
                 return None
             after = str(entry.get("status_before_delete") or "")
             entry["status"] = after
-            entry["status_before_delete"] = ""
+            entry.pop("status_before_delete", None)  # CHG-SCPT-2026-652：搬回后不留空键，和没删过的条目长得一样
             return "deleted", after
+
+        return self._change_status(project_id, change)
+
+    def set_status(self, project_id: str, status: str, *, only_from: tuple[str, ...]) -> StatusChange | None:
+        """CHG-SCPT-2026-652: change only this one entry's status (``project archive`` / ``project reactivate``).
+
+        ``only_from`` names the statuses the entry may have now (an entry with no status counts as ``active``); any
+        other current status raises ``WorkspaceRegistryError`` and nothing is written.  None when the project is not
+        registered.  ``deleted`` can be neither the target nor a starting point: that pair belongs to delete/restore.
+        """
+        if status not in USER_STATUSES:
+            raise WorkspaceRegistryError(f"项目状态只能改成 {'、'.join(USER_STATUSES)}，不能改成 {status!r}")
+
+        def change(entry: dict[str, object]) -> tuple[str, str] | None:
+            before = str(entry.get("status") or "")
+            if (before or "active") not in only_from or before == "deleted":
+                raise WorkspaceRegistryError(
+                    f"项目 {project_id} 现在的状态是“{status_label(before)}”，不能改成“{status_label(status)}”"
+                )
+            entry["status"] = status
+            return before, status
 
         return self._change_status(project_id, change)
 
