@@ -28,7 +28,7 @@ class ProjectsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 16)
         layout.addWidget(
-            c.section("全部项目", "受阻和有风险的排前，未接入的排后；已归档的默认不列，勾上才列在最后；性质、状态读登记表；双击一行进项目页")
+            c.section("全部项目", "挡路和有风险的排前，未接入的排后；已归档的默认不列，勾上才列在最后；性质、状态读登记表；双击一行进项目页")
         )
         # CHG-SCPT-2026-652：默认不列已归档的；只读，勾选只改这一页显示哪些行
         self.show_archived = QCheckBox(self._archived_text(0))

@@ -310,3 +310,19 @@ def test_page_with_bad_data_says_so_and_does_not_crash(qapp: QApplication, monke
     page.show_cards([CardPosition("P", "M", "t", "ACTIVE", "")])  # 不炸
     page.select_graph("mission")
     assert page.error and not page.picker_buttons
+
+
+# ---------------------------------------------------------------- 状态词表对表（CHG-SCPT-2026-653）
+
+
+def test_653_state_words_on_the_board_are_the_graph_node_names_and_cover_every_state(graphs: dict[str, Graph]) -> None:
+    """看板上说状态的字只有 pm_dashboard 里这四张表：前三张的键和词逐个等于流程图的节点，键集合等于状态枚举，多一个少一个都红。"""
+    import pm_dashboard as pd
+
+    from auto_pm.application.core.pm_closure_service import ClosureState
+
+    for graph_id, table, enum in (("mission", pd.STATE_LABEL, MissionState), ("work", pd.WORK_LABEL, WorkState), ("run", pd.RUN_LABEL, RunState)):
+        assert table == {n.id: n.label for n in graphs[graph_id].nodes}, graph_id
+        assert set(table) == {m.value for m in enum}, graph_id
+    assert set(pd.CLOSURE_LABEL) == {m.value for m in ClosureState}
+    assert all(word and not word.isascii() for word in pd.CLOSURE_LABEL.values())

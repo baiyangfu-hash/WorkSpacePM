@@ -49,7 +49,12 @@ def test_issue_tiers_and_decisions(tmp_path: Path) -> None:
     home = vm.home_vm(board, OFFSET, online=None, use_git=False)
     card = next(c for c in home.hot if c.project_id == "DJ-2026-101")
     titles = {i.title: i.sev for i in card.issues}
-    assert titles["卡住要拿主意"] == "block"
+    assert titles["受阻，要拿主意"] == "block"
+    # CHG-SCPT-2026-653：依据句里的状态词从词表取；回复句认得出“受阻”，不退成“看过了”；项目健康叫“挡路”
+    blocked = next(i for i in card.issues if i.title == "受阻，要拿主意")
+    assert blocked.basis == "账本里这张卡的状态是“受阻”" and pd.STATE_LABEL["BLOCKED"] == "受阻"
+    assert vm._reply(blocked).endswith(" 拿主意：…")
+    assert card.health_label == "挡路" and vm.SEV_LABEL["block"] == "阻塞"
     assert titles["等你超过 3 天：批准范围"] == "block"  # 等批一 等了 4 天
     assert titles["验收结果"] == "hint"  # 等验收 才 1 天
     assert titles["业务变更待批"] == "hint"
@@ -954,7 +959,7 @@ def test_b1_05_a_closed_project_keeps_its_leftovers_as_old_records_not_risk(tmp_
     )
     home = vm.home_vm(board, OFFSET, online=None, use_git=False)
     card = _card(home)
-    old = [i for i in card.issues if i.title == "工作项卡住"]
+    old = [i for i in card.issues if i.title == "工作项受阻"]
     assert len(old) == 2 and {(i.sev, i.basis) for i in old} == {("hint", vm.OLD_BASIS)}
     assert (card.health, card.health_label, card.closed) == ("old", "旧账", True)
     mismatch = next(k for k in home.checks if k.key == "mismatch")
@@ -969,7 +974,7 @@ def test_b1_06_an_open_project_with_a_blocked_work_item_is_still_at_risk(tmp_pat
     )
     home = vm.home_vm(board, OFFSET, online=None, use_git=False)
     card = _card(home)
-    stuck = [i for i in card.issues if i.title == "工作项卡住"]
+    stuck = [i for i in card.issues if i.title == "工作项受阻"]
     assert [(i.sev, i.basis) for i in stuck] == [("risk", "账本一致性检查")]
     assert (card.health, card.closed) == ("risk", False)
     mismatch = next(k for k in home.checks if k.key == "mismatch")
@@ -992,8 +997,10 @@ def test_b1_07_a_closed_card_with_an_unfinished_closure_counts_in_one_cell_only(
     checks = {k.key: k for k in home.checks}
     assert (checks["unverified"].value, checks["mismatch"].value) == (1, 0)
     assert "说完成但机器没过" in checks["mismatch"].note and "账本对不上" in checks["unverified"].note
-    titles = [i.title for i in _card(home).issues if "CLOSURE-MISSION-0" in i.detail]
+    # CHG-SCPT-2026-653：收口单号挪进 ref，说明句里不带
+    titles = [i.title for i in _card(home).issues if i.ref == "CLOSURE-MISSION-0"]
     assert titles == ["说完成但机器没过"]
+    assert not any("CLOSURE-MISSION-0" in i.detail for i in _card(home).issues)
 
 
 def test_b1_08_cards_closed_the_old_way_are_not_counted_but_are_named_in_the_note(tmp_path: Path) -> None:
@@ -1107,3 +1114,103 @@ def test_the_station_default_prefers_equipment_then_unclassified(tmp_path: Path)
     data["projects"].append({"project_id": "DJ-2026-104", "project_root": "x/DJ-2026-104_丁", "kind": "equipment"})
     registry.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     assert default_station_project(root) == "DJ-2026-104"
+
+
+# ---------------------------------------------------------------- CHG-SCPT-2026-653 词表与显示清理
+
+STATE_CODE = re.compile(r"\b(RUNNING|CANCELLED|PREPARED|COMPLETED|BLOCKED|VERIFYING|SUCCEEDED|PENDING|FAILED)\b")
+INTERNAL_ID = re.compile(r"\b(RUN|CLOSURE|WORK)-")
+
+
+def _653_board(tmp_path: Path) -> Any:
+    """一张卡开着但执行已取消（MISSION-0 / RUN-0）、一张已关但收口停在半路、一张开着且收口停在半路、一个受阻的工作项（WORK-3）。"""
+    return _edited_board(
+        tmp_path,
+        [
+            ("DJ-2026-101", "ACTIVE", "执行早取消了的活", 3),
+            ("DJ-2026-101", "CLOSED", "关了但收口没走完", 5),
+            ("DJ-2026-101", "ACTIVE", "开着且收口停在半路", 2),
+            ("DJ-2026-101", "ACTIVE", "工作项受阻的活", 0.01),
+        ],
+        "UPDATE run_items SET state = 'CANCELLED' WHERE run_id = 'RUN-0'",
+        "DELETE FROM execution_leases WHERE run_id = 'RUN-0'",
+        "UPDATE work_items SET state = 'BLOCKED' WHERE work_id = 'WORK-3'",
+        _closure("MISSION-1", "PREPARED", 5),
+        _closure("MISSION-2", "PREPARED", 3),
+    )
+
+
+def test_653_issue_details_carry_no_state_codes_or_internal_ids(tmp_path: Path) -> None:
+    """D-356：说明句里没有全大写状态码，也没有 RUN-、CLOSURE-、工作项号；编号在 ref 一栏。"""
+    board = _653_board(tmp_path)
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    issues = {i.title: i for i in _card(home).issues}
+    idle = issues["卡开着，但下面没有在跑的执行"]
+    assert idle.detail.startswith("最近一次执行的状态是“已取消”：") and idle.ref == "RUN-0"
+    assert issues["说完成但机器没过"].ref == "CLOSURE-MISSION-1" and "备好了，没走完" in issues["说完成但机器没过"].detail
+    assert issues["账本对不上"].ref == "CLOSURE-MISSION-2" and "CHG-B1-MISSION-2" in issues["账本对不上"].detail
+    assert (issues["工作项受阻"].ref, issues["工作项受阻"].detail) == ("WORK-3", "工作项受阻的活")
+    for issue in _card(home).issues:
+        assert not STATE_CODE.search(issue.detail) and not INTERNAL_ID.search(issue.detail), issue.detail
+    # 账本遗留那一层（HTML 看板和问题页共用的数据）同样：编号在 ref
+    for item in next(p for p in board.projects if p.project_id == "DJ-2026-101").attention:
+        assert item.ref and item.ref not in item.detail and not STATE_CODE.search(item.detail), item.detail
+
+
+def test_653_an_overdue_run_record_says_its_state_in_chinese_and_keeps_the_id_in_ref(tmp_path: Path) -> None:
+    board = _board(tmp_path, [("DJ-2026-101", "ACTIVE", "租约过期两天的活", 2.5)])
+    item = next(a for p in board.projects for a in p.attention if a.what == "执行记录没结账")
+    assert item.ref == "RUN-0" and item.detail == "Trae，状态“运行中”：租约过期两天的活"
+
+
+def test_653_html_board_shows_no_state_codes(tmp_path: Path) -> None:
+    board = _653_board(tmp_path)
+    page = pd.render_page(board, timezone.utc)
+    text = re.sub(r"<(script|style)\b.*?</\1>", "", page, flags=re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    assert not STATE_CODE.search(text), STATE_CODE.search(text)
+    assert "编号：CLOSURE-MISSION-2" in text and "编号：WORK-3" in text  # 编号另起一行，不靠鼠标悬停
+    card = pd._dev_card(next(m for p in board.projects for m in p.missions if m.title == "开着且收口停在半路"), NOW, timezone.utc)
+    assert "· 运行中 ·" in card and "收口 备好了，没走完" in card
+    no_closure = next(m for p in board.projects for m in p.missions if m.title == "工作项受阻的活")
+    no_closure.change_id = "CHG-X-1"
+    assert "收口 未开始" in pd._dev_card(no_closure, NOW, timezone.utc)
+
+
+def test_653_project_page_closure_rows_show_words_and_keep_the_raw_status(tmp_path: Path) -> None:
+    board = _653_board(tmp_path)
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False)
+    project = vm.project_vm(board, _card(home), OFFSET, False)
+    closures = [row for row in project.changes if row.kind == "收口"]
+    assert {row.status for row in closures} == {"PREPARED"}  # 原值不动：排序、判定都按它
+    assert {vm.change_status_text(row) for row in closures} == {"备好了，没走完"}
+    assert vm.change_status_text(vm.ChangeRow("CHG-1", "", "收口", "x", "COMPLETED")) == "已走完"
+    assert vm.change_status_text(vm.ChangeRow("CHG-1", "", "收口", "x", "")) == ""
+    assert vm.change_status_text(vm.ChangeRow("BC-1", "", "参数", "x", "COMPLETED")) == "COMPLETED"  # 别的类型的状态栏不动
+    evidence = {row.title: row.detail for row in project.evidence}
+    assert evidence["质量回执"] == "已关的卡收口单是否已走完（账本路线）"
+    unverified = next(k for k in home.checks if k.key == "unverified")
+    assert "是否已走完" in unverified.note and not STATE_CODE.search(unverified.note)
+
+
+def _luminance(color: str) -> float:
+    parts = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    red, green, blue = (p / 12.92 if p <= 0.03928 else ((p + 0.055) / 1.055) ** 2.4 for p in parts)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast(first: str, second: str) -> float:
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+@pytest.mark.parametrize("tokens", [theme.LIGHT, theme.DARK], ids=["light", "dark"])
+@pytest.mark.parametrize("ground", ["bg", "card", "card2", "side"])
+def test_653_small_grey_text_is_readable_on_every_ground(tokens: theme.Tokens, ground: str) -> None:
+    """D-358：灰字 fg3 在页面底、卡片、次级底、侧栏四种底上的对比度都不低于 4.5（WCAG AA）。"""
+    assert _contrast(tokens.fg3, getattr(tokens, ground)) >= 4.5
+
+
+def test_653_contrast_formula_is_the_wcag_one() -> None:
+    assert round(_contrast("#000000", "#ffffff"), 1) == 21.0 and _contrast("#777777", "#777777") == 1.0
+    assert _contrast("#8b93a0", theme.LIGHT.side) < 4.5  # 旧的浅色灰字在侧栏上不够，这条测试拦得住

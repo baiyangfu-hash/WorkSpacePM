@@ -36,7 +36,7 @@ class Tokens:
     fg3: str  # 辅助文字
     accent: str  # 导航、链接、选中
     accent_soft: str
-    block: str  # 阻塞 / 受阻
+    block: str  # 阻塞 / 挡路
     block_soft: str
     risk: str  # 风险 / 有风险
     risk_soft: str
@@ -57,7 +57,7 @@ LIGHT = Tokens(
     line2="#cfd4db",
     fg="#17191d",
     fg2="#5c6470",
-    fg3="#8b93a0",
+    fg3="#626a79",
     accent="#1d5c8f",
     accent_soft="#e3eef7",
     block="#c6262e",
@@ -81,7 +81,7 @@ DARK = Tokens(
     line2="#3d434d",
     fg="#e8eaed",
     fg2="#a9b0ba",
-    fg3="#7c8491",
+    fg3="#8f97a3",
     accent="#7fb3e0",
     accent_soft="#1f3346",
     block="#ef6b6b",

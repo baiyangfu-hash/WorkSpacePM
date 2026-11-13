@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from cockpit_board import theme
-from cockpit_board.viewmodel import PHASES, ProjectVM
+from cockpit_board.viewmodel import PHASES, ProjectVM, change_status_text
 from cockpit_board.widgets import common as c
 from cockpit_board.widgets.delivery import github_block
 from cockpit_board.widgets.home import decision_card
@@ -111,7 +111,7 @@ class ProjectPage(QWidget):
             widgets.append(frame)
         c.fill_grid(grid, widgets, len(vm.columns))
         self.layout_.addWidget(holder)
-        self.layout_.addWidget(c.label("四栏照挂起设计稿：在干 = ACTIVE；等你 = 草稿 / 待批 / 待验收 / 卡住；已关 = 近 14 天验收或收口的。", "small"))
+        self.layout_.addWidget(c.label("四栏照挂起设计稿：在干 = ACTIVE；等你 = 草稿 / 等批准 / 等验收 / 受阻；已关 = 近 14 天验收或收口的。", "small"))
 
     def _evidence(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()
@@ -131,7 +131,7 @@ class ProjectPage(QWidget):
         if not vm.changes:
             inner.addWidget(c.label("无", "muted"))
         for row in vm.changes:
-            status = c.chip(row.status, "hint") if row.status.startswith("待批") else c.label(row.status or "—", "", wrap=False)
+            status = c.chip(row.status, "hint") if row.status.startswith("待批") else c.label(change_status_text(row) or "—", "", wrap=False)
             inner.addWidget(c.hrow(c.label(row.change_id, "mono", wrap=False), c.label(row.date, "mono", wrap=False),
                                    c.label(row.kind, "", wrap=False), c.label(row.what), 1, status))
         if vm.changes_more:

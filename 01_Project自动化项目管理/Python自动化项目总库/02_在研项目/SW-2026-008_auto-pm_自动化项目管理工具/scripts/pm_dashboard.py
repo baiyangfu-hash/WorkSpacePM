@@ -69,19 +69,43 @@ WAITING_ASK = {
     "DRAFT": "核对需求",
     "AWAITING_APPROVAL": "批准范围",
     "ACCEPTANCE_PENDING": "验收结果",
-    "BLOCKED": "卡住了，要你拿主意",
+    "BLOCKED": "受阻了，要你拿主意",
 }
+# 状态词表（CHG-SCPT-2026-653）：看板上说状态的字只从这四张表取。前三张的词和 cockpit_board/flow/graphs.json
+# 任务图、工作项图、执行图的节点名逐个相同，键和 auto_pm 里的状态枚举逐个相同，
+# tests/core/test_cockpit_board_flow.py 的对表测试守着；收口单流程图里没有，词在这里定。
 STATE_LABEL = {
     "DRAFT": "草稿",
-    "AWAITING_APPROVAL": "待批准",
-    "ACTIVE": "在干",
-    "BLOCKED": "卡住",
-    "ACCEPTANCE_PENDING": "待验收",
+    "AWAITING_APPROVAL": "等批准",
+    "ACTIVE": "进行中",
+    "BLOCKED": "受阻",
     "PARKED": "搁着",
+    "ACCEPTANCE_PENDING": "等验收",
     "ACCEPTED": "已验收",
-    "CLOSED": "已收口",
-    "CANCELLED": "已作废",
+    "CLOSED": "已关闭",
+    "CANCELLED": "已取消",
 }
+WORK_LABEL = {
+    "PLANNED": "已计划",
+    "READY": "就绪",
+    "IN_PROGRESS": "进行中",
+    "VERIFYING": "验证中",
+    "ACCEPTED": "已验收",
+    "CLOSED": "已关闭",
+    "BLOCKED": "受阻",
+    "CANCELLED": "已取消",
+}
+RUN_LABEL = {
+    "READY": "就绪",
+    "RUNNING": "运行中",
+    "VERIFYING": "验证中",
+    "SUCCEEDED": "成功",
+    "BLOCKED": "受阻",
+    "PENDING": "等待中",
+    "FAILED": "失败",
+    "CANCELLED": "已取消",
+}
+CLOSURE_LABEL = {"PREPARED": "备好了，没走完", "COMPLETED": "已走完"}
 OPEN_RUN_STATES = ("RUNNING", "VERIFYING", "BLOCKED", "PENDING", "CLAIMED")
 
 WAITING_RED_DAYS = 3
@@ -162,6 +186,7 @@ class Attention:
     what: str
     since: datetime | None
     detail: str
+    ref: str = ""  # 内部编号（执行号、收口单号、工作项号）：不进说明句，页面上另起一行小字“编号：…”
     mission_state: str = ""  # 收口停在半路时：这条收口所属卡的状态（CLOSED 的已算进“说完成但机器没过”，D-329）
 
 
@@ -531,12 +556,12 @@ def read_ledger(
                         project_id=row["subject_project_id"],
                         what="执行记录没结账",
                         since=expires,
-                        detail="{}（{}，状态 {}）：{}".format(
-                            row["run_id"],
+                        detail="{}，状态“{}”：{}".format(
                             row["executor_id"],
-                            row["state"],
+                            RUN_LABEL.get(row["state"], row["state"]),
                             _short(row["title"], 40),
                         ),
+                        ref=row["run_id"],
                     )
                 )
     if "closure_items" in tables:
@@ -552,9 +577,11 @@ def read_ledger(
                         project_id=row["subject_project_id"],
                         what="收口停在半路",
                         since=since,
-                        detail="{}（{}，状态 {}）".format(
-                            row["closure_id"], row["change_id"], row["state"]
+                        detail="{}收口单的状态是“{}”".format(
+                            row["change_id"] + " 的" if row["change_id"] else "",
+                            CLOSURE_LABEL.get(row["state"], row["state"]),
                         ),
+                        ref=row["closure_id"],
                         mission_state=row["mission_state"] or "",
                     )
                 )
@@ -566,9 +593,10 @@ def read_ledger(
             attention.append(
                 Attention(
                     project_id=row["subject_project_id"],
-                    what="工作项卡住",
+                    what="工作项受阻",
                     since=parse_time(row["updated_at"]),
-                    detail="{}：{}".format(row["work_id"], _short(row["title"], 40)),
+                    detail=_short(row["title"], 40),
+                    ref=row["work_id"],
                 )
             )
     return missions, attention
@@ -765,7 +793,7 @@ def lamp(project: Project, now: datetime) -> tuple[str, str]:
     open_missions = [m for m in project.missions if m.column != "已关"]
     for mission in open_missions:
         if mission.state == "BLOCKED":
-            return "red", "有卡住的活，要你拿主意"
+            return "red", "有受阻的活，要你拿主意"
         if mission.column == "等你" and _days(now, mission.updated_at) > WAITING_RED_DAYS:
             return "red", f"有一件等你超过 {WAITING_RED_DAYS} 天"
     for mission in open_missions:
@@ -1222,7 +1250,7 @@ def render_pm(board: Board, offset: tzinfo) -> str:
         )
     parts.append(
         '<div class="legend">'
-        f'<span><i class="red"></i>红：有卡住的，或等你超过 {WAITING_RED_DAYS} 天</span>'
+        f'<span><i class="red"></i>红：有受阻的，或等你超过 {WAITING_RED_DAYS} 天</span>'
         f'<span><i class="amber"></i>黄：搁着超过 {PARKED_YELLOW_DAYS} 天、'
         f"开着超过 {OPEN_SOFT_LIMIT} 张、账本有遗留，或 {QUIET_YELLOW_DAYS} 天没动静</span>"
         '<span><i class="green"></i>绿：正常</span>'
@@ -1412,8 +1440,9 @@ def render_dev(board: Board, offset: tzinfo) -> str:
     if issues:
         parts.append('<ul class="health">')
         for item in sorted(issues, key=lambda i: (i.project_id, i.since or now)):
+            ref_line = f'<br><span class="small mono">编号：{_e(item.ref)}</span>' if item.ref else ""
             parts.append(
-                f'<li><span class="pid">{_e(item.project_id)}</span> {_e(item.what)} · {_e(_when(item.since, offset))}<br><span class="small mono">{_e(item.detail)}</span></li>'
+                f'<li><span class="pid">{_e(item.project_id)}</span> {_e(item.what)} · {_e(_when(item.since, offset))}<br><span class="small">{_e(item.detail)}</span>{ref_line}</li>'
             )
         parts.append("</ul>")
     else:
@@ -1435,14 +1464,15 @@ def _dev_card(mission: MissionInfo, now: datetime, offset: tzinfo) -> str:
             else "未持租约"
         )
         lines.append(
-            f'<span class="small">{_e(run.executor)} · {_e(run.state)} · {_e(lease)}</span>'
+            f'<span class="small">{_e(run.executor)} · {_e(RUN_LABEL.get(run.state, run.state))} · {_e(lease)}</span>'
         )
         if run.checkpoint:
             lines.append(f'<span class="small">断点：{_e(_short(run.checkpoint, 60))}</span>')
     if mission.change_id:
         lines.append(
             '<span class="small mono">{} · 收口 {}</span>'.format(
-                _e(mission.change_id), _e(mission.closure_state or "未开始")
+                _e(mission.change_id),
+                _e(CLOSURE_LABEL.get(mission.closure_state, mission.closure_state) or "未开始"),
             )
         )
     lines.append(f'<span class="small">更新 {_e(_when(mission.updated_at, offset))}</span></div>')

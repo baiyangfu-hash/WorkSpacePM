@@ -26,6 +26,8 @@ def issue_card(issue: Issue, now: datetime, on_project: Callable[[str], None] | 
         see.clicked.connect(lambda: on_project(issue.project_id))
         foot.append(see)
     layout.addWidget(c.hrow(*foot))
+    if issue.ref:  # 内部编号不进说明句，留在卡的最下面查（CHG-SCPT-2026-653）
+        layout.addWidget(c.label("编号：" + issue.ref, "small"))
     return frame
 
 

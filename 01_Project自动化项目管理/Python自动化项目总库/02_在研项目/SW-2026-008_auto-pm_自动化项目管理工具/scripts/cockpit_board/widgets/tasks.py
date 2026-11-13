@@ -6,13 +6,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from cockpit_board import shell
+from cockpit_board import shell, viewmodel
 from cockpit_board.widgets import common as c
 
 COLUMNS = (("active", "在干"), ("waiting", "等你"), ("parked", "搁着"), ("closed", "已关"))
 TITLES_SHOWN = 3  # 每栏最多列几张卡的标题
+RECENT_CLOSED_DAYS = viewmodel.pd.RECENT_CLOSED_DAYS  # “已关”只数近几天的：和项目页、HTML 看板同一个数
 
 
 def _titles(rows: list[dict[str, Any]]) -> str:
@@ -21,13 +23,26 @@ def _titles(rows: list[dict[str, Any]]) -> str:
     return "、".join(names) + more
 
 
-def summarize(reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
+def _closed_text(items: list[dict[str, Any]], now: datetime) -> str:
+    """“已关”一栏只数近 RECENT_CLOSED_DAYS 天关的（和项目页同一个口径，D-347）；更早的另写一句，读不到日期的算更早的，不冒充近期。"""
+    floor = now - timedelta(days=RECENT_CLOSED_DAYS)
+    recent = [row for row in items if (when := viewmodel.pd.parse_time(row.get("updated_at"))) is not None and when >= floor]
+    older = len(items) - len(recent)
+    text = c.count_text(recent, "张")
+    return text + (f"；另有 {older} 张更早关的" if older else "")
+
+
+def summarize(reader: str, data: dict[str, Any], now: datetime | None = None) -> list[tuple[str, str]]:
+    """`now` 是“现在几点”，不给就取当前时间；测试给定值。"""
     if reader == "missions":
         rows = []
         for key, name in COLUMNS:
             items = data.get(key) or []
+            if key == "closed":
+                rows.append((f"{name}（近 {RECENT_CLOSED_DAYS} 天）", _closed_text(items, now or datetime.now(UTC))))
+                continue
             text = c.count_text(items, "张")
-            if items and key != "closed":
+            if items:
                 text += "：" + _titles(items)
             rows.append((name, text))
         return rows

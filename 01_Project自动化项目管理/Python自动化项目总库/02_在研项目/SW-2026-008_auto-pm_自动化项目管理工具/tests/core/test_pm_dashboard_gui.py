@@ -228,12 +228,12 @@ def test_recent_activity_text_is_not_squeezed_into_a_narrow_column(qapp: QApplic
     window.show()
     qapp.processEvents()
     for page in (window.home,):
-        label = next(item for item in page.findChildren(QLabel) if item.text().startswith("在干：") and long_title[:6] in item.text())
+        label = next(item for item in page.findChildren(QLabel) if item.text().startswith("进行中：") and long_title[:6] in item.text())
         assert label.width() > 400, label.width()  # 窄一列时只有 100 来像素
         assert label.height() < 40, label.height()  # 没被挤成好几行
     window.open_project("DJ-2026-101")
     qapp.processEvents()
-    label = next(item for item in window.project.findChildren(QLabel) if item.text().startswith("在干：") and long_title[:6] in item.text())
+    label = next(item for item in window.project.findChildren(QLabel) if item.text().startswith("进行中：") and long_title[:6] in item.text())
     assert label.width() > 400 and label.height() < 40, (label.width(), label.height())
     window.close()
 
