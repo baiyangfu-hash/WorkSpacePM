@@ -9,9 +9,9 @@
   ],
   "counts": {
     "never": 12,
-    "read": 68,
+    "read": 69,
     "user_only": 24,
-    "write": 118
+    "write": 119
   },
   "commands": {
     "change create": {
@@ -37,6 +37,12 @@
     },
     "claim list": {
       "class": "read"
+    },
+    "claim log": {
+      "class": "read"
+    },
+    "claim note": {
+      "class": "write"
     },
     "claim number": {
       "class": "write"
