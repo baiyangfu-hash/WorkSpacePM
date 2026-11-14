@@ -38,6 +38,7 @@ from yaml import dump as yaml_dump
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.paths import ProjectDestinationError, resolve_project_destination
+from auto_pm.application.core.project_scanner import unfindable_project_folder
 from auto_pm.contracts.workspace_context import (
     KIND_LABELS,
     STATUS_LABELS,
@@ -456,6 +457,10 @@ def cmd_create(
 
     # 目标路径
     project_dir = f"{project_id}_{project_name}"
+    unfindable = unfindable_project_folder(project_dir)  # TD-SW008-619：扫描器跳过的名字建出来也找不到
+    if unfindable:
+        console.print(f"[red]错误: {unfindable}[/red]")
+        ctx.exit(1)
     dest_path = os.path.join(dest_root, project_dir)
 
     if os.path.exists(dest_path):
@@ -1298,6 +1303,10 @@ def cmd_import(
     app_ctx: AppContext = ctx.obj
     source_path = os.path.abspath(path)
     dirname = os.path.basename(source_path)
+    unfindable = unfindable_project_folder(dirname)  # TD-SW008-619：导入后的文件夹名就是源目录名
+    if unfindable:
+        console.print(f"[red]错误: {unfindable}[/red]")
+        ctx.exit(1)
 
     # TD-SW008-563：先认技术栈；--stack 和目录内容对不上时拒绝，不猜
     detected = ProjectService(app_ctx.workspace_root).detect_stack(source_path)

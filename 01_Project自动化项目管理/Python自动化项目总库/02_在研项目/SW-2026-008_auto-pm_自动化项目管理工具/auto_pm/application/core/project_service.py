@@ -351,6 +351,7 @@ class ProjectService:
         Raises:
             FileExistsError: 目标路径已存在且未指定 force
             FileNotFoundError: 源目录不存在
+            ValueError: 源目录名会被扫描或登记跳过（TD-SW008-619）
         """
         import shutil
 
@@ -359,6 +360,11 @@ class ProjectService:
             raise FileNotFoundError(f"源目录不存在: {src}")
 
         dirname = os.path.basename(src)
+        from auto_pm.application.core.project_scanner import unfindable_project_folder
+
+        unfindable = unfindable_project_folder(dirname)  # TD-SW008-619：和命令行 project import 同一条
+        if unfindable:
+            raise ValueError(unfindable)
         # D-344 同类：窗口导入和命令行 project import、project create 同一个落点函数（PLC 进 0100_PLC自动化，其余进 Python 在研目录）
         dest_path = os.path.join(resolve_project_destination(self.workspace_root, self.detect_stack(src)), dirname)
 

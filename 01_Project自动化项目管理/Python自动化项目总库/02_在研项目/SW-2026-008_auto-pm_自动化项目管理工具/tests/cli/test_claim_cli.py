@@ -130,7 +130,8 @@ def test_add_paths_command_lifts_paths_to_the_root_and_reports_the_new_list(monk
     class _Service:
         def add_paths(self, card: str, *, owner: str, paths: list[str]) -> Claim:
             seen.update(card=card, owner=owner, paths=paths)
-            return Claim(card, owner, "m", ("a", *paths), "g", "t", "c")
+            # TD-SW008-611 起命令看 written：服务真推了新提交才说“已追加”
+            return Claim(card, owner, "m", ("a", *paths), "g", "t", "c", written=True)
 
     monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
     monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
@@ -141,6 +142,29 @@ def test_add_paths_command_lifts_paths_to_the_root_and_reports_the_new_list(monk
     assert result.exit_code == 0, result.output
     assert seen == {"card": "340", "owner": "claude", "paths": [f"{PROJECT}/auto_pm/x.py"]}
     assert "已追加路径" in result.output and "领卡时间和到期时间不变" in result.output
+
+
+def test_add_paths_command_says_nothing_was_written_when_the_paths_were_already_held(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TD-SW008-611（D-346）：要加的路径都已在占位里，服务原样返回、什么都没推；命令不说“已追加”。"""
+    from auto_pm.application.core.claim_service import Claim
+
+    root, project = _tree(tmp_path)
+
+    class _Service:
+        def add_paths(self, card: str, *, owner: str, paths: list[str]) -> Claim:
+            return Claim(card, owner, "m", tuple(paths), "g", "t", "c")  # written 默认 False：没推
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["add-paths", "340", "--paths", "auto_pm/x.py", "--as", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert "已追加路径" not in result.output
+    assert "这次什么都没写" in result.output
 
 
 def test_add_paths_command_exits_one_with_the_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

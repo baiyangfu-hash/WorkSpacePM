@@ -336,8 +336,18 @@ def test_project_create_records_the_station_list_and_template_update_passes_it_b
 
     seen: dict[str, object] = {}
     monkeypatch.setattr(copier, "run_update", lambda **kwargs: seen.update(kwargs))
-    TemplateService(str(tmp_path)).update_template(str(project_dir))
-    assert seen["data"] == {"station_instances": ["StationA", "StationB", "StationC"]}
+    # D-376 起先查“copier 跑不跑得起来”；这条只看回传了什么，所以把那道检查放过去。
+    # D-343 起回传答案文件里记着的全部 when: false 答案（读驾驶舱自带模板的 copier.yml），工位清单是其中一项。
+    monkeypatch.setattr(TemplateService, "_update_blocker", lambda self, answers: "")
+    with (project_dir / ".copier-answers.yml").open("a", encoding="utf-8") as f:
+        f.write("_src_path: templates/plc-standard-project\n")
+    templates = Path(__file__).resolve().parents[2] / "templates"
+    TemplateService(str(templates)).update_template(str(project_dir), overwrite=True)
+    data = seen["data"]
+    assert isinstance(data, dict)
+    assert data["station_instances"] == ["StationA", "StationB", "StationC"]
+    assert {key: data[key] for key in ("stack", "mode", "project_type")} == {
+        "stack": "plc", "mode": "standard-project", "project_type": "single_machine"}
 
 
 @pytest.mark.parametrize(
