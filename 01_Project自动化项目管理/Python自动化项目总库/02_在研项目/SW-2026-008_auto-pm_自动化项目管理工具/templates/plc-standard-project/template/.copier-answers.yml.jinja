@@ -1,14 +1,14 @@
 # Copier answers - 请勿手动修改
-project_id: {{ project_id }}
-project_name: {{ project_name }}
-description: {{ description }}
-version: {{ version }}
-stack: {{ stack }}
-mode: {{ mode }}
-business_line: {{ business_line }}
-project_type: {{ project_type }}
-equipment_type: {{ equipment_type }}
-plc_vendor: {{ plc_vendor }}
-plc_model: {{ plc_model }}
+project_id: '{{ project_id | replace("'", "''") }}'
+project_name: '{{ project_name | replace("'", "''") }}'
+description: '{{ description | replace("'", "''") }}'
+version: '{{ version | replace("'", "''") }}'
+stack: '{{ stack | replace("'", "''") }}'
+mode: '{{ mode | replace("'", "''") }}'
+business_line: '{{ business_line | replace("'", "''") }}'
+project_type: '{{ project_type | replace("'", "''") }}'
+equipment_type: '{{ equipment_type | replace("'", "''") }}'
+plc_vendor: '{{ plc_vendor | replace("'", "''") }}'
+plc_model: '{{ plc_model | replace("'", "''") }}'
 # 工位清单（TD-SW008-525）：模板更新时由驾驶舱读回来再传给 copier，不记下来就会退回只有 Station1
 station_instances: {{ station_instances | tojson }}
