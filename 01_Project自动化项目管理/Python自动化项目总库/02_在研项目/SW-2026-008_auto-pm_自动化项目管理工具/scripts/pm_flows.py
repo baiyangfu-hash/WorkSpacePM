@@ -36,6 +36,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = PROJECT_ROOT.parents[3]
 CATALOG_SCRIPT = PROJECT_ROOT / "scripts" / "command_catalog.py"
+PLAN_SCRIPT = PROJECT_ROOT / "scripts" / "plan_status.py"
 REGISTRY = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
 REPORTS = Path(".auto-pm") / "reports" / "flows"
 PLC_ROOT = "0100_PLC自动化/"
@@ -50,7 +51,7 @@ PLC_ONLY = "plc"
 PID_PATTERN = re.compile(r"^[A-Z]{2,4}-\d{4}-\d{3}$")
 MISSION_PATTERN = re.compile(r"^MISSION-[A-Z0-9-]+$")
 
-# 一步红了还接着跑的流程：体检九步全只读，是一张报警一览，红了也要看到后面几步（协调者 03:55Z 裁定）。
+# 一步红了还接着跑的流程：体检十步全只读，是一张报警一览，红了也要看到后面几步（协调者 03:55Z 裁定）。
 KEEP_GOING = frozenset({"checkup"})
 
 
@@ -59,7 +60,8 @@ class Step:
     """流程里的一步。
 
     kind 为 ``run``：脚本运行这条只读命令。kind 为 ``stop``：脚本停下，只打印这条命令和要用户本人说的话。
-    args 里的 ``{pid}``、``{mission}`` 运行时换成项目号和卡号；``{catalog}`` 表示运行命令目录脚本而不是 main.py。
+    args 里的 ``{pid}``、``{mission}`` 运行时换成项目号和卡号；``{catalog}`` 表示运行命令目录脚本而不是 main.py；
+    ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）。
     """
 
     key: str
@@ -83,6 +85,12 @@ CHECKUP: tuple[Step, ...] = (
     Step("doc_check", "文档检查", ("doc", "check")),
     Step("plc_docs", "接口和变量文档检查", ("plc", "docs", "check", "{pid}"), only=PLC_ONLY),
     Step("prototype", "原型检查", ("prototype", "check", "--pid", "{pid}"), only=PLC_ONLY),
+    Step(
+        "plan",
+        "项目计划状态",
+        ("{plan}", "{pid}"),
+        note="按实施卡号现算每个任务、每个里程碑的状态，只显示；项目还没有计划表时说明一句，不算红",
+    ),
     Step(
         "catalog",
         "当前命令目录",
@@ -196,6 +204,8 @@ def _fill(args: Sequence[str], pid: str, mission: str) -> list[str]:
 def command_of(step: Step, python: Path, root: Path, pid: str, mission: str) -> list[str]:
     """一步对应的整条命令（列表，不经过 shell）。"""
     args = _fill(step.args, pid, mission)
+    if args and args[0] == "{plan}":
+        return [str(python), "-B", str(PLAN_SCRIPT), *args[1:], "--root", str(root)]
     if args and args[0] == "{catalog}":
         return [str(python), "-B", str(CATALOG_SCRIPT), *args[1:]]
     return [str(python), "-B", str(root / "main.py"), *args]
