@@ -190,6 +190,9 @@ def add_paths_claim(ctx: click.Context, card: str, paths: tuple[str, ...], owner
     except ClaimError as error:
         _fail(error)
         return
+    if not claim.written:  # TD-SW008-611（D-346）：要加的路径都已在占位里，服务什么都没推，不能说“已追加”
+        click.echo(f"要加的路径都已在 {claim.label()} 的占位里，这次什么都没写；现在的路径：{'、'.join(claim.paths)}")
+        return
     click.echo(f"已追加路径 {claim.label()}；现在的路径：{'、'.join(claim.paths)}（领卡时间和到期时间不变）")
 
 
