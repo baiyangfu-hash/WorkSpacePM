@@ -506,3 +506,81 @@ def test_the_safety_signature_line_is_exactly_what_the_judge_accepts(tmp_path: P
     assert gh.find_signature([comment], SHA1)[0] is not None  # 总控屏自己的同口径判断也认
     assert judge.find_signature([{**comment, "body": decision.reply[:-1]}], SHA1, judge.Result()) is None  # 少一位不认
     assert judge.find_signature([comment], SHA2, judge.Result()) is None  # 换头（又推了提交）作废
+
+
+# ---------------------------------------------------------------- D-364：pull_request_target 触发的门禁也要认
+
+TARGET_NAMES = ("pr-gate", "safety-gate", "rules-gate", "hook-replay", "ci-aggregate")
+TARGET_BLOCK = """name: {name}
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+"""
+TARGET_INLINE = """name: {name}
+on: [pull_request_target]
+"""
+
+
+def _repo_with_targets(tmp_path: Path, names: tuple[str, ...] = TARGET_NAMES) -> Path:
+    """在 ``_repo`` 的三个工作流之外，再放几个 pull_request_target 触发的；hook-replay 用一行写法，其余用块写法。"""
+    root = _repo(tmp_path)
+    for name in names:
+        text = TARGET_INLINE if name == "hook-replay" else TARGET_BLOCK
+        (root / ".github" / "workflows" / f"{name}.yml").write_text(text.format(name=name), encoding="utf-8")
+    return root
+
+
+def test_d364_target_workflows_are_read_apart_from_pull_request_ones(tmp_path: Path) -> None:
+    root = _repo_with_targets(tmp_path, ("pr-gate", "hook-replay"))  # 块写法一个、一行写法一个
+    assert gh.read_target_workflows(root) == {"pr-gate": None, "hook-replay": None}
+    assert set(gh.read_workflows(root)) == {"sw008-ci", "plc-ci"}  # 原来那份名单一个不多：定时的、target 的都不进
+    assert gh.read_target_workflows(tmp_path / "nowhere") == {}  # 目录不在：回空，不回退到默认名单
+    assert gh._workflow_paths(SW8_CI, gh.PR_TARGET_TRIGGER)[0] is False  # pull_request 不当成 pull_request_target
+    assert gh._workflow_paths("on: [push, pull_request]\n", gh.PR_TARGET_TRIGGER)[0] is False
+    assert gh._workflow_paths("on: [push, pull_request_target]\n")[0] is False  # 反过来也不串
+
+
+def test_d364_a_missing_pr_gate_run_is_reported_and_the_gate_is_not_pass(tmp_path: Path) -> None:
+    _repo_with_targets(tmp_path, ("pr-gate",))
+    table = routes(**{f"{API}/actions/runs?head_sha={SHA2}&per_page=50": {"workflow_runs": [_run("sw008-ci", SHA2, "success")]}})
+    snap = _collect(tmp_path, FakeGitHub(table))
+    two = snap.pulls[1]
+    states = {c.workflow: (c.state, c.detail) for c in two.ci}
+    assert states["sw008-ci"] == ("pass", "过")
+    assert states["pr-gate"] == ("notrun", gh.EXPECTED_NOT_RUN) == ("notrun", "应跑没跑")
+    assert two.gate == "notrun"  # 别的都过了也不算“过”
+    row = next(r for r in vm.github_vm(snap, NOW, OFFSET).rows if r.number == 2)
+    assert row.gate.text == "没跑" and row.gate.sev == "na"
+    assert dict(row.ci)["pr-gate"] == vm.Cell("没跑", "na", "应跑没跑")
+
+
+def test_d364_the_latest_pr_gate_run_is_what_shows(tmp_path: Path) -> None:
+    _repo_with_targets(tmp_path, ("pr-gate",))
+    runs = [_run("sw008-ci", SHA2, "success"), _run("pr-gate", SHA2, "cancelled", 1), _run("pr-gate", SHA2, "success", 2)]
+    table = routes(**{f"{API}/actions/runs?head_sha={SHA2}&per_page=50": {"workflow_runs": runs}})
+    two = _collect(tmp_path, FakeGitHub(table)).pulls[1]
+    assert {c.workflow: (c.state, c.detail) for c in two.ci}["pr-gate"] == ("pass", "过")  # 先取消后成功：取最新一条
+    assert two.gate == "pass"
+
+
+def test_d364_main_row_does_not_grow_target_workflows(tmp_path: Path) -> None:
+    _repo_with_targets(tmp_path)
+    snap = _collect(tmp_path, FakeGitHub(routes()))
+    assert [c.workflow for c in snap.main_ci] == ["plc-ci", "sw008-ci"]  # 这 5 个从不在推送到 main 时跑
+    assert not set(TARGET_NAMES) & {c.workflow for c in snap.main_ci}
+    assert set(TARGET_NAMES) <= {c.workflow for c in snap.pulls[0].ci}  # PR 那几行才有
+    _repo_with_targets(tmp_path / "c")
+    unread = _collect(tmp_path / "c", FakeGitHub(routes(**{f"{API}/pulls/2/files?per_page=100": (502, {}, b"")})))
+    two = unread.pulls[1]  # 改动文件没读到：5 个门禁也各算未知，不漏
+    assert {c.workflow for c in two.ci} == {"plc-ci", "sw008-ci", *TARGET_NAMES}
+    assert all((c.state, c.detail) == ("unknown", "改动文件没读到") for c in two.ci)
+
+
+def test_d364_declared_no_points_at_the_safety_gate_row_of_this_pull() -> None:
+    safety = gh.safety_of("说明\n\n安全回路: 否\n", [], SHA1, plc=True)
+    assert safety.state == "declared_no"
+    assert safety.detail == "填了“否”；碰没碰安全区由 safety-gate 判（看这个 PR 的 safety-gate 一项）"
+    assert "合进 main 后" not in safety.detail

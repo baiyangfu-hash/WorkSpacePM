@@ -2,8 +2,8 @@
 
 采什么：
     - 开着的 PR：改到哪些项目（按路径里的项目编号）、头提交、作者。
-    - 每个 PR 的 CI：按 .github/workflows/*.yml 的 pull_request 路径过滤推出“应该跑哪几个”，
-      再和 GitHub Actions 上这个头提交实际跑的比（sw008-ci、plc-ci，以后合进来的 safety-gate 自动算上）。
+    - 每个 PR 的 CI：按 .github/workflows/*.yml 的 pull_request、pull_request_target 路径过滤推出“应该跑哪几个”，
+      再和 GitHub Actions 上这个头提交实际跑的比（sw008-ci、plc-ci 等，以及 pr-gate、safety-gate、rules-gate 这些门禁）。
     - main 上每个工作流最近一次的结论。
     - PR 描述里的“安全回路: 是/否”、PR 评论里的“安全签字 <头提交号>”（规则照抄 reviews/tools/safety_zone_check.py，
       这里只显示，不当裁判；裁判是 safety-gate）。
@@ -75,6 +75,9 @@ SIGN_LINE = re.compile(r"^\s*安全签字\s*[:：]?\s*`?([0-9a-fA-F]{7,40})`?(?:
 # 规则批准（用户评论“规则批准 <头提交前 12 位>”）：判卷由 GitHub 上的 rules-gate 工作流做，总控屏不重判，只读它的结果。
 # 这里只需要知道“这个 PR 改没改规则文件”，清单照抄 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS（测试里有一致性断言）。
 RULES_WORKFLOW = "rules-gate"
+PR_TARGET_TRIGGER = "pull_request_target"
+#: 应跑名单里有、这个头提交上却没有运行记录。``ci_states`` 写它，``rules_of`` 认它，两处用同一个词。
+EXPECTED_NOT_RUN = "应跑没跑"
 RULES_APPROVE_WORD = "规则批准"
 RULES_SIGN_LEN = 12
 RULE_PATTERNS = (
@@ -219,9 +222,10 @@ class Snapshot:
 # ---------------------------------------------------------------- 本地：工作流路径、审计结论、仓库名
 
 
-def _workflow_paths(text: str) -> tuple[bool, tuple[str, ...] | None]:
-    """从工作流 YAML 里取 pull_request 触发和它的 paths。返回（PR 会不会触发，paths；None = 不按路径过滤）。
+def _workflow_paths(text: str, trigger: str = "pull_request") -> tuple[bool, tuple[str, ...] | None]:
+    """从工作流 YAML 里取 ``trigger`` 这种触发和它的 paths。返回（PR 会不会触发，paths；None = 不按路径过滤）。
 
+    ``trigger`` 按整个词比：``pull_request`` 不会把 ``pull_request_target`` 也算进去（D-364）。
     只认本仓库工作流的写法（缩进列表），不是通用 YAML 解析器；认不出就当“PR 都会触发”，宁可说该跑没跑。
     """
     lines = text.splitlines()
@@ -235,12 +239,12 @@ def _workflow_paths(text: str) -> tuple[bool, tuple[str, ...] | None]:
         if re.match(r"^['\"]?on['\"]?\s*:", stripped) and indent == 0:
             if stripped.split(":", 1)[1].strip():
                 inline = stripped.split(":", 1)[1]
-                return "pull_request" in inline, None
+                return trigger in re.findall(r"[A-Za-z_]+", inline), None
             in_on, on_indent = True, indent
             continue
         if in_on and indent <= on_indent:
             in_on = False
-        if not in_on or not re.match(r"^pull_request\s*:", stripped):
+        if not in_on or not re.match(rf"^{re.escape(trigger)}\s*:", stripped):
             continue
         pr_indent = indent
         paths: list[str] | None = None
@@ -288,6 +292,29 @@ def read_workflows(repo_root: Path) -> dict[str, tuple[str, ...] | None]:
         if triggered:
             found[name] = paths
     return found or dict(DEFAULT_WORKFLOWS)
+
+
+def read_target_workflows(repo_root: Path) -> dict[str, tuple[str, ...] | None]:
+    """{工作流名: 路径过滤}；只收 ``pull_request_target`` 触发的（pr-gate、safety-gate、rules-gate 这些门禁，D-364）。
+
+    它们只在 PR 上跑，从不在推送到 main 时跑，所以单列一份、只给 PR 那几行用，不并进 ``read_workflows``
+    （并进去的话 main 那一行会多出几个“没跑”）。工作流目录不存在时回空，不回退到 ``DEFAULT_WORKFLOWS``。
+    """
+    folder = repo_root / ".github" / "workflows"
+    found: dict[str, tuple[str, ...] | None] = {}
+    if not folder.is_dir():
+        return found
+    for path in sorted(folder.glob("*.y*ml")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        name_match = re.search(r"^name\s*:\s*['\"]?(.+?)['\"]?\s*$", text, re.MULTILINE)
+        name = name_match.group(1) if name_match else path.stem
+        triggered, paths = _workflow_paths(text, PR_TARGET_TRIGGER)
+        if triggered:
+            found[name] = paths
+    return found
 
 
 def path_matches(path: str, pattern: str) -> bool:
@@ -509,7 +536,7 @@ def safety_of(body: str | None, comments: list[dict[str, Any]] | None, head_sha:
     if plan == "是":
         return Safety("waiting", plan, why or f"填了“安全回路: 是”，等你仿真后签 {head_sha[:8]}")
     if plan == "否":
-        return Safety("declared_no", plan, "填了“否”；碰没碰安全区由 safety-gate 判（合进 main 后）")
+        return Safety("declared_no", plan, "填了“否”；碰没碰安全区由 safety-gate 判（看这个 PR 的 safety-gate 一项）")
     if plc:
         return Safety("undeclared", None, "改了 PLC 却没写“安全回路: 是/否”一行")
     return Safety("na", None, "不涉及 PLC")
@@ -538,7 +565,8 @@ def rules_of(paths: list[str] | None, truncated: bool, runs_read: bool, ci: Iter
     if not runs_read:
         return RulesApproval("unknown", files, "改了规则文件，但 rules-gate 的运行结果没读到")
     check = next((c for c in ci if c.workflow == RULES_WORKFLOW), None)
-    if check is None:
+    # rules-gate 在应跑名单里（D-364）而这个头提交上还没有运行记录：和“清单里找不到”是同一回事，不是“没批准”。
+    if check is None or (check.state == "notrun" and check.detail == EXPECTED_NOT_RUN):
         return RulesApproval("waiting", files, "rules-gate 还没在当前头提交上跑出结果（刚推送时常见）")
     if check.state == "pass":
         return RulesApproval("approved", files, "rules-gate 绿：有你对当前头提交的批准", check.url)
@@ -589,7 +617,7 @@ def ci_states(runs: list[dict[str, Any]] | None, expected: set[str], known: Iter
             state, text = _run_state(run)
             out.append(CiState(name, state, text, str(run.get("html_url") or "")))
         elif name in expected:
-            out.append(CiState(name, "notrun", "应跑没跑"))
+            out.append(CiState(name, "notrun", EXPECTED_NOT_RUN))
         else:
             out.append(CiState(name, "na", "路径没碰到，不跑"))
     return out
@@ -847,6 +875,8 @@ def _collect(
     token = token if token is not None else env_value
     api = Api(fetch or urllib_fetch, token, etags)
     workflows = read_workflows(repo_root)
+    # PR 那几行另用一份名单：多认 pull_request_target 触发的门禁（D-364）；main 那一行仍只用 ``workflows``。
+    pr_workflows = {**read_target_workflows(repo_root), **workflows}
     rejected = False
     try:
         try:
@@ -914,9 +944,9 @@ def _collect(
         runs = runs_raw.get("workflow_runs") if isinstance(runs_raw, dict) else None
         if paths is None:
             # 不知道改了哪些文件，就推不出该跑哪几个：一律未知，不说“不适用”
-            pull.ci = [CiState(n, "unknown", "改动文件没读到") for n in sorted(workflows)]
+            pull.ci = [CiState(n, "unknown", "改动文件没读到") for n in sorted(pr_workflows)]
         else:
-            pull.ci = ci_states(runs, expected_workflows(paths, workflows), workflows)
+            pull.ci = ci_states(runs, expected_workflows(paths, pr_workflows), pr_workflows)
         pull.rules = rules_of(rule_paths, isinstance(files, list) and len(files) >= PER_PAGE, runs is not None, pull.ci)
         comments = guarded(f"PR #{number} 评论", f"/repos/{repo}/issues/{number}/comments?per_page={PER_PAGE}")
         pull.safety = safety_of(
