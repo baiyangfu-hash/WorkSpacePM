@@ -1,7 +1,7 @@
 ---
 spec_id: DEV-220
 title: Python项目打包规范
-version: V2.4.0
+version: V2.4.1
 domain: python
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/02_Python开发域/220_Python项目打包规范_DEV.md"
@@ -20,7 +20,7 @@ aliases: ["CODE-220"]
 
 
 **文档标题**：Python项目打包规范
-**文档版本**：V2.4.0
+**文档版本**：V2.4.1
 **编制日期**：2026-07-18
 **编制人**：技术团队
 
@@ -34,6 +34,7 @@ aliases: ["CODE-220"]
 
 | 版本号 | 变更内容 | 变更人 | 变更日期 | 详细说明 |
 |--------|----------|--------|----------|----------|
+| V2.4.1 | 附录A构建脚本标为已退役 | auto-pm | 2026-11-14 | 1)附录A标题与说明改为“已退役”，打包一律用 auto-pm delivery 命令 2)A.1、A.5 中指向脚本的两处改为历史说明；正文其余内容不变 |
 | V2.4.0 | 新增旧版归档机制 + auto-pm delivery CLI | auto-pm | 2026-07-18 | 1)新增§18旧版归档机制（archive/子目录+archive_info.md） 2)新增§19 auto-pm delivery CLI命令参考 3)更新§16两阶段流程增加归档步骤 4)附录A标注build_delivery.py为兼容保留，推荐使用CLI |
 | V2.3.0 | 补充hatchling打包模式 | auto-pm | 2026-06-21 | 1)新增hatchling+pyproject.toml打包模式 2)PyInstaller模式降级为可选方案 3)补充pip install -e .开发模式和hatch build构建流程 |
 | V2.2.0 | 规范缺陷修复+构建脚本强制化 | AI Assistant | 2026-04-15 | 1)D1:消除L526 Compress-Archive矛盾 2)D2:目录结构对齐实际项目 3)D3:ZIP阈值更新至150-170MB 4)D4:新增附录A(标准构建脚本build_delivery.py) |
@@ -2422,18 +2423,18 @@ auto-pm delivery archive list
 
 
 
-## 附录A: 标准构建脚本 build_delivery.py（V2.2.0新增，V2.4.0标记为兼容保留）
+## 附录A: 标准构建脚本 build_delivery.py（V2.2.0新增，V2.4.0标记为兼容保留，V2.4.1标记为已退役）
 
-> **⚠️ 兼容保留**：自 V2.4.0 起，推荐使用 `auto-pm delivery` CLI 命令替代本脚本。
-> 本脚本仍可使用，但不再作为主要推荐方式。详见 §19。
+> **⚠️ 已退役（V2.4.1，2026-11-14）**：本脚本不再使用，也不再维护。打包一律使用 `auto-pm delivery` CLI 命令，详见 §19。
+> 本附录以下内容是退役前的原文，只作历史参考。
 >
-> **强制性要求**：所有打包操作必须通过此脚本（或其后续版本）执行，**禁止临时手写脚本替代**。
+> **强制性要求**：所有打包操作必须通过 `auto-pm delivery` CLI 命令执行，**禁止临时手写脚本替代**。
 
 >
 
 > 本附录提供完整可运行的构建脚本源码，作为本规范的**代码级强制执行工具**。
 
-> 脚本文件位置：`03_主程序/01_主程序核心代码/scripts/build_delivery.py`
+> 脚本文件原位置（已退役，仅历史参考）：`03_主程序/01_主程序核心代码/scripts/build_delivery.py`
 
 
 
@@ -2443,7 +2444,7 @@ auto-pm delivery archive list
 
 ```
 
-用法: python build_delivery.py --version V{x.y.z} [--skip-build] [--verify-only]
+历史用法（已退役，现用 auto-pm delivery build）: python build_delivery.py --version V{x.y.z} [--skip-build] [--verify-only]
 
 
 
@@ -2561,7 +2562,7 @@ auto-pm delivery archive list
 
 
 
-> 完整源码见项目路径: `scripts/build_delivery.py` (约350行)
+> 完整源码原在项目路径 `scripts/build_delivery.py` (约350行)，脚本已退役；需要查看时到项目归档目录或 Git 历史中找。
 
 > 本规范不在此嵌入完整源码以避免冗余，请以项目中实际文件为准。
 
