@@ -48,6 +48,8 @@ log = logging.getLogger(__name__)
 SCL_SYNTAX_ITEM = "SCL 轻量语法（不依赖插件）"
 # 块里读自己的输出引脚（TD-SW008-316）：第一阶段对所有工程一律只报警告，不改退出码
 SCL_OUTPUT_READBACK_ITEM = "SCL 读自己的输出引脚"
+# 全局 DB 里放 FB 实例（TD-SW008-596，LSP-905 §4.11）：第一阶段只报警告，不改退出码
+SCL_GLOBAL_DB_FB_ITEM = "SCL 全局 DB 里的 FB 实例"
 
 # SysLib 关键文件清单（相对路径），用于 libraries 路径深度校验
 _KEY_FILES = [
@@ -253,6 +255,7 @@ class _LegacyPlcCheckerCore:
         warnings: list[str] = []
         syntax_hits: list[str] = []  # 不依赖插件的轻量语法层（TD-560 方案②）单独成一项，全部按“文件:行”列出
         readback_hits: list[str] = []  # 读自己的输出引脚（TD-316）单独成一项，只报警告
+        db_fb_hits: list[str] = []  # 全局 DB 里放 FB 实例（TD-596）单独成一项，只报警告
         syntax_files = 0
 
         for scl_file in sorted(scl_files):
@@ -266,6 +269,8 @@ class _LegacyPlcCheckerCore:
                     syntax_hits.append(line)
                 elif v.rule_id == SclLinter.OUTPUT_READBACK_RULE:
                     readback_hits.append(line)
+                elif v.rule_id == SclLinter.GLOBAL_DB_FB_INSTANCE_RULE:
+                    db_fb_hits.append(line)
                 elif v.severity == "ERROR":
                     total_errors += 1
                     errors.append(line)
@@ -284,6 +289,15 @@ class _LegacyPlcCheckerCore:
             result.add("SCL 代码规范", "warn", f"全量 SCL 结构合规，包含 {total_warnings} 个规范建议（逐条见明细）", warnings)
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
+
+        if db_fb_hits:
+            result.add(
+                SCL_GLOBAL_DB_FB_ITEM, "warn",
+                f"全局 DB 里放了 FB 实例 {len(db_fb_hits)} 处（导入 TIA 时这类 DB 生成不出；第一阶段只报警告，逐条见明细）",
+                db_fb_hits,
+            )
+        else:
+            result.add(SCL_GLOBAL_DB_FB_ITEM, "pass", "全局 DB 里没有 FB 实例")
 
         if syntax_files:
             if syntax_hits:
