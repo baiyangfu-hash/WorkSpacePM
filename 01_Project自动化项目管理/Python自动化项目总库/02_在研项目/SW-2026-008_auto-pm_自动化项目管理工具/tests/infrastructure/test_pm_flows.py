@@ -83,7 +83,7 @@ def test_every_main_py_step_is_a_registered_command(flows: ModuleType) -> None:
     commands = _map()
     for steps in flows.FLOWS.values():
         for step in steps:
-            if step.args[0] != "{catalog}":
+            if not step.args[0].startswith("{"):
                 _leaf(step.args, commands)
 
 
@@ -91,7 +91,7 @@ def test_steps_the_script_runs_are_read_only(flows: ModuleType) -> None:
     commands = _map()
     for name, steps in flows.FLOWS.items():
         for step in steps:
-            if step.kind != "run" or step.args[0] == "{catalog}":
+            if step.kind != "run" or step.args[0].startswith("{"):
                 continue
             leaf = _leaf(step.args, commands)
             entry = commands[leaf]
@@ -142,6 +142,8 @@ def test_checkup_runs_every_step_in_order_and_writes_a_record(
         "plc docs check DJ-2026-005",
         "prototype check --pid DJ-2026-005",
     ]
+    assert runner.calls[-2]["command"][2].endswith("plan_status.py")
+    assert runner.calls[-2]["command"][3:] == ["DJ-2026-005", "--root", str(root)]
     assert runner.calls[-1]["command"][2].endswith("command_catalog.py")
     assert runner.calls[-1]["command"][3:] == ["--print"]
     for call in runner.calls:
@@ -151,7 +153,7 @@ def test_checkup_runs_every_step_in_order_and_writes_a_record(
     assert len(records) == 1
     record = json.loads(records[0].read_text(encoding="utf-8"))
     assert record["result"] == "走完，全过" and record["pid"] == "DJ-2026-005"
-    assert [step["rc"] for step in record["steps"]] == [0] * 9
+    assert [step["rc"] for step in record["steps"]] == [0] * 10
     assert record["steps"][0]["command"].endswith("main.py pm orient DJ-2026-005")
     assert Path(record["catalog"]).is_file()
 
@@ -180,7 +182,7 @@ def test_checkup_runs_every_step_even_after_a_red_one_and_sums_up(
 
     assert flows.run_flow("checkup", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
 
-    assert len(runner.calls) == 9, "体检一步红了也要跑完九步"
+    assert len(runner.calls) == 10, "体检一步红了也要跑完十步"
     text = "\n".join(lines)
     assert "小结" in text
     assert "| 4 | 对账 | 红 |" in text and "ledger reconcile DJ-2026-005 | 2 |" in text
