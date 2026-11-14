@@ -145,7 +145,7 @@ launcher/launch.py   指针 → 校验 manifest 登记 → 逐文件核 SHA-256 
 | 总控屏 `scripts/cockpit_board/` | PySide6 普通控件 | 命令行的另一层皮：每个按钮只调用同一条 `main.py` 命令，不持有治理权；按钮白名单在 `policy.py`；不进发布载荷 |
 | 老板驾驶舱、专业工作台 | QML（`ui/qml/`，`main.py gui`、`gui --advanced`） | 进发布载荷；总控屏计划作为唯一主界面，这两套退为高级入口（见 `scripts/cockpit_board/README.md`） |
 
-**CI（`.github/workflows`）**：`pr-gate`、`safety-gate`、`rules-gate`、`reviews-tools-ci`、`sw008-ci`（驾驶舱全量测试，按路径触发，改受保护清单的 PR 要手动触发）、`plc-ci`、`plc-tool-ci`、`root-tests`、`hook-replay`、`ci-aggregate`、`release-pregate`、`sample-drill`、`bat-guard`、`gitignore-guard`。
+**CI（`.github/workflows`）**：`pr-gate`、`safety-gate`、`rules-gate`、`reviews-tools-ci`、`sw008-ci`（驾驶舱全量测试，按路径触发，改受保护清单的 PR 要手动触发）、`plc-ci`、`root-tests`、`hook-replay`、`ci-aggregate`、`release-pregate`、`sample-drill`、`bat-guard`、`gitignore-guard`。
 
 ## 8. 质量保障
 
