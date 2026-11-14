@@ -21,6 +21,7 @@
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 多 agent 工位与控制根规则 | 本文件“多 agent 工位与控制根规则 (WS-001)”一节 |
 | 流程分三条线、快线和退回 | 本文件“流程分三条线 (FLOW-001)”一节 |
+| 进门三步、日常先走的两条流程、交接记录、单条命令清单 | 本文件“先走流程，单条命令当点动 (FLOW-002)”一节 |
 | 独立审计（任何 agent 通用） | 本文件“独立审计 (AUD-001)”一节；脚本 `reviews/tools/audit_pr.py`，清单 `reviews/21_audit_checklist.md` |
 | 全栈执行 | `roles/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `roles/plc-electrical-engineer/SKILL.md` |
@@ -76,6 +77,111 @@
    - 谁说了算：谁都可以提出。快线改动的退回 PR，用户一句话（或用户自己点 Revert）就合，不另开变更单；标准线、全流程的退回要用户明说。审计只核“退回 PR 的内容确实只是那次合并的反向”。
    - 边界：退回只管仓库里的文件。账本里的状态、已经装到用户电脑上的发布不会跟着退，那两样各用自己的回退命令。退回之后想重新上，另开一个新 PR。
 5. **用户怎么批（用户 2026-11-13 定）**：不设批准口令。看板上有对应按钮的，用户在看板上点按钮，留下谁在何时点的；还没有按钮的，仍由用户本人在本机主对话里亲口说，agent 在用户说了之后带上那句话的位置去执行。agent 不能自己决定批，也不能替用户点看板上的按钮。本文件里“已启用批准口令时……”的句子只在口令真被启用时适用；现在没有启用，也不安排启用。
+
+## 先走流程，单条命令当点动 (FLOW-002，用户 2026-11-14 00:56Z 提出)
+
+用户原话：“散装的功能不连起来，越到后面越记不住，没有使用，最后换个对话估计命令都找不到了。”
+
+像设备一样：正常生产走自动流程，点动只在维修和调试时用。agent 日常先走下面两条流程，流程里没有的事才查点动清单。流程只把已有命令按顺序串起来，不加新动作；会改状态的步骤都是停点。
+
+两条流程由 `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/pm_flows.py` 一条命令跑（在控制根，用控制根 `.venv` 里的 Python）：`pm_flows.py checkup <项目编号>`、`pm_flows.py closeout <项目编号> --mission-id <卡号> [--done <停点名>]`。步骤以脚本为准，下面两张表是写本节时的顺序，脚本加了步骤就按脚本的；脚本用不了时，按表在控制根逐条手敲 `main.py …`，顺序相同。这个脚本不在发布载荷里，控制根的 `main` 拉到最新就是最新的。
+
+### 进门三步（新对话、换班接手都照做，全程只读）
+
+1. 跑流程一“项目体检”，看项目现在什么情况。
+2. `main.py claim list` 看占位表，找出登记路径落在本项目目录里的卡。
+3. 对这样的每张卡跑 `main.py claim log <卡号>`，读交接记录最后三行：最后一笔是谁交给谁、下一棒做什么、先读哪些文件。先读完那些文件，再向用户报告，不要直接动手。
+
+报 `No such command 'log'` 说明本机生效的发布版本还没有交接记录命令：照实告诉用户，不要绕过去。
+
+### 流程一：项目体检（全程只读，没有停点）
+
+进门定位后、动手前、交卷前各跑一次。每一步都跑完，哪一步红了也接着跑，最后列小结：每步通过、红或跳过，红的写出整条命令和退出码。有红的照原样报告，不照输出里建议的修复命令去跑（如 `--fix`、`doc sync`）。没有账本的克隆（云端会话）第 3 步会红，那是查不到账本，不是项目有问题。
+
+| 步 | 命令 | 说明 |
+|---|---|---|
+| 1 | `pm orient <项目编号>` | 定位 |
+| 2 | `pm control-root-status <项目编号>` | 控制根状态 |
+| 3 | `pm missions --pid <项目编号>` | 开着的卡 |
+| 4 | `ledger reconcile <项目编号>` | 不加 `--fix`；有差异退出 2 |
+| 5 | `plc check <项目编号>` | 只 PLC 项目；不加 `--fix` |
+| 6 | `doc check` | |
+| 7 | `plc docs check <项目编号>` | 只 PLC 项目 |
+| 8 | `prototype check --pid <项目编号>` | 只 PLC 项目 |
+| 9 | 命令总目录 | 脚本现场生成；手敲时看 `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/06_交付物/003_命令总目录_COMMANDS.md` |
+
+### 流程二：交卷到收口（全流程、标准线；一步红就停）
+
+| 步 | 命令 | 谁来做 |
+|---|---|---|
+| 1 | `pm acceptance-scan --pid <项目编号>` | agent |
+| 2 | `pm control-root-status <项目编号>` | agent |
+| 3 | `pm verify --mission-id <卡号> --lease-wallet` | **停**：用户说“同意 <卡号> 交卷验证”后 agent 跑 |
+| 4 | `pm missions --pid <项目编号>` | agent |
+| 5 | `pm accept --mission-id <卡号>` | **停，只有用户本人**：看板点“确认验收”（验收和收口一步做完），或在自己的终端跑 |
+| 6 | `pm close --mission-id <卡号>` | **停**：用户说“同意 <卡号> 收口”后 agent 跑；看板已一步收口的跳过 |
+| 7 | `pr settle-scan <项目编号>` | agent；输出里有变更单号 |
+| 8 | `change transition <变更单号> --to completed --pid <项目编号>` | **停，只有用户本人，agent 永远不跑**：看板“决定”页点“推到完成”；看板上还没有这个按钮时，用户在本机主对话里说“把 <变更单号> 推到完成” |
+| 9 | `ledger reconcile <项目编号>` | agent；不加 `--fix` |
+| 10 | `worktree close <你的名字>` | **停**：用户说“同意收工位”后 agent 跑 |
+
+停下后接着走：那一步做完，在原命令后加 `--done <停点名>`（verify、accept、close、transition、worktree）。
+
+### 快线收尾（FLOW-001 第 3 条，没有停点）
+
+快线没有卡、Run 和租约，不走流程二：PR 经 CI 全绿、独立审计通过合并后，当天告诉用户一行（PR 号、改了什么、怎么退）；用 `change create --retrofit --pid <项目编号>` 补单（一批小改可合补一张）；再跑 `pr settle-scan <项目编号>` 和 `worktree close <你的名字>`。
+
+### 交接记录（`claim note`、`claim log`）
+
+一张卡从起草到收口要换很多次手。每次换手，交出去的人在这张卡上记一笔，接手的人先读再干，不靠聊天记录传话。
+
+1. **什么时候记**：把卡交给另一个 agent、另一个对话或用户之前（起草完、预核完、建单后、开 PR 后、交卷、审计完、搁置），以及接手之后（`--kind takeover`）。命令是 `main.py claim note <卡号> --kind <种类> --to <交给谁> --next <下一步> [--read-first <文件>]…`，种类和必填项看 `claim note --help`。
+2. **只记引用和下一步，不记状态**：文件路径（哈希由命令算）、提交号、PR 号、变更单号、结论、下一步、先读什么。写“已批准、已完成、已验收、已合并”这类状态词会被拒。卡的状态看项目体检和占位表，交接记录里的话不能当状态用。
+3. **交接记录不是批准**：记录里的“请用户说”只是提示。批准、验收、推到完成仍照本文件其他各节，由用户本人做。
+4. **记之前先有占位**：没订卡的先 `claim number` 领号或 `claim open` 订卡，一个号用到底。记录只追加，不改不删；持有人以外的人也能记（预核、审计、接手本来就是别人记），记的人如实留名，不冒用别人的名字。
+5. **断网记不上**：命令会拒，也不存本机；联网后原样重记，不要改记到别处。
+
+### 卡号写进分支名和提交说明
+
+状态按 Git 上的事实现算，认卡号靠两样：分支名 `<前缀><卡号>`（见 WS-001 的前缀表），和提交说明里单独一行 `领卡占位: <卡号>`（和 D-101 要求写在 PR 描述里的是同一行）。实施卡的 PR 里至少有一个提交带这一行。合并的人（独立审计或用户）用 GitHub 默认的合并标题（`Merge pull request #N from <账号>/<分支名>`），不要改写标题。两样都没有的合并，算不到这张卡头上。
+
+### 点动（单条命令）
+
+一共 224 条，分三档：必须知道 74 条（自己用 55 条，只能请用户做 19 条），需要时查 90 条，不该用 60 条。全部命令、谁能跑、会不会写，见 `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/06_交付物/003_命令总目录_COMMANDS.md`。命令增减后以命令总目录为准，本节的条数在下一次改本文件时更正。
+
+**必须知道：自己用的 55 条**。“不写”的随时可跑；“写”的只在本节和 FLOW-001 说可以的时候跑。`gate precheck` 不写账本和工作树，但跑得久、占内存，算重任务。
+
+| 场合 | 不写 | 写 |
+|---|---|---|
+| 进门定位 | `pm orient`（旧版本用 `pm resume`）、`pm missions`、`pm triage`、`project list`、`project show`、`context resolve`、`doctor` | — |
+| 开工占位和工位 | `claim list`、`worktree list` | `claim number`、`claim open`、`claim renew`、`claim add-paths`、`claim release`（PR 没合不放）、`worktree open`、`worktree close` |
+| 干活中自检 | `gate precheck`、`plc check`（不加 `--fix`；会刷新上下文缓存）、`plc docs check`、`doc check`、`prototype check`、`role check` | `python check`（命令分类记为写） |
+| 变更单和实施卡 | `change list`、`change show`、`implementation-card precheck`、`implementation-card validate`、`implementation-card by-change` | `change create`、`change edit`（变更单只在本机建） |
+| 需求入口和计划 | `pm inbox list`、`pm inbox show`、`pm drafts`、`pm pending` | `pm inbox add`、`pm plan` |
+| 交卷、收口、交接 | `pr settle-scan`、`pr ready`、`ledger reconcile`（不加 `--fix`）、`claim log` | `pm verify`、`pm close`、`pr open`、`pm handoff`、`pm takeover`、`claim note` |
+| 出事了先看 | `release status`、`project recycle-list`、`continuity list-backups`、`continuity verify-backup`、`continuity recovery plan`、`pm recover-status`、`pm control-root-status` | `pm recover` |
+
+**只能请用户做的 19 条**（和上面 55 条合起来就是“必须知道”的 74 条）：知道有这些，好告诉用户“这一步要你来”；自己不跑、不代填、不替用户点看板按钮。
+
+| 场合 | 命令 |
+|---|---|
+| 批准和开工 | `pm approve`、`pm confirm-start`、`pm inbox confirm`、`pm inbox reject`、`decision create` |
+| 验收、搁卡、收占位 | `pm accept`（日常是看板“确认验收”）、`pm park`（带凭据时）、`pm unpark`、`pm switch`、`claim reclaim` |
+| 项目、发版、账本 | `project archive`、`project reactivate`、`project delete`、`project restore`、`release deploy`、`release rollback`、`continuity restore-backup` |
+| 租约和风险 | `continuity lease extend-hold`、`pm sign-risk` |
+
+变更单批准（`change transition … approved`）和推到完成，看板上有按钮的由用户点按钮；还没有按钮的由用户在本机主对话里亲口说（FLOW-001 第 5 条）。
+
+**需要时查（90 条）**：不在这里列，名字、谁能跑、会不会写都在上面那页命令总目录里，用法看 `--help`。用之前记住这六条：
+
+1. `plc docs sync` 补出来的行带“待确认”，要人确认后才算数。
+2. `plc ingest` 先带 `--stage-only`。
+3. 全量门禁（`gate run`、`long-run start`）要先告诉用户，内存总闸只有用户能动。
+4. `pm retire` 默认只预演。
+5. `decision list` 写本节时会报“决策包列表包含无效文件”，修好再用。
+6. `spec lint` 在用户那台电脑以外必报错（注册表里写死了那台电脑的路径）。
+
+**不该用的 60 条**（不列名字，碰上就停下问）：旧交接包、`pm-session`、`workflow` 旧名、启动挂起执行器的 `pm context`/`pm workflow`/`pm execute`、三条单独推状态的 `continuity … transition` 和 `lease run-with-renewal`（本文件已禁）、由提交钩子自动调用的 `git-hook` 4 条和 `worktree heartbeat`、`constraint guard`/`constraint verify`、已知有害的 `project snapshot`/`plc repair`/`template update`/`doc sync`/`spec sync`、6 条清旧数据的一次性命令、2 条 `orchestration`、旧格式实施卡的 `implementation-card create`/`dispatch`/`verify`/`approve`（只服务旧格式卡；新格式卡用表里的 `precheck`、`validate`、`by-change`）、批准口令的 `pm approver-pin init`/`status`（口令不做）。
 
 ## 子代理物理隔离法则（执行权剥离）
 
