@@ -391,6 +391,8 @@ class CockpitWindow(QMainWindow):
         wanted += [p.project_id for p in self.board.projects if getattr(p, "asks", None)]  # 只有等批准范围卡、还没有卡的项目也要读（CHG-SCPT-2026-639）
         project_ids = list(dict.fromkeys(wanted))[:DECISION_PROJECT_LIMIT]
         missions = [m for p in self.board.projects for m in p.missions]
+        # 变更单已随账本读进来，不另起命令；交给控制器记着，refresh 的两个参数不变
+        self.decisions.changes = tuple((p.project_id, o) for p in self.board.projects for o in getattr(p, "change_orders", ()))
         self.decisions.refresh(project_ids, missions)
 
     def new_project(self) -> None:

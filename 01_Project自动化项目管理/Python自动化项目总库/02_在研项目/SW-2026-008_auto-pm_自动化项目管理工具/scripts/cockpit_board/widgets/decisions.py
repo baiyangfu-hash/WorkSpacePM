@@ -1,4 +1,4 @@
-"""“决定”页：批准范围、确认开工、确认验收、收口、搁着、拿回、插急活、确认/驳回入箱。
+"""“决定”页：批准变更单、推到完成、批准范围、确认开工、确认验收、收口、搁着、拿回、插急活、确认/驳回入箱。
 
 每个按钮点开一个确认对话框，对话框里先写清“会发生什么”和“等价的命令行”，用户再点“确认并运行”。
 命令怎么拼见 decisions.py；真正起子进程在 actions.py。这里只画和发信号，不算业务、不起子进程。
@@ -43,9 +43,10 @@ class ConfirmDialog(QDialog):
 
     def __init__(self, decision: Decision, target: Target, pin_enforced: bool,
                  preview: Callable[[Mapping[str, str]], str], on_copy: Callable[[str], None],
-                 parent: QWidget | None = None) -> None:
+                 parent: QWidget | None = None, *, blocked: str = "") -> None:
         super().__init__(parent)
         self.decision, self.target, self.preview, self.on_copy = decision, target, preview, on_copy
+        self.blocked = blocked if decision.human_only else ""  # 非空：只许你本人点的按钮，这里确认键一直灰着
         self.via_terminal = pin_enforced and decision.pin
         self.command_text = ""
         self.inputs: dict[str, QLineEdit | QPlainTextEdit] = {}
@@ -55,7 +56,7 @@ class ConfirmDialog(QDialog):
         outer = QVBoxLayout(self)
         outer.setSpacing(theme.SPACE)
         outer.addWidget(c.label(decision.label, "title", wrap=False))
-        outer.addWidget(c.label(target.title or target.mission_id or target.request_id or target.item_id, "section"))
+        outer.addWidget(c.label(target.title or target.change_id or target.mission_id or target.request_id or target.item_id, "section"))
         outer.addWidget(c.label(decision.summary))
         if decision.danger:
             frame = QFrame()
@@ -70,6 +71,8 @@ class ConfirmDialog(QDialog):
                 box.setFixedHeight(64)
             box.setPlaceholderText(item.hint)
             box.setObjectName(f"field_{item.key}")
+            if item.default:
+                box.setPlainText(item.default) if isinstance(box, QPlainTextEdit) else box.setText(item.default)
             box.textChanged.connect(self._refresh)
             self.inputs[item.key] = box
             outer.addWidget(box)
@@ -78,6 +81,8 @@ class ConfirmDialog(QDialog):
         outer.addWidget(self.command_label)
         self.problem = c.label("", "muted")
         outer.addWidget(self.problem)
+        if self.blocked:
+            outer.addWidget(c.label(self.blocked, "small"))
         if self.via_terminal:
             outer.addWidget(c.label("批准口令已生效：点下面的键会弹出一个新的终端窗口，口令只在那个窗口里输入，本程序看不到。", "small"))
         row = QHBoxLayout()
@@ -107,7 +112,7 @@ class ConfirmDialog(QDialog):
             self.command_text, ok, message = "", False, str(error)
         self.command_label.setText(self.command_text or "（填好后显示）")
         self.problem.setText(message)
-        self.run_button.setEnabled(ok)
+        self.run_button.setEnabled(ok and not self.blocked)
         self.copy_button.setEnabled(ok)
 
 
@@ -158,6 +163,8 @@ class DecisionsPage(QWidget):
                 lay.addWidget(c.label("没读到全部数据，不能说“没有要你决定的事”；原因见上面的红条。", "muted"))
             else:
                 lay.addWidget(c.label("现在没有要你决定的事。", "muted"))
+        for note in vm.notes:
+            lay.addWidget(c.label(note, "small"))
         column = ""
         for card in vm.cards:
             if card.column != column:
@@ -179,9 +186,13 @@ class DecisionsPage(QWidget):
         for decision in card.decisions:
             item = c.button(decision.label, "", decision.summary)
             item.setProperty("decision", decision.key)
+            if decision.human_only and card.blocked:
+                item.setEnabled(False)
             item.clicked.connect(lambda _checked=False, d=decision, t=card.target: self.open_dialog(d, t))
             buttons.append(item)
         inner.addWidget(c.hrow(*buttons, 1))
+        if card.blocked and any(d.human_only for d in card.decisions):
+            inner.addWidget(c.label(card.blocked, "small"))
         return frame
 
     def _read_failure_bar(self, bad: ReadFailure) -> QFrame:
@@ -225,7 +236,7 @@ class DecisionsPage(QWidget):
         pin = self.vm.pin_mode == "enforced"
         dialog = ConfirmDialog(decision, target, pin,
                                lambda values: self.preview(decision, target, values, self.approver(), pin),
-                               self.on_copy, self)
+                               self.on_copy, self, blocked=self.vm.blocked)
         self.last_dialog = dialog
         if run and dialog.exec() == QDialog.DialogCode.Accepted:
             self.run_requested.emit(decision, target, dialog.values(), dialog.via_terminal)
