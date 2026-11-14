@@ -13,7 +13,7 @@
 | DEV-210 | 210_Python编程规范_DEV.md | V1.2.0 | Python编程规范 | 🟡配套 |
 | DEV-211 | 211_Python代码审查规范_DEV.md | V1.0.0 | Python代码审查规范 | 🟡配套 |
 | INT-215 | 215_Python接口文档模板_INT.md | V1.0.0 | Python接口文档模板 | 🟡配套 |
-| DEV-220 | 220_Python项目打包规范_DEV.md | V2.4.0 | Python项目打包规范 | 🟡配套 |
+| DEV-220 | 220_Python项目打包规范_DEV.md | V2.4.1 | Python项目打包规范 | 🟡配套 |
 
 ## 已废弃规范（Deprecated）
 
