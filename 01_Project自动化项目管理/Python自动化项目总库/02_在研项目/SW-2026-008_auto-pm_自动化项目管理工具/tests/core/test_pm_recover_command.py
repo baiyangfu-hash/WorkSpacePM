@@ -235,6 +235,7 @@ def _resume_stub(run_state: str | None) -> Any:
         residue=(),
         exit_hints=(),
         intake=SimpleNamespace(is_empty=True),
+        notes=SimpleNamespace(is_empty=True),
         read_set=(),
         query=None,
     )

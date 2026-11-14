@@ -78,6 +78,7 @@ class CommandSpec:
 
 COMMANDS: dict[str, CommandSpec] = {
     "change create": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",)),
+    "pm inbox note": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "记一条待整理记录（一句话和原话）；不改当前焦点"),
     "worktree release": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "收自己对话的别名工位，先存救援引用"),
     "worktree heartbeat": CommandSpec(CommandKind.NORMAL, (), (), "只刷新自己工位的心跳记录，不写账本"),
     "worktree who": CommandSpec(CommandKind.NORMAL, (), (), "列出本机在场会话；只读，唯一的写入是本会话自己的在场记录（.auto-pm/presence），不写账本"),

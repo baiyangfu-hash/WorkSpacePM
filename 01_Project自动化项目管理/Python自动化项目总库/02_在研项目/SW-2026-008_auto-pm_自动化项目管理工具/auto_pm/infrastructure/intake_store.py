@@ -20,14 +20,19 @@ from auto_pm.contracts.intake import (
     IntakeBrief,
     IntakeClassification,
     IntakeItem,
+    IntakeKind,
+    IntakeNote,
+    IntakeNoteSummary,
     IntakeStatus,
     IntakeSummary,
+    NoteStatus,
     TriageTicket,
 )
 from auto_pm.contracts.pm_facade import PlanningScopeCard
 from auto_pm.infrastructure.continuity_store import (
     INTAKE_BINDINGS_DDL,
     INTAKE_ITEMS_DDL,
+    INTAKE_NOTES_DDL,
     ContinuityStore,
     ContinuityStoreError,
 )
@@ -51,6 +56,7 @@ class IntakeStore(ContinuityStore):
                 raise ContinuityStoreError("Continuity Store 尚未初始化，拒绝创建收件箱表")
             conn.execute(INTAKE_ITEMS_DDL)
             conn.execute(INTAKE_BINDINGS_DDL)
+            conn.execute(INTAKE_NOTES_DDL)
             yield conn
 
     @staticmethod
@@ -85,6 +91,170 @@ class IntakeStore(ContinuityStore):
             (item.status.value, payload, now, item.item_id),
         )
 
+    @staticmethod
+    def _note_from_json(raw: object) -> IntakeNote:
+        try:
+            return IntakeNote.model_validate_json(str(raw))
+        except ValueError as error:
+            raise ContinuityStoreError("待整理记录无法读取") from error
+
+    @staticmethod
+    def _store_note(conn: sqlite3.Connection, note: IntakeNote, now: str, *, seq: int = 0) -> None:
+        payload = note.model_dump_json()
+        if seq:
+            conn.execute(
+                "INSERT INTO intake_notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    note.note_id,
+                    note.request_id,
+                    note.project_id,
+                    seq,
+                    _title_key(note.title),
+                    note.status.value,
+                    payload,
+                    note.item_id or None,
+                    now,
+                    now,
+                ),
+            )
+            return
+        conn.execute(
+            "UPDATE intake_notes SET status=?, note_json=?, item_id=?, updated_at=? WHERE note_id=?",
+            (note.status.value, payload, note.item_id or None, now, note.note_id),
+        )
+
+    def add_note(
+        self,
+        *,
+        request_id: str,
+        project_id: str,
+        title: str,
+        original_words: str,
+        kind_hint: IntakeKind,
+        recorded_by: str,
+    ) -> tuple[IntakeNote, bool]:
+        """Record one raw note; a replay of the same request with the same content returns it with ``False``."""
+
+        now = self._utc_now().isoformat()
+        with self._intake_transaction() as conn:
+            seq = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM intake_notes WHERE project_id=?",
+                    (project_id,),
+                ).fetchone()[0]
+            )
+            try:
+                note = IntakeNote(
+                    note_id=f"NOTE-{project_id}-{seq:04d}",
+                    request_id=request_id,
+                    project_id=project_id,
+                    title=title,
+                    original_words=original_words,
+                    kind_hint=kind_hint,
+                    recorded_by=recorded_by,
+                    created_at=now,
+                )
+            except ValueError as error:
+                raise ContinuityStoreError(str(error)) from error
+            existing = conn.execute(
+                "SELECT note_json FROM intake_notes WHERE request_id=?", (request_id,)
+            ).fetchone()
+            if existing is not None:
+                stored = self._note_from_json(existing["note_json"])
+                if (stored.project_id, stored.title, stored.original_words, stored.kind_hint) != (
+                    note.project_id,
+                    note.title,
+                    note.original_words,
+                    note.kind_hint,
+                ):
+                    raise ContinuityStoreError("request_id 已绑定不同内容，拒绝覆盖既有待整理记录")
+                return stored, False
+            key = _title_key(note.title)
+            clash = conn.execute(
+                "SELECT note_id FROM intake_notes WHERE project_id=? AND title_key=? AND status='RAW'",
+                (project_id, key),
+            ).fetchone()
+            if clash is not None:
+                raise ContinuityStoreError(f"已有同名待整理记录: {clash['note_id']}")
+            clash = conn.execute(
+                """SELECT item_id FROM intake_items
+                WHERE project_id=? AND title_key=? AND status IN ('PROPOSED', 'CONFIRMED')""",
+                (project_id, key),
+            ).fetchone()
+            if clash is not None:
+                raise ContinuityStoreError(f"已有同名未处理条目: {clash['item_id']}")
+            self._store_note(conn, note, now, seq=seq)
+            self._append_event(
+                conn,
+                note.note_id,
+                "INTAKE_NOTE_RECORDED",
+                {
+                    "note_id": note.note_id,
+                    "request_id": request_id,
+                    "project_id": project_id,
+                    "kind_hint": note.kind_hint.value,
+                    "recorded_by": recorded_by,
+                },
+                f"intake-note-record:{request_id}",
+                now,
+                aggregate_type="intake_note",
+            )
+            return note, True
+
+    def list_notes(
+        self, project_id: str, statuses: tuple[NoteStatus, ...] = (NoteStatus.RAW,)
+    ) -> tuple[IntakeNote, ...]:
+        """List the notes of one project in the order they were recorded.  Read-only: creates neither ledger nor table."""
+
+        if not self.db_path.is_file():
+            return ()
+        with self._read_connection() as conn:
+            if not self._table_exists(conn, "intake_notes"):
+                return ()
+            rows = conn.execute(
+                "SELECT note_json, status FROM intake_notes WHERE project_id=? ORDER BY seq",
+                (project_id,),
+            ).fetchall()
+        wanted = {status.value for status in statuses}
+        return tuple(
+            self._note_from_json(row["note_json"]) for row in rows if str(row["status"]) in wanted
+        )
+
+    def note_summary(self, project_id: str) -> IntakeNoteSummary:
+        """Count the raw notes of one project and name the oldest.  Read-only like ``list_notes``."""
+
+        notes = self.list_notes(project_id)
+        if not notes:
+            return IntakeNoteSummary()
+        oldest = notes[0]
+        return IntakeNoteSummary(
+            waiting=len(notes),
+            oldest_note_id=oldest.note_id,
+            oldest_recorded_by=oldest.recorded_by,
+            oldest_created_at=oldest.created_at,
+        )
+
+    def _note_to_triage(
+        self, conn: sqlite3.Connection, note_id: str, project_id: str, ticket: TriageTicket
+    ) -> IntakeNote:
+        """The three hard rules of ``--from-note``, judged inside the writing transaction."""
+
+        row = conn.execute("SELECT note_json FROM intake_notes WHERE note_id=?", (note_id,)).fetchone()
+        if row is None:
+            raise ContinuityStoreError(f"待整理记录不存在: {note_id}")
+        note = self._note_from_json(row["note_json"])
+        if note.project_id != project_id:
+            raise ContinuityStoreError(
+                f"待整理记录 {note_id} 属于项目 {note.project_id}，和 --project-id {project_id} 不一致"
+            )
+        if note.status is not NoteStatus.RAW:
+            raise ContinuityStoreError(f"待整理记录 {note_id} 已经转成 {note.item_id}，不能再转一次")
+        if ticket.original_words != note.original_words:
+            raise ContinuityStoreError(
+                f"--original-words 和待整理记录 {note_id} 里的原话不逐字相同，拒绝转正；整理的人不能改原话"
+            )
+        return note
+
     def add_item(
         self,
         *,
@@ -94,8 +264,13 @@ class IntakeStore(ContinuityStore):
         classification: IntakeClassification,
         ticket: TriageTicket,
         proposed_by: str,
+        from_note: str = "",
+        triaged_by: str = "",
     ) -> tuple[IntakeItem, bool]:
-        """Record one proposed item; a replay of the same request returns it with ``False``."""
+        """Record one proposed item; a replay of the same request returns it with ``False``.
+
+        With ``from_note`` the raw note is turned into this item in the same transaction: either both are written or neither.
+        """
 
         try:
             wanted_hash = IntakeItem.hash_for(project_id, title, classification, ticket)
@@ -112,7 +287,18 @@ class IntakeStore(ContinuityStore):
                     item.ticket_hash, wanted_hash
                 ):
                     raise ContinuityStoreError("request_id 已绑定不同内容，拒绝覆盖既有收件箱条目")
+                if from_note:
+                    row = conn.execute(
+                        "SELECT item_id FROM intake_notes WHERE note_id=?", (from_note,)
+                    ).fetchone()
+                    if row is None:
+                        raise ContinuityStoreError(f"待整理记录不存在: {from_note}")
+                    if str(row["item_id"] or "") != item.item_id:
+                        raise ContinuityStoreError(
+                            f"request_id 已经记成 {item.item_id}，它不是由待整理记录 {from_note} 转来的，拒绝"
+                        )
                 return item, False
+            note = self._note_to_triage(conn, from_note, project_id, ticket) if from_note else None
             clash = conn.execute(
                 """SELECT item_id FROM intake_items
                 WHERE project_id=? AND title_key=? AND status IN ('PROPOSED', 'CONFIRMED')""",
@@ -120,6 +306,15 @@ class IntakeStore(ContinuityStore):
             ).fetchone()
             if clash is not None:
                 raise ContinuityStoreError(f"已有同名未处理条目: {clash['item_id']}")
+            clash = conn.execute(
+                """SELECT note_id FROM intake_notes
+                WHERE project_id=? AND title_key=? AND status='RAW' AND note_id<>?""",
+                (project_id, _title_key(title), from_note),
+            ).fetchone()
+            if clash is not None:
+                raise ContinuityStoreError(
+                    f"已有同名待整理记录: {clash['note_id']}；要转正它请加 --from-note {clash['note_id']}"
+                )
             seq = int(
                 conn.execute(
                     "SELECT COALESCE(MAX(seq), 0) + 1 FROM intake_items WHERE project_id=?",
@@ -157,6 +352,34 @@ class IntakeStore(ContinuityStore):
                 now,
                 aggregate_type="intake_item",
             )
+            if note is not None:
+                try:
+                    triaged = IntakeNote.model_validate(
+                        {
+                            **note.model_dump(mode="json"),
+                            "status": NoteStatus.TRIAGED.value,
+                            "item_id": item.item_id,
+                            "triaged_by": triaged_by,
+                            "triaged_at": now,
+                        }
+                    )
+                except ValueError as error:
+                    raise ContinuityStoreError(str(error)) from error
+                self._store_note(conn, triaged, now)
+                self._append_event(
+                    conn,
+                    note.note_id,
+                    "INTAKE_NOTE_TRIAGED",
+                    {
+                        "note_id": note.note_id,
+                        "item_id": item.item_id,
+                        "project_id": project_id,
+                        "triaged_by": triaged_by,
+                    },
+                    f"intake-note-triage:{note.note_id}:{item.item_id}",
+                    now,
+                    aggregate_type="intake_note",
+                )
             return item, True
 
     def get_item(self, item_id: str) -> IntakeItem:

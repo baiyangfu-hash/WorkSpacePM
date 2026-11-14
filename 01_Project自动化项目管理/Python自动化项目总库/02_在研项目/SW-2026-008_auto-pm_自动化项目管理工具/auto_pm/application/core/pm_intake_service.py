@@ -17,7 +17,9 @@ from auto_pm.contracts.intake import (
     IntakeClassification,
     IntakeItem,
     IntakeKind,
+    IntakeNote,
     IntakeStatus,
+    NoteStatus,
     TriageTicket,
     UrgentCriterion,
     parse_evidence,
@@ -112,8 +114,14 @@ class PmIntakeService:
         classification: IntakeClassification,
         ticket: TriageTicket,
         proposed_by: str,
+        from_note: str = "",
+        triaged_by: str = "",
     ) -> tuple[IntakeItem, bool]:
-        """Record one proposed item; the second value is False when this was a replay."""
+        """Record one proposed item; the second value is False when this was a replay.
+
+        ``from_note`` turns that raw note into the item in the same store transaction; ``triaged_by`` is who the command
+        saw in its environment, never what the caller states.
+        """
 
         try:
             self._changes.next_change_number(project_id, classification.domain)
@@ -134,7 +142,43 @@ class PmIntakeService:
                 classification=classification,
                 ticket=ticket,
                 proposed_by=proposed_by,
+                from_note=from_note,
+                triaged_by=triaged_by,
             )
+        except ContinuityStoreError as error:
+            raise PmIntakeError(str(error)) from error
+
+    def note(
+        self,
+        *,
+        request_id: str,
+        project_id: str,
+        title: str,
+        original_words: str,
+        kind_hint: IntakeKind,
+        recorded_by: str,
+    ) -> tuple[IntakeNote, bool]:
+        """Record one raw note (one sentence and the original words); False means this was a replay."""
+
+        try:
+            return self._store.add_note(
+                request_id=request_id,
+                project_id=project_id,
+                title=title,
+                original_words=original_words,
+                kind_hint=kind_hint,
+                recorded_by=recorded_by,
+            )
+        except ContinuityStoreError as error:
+            raise PmIntakeError(str(error)) from error
+
+    def list_notes(
+        self, project_id: str, statuses: tuple[NoteStatus, ...] = (NoteStatus.RAW,)
+    ) -> tuple[IntakeNote, ...]:
+        """List the notes of one project in the order they were recorded; read-only."""
+
+        try:
+            return self._store.list_notes(project_id, statuses)
         except ContinuityStoreError as error:
             raise PmIntakeError(str(error)) from error
 

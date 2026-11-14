@@ -56,7 +56,8 @@ ADVICE_OPEN_WORK = (
 )
 ADVICE_INBOX = (
     "怎么办：先把这些条目处理掉再归档——待确认的由用户确认（pm inbox confirm）或拒绝（pm inbox reject），"
-    "已确认的排进计划或拒绝；pm inbox list 能看全部"
+    "已确认的排进计划或拒绝；待整理记录请 AI 先整理成正式条目（pm inbox add --from-note <NOTE-ID>），"
+    "再由用户确认或拒绝；pm inbox list 能看全部"
 )
 #: 开着的卡那一项的原因来自 ``open_work_blockers``（和 project delete 共用，不改它的文字），状态码是英文；
 #: 归档时在“怎么办”后面把出现了的状态码用中文注一遍。
@@ -192,16 +193,21 @@ def accepted_blockers(control_root: str | Path, project_id: str) -> list[str]:
 
 
 def inbox_blockers(control_root: str | Path, project_id: str) -> list[str]:
-    """Open inbox items of the project (PROPOSED 待确认 and CONFIRMED 待处理); an unreadable inbox also blocks."""
+    """Open inbox items (PROPOSED 待确认, CONFIRMED 待处理) and raw notes of the project; anything unreadable also blocks."""
 
     try:
         items = PmIntakeService(control_root).list_items(project_id)
     except Exception as error:  # 读不出来一律不放行
         return [f"读不出收件箱，无法确认有没有待处理条目：{error}"]
-    return [
+    found = [
         f"收件箱条目 {item.item_id}（{item.status.value} {INBOX_STATUS_LABELS.get(item.status.value, '待处理')}）：{item.title}"
         for item in items
     ]
+    try:  # D-357: a raw note is somebody's words nobody has looked at yet; it blocks like an open item (a triaged one does not)
+        notes = PmIntakeService(control_root).list_notes(project_id)
+    except Exception as error:  # 读不出来一律不放行
+        return [*found, f"读不出待整理记录，无法确认有没有还没整理的：{error}"]
+    return [*found, *(f"待整理记录 {note.note_id}（还没整理成正式条目）：{note.title}" for note in notes)]
 
 
 def open_change_hints(workspace_root: str | Path, project_id: str) -> list[str]:
