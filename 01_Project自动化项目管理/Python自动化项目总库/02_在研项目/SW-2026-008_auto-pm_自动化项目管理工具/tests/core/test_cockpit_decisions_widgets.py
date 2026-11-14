@@ -666,9 +666,10 @@ def test_cancelling_the_dialog_runs_nothing(qapp: QApplication, tmp_path: Path, 
     assert got == [] and not any("--confirm" in call for call in fake.calls)
 
 
-def test_dry_run_and_confirm_pass_the_agent_markers_through_untouched(
+def test_dry_run_passes_the_agent_markers_through_untouched_and_the_board_refuses_the_confirm(
         qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """验收第 7 条（预演、确认两次）：子进程的环境里 AUTO_PM_AGENT、CLAUDECODE 都在、值没变；看板不替命令摘掉 agent 标记。"""
+    """验收第 7 条：子进程的环境里 AUTO_PM_AGENT、CLAUDECODE 都在、值没变，看板不替命令摘掉 agent 标记。
+    M8 的 8.1 起：带标记打开的看板，“确认归档”这种只许你本人点的按钮看板自己就不运行（确认框的确认键灰着，控制器再拦一道）。"""
     monkeypatch.setenv("AUTO_PM_AGENT", "trae:cn")
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("CODEX_SANDBOX", "seatbelt")
@@ -677,11 +678,146 @@ def test_dry_run_and_confirm_pass_the_agent_markers_through_untouched(
     controller = _lifecycle(tmp_path, fake)
     controller.probe_lifecycle()
     _wait(controller, qapp)
-    controller.confirm_project(_dry(controller, qapp), "", lambda _r: None)
+    got: list[actions.Receipt] = []
+    dialog = controller.confirm_project(_dry(controller, qapp), "", got.append)
     _wait(controller, qapp)
-    assert len(fake.envs) == 6 and fake.calls[-2:] != []  # 三条探测、口令状态、预演、确认
-    assert any("--confirm" in call for call in fake.calls)
+    assert len(fake.envs) == 5  # 三条探测、口令状态、预演；确认没有起进程
+    assert not any("--confirm" in call for call in fake.calls)
+    assert not dialog.run_button.isEnabled() and "AUTO_PM_AGENT" in dialog.blocked
+    assert got and got[-1].command == "(未运行)" and got[-1].rc == 1
     for env in fake.envs:
         assert (env["AUTO_PM_AGENT"], env["CLAUDECODE"], env["CODEX_SANDBOX"]) == ("trae:cn", "1", "seatbelt")
         extra = {"PYTHONUTF8", "PYTHONIOENCODING"}
         assert {k: v for k, v in env.items() if k not in extra} == {k: v for k, v in os.environ.items() if k not in extra}
+
+
+def test_the_users_own_board_started_like_the_bat_can_read_the_markers_and_is_not_locked_out(tmp_path: Path) -> None:
+    """你本人双击 bat：新进程、sys.path 里只有 scripts 目录、环境里没有任何 AI 标记。看板要认得出“这是人”（返回空），不能落进“认不出”。"""
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    env = {k: v for k, v in os.environ.items() if k not in AGENT_MARKERS and k != "PYTHONPATH"}
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); from cockpit_board import actions, decisions; "
+            "m = actions.board_agent_markers(); print(repr(m)); print(repr(decisions.human_only_block(m)))")
+    done = subprocess.run([sys.executable, "-I", "-c", code, str(SCRIPTS)], cwd=tmp_path, env=env, capture_output=True, text=True,
+                          encoding="utf-8", timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines() == ["()", "''"]
+    env["CLAUDECODE"] = "1"  # 同样的启动方式，AI 会话拉起的：认得出是 AI
+    done = subprocess.run([sys.executable, "-I", "-c", code, str(SCRIPTS)], cwd=tmp_path, env=env, capture_output=True, text=True,
+                          encoding="utf-8", timeout=120, check=False)
+    assert done.stdout.splitlines()[0] == "('CLAUDECODE',)"
+
+
+# ---------------------------------------------------------------- 变更单的两个按钮（M8 的 8.1）
+
+
+def _order(change_id: str, status: str) -> Any:
+    return SimpleNamespace(change_id=change_id, domain="SCPT", what="改 IO 表", status=status, raised="2026-11-13")
+
+
+CHANGES = [("SW-2026-008", _order("CHG-SCPT-2026-700", "under_review")), ("SW-2026-008", _order("CHG-SCPT-2026-701", "accepting")),
+           ("SW-2026-008", _order("CHG-SCPT-2026-702", "draft"))]
+
+
+def _change_buttons(page: DecisionsPage) -> dict[str, QPushButton]:
+    return {str(b.property("decision")): b for b in page.findChildren(QPushButton) if str(b.property("decision")).startswith("change_")}
+
+
+def test_change_cards_are_drawn_with_their_buttons_and_the_not_yet_line(qapp: QApplication) -> None:
+    page = DecisionsPage(lambda _t: None, _preview)
+    page.show_view(decisions.build_vm([], {}, {}, "off", changes=CHANGES))
+    buttons = _change_buttons(page)
+    assert {k: (b.text(), b.isEnabled()) for k, b in buttons.items()} == {
+        "change_approve": ("批准变更单", True), "change_complete": ("推到完成", True)}
+    labels = " ".join(_texts(page, QLabel))
+    assert "CHG-SCPT-2026-700" in labels and "另有 1 张变更单还是草稿或已提交" in labels
+    assert set(_texts(page, QPushButton)) <= decisions.DECISION_BUTTONS
+    for word in decisions.NEVER_WORDS:
+        assert word not in (labels + " ".join(_texts(page, QPushButton))).lower()
+
+
+def test_change_buttons_are_grey_with_the_reason_when_an_agent_session_opened_the_board(qapp: QApplication) -> None:
+    page = DecisionsPage(lambda _t: None, _preview)
+    reason = decisions.human_only_block(("CLAUDECODE",))
+    page.show_view(decisions.build_vm([_mission("M4", "ACCEPTED", "已关")], {}, {}, "off", changes=CHANGES, human_only_block=reason))
+    assert [b.isEnabled() for b in _change_buttons(page).values()] == [False, False]
+    assert _texts(page, QLabel).count(reason) == 2  # 每张变更单卡上都写原因
+    close = next(b for b in page.findChildren(QPushButton) if b.property("decision") == "close")
+    assert close.isEnabled()  # 别的按钮照旧
+
+
+def test_complete_dialog_comes_prefilled_and_blocks_when_the_conclusion_is_cleared(qapp: QApplication) -> None:
+    page = DecisionsPage(lambda _t: None, _preview)
+    page.approver_input.setText("baiyang")
+    target = decisions.Target(project_id="SW-2026-008", change_id="CHG-SCPT-2026-701", title="CHG-SCPT-2026-701 改 IO 表")
+    dialog = page.open_dialog(decisions.BY_KEY["change_complete"], target, run=False)
+    assert dialog.values() == {"verification_conclusion": "全部通过"} and dialog.run_button.isEnabled()
+    assert "change transition CHG-SCPT-2026-701 --to completed --pid SW-2026-008 --approver baiyang" in dialog.command_label.text()
+    assert dialog.command_label.text().endswith('--verification-conclusion "全部通过"')
+    _fill(dialog, "verification_conclusion", "")
+    assert not dialog.run_button.isEnabled() and "验证结论" in dialog.problem.text()
+    approve = page.open_dialog(decisions.BY_KEY["change_approve"], target, run=False)
+    assert approve.run_button.isEnabled() and "--to approved" in approve.command_label.text()
+    page.approver_input.setText("")
+    assert "批准人" in page.open_dialog(decisions.BY_KEY["change_approve"], target, run=False).problem.text()
+
+
+def test_controller_runs_the_change_command_for_a_human_and_refuses_for_an_agent_session(qapp: QApplication, tmp_path: Path) -> None:
+    fake, changed = FakeCli(), []
+    human = DecisionController(tmp_path, lambda _t: None, lambda: changed.append(1), runner=fake, now=lambda: NOW, markers=lambda: ())
+    human.page.approver_input.setText("baiyang")
+    human.refresh([], [], CHANGES)
+    _wait(human, qapp)
+    card = next(c for c in human.page.vm.cards if c.target.change_id == "CHG-SCPT-2026-700")
+    assert card.blocked == "" and [c.column for c in human.page.vm.cards] == ["变更单", "变更单"]
+    human.page.run_requested.emit(decisions.BY_KEY["change_approve"], card.target, {"comment": ""}, False)
+    _wait(human, qapp)
+    ran = next(c for c in fake.calls if c[:2] == ["change", "transition"])
+    assert ran[2:5] == ["CHG-SCPT-2026-700", "--to", "approved"] and ran[ran.index("--approver") + 1] == "baiyang"
+    assert ran[ran.index("--approval-evidence-ref") + 1].startswith("user-confirmation:gui-click-") and changed == [1]
+
+    for markers in (("CLAUDECODE",), None):  # 带 AI 标记；认不出带没带
+        fake2 = FakeCli()
+        changed2: list[int] = []
+        agent = DecisionController(tmp_path, lambda _t: None, lambda c=changed2: c.append(1), runner=fake2, now=lambda: NOW,
+                                   markers=lambda m=markers: m)
+        agent.page.approver_input.setText("baiyang")
+        agent.refresh([], [], CHANGES)
+        _wait(agent, qapp)
+        assert all(c.blocked for c in agent.page.vm.cards) and not any(b.isEnabled() for b in _change_buttons(agent.page).values())
+        agent.page.run_requested.emit(decisions.BY_KEY["change_approve"], card.target, {"comment": ""}, False)  # 绕过灰按钮直接发信号
+        _wait(agent, qapp)
+        assert not any(c[:1] == ["change"] for c in fake2.calls) and changed2 == []
+        refused = agent.page.receipts[-1]
+        assert refused.command == "(未运行)" and refused.rc == 1 and agent.page.failure is refused
+
+
+def test_the_window_hands_every_projects_change_orders_to_the_decisions_page() -> None:
+    from cockpit_board import app as app_module
+
+    seen: list[tuple[list[str], list[Any]]] = []
+    stub = SimpleNamespace(changes=(), refresh=lambda ids, missions: seen.append((list(ids), list(missions))))
+    order = _order("CHG-PLC-2026-001", "under_review")
+    projects = [SimpleNamespace(project_id="DJ-1", missions=[], change_orders=[order]), SimpleNamespace(project_id="DJ-2", missions=[])]
+    window = SimpleNamespace(board=SimpleNamespace(projects=projects), home_vm=None, decisions=stub)
+    app_module.CockpitWindow._refresh_decisions(window)
+    assert stub.changes == (("DJ-1", order),) and seen == [([], [])]  # 没有开着的卡的项目，变更单也照样交过去
+
+
+def test_every_human_only_button_is_grey_on_an_agent_board_and_the_two_ai_steps_stay_lit(qapp: QApplication) -> None:
+    page = DecisionsPage(lambda _t: None, _preview)
+    reason = decisions.human_only_block(("AI_AGENT",))
+    missions = [_mission("M1", "ACTIVE", "在干"), _mission("M2", "DRAFT", "等你"), _mission("M3", "ACCEPTANCE_PENDING", "等你"),
+                _mission("M4", "ACCEPTED", "已关"), _mission("M5", "PARKED", "搁着")]
+    scope = decisions.Target(project_id="DJ-1", request_id="R1", plan_hash="h" * 64)
+    item = decisions.Target(project_id="DJ-1", item_id="I1", ticket_hash="k" * 64)
+    page.show_view(decisions.build_vm(missions, {"DJ-1": [scope]}, {"DJ-1": [item]}, "off", changes=CHANGES, human_only_block=reason))
+    drawn = {str(b.property("decision")): b.isEnabled() for b in page.findChildren(QPushButton) if b.property("decision")}
+    assert {k for k, lit in drawn.items() if lit} == {"begin_work", "close"}
+    assert {k for k, lit in drawn.items() if not lit} == {"approve_card", "inbox_confirm", "inbox_reject", "accept", "park", "unpark",
+                                                         "switch", "change_approve", "change_complete"}
+    dialog = page.open_dialog(decisions.BY_KEY["accept"], decisions.Target(project_id="DJ-1", mission_id="M3", title="x"), run=False)
+    assert not dialog.run_button.isEnabled() and reason in " ".join(str(w.text()) for w in dialog.findChildren(QLabel))
+    human = DecisionsPage(lambda _t: None, _preview)
+    human.show_view(decisions.build_vm(missions, {"DJ-1": [scope]}, {"DJ-1": [item]}, "off", changes=CHANGES))
+    assert all(b.isEnabled() for b in human.findChildren(QPushButton) if b.property("decision"))  # 你本人打开的：全亮

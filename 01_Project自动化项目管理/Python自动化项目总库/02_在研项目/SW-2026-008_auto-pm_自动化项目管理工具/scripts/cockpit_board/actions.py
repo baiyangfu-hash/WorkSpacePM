@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -237,6 +237,20 @@ _URL_CREDENTIALS = re.compile(r"(://)[^/\s]*@")  # 吃到第一个 / 之前的�
 def _scrub(text: str) -> str:
     """git 的报错里常带网址，网址里可能有 user:token@：抹掉再给人看。"""
     return _URL_CREDENTIALS.sub(r"\1***@", text)
+
+
+def board_agent_markers(environ: Mapping[str, str] | None = None) -> tuple[str, ...] | None:
+    """这个看板进程的环境里带着哪些 AI 标记（名单取主程序的，和命令判的是同一份）。找不到主程序返回 None：认不出，不当成“没带”。"""
+    try:
+        # 双击 bat 时 sys.path 里只有 scripts\，主程序在它上一级：和 pm_dashboard.continuity_store_class 同一做法，先把上一级放进来，
+        # 免得“看板先读账本还是先读标记”的先后让你本人的看板也落进“认不出”。
+        source_root = str(Path(__file__).resolve().parents[2])
+        if source_root not in sys.path:
+            sys.path.insert(0, source_root)
+        from auto_pm.application.core.lease_handover_service import agent_markers
+    except Exception:  # noqa: BLE001 - 看板单独拷走时没有 auto_pm
+        return None
+    return tuple(agent_markers(os.environ if environ is None else environ))
 
 
 def classify_probe(returncode: int, stderr: str) -> OriginProbe:

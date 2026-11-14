@@ -3,6 +3,7 @@
 app.py 接这个页面只需要三件事（S0 合并后再动 app.py）：
     controller = DecisionController(root, on_copy, on_changed)   # on_changed：命令成功后让主窗口重新读账本
     stack.addWidget(controller.page)                              # 顶栏加一个“决定”页签
+    controller.changes = ...                                      # （项目号, 变更单）；主窗口读完账本后先放这里
     controller.refresh(project_ids, missions)                     # 每次主窗口读完账本后调一次
 
 项目详情页也借用这个控制器（CHG-SCPT-2026-654）：探测本机有没有 project archive / reactivate、register 有没有 --kind
@@ -73,14 +74,17 @@ class _Job(QThread):
 
 class DecisionController(QObject):
     def __init__(self, root: Path, on_copy: Callable[[str], None], on_changed: Callable[[], None],
-                 runner: Callable[..., Any] | None = None, now: Callable[[], datetime] = datetime.now) -> None:
+                 runner: Callable[..., Any] | None = None, now: Callable[[], datetime] = datetime.now,
+                 markers: Callable[[], Sequence[str] | None] = actions.board_agent_markers) -> None:
         super().__init__()
+        self.markers = markers  # 这个看板进程带着哪些 AI 标记；测试注入
         self.root, self.on_copy, self.on_changed, self.now = root, on_copy, on_changed, now
         self.runner = runner  # 测试注入；None 用 actions 里的默认运行器
         self.pin_mode = "unknown"
         self._reading = False
         self.missions: Sequence[Any] = ()
         self.project_ids: Sequence[str] = ()
+        self.changes: Sequence[tuple[str, Any]] = ()
         self._jobs: list[QThread] = []
         # 项目生命周期：三条 --help 探测的结果在这个窗口里记着（None＝还没探测）；点“重新读取”才清掉重探
         self.lifecycle_probe: dict[str, actions.ReadOutcome] | None = None
@@ -99,8 +103,10 @@ class DecisionController(QObject):
 
     # ------------------------------------------------ 读
 
-    def refresh(self, project_ids: Sequence[str], missions: Sequence[Any]) -> None:
+    def refresh(self, project_ids: Sequence[str], missions: Sequence[Any], changes: Sequence[tuple[str, Any]] | None = None) -> None:
         self.project_ids, self.missions = tuple(project_ids), tuple(missions)
+        if changes is not None:  # 不给就用 self.changes 里记着的
+            self.changes = tuple(changes)
         if self._reading:  # 上一轮还没读完：不叠起新的一批命令，读完后页面用的就是上一轮读到的
             return
         self._reading = True
@@ -140,7 +146,8 @@ class DecisionController(QObject):
             return
         pin, pending, inbox, failures = result
         self.pin_mode = pin
-        vm = decisions.build_vm(self.missions, pending, inbox, pin, failures=failures)
+        vm = decisions.build_vm(self.missions, pending, inbox, pin, failures=failures, changes=self.changes,
+                                human_only_block=decisions.human_only_block(self.markers()))
         self.page.show_view(vm)
 
     # ------------------------------------------------ 运行
@@ -149,6 +156,9 @@ class DecisionController(QObject):
                      via_terminal: bool, on_receipt: Callable[[actions.Receipt], None] | None = None) -> None:
         pin = self.pin_mode == "enforced"
         try:
+            blocked = decisions.human_only_block(self.markers()) if decision.human_only else ""
+            if blocked:  # 按钮本来就灰着；这里再拦一道，别的入口调进来也不运行
+                raise decisions.DecisionError(blocked)
             args = decisions.build_args(decision, target, values, approver=self.page.approver(), pin_enforced=pin, now=self.now())
         except decisions.DecisionError as error:  # 对话框已拦过，这里兜底，不静默
             refused = actions.Receipt(self.now().strftime("%H:%M"), decision.label, "(未运行)", 1, False, str(error))
@@ -275,7 +285,9 @@ class DecisionController(QObject):
         decision = decisions.BY_KEY[decisions.LIFECYCLES[run.key].decision]
         target = decisions.Target(project_id=run.project_id, title=title or run.project_id)
         pin = self.pin_mode == "enforced"
-        dialog = ConfirmDialog(decision, target, pin, lambda values: self.preview(decision, target, values, "", pin), self.on_copy, parent)
+        blocked = decisions.human_only_block(self.markers()) if decision.human_only else ""
+        dialog = ConfirmDialog(decision, target, pin, lambda values: self.preview(decision, target, values, "", pin), self.on_copy, parent,
+                               blocked=blocked)
         self.last_dialog = dialog
         if execute and dialog.exec() == QDialog.DialogCode.Accepted:
             self.run_decision(decision, target, dialog.values(), dialog.via_terminal, on_receipt)

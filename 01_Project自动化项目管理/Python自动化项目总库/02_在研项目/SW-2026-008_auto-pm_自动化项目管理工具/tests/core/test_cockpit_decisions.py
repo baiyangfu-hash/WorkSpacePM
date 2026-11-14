@@ -31,9 +31,9 @@ from auto_pm.ui.cli.pm import pm_group  # noqa: E402
 DECISIONS_ALL = decisions.DECISIONS
 NOW = datetime(2026, 11, 1, 13, 30, 5)
 TARGET = decisions.Target(project_id="DJ-2026-009", mission_id="M-0001", request_id="REQ-1", plan_hash="a" * 64,
-                          item_id="INB-1", ticket_hash="b" * 64, title="改 IO 表")
+                          item_id="INB-1", ticket_hash="b" * 64, title="改 IO 表", change_id="CHG-SCPT-2026-700")
 VALUES = {"reason": "客户急改", "summary": "干到第3步，下一步写 IO", "as_owner": "claude:cloud", "note": "ok",
-          "admission_release_ref": ""}
+          "admission_release_ref": "", "verification_conclusion": "全部通过", "comment": ""}
 
 
 def _args(decision: decisions.Decision, *, pin: bool = False, approver: str = "baiyang", values: dict[str, str] | None = None) -> list[str]:
@@ -497,3 +497,176 @@ def test_parse_pending_never_crashes_on_unexpected_shapes(text: str) -> None:
 @pytest.mark.parametrize("text", ['{"items": {"x": 1}}', '{"items": "abc"}', '{"items": null}', '{"items": 3}', '{"items": ["x", 1, null]}', "", "not json"])
 def test_parse_inbox_never_crashes_on_unexpected_shapes(text: str) -> None:
     assert decisions.parse_inbox(text, "DJ-1") == []
+
+
+# ---------------------------------------------------------------- 变更单的两个按钮：批准变更单、推到完成（M8 的 8.1）
+
+
+def _order(change_id: str, status: str, what: str = "改 IO 表") -> SimpleNamespace:
+    return SimpleNamespace(change_id=change_id, domain="SCPT", what=what, status=status, raised="2026-11-13")
+
+
+def _change_view(statuses: list[str], block: str = "") -> decisions.DecisionsVM:
+    orders = [("SW-2026-008", _order(f"CHG-SCPT-2026-{700 + i}", status)) for i, status in enumerate(statuses)]
+    return decisions.build_vm([], {}, {}, "off", changes=orders, human_only_block=block)
+
+
+def test_change_buttons_build_one_change_transition_step_with_click_evidence() -> None:
+    approve, complete = decisions.BY_KEY["change_approve"], decisions.BY_KEY["change_complete"]
+    assert approve.human_only and complete.human_only and approve.user_words and complete.user_words
+    got = _args(approve)
+    assert got[:9] == ["change", "transition", "CHG-SCPT-2026-700", "--to", "approved", "--pid", "DJ-2026-009", "--approver", "baiyang"]
+    assert got[9] == "--approval-evidence-ref" and got[10] == decisions.click_evidence("change_approve", "CHG-SCPT-2026-700", NOW)
+    assert not user_evidence_problem(got[10]) and "--comment" not in got and len(got) == 11
+    assert _args(approve, values={"comment": "只批第 2 节"})[-2:] == ["--comment", "只批第 2 节"]
+    got = _args(complete)
+    assert got[3:5] == ["--to", "completed"] and got[-2:] == ["--verification-conclusion", "全部通过"]
+    assert "--allow-partial-verification" not in got  # 放过没过的验证项不上看板
+    with pytest.raises(decisions.DecisionError, match="验证结论"):
+        _args(complete, values={"verification_conclusion": ""})
+    with pytest.raises(decisions.DecisionError, match="批准人"):
+        _args(approve, approver="")
+    with pytest.raises(decisions.DecisionError, match="变更单号"):
+        decisions.build_args(approve, decisions.Target(project_id="DJ-1"), {}, approver="a", pin_enforced=False, now=NOW)
+
+
+def test_change_buttons_follow_the_real_status_flow_and_labels() -> None:
+    """按钮出现的状态、推到的状态、状态的白话，都和主程序的状态流对得上；主程序改了这里会红。"""
+    from auto_pm.domain.change.constants import STATUS_FLOW, STATUS_LABELS
+    from auto_pm.ui.cli.change import cmd_transition
+
+    for key, target in decisions.CHANGE_TARGET.items():
+        for state in decisions.BY_KEY[key].states:
+            assert target in STATUS_FLOW[state], f"{key}: {state} 不能一步推到 {target}"
+    for status, label in decisions.CHANGE_STATUS_LABEL.items():
+        assert STATUS_LABELS[status] == label
+    before = set(decisions.CHANGE_BEFORE_APPROVE) | set(decisions.CHANGE_BEFORE_COMPLETE)
+    assert before <= set(STATUS_FLOW) and not before & {s for d in DECISIONS_ALL if d.kind == "change" for s in d.states}
+    default = next(p.default for p in cmd_transition.params if p.name == "verification_conclusion")
+    field = decisions.BY_KEY["change_complete"].fields[0]
+    assert field.default == default and "通过" in field.default  # 先填上的字就是命令自己的缺省值
+
+
+def test_change_cards_show_a_button_only_at_its_own_step_and_count_the_rest() -> None:
+    view = _change_view(["draft", "submitted", "under_review", "approved", "implementing", "accepting", "completed", "未读到状态"])
+    assert [(c.column, [d.key for d in c.decisions]) for c in view.cards] == [("变更单", ["change_approve"]), ("变更单", ["change_complete"])]
+    assert [c.target.change_id for c in view.cards] == ["CHG-SCPT-2026-702", "CHG-SCPT-2026-705"]
+    assert "审核中" in view.cards[0].detail and "验收中" in view.cards[1].detail
+    assert len(view.notes) == 2 and "另有 2 张" in view.notes[0] and "另有 2 张" in view.notes[1]
+    assert _change_view(["completed", "rejected"]).notes == () and _change_view([]).cards == ()
+    scope = decisions.Target(project_id="DJ-1", request_id="R1", plan_hash="h" * 64)
+    mixed = decisions.build_vm([], {"DJ-1": [scope]}, {}, "off", changes=[("DJ-1", _order("CHG-PLC-2026-001", "under_review"))])
+    assert [c.column for c in mixed.cards] == ["变更单", "范围卡"]
+
+
+def test_human_only_buttons_are_blocked_when_the_board_carries_an_agent_marker_or_cannot_tell() -> None:
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    assert decisions.human_only_block(()) == ""
+    assert "CLAUDECODE" in decisions.human_only_block(("CLAUDECODE",)) and "你本人" in decisions.human_only_block(("CLAUDECODE",))
+    assert decisions.human_only_block(None) == decisions.HUMAN_ONLY_UNKNOWN
+    assert _change_view(["under_review"], block="原因").cards[0].blocked == "原因"
+    assert actions.board_agent_markers({}) == ()
+    for marker in AGENT_MARKERS:  # 名单取主程序的那一份：主程序多认一个标记，看板跟着认
+        assert actions.board_agent_markers({marker: "x"}) == (marker,)
+    # 只许你本人点的：要用户原话的、要口令的（含确认验收），一个不漏；确认开工、收口 AI 也可以做（cockpit-entry 第 6、8 步）
+    assert {d.key for d in DECISIONS_ALL if d.human_only} == {d.key for d in DECISIONS_ALL if d.user_words or d.pin}
+    assert {d.key for d in DECISIONS_ALL if not d.human_only} == {"begin_work", "close"}
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_a_real_change_order_goes_from_the_file_to_the_button_to_the_real_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """真文件走一遍：看板读到“审核中”的单 → 出“批准变更单” → 拼出的命令交给真命令 → 文件里变成已批准。"""
+    import pm_dashboard as pd
+    from click.testing import CliRunner
+
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+    from tests.infrastructure.test_git_hook_enforcer import _make_dual_root_fixture
+
+    for marker in AGENT_MARKERS:  # 这条测试演的是“你本人打开的看板”
+        monkeypatch.delenv(marker, raising=False)
+    _cand, ctrl, _msg = _make_dual_root_fixture(tmp_path, chg_status="under_review")
+    project_root = ctrl / "01_Project" / "SW-2026-008"
+    orders = pd.read_change_orders(project_root)
+    assert [(o.change_id, o.status) for o in orders] == [("CHG-SCPT-2026-346", "under_review")]
+    view = decisions.build_vm([], {}, {}, "off", changes=[("SW-2026-008", o) for o in orders])
+    card = view.cards[0]
+    assert [d.key for d in card.decisions] == ["change_approve"] and card.blocked == ""
+    args = decisions.build_args(card.decisions[0], card.target, {}, approver="baiyang", pin_enforced=False, now=NOW)
+    obj = SimpleNamespace(control_root=ctrl, workspace_root=str(ctrl), templates_dir=str(ctrl))
+    result = CliRunner().invoke(_root_cli().get_command(click.Context(_root_cli()), "change"), args[1:], obj=obj)  # type: ignore[arg-type]
+    assert result.exit_code == 0, result.output
+    assert [(o.change_id, o.status) for o in pd.read_change_orders(project_root)] == [("CHG-SCPT-2026-346", "approved")]
+    assert decisions.build_vm([], {}, {}, "off", changes=[("SW-2026-008", o) for o in pd.read_change_orders(project_root)]).cards == ()
+
+
+def test_the_command_itself_still_refuses_an_agent_without_evidence_and_the_known_gap_is_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """命令的拒绝没变：带 AI 标记、不带凭据，批准被拒。带 AI 标记又带一条格式对的凭据，命令放行（用户 2026-10-31 定的 A）——
+    所以看板自己必须把 human_only 的按钮关掉，不能指望命令替它拦。"""
+    from click.testing import CliRunner
+
+    from auto_pm.ui.cli import change as change_cli
+
+    reached: list[str] = []
+    monkeypatch.setattr(change_cli, "require_runtime_identity_for_change", lambda *a, **k: reached.append("past the agent refusal"))
+    monkeypatch.setattr(change_cli, "ChangeService", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("stop here")))
+    monkeypatch.setenv("CLAUDECODE", "1")
+    obj = SimpleNamespace(control_root=tmp_path, workspace_root=str(tmp_path), templates_dir=str(tmp_path))
+    args = _args(decisions.BY_KEY["change_approve"])
+    bare = [a for a in args[1:] if a != "--approval-evidence-ref" and not a.startswith("user-confirmation:")]
+    refused = CliRunner().invoke(change_cli.change_group, bare, obj=obj)
+    assert refused.exit_code != 0 and "agent 会话" in refused.output and reached == []
+    CliRunner().invoke(change_cli.change_group, args[1:], obj=obj)
+    assert reached == ["past the agent refusal"]
+
+
+@pytest.mark.usefixtures("identity_guard_off")
+def test_complete_goes_through_the_real_command_and_a_refusal_keeps_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """“推到完成”真跑一遍：停在“验收中”的单出按钮，拼出的命令交给真命令；命令说行就变“已完成”，说不行文件不变。"""
+    import pm_dashboard as pd
+    from click.testing import CliRunner
+
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+    from tests.infrastructure.test_git_hook_enforcer import _make_dual_root_fixture
+
+    for marker in AGENT_MARKERS:
+        monkeypatch.delenv(marker, raising=False)
+    _cand, ctrl, _msg = _make_dual_root_fixture(tmp_path, chg_status="accepting")
+    project_root = ctrl / "01_Project" / "SW-2026-008"
+    orders = pd.read_change_orders(project_root)
+    card = decisions.build_vm([], {}, {}, "off", changes=[("SW-2026-008", o) for o in orders]).cards[0]
+    assert [d.key for d in card.decisions] == ["change_complete"]
+    obj = SimpleNamespace(control_root=ctrl, workspace_root=str(ctrl), templates_dir=str(ctrl))
+    group = _root_cli().get_command(click.Context(_root_cli()), "change")
+    chg_file = next(ctrl.rglob("CHG-SCPT-2026-346.md"))
+    before = chg_file.read_bytes()
+    bad = decisions.build_args(card.decisions[0], card.target, {"verification_conclusion": "还没验"}, approver="baiyang", pin_enforced=False, now=NOW)
+    refused = CliRunner().invoke(group, bad[1:], obj=obj)  # type: ignore[arg-type]
+    assert refused.exit_code == 1 and "验证结论" in refused.output and chg_file.read_bytes() == before
+    good = decisions.build_args(card.decisions[0], card.target, {"verification_conclusion": "全部通过"}, approver="baiyang", pin_enforced=False, now=NOW)
+    done = CliRunner().invoke(group, good[1:], obj=obj)  # type: ignore[arg-type]
+    assert done.exit_code == 0, done.output
+    assert [(o.change_id, o.status) for o in pd.read_change_orders(project_root)] == [("CHG-SCPT-2026-346", "completed")]
+
+
+def test_the_guide_names_every_marker_and_every_human_only_button() -> None:
+    from auto_pm.application.core.lease_handover_service import AGENT_MARKERS
+
+    text = GUIDE.read_text(encoding="utf-8")
+    section = text[text.index("## 只许你本人点"):]
+    for marker in AGENT_MARKERS:  # 主程序多认一个标记，说明里也得写上
+        assert f"`{marker}`" in section, marker
+    listed = next(line for line in section.splitlines() if line.startswith("- **哪些按钮**"))
+    listed = listed.split("：", 1)[1].split("。", 1)[0].split("：", 1)[1]  # “……共 11 个：批准范围、……、推到完成”
+    assert listed.split("、") == [d.label for d in DECISIONS_ALL if d.human_only]
+    assert f"共 {sum(d.human_only for d in DECISIONS_ALL)} 个" in section
+
+
+def test_markers_are_none_not_empty_when_the_main_program_cannot_be_imported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """找不到主程序时必须是“认不出”（None），不能当成“没带标记”（空）——否则按钮会对 AI 拉起的看板也亮。"""
+    monkeypatch.setitem(sys.modules, "auto_pm.application.core.lease_handover_service", None)  # 再 import 就报 ImportError
+    assert actions.board_agent_markers({"CLAUDECODE": "1"}) is None
+    assert actions.board_agent_markers({}) is None
+    assert decisions.human_only_block(actions.board_agent_markers({})) == decisions.HUMAN_ONLY_UNKNOWN
