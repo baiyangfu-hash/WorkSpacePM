@@ -56,6 +56,10 @@ class SclLinter:
     SYNTAX_RULES = (SYNTAX_UNCLOSED_RULE, SYNTAX_UNDECLARED_RULE)
     # 块里读自己的输出引脚（TD-SW008-316，D-50）：TIA 报“参数无法初始化”。第一阶段对所有工程一律只报警告
     OUTPUT_READBACK_RULE = "SCL-OUT-READBACK"
+    # 全局 DB 里放 FB 实例（TD-SW008-596，D-331；LSP-905 §4.11 第 1 条）：导入 TIA 时生成不出这个 DB。.plc.json 不记目标平台，所以对所有工程都查，第一阶段只报警告
+    GLOBAL_DB_FB_INSTANCE_RULE = "SCL-DB-FB-INSTANCE"
+    # .db / .udt 只留这几条（声明文件能查的规则）
+    DECLARATION_FILE_RULES = (ARRAY_LOWER_BOUND_RULE, GLOBAL_DB_FB_INSTANCE_RULE)
 
     @classmethod
     def is_lintable(cls, name: str | Path) -> bool:
@@ -82,6 +86,14 @@ class SclLinter:
     END_FOR_PATTERN = re.compile(r"\bEND_FOR\b", re.IGNORECASE)
     PROGRAM_BLOCK_OPEN_PATTERN = re.compile(r"^\s*(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b", re.IGNORECASE)
     PROGRAM_BLOCK_END_PATTERN = re.compile(r"^\s*END_(?:FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b", re.IGNORECASE)
+    DATA_BLOCK_OPEN_PATTERN = re.compile(r"^\s*DATA_BLOCK\b", re.IGNORECASE)
+    DATA_BLOCK_BODY_PATTERN = re.compile(r"^\s*(?:BEGIN|END_DATA_BLOCK)\b", re.IGNORECASE)
+    # 全局 DB 声明区里类型是 FB_ 开头的成员：名字 [{属性}] : [ARRAY[..] OF] FB_类型（类型可带双引号）。
+    # 背景 DB 的写法是 DATA_BLOCK 下一行只写 "FB_名"、没有冒号，不会命中
+    DB_FB_MEMBER_PATTERN = re.compile(
+        r'^\s*"?[A-Za-z_]\w*"?\s*(?:\{[^}]*\}\s*)?:\s*(?:ARRAY\s*\[[^\]]*\]\s*OF\s+)?"?(FB_\w*)"?\s*(?:;|:=|$)',
+        re.IGNORECASE,
+    )
 
     # 折叠区段：siemens-lsp 只认 REGION 名称 ... END_REGION；带 # 的写法不被支持（LSP-905 §6.3）
     HASH_REGION_PATTERN = re.compile(r"^\s*#\s*(?:END_?REGION|REGION)\b", re.IGNORECASE)
@@ -501,6 +513,7 @@ class SclLinter:
         cls._check_array_index_init(code_entries, report)
         cls._check_undeclared_locals(code_entries, report)
         cls._check_output_readback(code_entries, report)
+        cls._check_global_db_fb_instance(code_entries, report)
 
         # 结构完整性（LSP-905-STRUCT-*）
         opens = {kw: sum(1 for ln in code_lines if cls.STRUCT_OPEN_PATTERNS[kw].match(ln)) for kw in cls.STRUCT_KEYWORDS}
@@ -837,6 +850,35 @@ class SclLinter:
                     )
                 )
 
+    @classmethod
+    def _check_global_db_fb_instance(cls, code_entries: list[tuple[int, str, str]], report: SclLintReport) -> None:
+        """全局 DB（``DATA_BLOCK`` 到 ``BEGIN`` 之间的声明区）里有类型为 ``FB_…`` 的成员（TD-596）：只报警告。
+
+        只认 ``FB_`` 开头的类型名（LSP-905 §3.4 的 FB 命名），不认得的 FB 名、TIA 系统 FB（如 TON_TIME）不查。
+        """
+        in_declarations = False
+        for line_idx, code_part, stripped in code_entries:
+            if cls.DATA_BLOCK_OPEN_PATTERN.match(code_part):
+                in_declarations = True
+                continue
+            if not in_declarations:
+                continue
+            if cls.DATA_BLOCK_BODY_PATTERN.match(code_part):
+                in_declarations = False
+                continue
+            member = cls.DB_FB_MEMBER_PATTERN.match(code_part)
+            if member:
+                report.violations.append(
+                    SclViolation(
+                        line_number=line_idx,
+                        rule_id=cls.GLOBAL_DB_FB_INSTANCE_RULE,
+                        severity="WARNING",
+                        message=f"全局 DB 里放了 FB 实例（类型 {member.group(1)}，导入 TIA 时这个 DB 生成不出）："
+                        "挪到调用方 FB 的 VAR 里做多重实例，或给它建自己的背景 DB（LSP-905 §4.11）",
+                        code_snippet=stripped,
+                    )
+                )
+
     @staticmethod
     def _line_text(lines: list[str], line_number: int) -> str:
         return lines[line_number - 1].strip() if 0 < line_number <= len(lines) else ""
@@ -868,15 +910,15 @@ class SclLinter:
 
     @classmethod
     def _keep_only_array_lower_bound(cls, report: SclLintReport) -> None:
-        """``.db`` / ``.udt``：只留数组下界这一条，计数跟着重算。"""
-        report.violations = [v for v in report.violations if v.rule_id == cls.ARRAY_LOWER_BOUND_RULE]
+        """``.db`` / ``.udt``：只留数组下界和全局 DB 放 FB 实例这两条，计数跟着重算。"""
+        report.violations = [v for v in report.violations if v.rule_id in cls.DECLARATION_FILE_RULES]
         report.total_violations = len(report.violations)
         report.errors_count = sum(1 for v in report.violations if v.severity == "ERROR")
         report.warnings_count = sum(1 for v in report.violations if v.severity == "WARNING")
 
     @classmethod
     def lint_file(cls, file_path: Path | str) -> SclLintReport:
-        """扫描磁盘上的 .scl 文件；.db / .udt 只查数组下界"""
+        """扫描磁盘上的 .scl 文件；.db / .udt 只查数组下界和全局 DB 放 FB 实例"""
         path = Path(file_path)
         if not path.exists():
             return SclLintReport(file_path=str(path))
