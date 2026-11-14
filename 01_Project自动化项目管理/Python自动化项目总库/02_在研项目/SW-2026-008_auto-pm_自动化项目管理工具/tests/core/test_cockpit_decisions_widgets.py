@@ -698,13 +698,15 @@ def test_the_users_own_board_started_like_the_bat_can_read_the_markers_and_is_no
     env = {k: v for k, v in os.environ.items() if k not in AGENT_MARKERS and k != "PYTHONPATH"}
     code = ("import sys; sys.path.insert(0, sys.argv[1]); from cockpit_board import actions, decisions; "
             "m = actions.board_agent_markers(); print(repr(m)); print(repr(decisions.human_only_block(m)))")
-    done = subprocess.run([sys.executable, "-I", "-c", code, str(SCRIPTS)], cwd=tmp_path, env=env, capture_output=True, text=True,
-                          encoding="utf-8", timeout=120, check=False)
+    # -I 会忽略 PYTHONUTF8、PYTHONIOENCODING，子进程按系统代码页输出（中文 Windows 是 GBK）；第二次的第二行是中文，
+    # 父进程按 utf-8 读就读不出来。所以用 -X utf8 让子进程也按 utf-8 输出（命令行开关，-I 不忽略它）。
+    argv = [sys.executable, "-I", "-X", "utf8", "-c", code, str(SCRIPTS)]
+    done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines() == ["()", "''"]
     env["CLAUDECODE"] = "1"  # 同样的启动方式，AI 会话拉起的：认得出是 AI
-    done = subprocess.run([sys.executable, "-I", "-c", code, str(SCRIPTS)], cwd=tmp_path, env=env, capture_output=True, text=True,
-                          encoding="utf-8", timeout=120, check=False)
+    done = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines()[0] == "('CLAUDECODE',)"
 
 
