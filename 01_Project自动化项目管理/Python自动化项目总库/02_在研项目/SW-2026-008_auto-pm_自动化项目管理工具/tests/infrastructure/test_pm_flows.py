@@ -529,8 +529,11 @@ def test_entry_runs_the_checkup_then_the_claims_then_each_card_of_the_project(
     assert tail.count("0100_PLC自动化/DJ-2026-005/018.md") == 1, "先读的文件去重"
     assert "0100_PLC自动化/DJ-2026-005/025.md" in tail
     assert "不是状态" in text, "要说明交接记录里的话不当状态"
-    assert not any(line.startswith("  ran command_catalog") for line in lines), (
-        "进门时命令目录不刷屏"
+    # 进门时命令目录不刷屏：替身对命令目录那一步输出“ran --print”（命令是 python -B command_catalog.py --print），
+    # 刷屏时屏幕上会有“  ran --print”这一行；不刷屏时只有一行“命令目录全文存在 …”（#825 验收 WARN-1）
+    assert "  ran --print" not in lines, "进门时命令目录不刷屏"
+    assert sum(line.startswith("  命令目录全文存在 ") for line in lines) == 1, (
+        "屏幕上只说命令目录存在哪"
     )
     record = json.loads(
         next((root / ".auto-pm" / "reports" / "flows").glob("*_entry_DJ-2026-005.json")).read_text(
