@@ -46,7 +46,10 @@ def test_plc_ingest_service_basic() -> None:
 
 
 # 以下钉住：摄取只写源工程变量表里读得到的东西，不编控制器、总线、IP、设备和工艺（演示机的拓扑曾被写进每个摄取的项目）
-INVENTED = ("H5U", "GL20", "IS620N", "SV660N", "192.168.", "EtherCAT", "龙门", "码垛", "隔纸", "托盘", "Inovance", "汇川")
+INVENTED = (
+    "H5U", "GL20", "IS620N", "SV660N", "192.168.", "EtherCAT", "龙门", "码垛", "隔纸", "托盘", "Inovance", "汇川",
+    "晶体管", "阀岛", "24VDC",  # IO 表曾写死“DI (24VDC)”“DO (晶体管)”“阀岛/指示灯”（#823 验收 WARN-1）
+)
 
 
 def _ingest(ws: Path, *, keep_comm: str | None = None) -> Path:
