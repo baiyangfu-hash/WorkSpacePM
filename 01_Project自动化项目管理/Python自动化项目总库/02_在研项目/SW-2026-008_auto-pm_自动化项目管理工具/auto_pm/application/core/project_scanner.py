@@ -58,12 +58,16 @@ def unfindable_project_folder(name: str) -> str:
     """
 
     folded = name.casefold()
-    if scan_skips_folder(name) or "backup" in folded or "备份" in name:
-        return (
-            f"项目文件夹名 {name} 以 . 或 _ 开头，或带“归档”“备份”、archive、trash、backup 这类字样，"
-            "扫描和登记都会跳过它，建出来也找不到；换个名字"
-        )
-    return ""
+    if not (scan_skips_folder(name) or "backup" in folded or "备份" in name):
+        return ""
+    # 拒不拒仍由上面这一行定（扫描器规则只写在 scan_skips_folder 一处）；下面只找出说给人听的原因。
+    if name.startswith((".", "_")):
+        reason = f"以 {name[0]} 开头"
+    else:
+        hits = [word for word in ("归档", "备份") if word in name]
+        hits += [word for word in ("archive", "trash", "backup") if word in folded]
+        reason = "带“" + "”“".join(hits) + "”字样" if hits else "是扫描器会跳过的名字"
+    return f"项目文件夹名 {name} {reason}，扫描和登记都会跳过它，建出来也找不到；换个名字"
 
 class ProjectScanner:
     """项目扫描器 - 递归扫描工作空间，识别项目"""
