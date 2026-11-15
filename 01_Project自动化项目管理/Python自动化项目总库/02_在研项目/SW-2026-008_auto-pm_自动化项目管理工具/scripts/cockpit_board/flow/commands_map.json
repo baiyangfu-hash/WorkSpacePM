@@ -8,10 +8,10 @@
     "never"
   ],
   "counts": {
-    "never": 12,
-    "read": 69,
-    "user_only": 24,
-    "write": 120
+    "never": 13,
+    "read": 68,
+    "user_only": 21,
+    "write": 116
   },
   "commands": {
     "change create": {
@@ -67,7 +67,8 @@
       "class": "read"
     },
     "constraint guard": {
-      "class": "write"
+      "class": "never",
+      "note": "已隐藏（退役批一），程序和定义留着，随时能恢复"
     },
     "constraint heal": {
       "class": "write"
@@ -76,7 +77,8 @@
       "class": "read"
     },
     "constraint verify": {
-      "class": "write"
+      "class": "never",
+      "note": "已隐藏（退役批一），程序和定义留着，随时能恢复"
     },
     "context resolve": {
       "class": "read"
@@ -672,35 +674,10 @@
     "vartable parse": {
       "class": "read"
     },
-    "workflow accept": {
-      "class": "user_only",
-      "note": "pm accept 的旧名"
-    },
-    "workflow approve": {
-      "class": "user_only",
-      "note": "pm approve 的旧名"
-    },
-    "workflow confirm-start": {
-      "class": "user_only",
-      "note": "pm confirm-start 的旧名"
-    },
-    "workflow context": {
-      "class": "write"
-    },
-    "workflow execute": {
-      "class": "never",
-      "note": "pm execute 的旧名"
-    },
     "workflow history": {
       "class": "read"
     },
     "workflow list": {
-      "class": "read"
-    },
-    "workflow plan": {
-      "class": "write"
-    },
-    "workflow resume": {
       "class": "read"
     },
     "workflow run": {

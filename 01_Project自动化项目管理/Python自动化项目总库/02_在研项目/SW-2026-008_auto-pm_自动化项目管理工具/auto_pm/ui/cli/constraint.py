@@ -19,8 +19,6 @@
 Usage:
     auto-pm -w "." constraint list
     auto-pm -w "." constraint check [--file <path>] [--json] [--gate]
-    auto-pm -w "." constraint guard <file>
-    auto-pm -w "." constraint verify <file>
     auto-pm -w "." constraint heal [--file <path>] [--all] [--dry-run]
 """
 
@@ -201,7 +199,7 @@ def check_constraints(
         raise SystemExit(1)
 
 
-@constraint_group.command("guard")
+@constraint_group.command("guard", hidden=True)
 @click.argument("file", type=CallerPath(exists=True))
 @click.pass_context
 def guard_file(ctx: click.Context, file: str) -> None:
@@ -227,7 +225,7 @@ def guard_file(ctx: click.Context, file: str) -> None:
     console.print(f"  bom_count: {snap['bom_count']}")
 
 
-@constraint_group.command("verify")
+@constraint_group.command("verify", hidden=True)
 @click.argument("file", type=CallerPath(exists=True))
 @click.pass_context
 def verify_file(ctx: click.Context, file: str) -> None:

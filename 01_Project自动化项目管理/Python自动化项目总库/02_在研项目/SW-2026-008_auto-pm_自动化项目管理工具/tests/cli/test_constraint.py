@@ -37,9 +37,14 @@ class TestConstraintCLI:
         assert "约束管理" in result.output
         assert "list" in result.output
         assert "check" in result.output
-        assert "guard" in result.output
-        assert "verify" in result.output
         assert "heal" in result.output
+        # 退役批一：guard、verify 从帮助里隐藏，但命令本身还在，随时能恢复
+        assert "guard" not in result.output
+        assert "verify" not in result.output
+        for hidden in ("guard", "verify"):
+            assert constraint_group.commands[hidden].hidden is True
+            still_there = cli_runner.invoke(constraint_group, [hidden, "--help"])
+            assert still_there.exit_code == 0, hidden
 
     def test_list_constraints(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
         """constraint list 正确列出已加载的约束"""
@@ -49,7 +54,7 @@ class TestConstraintCLI:
         assert result.exit_code == 0
         assert "CST-FILE-001" in result.output
         assert "CST-FILE-002" in result.output
-        assert "共 10 个约束定义" in result.output
+        assert "共 4 个约束定义" in result.output  # 退役批一挪走了 6 条没人查的
 
     def test_check_clean(self, cli_runner: CliRunner, temp_workspace: Path, monkeypatch: MonkeyPatch) -> None:
         """constraint check 没有违规"""

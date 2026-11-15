@@ -1,11 +1,9 @@
-"""Compatibility proofs for the old ``workflow`` entry: engine commands stay, PM actions delegate."""
+"""Compatibility proofs for the old ``workflow`` entry: engine commands stay; the 7 old PM aliases are retired (退役批一) and refused."""
 
 from __future__ import annotations
 
 import ast
 import hashlib
-import importlib
-import json
 import os
 from pathlib import Path
 
@@ -15,7 +13,6 @@ from click.testing import CliRunner
 from auto_pm.domain.constraint.workflow import WorkflowEngine
 from auto_pm.ui.cli import workflow as workflow_module
 from auto_pm.ui.cli.__main__ import cli
-from auto_pm.ui.cli.pm import pm_group
 from auto_pm.ui.cli.workflow import (
     list_workflows,
     run_workflow,
@@ -26,17 +23,9 @@ from auto_pm.ui.cli.workflow import (
 
 pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
-# Reuse the existing PM CLI fixtures; imported dynamically so that this file is type-checked on its own.
-_pm_facade_tests = importlib.import_module("tests.cli.test_pm_facade")
-_git = _pm_facade_tests._git
-_planning_args = _pm_facade_tests._planning_args
-_setup = _pm_facade_tests._setup
-_setup_planning = _pm_facade_tests._setup_planning
-
 _ENGINE = {"list", "run", "history", "status"}
-_DELEGATED = ("plan", "approve", "confirm-start", "execute", "accept", "resume", "context")
+_RETIRED = ("plan", "approve", "confirm-start", "execute", "accept", "resume", "context")
 _UNKNOWN_PREFIX = "旧 workflow 动作"
-_MISSION = "MISSION-PM-CLI-001"
 
 
 def _tree(root: Path) -> dict[str, str]:
@@ -50,12 +39,12 @@ def _tree(root: Path) -> dict[str, str]:
     return found
 
 
-def test_the_seven_old_pm_actions_are_the_very_same_command_objects_as_pm() -> None:
-    assert set(workflow_group.commands) == _ENGINE | set(_DELEGATED)
-    assert len(workflow_group.commands) == 11
+def test_only_the_engine_commands_are_left() -> None:
+    assert set(workflow_group.commands) == _ENGINE
+    assert len(workflow_group.commands) == 4
     assert "workflow" not in workflow_group.commands
-    for name in _DELEGATED:
-        assert workflow_group.commands[name] is pm_group.commands[name]
+    for name in _RETIRED:
+        assert name not in workflow_group.commands
 
 
 def test_the_original_engine_commands_are_kept_unchanged() -> None:
@@ -66,94 +55,8 @@ def test_the_original_engine_commands_are_kept_unchanged() -> None:
     assert workflow_group.help == "工作流编排与执行管理"
 
 
-def test_a_delegated_action_behaves_exactly_like_the_pm_command(
-    cli_runner: CliRunner, tmp_path: Path
-) -> None:
-    via_pm, via_workflow = tmp_path / "via-pm", tmp_path / "via-workflow"
-    for root in (via_pm, via_workflow):
-        root.mkdir()
-        _setup(root)
-    sequence = [
-        ["plan", "--mission-id", _MISSION],
-        ["confirm-start", "--mission-id", _MISSION],
-        ["accept", "--mission-id", _MISSION],
-    ]
-
-    for arguments in sequence:
-        expected = cli_runner.invoke(cli, ["-w", str(via_pm), "pm", *arguments])
-        actual = cli_runner.invoke(cli, ["-w", str(via_workflow), "workflow", *arguments])
-        assert actual.exit_code == expected.exit_code, arguments
-        assert actual.output == expected.output, arguments
-
-    assert expected.exit_code == 1
-    assert (
-        json.loads(
-            cli_runner.invoke(
-                cli,
-                ["-w", str(via_workflow), "workflow", "confirm-start", "--mission-id", _MISSION],
-            ).output
-        )["mission_state"]
-        == "ACTIVE"
-    )
-
-
-def test_delegated_actions_keep_every_pm_guard(
-    cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "ws"
-    root.mkdir()
-    _setup(root)
-    linked = tmp_path / "linked"
-    _git(root, "worktree", "add", "--detach", str(linked), "HEAD")
-
-    refused = cli_runner.invoke(
-        cli, ["-w", str(linked), "workflow", "plan", "--mission-id", _MISSION]
-    )
-
-    assert refused.exit_code == 1
-    assert "linked worktree" in refused.output
-    assert not (linked / ".auto-pm").exists()
-
-    planning = tmp_path / "planning"
-    planning.mkdir()
-    _setup_planning(planning)
-    planned = cli_runner.invoke(cli, ["-w", str(planning), "workflow", "plan", *_planning_args()])
-    assert planned.exit_code == 0
-    card = json.loads(planned.output)
-    reached = False
-
-    def tripwire(_ctx: object) -> object:
-        nonlocal reached
-        reached = True
-        raise AssertionError("dispatch must not be reached")
-
-    monkeypatch.setattr("auto_pm.ui.cli.pm._facade", tripwire)
-    mismatch = cli_runner.invoke(
-        cli,
-        [
-            "-w",
-            str(planning),
-            "workflow",
-            "execute",
-            "--request-id",
-            "REQ-OTHER",
-            "--card-json",
-            json.dumps(card),
-            "--plan-hash",
-            card["plan_hash"],
-            "--lease-token-env",
-            "U08_TOKEN",
-        ],
-        env={"U08_TOKEN": "u08-super-secret"},
-    )
-    assert mismatch.exit_code == 1
-    assert "不一致" in mismatch.output
-    assert "u08-super-secret" not in mismatch.output
-    assert reached is False
-
-
 @pytest.mark.parametrize(
-    "action", ["handoff", "close", "start", "workflow", "rollback", "zz-garbage"]
+    "action", ["handoff", "close", "start", "workflow", "rollback", "zz-garbage", *_RETIRED]
 )
 def test_an_unknown_old_action_is_refused_without_touching_anything(
     cli_runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
@@ -175,6 +78,7 @@ def test_an_unknown_old_action_is_refused_without_touching_anything(
     assert f"{action!r}" in result.output
     assert "list/run/history/status" in result.output
     assert "plan/approve/confirm-start/execute/accept/resume/context" in result.output
+    assert "改用 pm 同名命令" in result.output
     assert "Traceback" not in result.output
     assert built == []
     assert _tree(tmp_path) == before
@@ -190,19 +94,18 @@ def test_a_very_long_unknown_action_name_is_truncated_in_the_message(
     assert "x" * 41 not in result.output
 
 
-def test_help_lists_all_commands_and_delegated_help_matches_pm(
+def test_help_lists_the_engine_commands_and_an_old_alias_help_is_refused(
     cli_runner: CliRunner, tmp_path: Path
 ) -> None:
     overview = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", "--help"])
 
     assert overview.exit_code == 0
-    for name in sorted(_ENGINE | set(_DELEGATED)):
+    for name in sorted(_ENGINE):
         assert name in overview.output
-    for name in _DELEGATED:
-        via_pm = cli_runner.invoke(cli, ["-w", str(tmp_path), "pm", name, "--help"])
-        via_workflow = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", name, "--help"])
-        assert via_workflow.exit_code == via_pm.exit_code == 0
-        assert via_workflow.output.split("\n\n", 1)[1] == via_pm.output.split("\n\n", 1)[1], name
+    for name in _RETIRED:
+        refused = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", name, "--help"])
+        assert refused.exit_code == 2, name
+        assert _UNKNOWN_PREFIX in refused.output, name
 
 
 def test_the_module_does_not_revive_the_old_write_state_machine() -> None:

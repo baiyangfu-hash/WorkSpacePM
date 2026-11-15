@@ -26,7 +26,7 @@ class TestConstraintChecker:
 
         non_env_violations = [v for v in report.violations_list if v.constraint_id != "CST-ENV-001"]
         assert len(non_env_violations) == 0
-        assert report.total >= 8
+        assert report.total >= 4  # 退役批一挪走 6 条后剩 4 条定义
 
     def test_check_naming_violation(self, temp_workspace: Path) -> None:
         """检测包含版本号后缀的文件名违规 (CST-NAME-001)"""
