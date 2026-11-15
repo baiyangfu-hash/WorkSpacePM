@@ -4,7 +4,7 @@ title: "{{ project_name }} 需求规格说明书 (REQ)"
 project_id: "{{ project_id }}"
 version: "{{ version | default('V1.0.0') }}"
 status: "正式"
-created: "2026-08-23"
+created: "{{ '%Y-%m-%d' | strftime }}"
 author: "PM_Workflow"
 domain: "plc"
 ---
