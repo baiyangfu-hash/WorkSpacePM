@@ -10,6 +10,7 @@ import csv
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 
@@ -316,8 +317,8 @@ ethernet_ip:
 title: "PLC变量定义文档 (VAR) - {project_name}"
 version: "V1.0.0"
 status: "正式"
-created: "2026-08-21"
-updated: "2026-08-21"
+created: "{date.today().isoformat()}"
+updated: "{date.today().isoformat()}"
 spec_id: "VAR"
 project_id: "{project_id}"
 ---
@@ -363,7 +364,7 @@ project_id: "{project_id}"
 title: "IO 分配表 (IO) - {project_name}"
 version: "V1.0.0"
 status: "正式"
-created: "2026-08-21"
+created: "{date.today().isoformat()}"
 spec_id: "IO"
 project_id: "{project_id}"
 ---
@@ -394,7 +395,7 @@ project_id: "{project_id}"
 title: "PLC程序设计总文档 (PLC) - {project_name}"
 version: "V1.0.0"
 status: "正式"
-created: "2026-08-21"
+created: "{date.today().isoformat()}"
 spec_id: "PLC"
 project_id: "{project_id}"
 ---
@@ -433,7 +434,7 @@ project_id: "{project_id}"
 title: "自动工艺流程图 (FLOW) - {project_name}"
 version: "V1.0.0"
 status: "正式"
-created: "2026-08-21"
+created: "{date.today().isoformat()}"
 spec_id: "FLOW"
 project_id: "{project_id}"
 ---

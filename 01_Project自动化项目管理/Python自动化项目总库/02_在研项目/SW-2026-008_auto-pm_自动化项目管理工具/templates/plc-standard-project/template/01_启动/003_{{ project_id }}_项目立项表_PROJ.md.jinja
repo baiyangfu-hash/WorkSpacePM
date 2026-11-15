@@ -4,7 +4,7 @@ title: "{{ project_name }} 项目立项表"
 project_id: "{{ project_id }}"
 version: "V1.0.0"
 status: "draft"
-created: "2026-08-21"
+created: "{{ '%Y-%m-%d' | strftime }}"
 domain: pm
 ---
 
@@ -20,7 +20,7 @@ domain: pm
 | **版本** | `V1.0.0` |
 | **项目类型** | single_machine |
 | **技术栈** | PLC (IEC 61131-3 SCL) |
-| **立项日期** | 2026-08-21 |
+| **立项日期** | {{ '%Y-%m-%d' | strftime }} |
 
 ## 2. 项目背景与目标
 

@@ -13,4 +13,4 @@
 
 | 版本号 | 变更单号 | 变更类型 | 变更描述 | 申请人 | 实施日期 |
 | :---: | :---: | :---: | :--- | :---: | :---: |
-| {{ version }} | CHG-PLC-{{ now().strftime('%Y') if now is defined else '2026' }}-001 | REQ | 初始版本创建：标准 5 步工步状态机与结构体整块传递架构 | {{ author }} | {{ now().strftime('%Y-%m-%d') if now is defined else '2026-08-23' }} |
+| {{ version }} | CHG-PLC-{{ '%Y' | strftime }}-001 | REQ | 初始版本创建：标准 5 步工步状态机与结构体整块传递架构 | {{ author }} | {{ '%Y-%m-%d' | strftime }} |
