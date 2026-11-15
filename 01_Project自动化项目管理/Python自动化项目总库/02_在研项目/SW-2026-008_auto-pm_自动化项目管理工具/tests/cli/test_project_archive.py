@@ -359,3 +359,53 @@ def test_open_cards_get_a_what_to_do_line_and_chinese_state_names(desk: Desk) ->
     assert result.exit_code == 1 and "[不过] 卡全关" in flat
     assert "开着的 Work WORK-1（IN_PROGRESS）" in flat  # 和 project delete 共用的原因文字原样
     assert "怎么办：" in flat and "pm missions --pid" in flat and "状态码：IN_PROGRESS 在干" in flat
+
+
+def test_archive_dry_run_lists_a_raw_note_with_its_way_out_and_changes_nothing(desk: Desk) -> None:
+    """D-357：归档预演第 5 项列出待整理记录和新的“怎么办”；预演不改登记表、不改账本。"""
+    note = desk.site.note("看板字太小")
+    commit_all(desk.site.root)
+    before = desk.site.snapshot()
+    result = desk.run("archive", PID)
+    flat = result.output.replace("\n", "")
+    assert "[不过] 收件箱没有待处理条目" in result.output
+    assert f"待整理记录 {note.note_id}（还没整理成正式条目）：看板字太小" in flat
+    assert "待整理记录请 AI 先整理成正式条目（pm inbox add --from-note <NOTE-ID>）" in flat
+    for name in ("卡全关", "收口走完", "没有已验收没收口的卡", "没有没提交的改动"):
+        assert f"[通过] {name}" in result.output
+    assert desk.site.snapshot() == before and desk.audit == []
+
+    refused = desk.run("archive", PID, "--confirm", "--approval-evidence-ref", USER_WORDS)
+    assert refused.exit_code == 1 and "现在不能归档" in refused.output and note.note_id in refused.output
+    assert desk.site.snapshot() == before and desk.status() != "archived"
+
+
+def test_archive_passes_once_the_note_was_turned_into_an_item_and_the_user_rejected_it(desk: Desk) -> None:
+    from auto_pm.contracts.intake import IntakeStatus
+
+    note = desk.site.note("记错的一句话")
+    item = desk.site.turn(note)
+    commit_all(desk.site.root)
+    waiting = desk.run("archive", PID)
+    assert "[不过] 收件箱没有待处理条目" in waiting.output and item.item_id in waiting.output
+    assert note.note_id not in waiting.output  # the triaged note itself no longer blocks
+    desk.site.decide(item, IntakeStatus.REJECTED)
+    done = desk.run("archive", PID)
+    assert "[通过] 收件箱没有待处理条目" in done.output and "[不过]" not in done.output
+
+
+def test_archive_dry_run_on_a_ledger_without_the_notes_table_does_not_create_it(desk: Desk) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    desk.site.closed_card(1)
+    with closing(sqlite3.connect(desk.site.db)) as conn:
+        conn.execute("DROP TABLE intake_notes")
+        conn.commit()
+    commit_all(desk.site.root)
+    before = desk.site.snapshot()
+    result = desk.run("archive", PID)
+    assert "[通过] 收件箱没有待处理条目" in result.output
+    assert desk.site.snapshot() == before
+    with closing(sqlite3.connect(desk.site.db)) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='intake_notes'").fetchone() is None

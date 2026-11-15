@@ -309,3 +309,56 @@ def test_orient_adds_one_read_only_presence_line_and_keeps_json_pure_and_writes_
 def test_orient_prints_no_presence_line_when_nobody_else_is_known(tmp_path: Path) -> None:
     _workspace(tmp_path)
     assert "[在场]" not in _run(tmp_path, "orient", PROJECT).output
+
+
+# --- D-357：待整理记录在 pm orient / pm resume 里多一栏、多一行；只读 ------------------------------------------------
+
+
+def _ledger_with_a_note(root: Path, *, by: str = "no-agent-marker") -> str:
+    from auto_pm.contracts.intake import IntakeKind
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+    from auto_pm.infrastructure.intake_store import IntakeStore
+
+    ContinuityStore(root).initialize("2026-11-13T00:00:00+00:00", "test")
+    note, _ = IntakeStore(root).add_note(
+        request_id="REQ-NOTE-1", project_id=PROJECT, title="看板字太小", original_words="字太小了，看不清",
+        kind_hint=IntakeKind.ITERATION, recorded_by=by,
+    )
+    return note.note_id
+
+
+@pytest.mark.parametrize("command", ["orient", "resume"])
+def test_d357_json_carries_the_notes_block_and_the_text_adds_one_line(tmp_path: Path, command: str) -> None:
+    _workspace(tmp_path)
+    empty = _json(_run(tmp_path, command, PROJECT, "--json"))
+    assert empty["notes"] == {"waiting": 0, "oldest_note_id": "", "oldest_recorded_by": "", "oldest_created_at": ""}
+    assert empty["next_legal_action"] == "USE_INBOX" and "待整理记录" not in _run(tmp_path, command, PROJECT).output
+
+    note_id = _ledger_with_a_note(tmp_path)
+    payload = _json(_run(tmp_path, command, PROJECT, "--json"))
+    assert payload["next_legal_action"] == "TRIAGE_NOTES"
+    assert (payload["notes"]["waiting"], payload["notes"]["oldest_note_id"], payload["notes"]["oldest_recorded_by"]) == (1, note_id, "no-agent-marker")
+    assert payload["intake"] == empty["intake"]  # the inbox summary keeps its exact shape (an older reader forbids extras there)
+    text = _run(tmp_path, command, PROJECT).output
+    assert f"待整理记录: 1 条，最早一条 {note_id}（本机终端（没带 AI 标记） 记于 {payload['notes']['oldest_created_at']}）" in text
+    assert "pm inbox add … --from-note <NOTE-ID>" in text and "no-agent-marker" not in text
+
+
+def test_d357_the_read_only_locators_leave_a_ledger_without_the_notes_table_byte_identical(tmp_path: Path) -> None:
+    """验收 12：没有 intake_notes 表的账本上，三条只读命令每跑完一条账本字节都不变，表也没被建出来。"""
+    import sqlite3
+    from contextlib import closing
+
+    _workspace(tmp_path)
+    _ledger_with_a_note(tmp_path)
+    db = tmp_path / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute("DROP TABLE intake_notes")
+        conn.commit()
+    before = _snapshot(tmp_path)
+    for args in ((("orient", PROJECT)), ("orient", PROJECT, "--json"), ("resume", PROJECT, "--json")):
+        result = _run(tmp_path, *args)
+        assert result.exit_code == 0 and "NOTE-" not in result.output
+        assert _snapshot(tmp_path) == before
+    with closing(sqlite3.connect(db)) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='intake_notes'").fetchone() is None

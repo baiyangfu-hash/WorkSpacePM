@@ -489,6 +489,26 @@ CREATE TABLE IF NOT EXISTS planning_draft_intake_bindings (
 """
 _DDL += INTAKE_ITEMS_DDL + ";\n" + INTAKE_BINDINGS_DDL + ";\n"
 
+# D-357: raw notes (one sentence plus the original words) waiting to be triaged into an inbox item.  Same pattern as the two
+# tables above (TD-SW008 073): ``IF NOT EXISTS`` in the base DDL, no schema-version bump, no migration; an older release
+# opens the ledger and simply does not read this table.
+INTAKE_NOTES_DDL = """
+CREATE TABLE IF NOT EXISTS intake_notes (
+    note_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    seq INTEGER NOT NULL CHECK (seq >= 1),
+    title_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    note_json TEXT NOT NULL,
+    item_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (project_id, seq)
+)
+"""
+_DDL += INTAKE_NOTES_DDL + ";\n"
+
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"

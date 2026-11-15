@@ -14,7 +14,7 @@ from pathlib import Path
 from auto_pm.infrastructure.continuity_store import ContinuityStore
 
 _NOW = "2026-11-08T20:00:00+00:00"
-_TABLES = ("intake_items", "planning_draft_intake_bindings")
+_TABLES = ("intake_items", "planning_draft_intake_bindings", "intake_notes")
 
 
 def _git(root: Path, *args: str) -> None:
@@ -77,6 +77,10 @@ def test_initialize_keeps_inbox_rows_that_a_lazy_create_already_stored_and_is_id
             "INSERT INTO intake_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("ITEM-1", "REQ-1", "SW-TEST-001", 1, "t", "AWAITING", "h", "{}", _NOW, _NOW),
         )
+        conn.execute(  # D-357: the raw-note table follows the same rule
+            "INSERT INTO intake_notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("NOTE-1", "REQ-N1", "SW-TEST-001", 1, "t", "RAW", "{}", None, _NOW, _NOW),
+        )
         conn.commit()
 
     store.initialize(_NOW, "test")
@@ -84,4 +88,6 @@ def test_initialize_keeps_inbox_rows_that_a_lazy_create_already_stored_and_is_id
 
     with closing(sqlite3.connect(store.db_path)) as conn:
         rows = conn.execute("SELECT item_id, seq FROM intake_items").fetchall()
+        notes = conn.execute("SELECT note_id, seq, status FROM intake_notes").fetchall()
     assert rows == [("ITEM-1", 1)]
+    assert notes == [("NOTE-1", 1, "RAW")]

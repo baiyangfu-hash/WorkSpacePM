@@ -22,9 +22,13 @@ from auto_pm.contracts.intake import (
     IntakeClassification,
     IntakeItem,
     IntakeKind,
+    IntakeNote,
+    IntakeNoteSummary,
     IntakeStatus,
+    NoteStatus,
     TriageTicket,
     UrgentCriterion,
+    note_actor_label,
 )
 from auto_pm.contracts.pm_facade import PlanningDraft, PmIntent
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
@@ -709,3 +713,196 @@ def test_td072_a_ledger_row_is_found_in_the_project_its_id_names_even_when_anoth
     assert desk.propose(project=PLC_PROJECT, kind=IntakeKind.BUG, ticket=desk.ticket(evidence=("ledger:TD-SW901-007",)))
     with pytest.raises(PmIntakeError, match="取证台账行不存在"):
         desk.propose(project=PLC_PROJECT, ticket=desk.ticket(evidence=("ledger:TD-SW901-008",)), title="没有这行")
+
+
+# ---------------------------------------------------------------- D-357: raw notes
+
+
+def _note(desk: Desk, title: str = "看板字太小", *, words: str = "字太小了，看不清", request_id: str = "", by: str = "trae") -> IntakeNote:
+    desk.counter += 1
+    note, _ = desk.service.note(
+        request_id=request_id or f"REQ-NOTE-{desk.counter:03d}", project_id=PYTHON_PROJECT, title=title,
+        original_words=words, kind_hint=IntakeKind.ITERATION, recorded_by=by,
+    )
+    return note
+
+
+def _turn(desk: Desk, note: IntakeNote, *, request_id: str = "REQ-TURN-1", title: str = "", words: str = "", by: str = "claude") -> tuple[IntakeItem, bool]:
+    classification = desk.service.classify(PYTHON_PROJECT, kind=IntakeKind.BUG, change_action=None, domain="", impact_scope=())
+    return desk.service.propose(
+        request_id=request_id, project_id=PYTHON_PROJECT, title=title or note.title, classification=classification,
+        ticket=desk.ticket(original_words=words or note.original_words), proposed_by="pm-test",
+        from_note=note.note_id, triaged_by=by,
+    )
+
+
+def test_d357_notes_are_numbered_per_project_listed_in_order_and_leave_an_event(desk: Desk) -> None:
+    first = _note(desk, "第一句")
+    second = _note(desk, "第二句", by="no-agent-marker")
+    assert (first.note_id, second.note_id) == ("NOTE-SW-2026-901-0001", "NOTE-SW-2026-901-0002")
+    assert first.status is NoteStatus.RAW and (first.item_id, first.triaged_by, first.triaged_at) == ("", "", "")
+    assert desk.service.list_notes(PYTHON_PROJECT) == (first, second)
+    assert desk.service.list_notes(PLC_PROJECT) == ()
+    row = desk.sql("SELECT aggregate_type, aggregate_id FROM events WHERE event_type='INTAKE_NOTE_RECORDED' ORDER BY rowid")
+    assert row == [("intake_note", first.note_id), ("intake_note", second.note_id)]
+    assert desk.sql("SELECT seq, status, item_id, title_key FROM intake_notes ORDER BY seq") == [(1, "RAW", None, "第一句"), (2, "RAW", None, "第二句")]
+    summary = IntakeStore(desk.root).note_summary(PYTHON_PROJECT)
+    assert summary == IntakeNoteSummary(
+        waiting=2, oldest_note_id=first.note_id, oldest_recorded_by="trae", oldest_created_at=first.created_at
+    )
+    assert IntakeStore(desk.root).note_summary(PLC_PROJECT).is_empty
+    assert desk.service.list_items(PYTHON_PROJECT) == ()  # a note is not an inbox item
+    assert IntakeStore(desk.root).summary(PYTHON_PROJECT).is_empty
+
+
+def test_d357_the_note_contract_keeps_raw_and_triaged_apart() -> None:
+    base: dict[str, Any] = {
+        "note_id": "NOTE-SW-2026-901-0001", "request_id": "R", "project_id": PYTHON_PROJECT, "title": "t",
+        "original_words": "  第一行\n第二行  ", "recorded_by": "claude", "created_at": "2026-11-13T00:00:00+00:00",
+    }
+    note = IntakeNote(**base)
+    assert note.original_words == "第一行\n第二行" and note.kind_hint is IntakeKind.ITERATION
+    triage = {"item_id": "INBOX-SW-2026-901-0001", "triaged_by": "claude", "triaged_at": "2026-11-13T01:00:00+00:00"}
+    assert IntakeNote(**base, status=NoteStatus.TRIAGED, **triage).item_id == triage["item_id"]
+    for field in triage:  # a raw note carries none of the three; a triaged one needs all three
+        with pytest.raises(ValueError, match="raw note"):
+            IntakeNote(**base, **{field: triage[field]})
+        with pytest.raises(ValueError, match="triaged note"):
+            IntakeNote(**base, status=NoteStatus.TRIAGED, **{key: value for key, value in triage.items() if key != field})
+    with pytest.raises(ValueError, match="same project"):
+        IntakeNote(**base, status=NoteStatus.TRIAGED, **{**triage, "item_id": "INBOX-DJ-2026-902-0001"})
+    with pytest.raises(ValueError, match="note_id"):
+        IntakeNote(**{**base, "note_id": "NOTE-DJ-2026-902-0001"})
+    with pytest.raises(ValueError):
+        IntakeNote.model_validate({**base, "extra_field": 1})
+    for blank in ("title", "original_words", "recorded_by"):
+        with pytest.raises(ValueError):
+            IntakeNote(**{**base, blank: " "})
+    assert IntakeNoteSummary.model_validate({"waiting": 1, "a_field_from_a_newer_release": 1}).waiting == 1
+    assert note_actor_label("no-agent-marker") == "本机终端（没带 AI 标记）"
+    assert note_actor_label("unknown-agent") == "带了标记但不在名册里的 AI"
+    assert note_actor_label("trae") == "trae"
+
+
+def test_d357_a_replay_returns_the_same_note_and_changed_content_is_refused(desk: Desk) -> None:
+    first = _note(desk, request_id="REQ-SAME")
+    events = desk.events()
+    again, created = desk.service.note(
+        request_id="REQ-SAME", project_id=PYTHON_PROJECT, title=first.title, original_words=first.original_words,
+        kind_hint=IntakeKind.ITERATION, recorded_by="cursor",
+    )
+    assert (again, created) == (first, False) and desk.events() == events  # the first recorder stays on record
+    for change in ({"title": "另一个标题"}, {"original_words": "另一句"}, {"kind_hint": IntakeKind.BUG}, {"project_id": PLC_PROJECT}):
+        values: dict[str, Any] = {
+            "request_id": "REQ-SAME", "project_id": PYTHON_PROJECT, "title": first.title,
+            "original_words": first.original_words, "kind_hint": IntakeKind.ITERATION, "recorded_by": "trae", **change,
+        }
+        with pytest.raises(PmIntakeError, match="request_id 已绑定不同内容"):
+            desk.service.note(**values)
+    assert desk.events() == events and len(desk.sql("SELECT 1 FROM intake_notes")) == 1
+
+
+def test_d357_duplicate_titles_are_checked_against_raw_notes_and_open_items_only(desk: Desk) -> None:
+    note = _note(desk, "看板 字太小")
+    with pytest.raises(PmIntakeError, match=f"已有同名待整理记录: {note.note_id}"):
+        _note(desk, "看板   字太小")
+    item = desk.propose("导出没反应")
+    with pytest.raises(PmIntakeError, match=f"已有同名未处理条目: {item.item_id}"):
+        _note(desk, "导出没反应")
+    with pytest.raises(PmIntakeError, match=f"--from-note {note.note_id}"):
+        desk.propose("看板 字太小")
+    desk.service.reject(item.item_id, ticket_hash=item.ticket_hash, approver=APPROVER, approval_evidence_ref=CONFIRMATION)
+    assert _note(desk, "导出没反应").note_id.endswith("-0002")  # a decided item no longer holds the title
+    turned, _ = _turn(desk, note)
+    assert desk.service.list_notes(PYTHON_PROJECT, (NoteStatus.TRIAGED,))[0].item_id == turned.item_id
+    with pytest.raises(PmIntakeError, match=f"已有同名未处理条目: {turned.item_id}"):
+        _note(desk, "看板 字太小")  # now the open item holds the title, not the triaged note
+
+
+def test_d357_turning_a_note_is_one_transaction_and_happens_once(desk: Desk, monkeypatch: pytest.MonkeyPatch) -> None:
+    note = _note(desk)
+    events = desk.events()
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise ContinuityStoreError("写记录失败（测试打桩）")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(IntakeStore, "_store_note", staticmethod(broken))
+        with pytest.raises(PmIntakeError, match="测试打桩"):
+            _turn(desk, note)
+    assert desk.events() == events and desk.service.list_items(PYTHON_PROJECT) == ()
+    assert desk.service.list_notes(PYTHON_PROJECT) == (note,)
+
+    for refused, pattern in (
+        ({"words": note.original_words + "！"}, "不逐字相同"),
+        ({"words": note.original_words[:-1]}, "不逐字相同"),
+    ):
+        with pytest.raises(PmIntakeError, match=pattern):
+            _turn(desk, note, **refused)
+    with pytest.raises(PmIntakeError, match="待整理记录不存在: NOTE-SW-2026-901-0009"):
+        _turn(desk, note.model_copy(update={"note_id": "NOTE-SW-2026-901-0009"}))
+    assert desk.events() == events and desk.service.list_items(PYTHON_PROJECT) == ()
+
+    item, created = _turn(desk, note, title="看板首页字号偏小")
+    assert created and item.status is IntakeStatus.PROPOSED and item.proposed_by == "pm-test"
+    triaged = desk.service.list_notes(PYTHON_PROJECT, (NoteStatus.TRIAGED,))[0]
+    assert (triaged.status, triaged.item_id, triaged.triaged_by, triaged.triaged_at) == (NoteStatus.TRIAGED, item.item_id, "claude", item.created_at)
+    assert (triaged.title, triaged.original_words, triaged.recorded_by, triaged.created_at) == (note.title, note.original_words, "trae", note.created_at)
+    assert desk.service.list_notes(PYTHON_PROJECT) == ()
+    assert [row[0] for row in desk.sql("SELECT event_type FROM events ORDER BY rowid")][-2:] == ["INTAKE_ITEM_RECORDED", "INTAKE_NOTE_TRIAGED"]
+    assert desk.sql("SELECT status, item_id FROM intake_notes") == [("TRIAGED", item.item_id)]
+
+    events = desk.events()
+    assert _turn(desk, note, title="看板首页字号偏小") == (item, False) and desk.events() == events
+    with pytest.raises(PmIntakeError, match=f"已经转成 {item.item_id}"):
+        _turn(desk, note, request_id="REQ-TURN-2", title="再转一次")
+    other = _note(desk, "另一件事", words="另一句")
+    with pytest.raises(PmIntakeError, match="不是由待整理记录"):
+        _turn(desk, other, title="看板首页字号偏小", words=note.original_words)  # REQ-TURN-1 belongs to the first note
+    with pytest.raises(PmIntakeError, match="待整理记录不存在"):
+        _turn(desk, other.model_copy(update={"note_id": "NOTE-SW-2026-901-0009"}), title="看板首页字号偏小", words=note.original_words)
+    assert desk.events() == events + 1 and len(desk.service.list_items(PYTHON_PROJECT)) == 1
+
+
+def test_d357_a_note_of_another_project_cannot_be_turned(desk: Desk) -> None:
+    note = _note(desk)
+    classification = desk.service.classify(PLC_PROJECT, kind=IntakeKind.BUG, change_action=None, domain="", impact_scope=())
+    with pytest.raises(PmIntakeError, match=f"属于项目 {PYTHON_PROJECT}"):
+        desk.service.propose(
+            request_id="REQ-X", project_id=PLC_PROJECT, title="t", classification=classification,
+            ticket=desk.ticket(original_words=note.original_words), proposed_by="pm-test", from_note=note.note_id, triaged_by="claude",
+        )
+    assert desk.service.list_items(PLC_PROJECT) == () and desk.service.list_notes(PYTHON_PROJECT) == (note,)
+
+
+def test_d357_reading_notes_creates_neither_the_table_nor_the_ledger(desk: Desk, tmp_path_factory: pytest.TempPathFactory) -> None:
+    import hashlib
+
+    _note(desk)
+    db = desk.root / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.execute("DROP TABLE intake_notes")  # what a ledger from before D-357 looks like
+    digest = hashlib.sha256(db.read_bytes()).hexdigest()
+    store = IntakeStore(desk.root)
+    assert store.list_notes(PYTHON_PROJECT) == () and store.note_summary(PYTHON_PROJECT).is_empty
+    assert desk.service.list_notes(PYTHON_PROJECT, (NoteStatus.RAW, NoteStatus.TRIAGED)) == ()
+    assert "intake_notes" not in desk.tables() and hashlib.sha256(db.read_bytes()).hexdigest() == digest
+    assert _note(desk, "老账本上第一次写").note_id.endswith("-0001") and "intake_notes" in desk.tables()
+
+    bare = tmp_path_factory.mktemp("no-ledger")
+    _repository(bare)
+    assert IntakeStore(bare).list_notes(PYTHON_PROJECT) == () and IntakeStore(bare).note_summary(PYTHON_PROJECT).is_empty
+    assert not (bare / ".auto-pm").exists()
+    with pytest.raises(ContinuityStoreError, match="尚未初始化"):
+        IntakeStore(bare).add_note(
+            request_id="R", project_id=PYTHON_PROJECT, title="t", original_words="w", kind_hint=IntakeKind.ITERATION, recorded_by="trae"
+        )
+    assert not (bare / ".auto-pm" / "continuity.db").exists()
+
+
+def test_d357_a_note_row_that_cannot_be_read_is_an_error_not_an_empty_list(desk: Desk) -> None:
+    _note(desk)
+    with closing(sqlite3.connect(desk.root / ".auto-pm" / "continuity.db")) as conn, conn:
+        conn.execute("UPDATE intake_notes SET note_json='{}'")
+    with pytest.raises(PmIntakeError, match="待整理记录无法读取"):
+        desk.service.list_notes(PYTHON_PROJECT)

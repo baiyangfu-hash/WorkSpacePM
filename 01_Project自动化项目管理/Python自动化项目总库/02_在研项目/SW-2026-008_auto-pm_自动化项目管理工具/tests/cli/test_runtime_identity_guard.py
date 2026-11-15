@@ -24,6 +24,7 @@ WRITE_COMMANDS = frozenset(
         "handoff",
         "inbox add",
         "inbox confirm",
+        "inbox note",
         "inbox reject",
         "park",
         "plan",
@@ -116,6 +117,7 @@ CASES = (
     _Case("handoff", ("--run-id", "R-1", "--to", "claude:local"), "P-RUN", "run"),
     _Case("inbox add", ("--project-id", "P-INBOX", "--request-id", "REQ-1", "--title", "t", "--kind", "bug", "--original-words", "w", "--affects", "a", "--duplicate-check", "c", "--disposition", "reject", "--rationale", "r", "--cost-risk", "c"), "P-INBOX", "inbox"),
     _Case("inbox confirm", ("ITEM-1", "--ticket-hash", "H", "--approver", "u", "--approval-evidence-ref", "user-confirmation:1"), "P-ITEM", "inbox"),
+    _Case("inbox note", ("--project-id", "P-NOTE", "--title", "t", "--original-words", "w"), "P-NOTE", "inbox"),
     _Case("inbox reject", ("ITEM-1", "--ticket-hash", "H", "--approver", "u", "--approval-evidence-ref", "user-confirmation:1"), "P-ITEM", "inbox"),
     _Case("park", ("--mission-id", "M-1", "--reason", "r", "--summary", "s"), "P-MISSION", "switch"),
     _Case("plan", ("--mission-id", "M-1"), "P-MISSION"),
@@ -201,7 +203,7 @@ def test_a_refused_identity_stops_every_write_command_before_it_writes(
         monkeypatch.setenv("TOKEN_ENV", "secret")
         card = SimpleNamespace(request_id="REQ-1", subject_project_id="P-CARD")
         monkeypatch.setattr("auto_pm.ui.cli.pm.PlanningScopeCard.model_validate_json", classmethod(lambda _cls, _text: card))
-    if case.setup == "inbox" and case.command != "inbox add":
+    if case.setup == "inbox" and case.command not in ("inbox add", "inbox note"):
         monkeypatch.setattr(
             pm,
             "_intake",

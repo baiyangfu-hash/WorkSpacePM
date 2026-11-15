@@ -1521,3 +1521,132 @@ def test_orient_text_shows_the_orphan_card_and_json_keeps_its_fields(
     payload = result.model_dump(mode="json")
     assert set(payload) == set(_collect_without_the_orphan_look(tmp_path).model_dump(mode="json"))
     assert payload["schema_version"] == "continuity-resume.v2"
+
+
+# --- D-357：待整理记录。只顶替 USE_INBOX 这一种下一步；任何状态都报；没有记录时证据号不变；只读 ----------------------
+
+
+def _raw_note(root: Path, title: str = "看板字太小", *, by: str = "no-agent-marker") -> str:
+    from auto_pm.contracts.intake import IntakeKind
+    from auto_pm.infrastructure.intake_store import IntakeStore
+
+    if not (root / ".auto-pm" / "continuity.db").is_file():
+        ContinuityStore(root).initialize("2026-09-09T11:00:00+00:00", "test")
+    note, _ = IntakeStore(root).add_note(
+        request_id=f"REQ-{title}", project_id="SW-2026-008", title=title, original_words=title,
+        kind_hint=IntakeKind.ITERATION, recorded_by=by,
+    )
+    return note.note_id
+
+
+def _collect(root: Path) -> ContinuityResume:
+    return ContinuityResumeService(root, now=lambda: datetime(2026, 9, 9, 12, 1, tzinfo=UTC)).collect(project_id="SW-2026-008")
+
+
+def test_d357_a_raw_note_on_an_otherwise_empty_ledger_asks_for_triage(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    ContinuityStore(tmp_path).initialize("2026-09-09T11:00:00+00:00", "test")
+    empty = _collect(tmp_path)
+    assert empty.next_legal_action == "USE_INBOX" and empty.notes.is_empty
+    assert "notes" in empty.model_dump(mode="json")  # the block is always there, empty or not
+
+    first = _raw_note(tmp_path, by="trae")
+    _raw_note(tmp_path, "另一句话")
+    result = _collect(tmp_path)
+
+    assert result.next_legal_action == "TRIAGE_NOTES"
+    assert (result.notes.waiting, result.notes.oldest_note_id, result.notes.oldest_recorded_by) == (2, first, "trae")
+    assert result.notes.oldest_created_at
+    assert result.intake == empty.intake and result.intake.is_empty  # the inbox summary itself is untouched
+    assert result.evidence_id != empty.evidence_id
+    assert result.conflicts == () and result.mission is None and result.work is None
+
+
+def test_d357_a_project_without_raw_notes_keeps_its_evidence_id(tmp_path: Path) -> None:
+    """没有待整理记录时证据号和改前一样：有没有这张表、表里只有已转正的记录，都不进种子。"""
+    from auto_pm.contracts.intake import Disposition, IntakeClassification, IntakeKind, TriageTicket
+    from auto_pm.infrastructure.intake_store import IntakeStore
+
+    _workspace(tmp_path)
+    note_id = _raw_note(tmp_path)
+    IntakeStore(tmp_path).add_item(
+        request_id="REQ-TURN", project_id="SW-2026-008", title="看板字太小",
+        classification=IntakeClassification(kind=IntakeKind.BUG, domain="SCPT"),
+        ticket=TriageTicket(
+            original_words="看板字太小", affects="x", duplicate_check="x", evidence=("file:README.md",),
+            disposition=Disposition.INBOX_WAIT, rationale="x", alternatives=("x",), cost_risk="x",
+        ),
+        proposed_by="pm-test", from_note=note_id, triaged_by="claude",
+    )
+    with_triaged_note = _collect(tmp_path)
+    assert with_triaged_note.notes.is_empty and with_triaged_note.next_legal_action == "USE_INBOX"
+    assert with_triaged_note.intake.awaiting_confirmation == 1
+
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        conn.execute("DROP TABLE intake_notes")  # the same ledger as an older release would have written it
+        conn.commit()
+    without_table = _collect(tmp_path)
+    assert without_table.evidence_id == with_triaged_note.evidence_id
+    assert without_table.model_dump(mode="json") == with_triaged_note.model_dump(mode="json")
+
+
+def test_d357_a_project_with_a_running_card_keeps_its_next_action_and_still_reports_the_notes(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _work(tmp_path, "WORK-001")
+    _run(tmp_path)
+    before = _collect(tmp_path)
+    note_id = _raw_note(tmp_path)
+
+    result = _collect(tmp_path)
+
+    assert before.next_legal_action == result.next_legal_action == "CONTINUE_RUN"
+    assert (result.notes.waiting, result.notes.oldest_note_id) == (1, note_id)
+    assert result.work and result.work.work_id == "WORK-001" and result.run and result.run.run_id == "RUN-001"
+    assert result.evidence_id != before.evidence_id
+
+
+def test_d357_reading_the_notes_never_creates_the_table_or_the_ledger(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    assert _collect(tmp_path).notes.is_empty and not (tmp_path / ".auto-pm").exists()
+
+    _work(tmp_path, "WORK-001")
+    db = tmp_path / ".auto-pm" / "continuity.db"
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute("DROP TABLE intake_notes")
+        conn.commit()
+    digest = hashlib.sha256(db.read_bytes()).hexdigest()
+    assert _collect(tmp_path).notes.is_empty
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == digest
+    with closing(sqlite3.connect(db)) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='intake_notes'").fetchone() is None
+
+
+def test_d357_notes_that_cannot_be_read_stop_the_answer_like_an_unreadable_inbox(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    _raw_note(tmp_path)
+    with closing(sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db")) as conn:
+        conn.execute("UPDATE intake_notes SET note_json='{}'")
+        conn.commit()
+    with pytest.raises(ContinuityResumeError, match="收件箱无法读取: 待整理记录无法读取"):
+        _collect(tmp_path)
+
+
+def test_d357_the_text_output_says_who_recorded_the_oldest_note_in_plain_words(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _workspace(tmp_path)
+    cases = (("no-agent-marker", "本机终端（没带 AI 标记）"), ("unknown-agent", "带了标记但不在名册里的 AI"), ("trae", "trae"))
+    for number, (by, shown) in enumerate(cases):
+        root = tmp_path / f"ws{number}"  # the folder name is printed as evidence, so it must not carry the internal value
+        root.mkdir()
+        _workspace(root)
+        note_id = _raw_note(root, by=by)
+        result = _collect(root)
+        pm_module._echo_resume_text(result)
+        text = capsys.readouterr().out
+        assert (
+            f"待整理记录: 1 条，最早一条 {note_id}（{shown} 记于 {result.notes.oldest_created_at}）；"
+            "整理办法：查重、取证后用 pm inbox add … --from-note <NOTE-ID> 转成正式条目"
+        ) in text
+        assert "下一合法动作: TRIAGE_NOTES" in text
+        assert ("no-agent-marker" in text, "unknown-agent" in text) == (False, False)
+    pm_module._echo_resume_text(_collect(tmp_path))
+    assert "待整理记录" not in capsys.readouterr().out

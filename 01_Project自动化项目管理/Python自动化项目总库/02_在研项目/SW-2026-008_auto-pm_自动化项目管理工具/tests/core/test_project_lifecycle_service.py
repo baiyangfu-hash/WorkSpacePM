@@ -27,6 +27,7 @@ from auto_pm.contracts.intake import (
     IntakeClassification,
     IntakeItem,
     IntakeKind,
+    IntakeNote,
     IntakeStatus,
     TriageTicket,
 )
@@ -189,6 +190,42 @@ class Site:
         )
         return item
 
+    def note(self, title: str, *, project: str = PID) -> IntakeNote:
+        """一条待整理记录（D-357）：只有一句话和原话。"""
+        assert self.store.db_path == self.db
+        note, _ = IntakeStore(self.root).add_note(
+            request_id=f"REQ-NOTE-{hashlib.sha256(title.encode()).hexdigest()[:8]}",
+            project_id=project,
+            title=title,
+            original_words=title,
+            kind_hint=IntakeKind.ITERATION,
+            recorded_by="no-agent-marker",
+        )
+        return note
+
+    def turn(self, note: IntakeNote) -> IntakeItem:
+        """把待整理记录转成正式条目（PROPOSED）。"""
+        item, _ = IntakeStore(self.root).add_item(
+            request_id=f"REQ-TURN-{note.note_id}",
+            project_id=note.project_id,
+            title=note.title,
+            classification=IntakeClassification(kind=IntakeKind.BUG, domain="PLC"),
+            ticket=TriageTicket(
+                original_words=note.original_words,
+                affects=note.project_id,
+                duplicate_check="查过，没有同类条目",
+                evidence=("file:README.md",),
+                disposition=Disposition.REJECT,
+                rationale="记错了，建议不做",
+                alternatives=("留着",),
+                cost_risk="无",
+            ),
+            proposed_by="pm-test",
+            from_note=note.note_id,
+            triaged_by="claude",
+        )
+        return item
+
     def decide(self, item: IntakeItem, status: IntakeStatus) -> None:
         IntakeStore(self.root).decide_item(
             item.item_id,
@@ -328,6 +365,65 @@ def test_check_5_a_confirmed_item_still_blocks_and_a_rejected_one_does_not(site:
     assert rejected.item_id not in blocker
 
 
+def test_check_5_a_raw_note_refuses_and_is_listed_by_id_and_title(site: Site) -> None:
+    """D-357：待整理记录也算收件箱有待处理；别的项目的记录不算。"""
+    site.note("别的项目的一句话", project=OTHER)
+    assert site.failed() == ()
+    note = site.note("看板字太小")
+    assert site.failed() == (lifecycle.CHECK_INBOX,)
+    (blocker,) = site.plan().blockers
+    assert blocker == f"{lifecycle.CHECK_INBOX}：待整理记录 {note.note_id}（还没整理成正式条目）：看板字太小"
+    advice = site.plan().checks[-1].advice
+    assert "待整理记录请 AI 先整理成正式条目（pm inbox add --from-note <NOTE-ID>），再由用户确认或拒绝" in advice
+    assert "pm inbox confirm" in advice and "pm inbox reject" in advice and advice.startswith("怎么办：")
+
+
+def test_check_5_a_note_stops_blocking_only_after_it_was_turned_and_the_item_was_decided(site: Site) -> None:
+    """记错的一句话要走完一圈：转成正式条目（这时挡的是条目），用户拒绝后才放行；已转正的记录本身不挡。"""
+    note = site.note("记错的一句话")
+    item = site.turn(note)
+    (blocker,) = site.plan().blockers
+    assert item.item_id in blocker and "PROPOSED 待确认" in blocker and note.note_id not in blocker
+    site.decide(item, IntakeStatus.REJECTED)
+    assert site.failed() == ()
+
+
+def test_check_5_lists_open_items_first_then_raw_notes(site: Site) -> None:
+    item = site.inbox_item("一条正式条目")
+    note = site.note("一句还没整理的话")
+    first, second = site.plan().blockers
+    assert item.item_id in first and first.startswith(f"{lifecycle.CHECK_INBOX}：收件箱条目 ")
+    assert note.note_id in second and second.startswith(f"{lifecycle.CHECK_INBOX}：待整理记录 ")
+
+
+def test_notes_that_cannot_be_read_refuse_and_the_readable_items_are_still_listed(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.pm_intake_service import PmIntakeError, PmIntakeService
+
+    item = site.inbox_item("一条正式条目")
+
+    def broken(self: PmIntakeService, project_id: str, *args: object) -> tuple[IntakeNote, ...]:
+        raise PmIntakeError("待整理记录无法读取")
+
+    monkeypatch.setattr(PmIntakeService, "list_notes", broken)
+    assert site.failed() == (lifecycle.CHECK_INBOX,)
+    first, second = site.plan().blockers
+    assert item.item_id in first
+    assert second == f"{lifecycle.CHECK_INBOX}：读不出待整理记录，无法确认有没有还没整理的：待整理记录无法读取"
+
+
+def test_a_ledger_without_the_notes_table_passes_check_5_and_is_not_changed(site: Site) -> None:
+    """老账本没有 intake_notes 表：归档检查照常过，不建表，账本字节不变。"""
+    site.closed_card(1)
+    with closing(sqlite3.connect(site.db)) as conn:
+        conn.execute("DROP TABLE intake_notes")
+        conn.commit()
+    before = site.snapshot()
+    assert site.failed() == ()
+    assert site.snapshot() == before
+    with closing(sqlite3.connect(site.db)) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='intake_notes'").fetchone() is None
+
+
 def test_an_unreadable_ledger_refuses_every_check_that_reads_it(site: Site) -> None:
     site.db.parent.mkdir(parents=True, exist_ok=True)
     site.db.write_bytes(b"this is not a sqlite file")
@@ -409,6 +505,7 @@ def test_planning_writes_nothing(site: Site) -> None:
     site.closed_card(1)
     site.closed_card(2, closure="PREPARED")
     site.inbox_item("一条待确认")
+    site.note("一句还没整理的话")
     before = site.snapshot()
     with closing(sqlite3.connect(site.db)) as conn:
         events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]

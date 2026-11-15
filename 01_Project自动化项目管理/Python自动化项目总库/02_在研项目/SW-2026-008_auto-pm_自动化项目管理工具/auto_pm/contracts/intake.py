@@ -65,7 +65,23 @@ class IntakeStatus(StrEnum):
     PLANNED = "PLANNED"
 
 
+class NoteStatus(StrEnum):
+    """Life cycle of a raw note: waiting to be triaged, or already turned into an inbox item."""
+
+    RAW = "RAW"
+    TRIAGED = "TRIAGED"
+
+
 OPEN_INTAKE_STATUSES = (IntakeStatus.PROPOSED, IntakeStatus.CONFIRMED)
+#: ``recorded_by`` / ``triaged_by`` when the command saw no agent marker at all.  It is deliberately not "user": an agent that
+#: forgot ``AUTO_PM_AGENT`` looks exactly the same, so the ledger must not vouch for a human it cannot tell apart.
+NOTE_ACTOR_NO_MARKER = "no-agent-marker"
+#: The caller carried a marker that names nobody on the roster (or markers that disagree).  Recorded, not refused.
+NOTE_ACTOR_UNKNOWN = "unknown-agent"
+NOTE_ACTOR_LABELS = {
+    NOTE_ACTOR_NO_MARKER: "本机终端（没带 AI 标记）",
+    NOTE_ACTOR_UNKNOWN: "带了标记但不在名册里的 AI",
+}
 DEFAULT_IMPACT_SCOPE = ("MODULE",)
 EVIDENCE_KINDS = ("file", "cmd", "ledger", "chg", "commit")
 KIND_BUSINESS_NATURE = {
@@ -83,6 +99,7 @@ DISPOSITION_RANK = {
 }
 
 _ITEM_ID = re.compile(rf"INBOX-{PROJECT_ID_PATTERN}-\d{{4}}\Z")
+_NOTE_ID = re.compile(rf"NOTE-{PROJECT_ID_PATTERN}-\d{{4}}\Z")
 _TICKET_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _DOMAIN = re.compile(r"[A-Z]{3,4}\Z")
 _SCOPE = re.compile(r"[A-Z]{3,6}\Z")
@@ -419,3 +436,104 @@ class IntakeSummary(BaseModel):
         """True when nothing is waiting in the inbox."""
 
         return not (self.awaiting_confirmation or self.confirmed_waiting or self.queue)
+
+
+def note_actor_label(actor: str) -> str:
+    """Say who recorded or triaged a note in plain words; a roster name is shown as it is."""
+
+    return NOTE_ACTOR_LABELS.get(actor, actor)
+
+
+class IntakeNote(BaseModel):
+    """A raw note: one sentence and the original words, waiting for someone to triage it into an inbox item.
+
+    It is not a triage ticket and carries no recommendation.  ``recorded_by`` and ``triaged_by`` are written by the command
+    from its environment; no caller can state them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["intake-note.v1"] = "intake-note.v1"
+    note_id: str
+    request_id: str
+    project_id: str
+    title: str
+    original_words: str
+    kind_hint: IntakeKind = IntakeKind.ITERATION
+    recorded_by: str
+    created_at: str
+    status: NoteStatus = NoteStatus.RAW
+    item_id: str = ""
+    triaged_by: str = ""
+    triaged_at: str = ""
+
+    @field_validator("project_id")
+    @classmethod
+    def _validate_project_id(cls, value: str) -> str:
+        if not is_project_id(value):
+            raise ValueError("project_id must be a canonical project id")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str) -> str:
+        return _clean_title(value)
+
+    @field_validator("original_words")
+    @classmethod
+    def _validate_original_words(cls, value: str) -> str:
+        return _clean_text(value, limit=_MAX_LONG, multiline=True)
+
+    @field_validator("request_id")
+    @classmethod
+    def _validate_request_id(cls, value: str) -> str:
+        return _clean_text(value, limit=_MAX_SHORT, multiline=False)
+
+    @field_validator("recorded_by")
+    @classmethod
+    def _validate_recorded_by(cls, value: str) -> str:
+        return _clean_actor(value)
+
+    @field_validator("triaged_by")
+    @classmethod
+    def _validate_triaged_by(cls, value: str) -> str:
+        return _clean_actor(value) if value else value
+
+    @model_validator(mode="after")
+    def _validate_consistency(self) -> IntakeNote:
+        if _NOTE_ID.fullmatch(self.note_id) is None or not self.note_id.startswith(
+            f"NOTE-{self.project_id}-"
+        ):
+            raise ValueError("note_id must be NOTE-<project id>-<4 digits>")
+        if self.status is NoteStatus.RAW:
+            if self.item_id or self.triaged_by or self.triaged_at:
+                raise ValueError("a raw note carries no triage record")
+            return self
+        if not (self.item_id and self.triaged_by and self.triaged_at):
+            raise ValueError("a triaged note needs item_id, triaged_by and triaged_at")
+        if _ITEM_ID.fullmatch(self.item_id) is None or not self.item_id.startswith(
+            f"INBOX-{self.project_id}-"
+        ):
+            raise ValueError("item_id must be an inbox item of the same project")
+        return self
+
+
+class IntakeNoteSummary(BaseModel):
+    """How many raw notes wait for triage, and the oldest one, as shown by ``pm orient`` / ``pm resume``.
+
+    Deliberately without ``extra="forbid"``: the whole answer is re-validated by readers that may run another release, and a
+    reader must not refuse the answer because this block gained a field.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    waiting: int = 0
+    oldest_note_id: str = ""
+    oldest_recorded_by: str = ""
+    oldest_created_at: str = ""
+
+    @property
+    def is_empty(self) -> bool:
+        """True when no raw note waits."""
+
+        return not self.waiting
