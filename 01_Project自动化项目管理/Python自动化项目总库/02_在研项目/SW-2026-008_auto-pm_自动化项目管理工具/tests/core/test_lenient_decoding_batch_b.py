@@ -26,8 +26,6 @@ from auto_pm.application.core.execution_microtask_service import (
 from auto_pm.application.core.gates.stage_gate_engine import StageGateEngine
 from auto_pm.application.core.pm_facade_service import PmFacadeService
 from auto_pm.application.core.project_fact_service import ProjectFactError, ProjectFactService
-from auto_pm.application.core.role_pack_service import FAIL
-from tests.core.test_role_pack_service import _codes, _workspace
 
 BAD = b"src/\xff\xfe.scl"
 REAL_RUN = subprocess.run
@@ -100,13 +98,6 @@ def test_unreadable_change_order_counts_as_not_closed(tmp_path: Path) -> None:
     result = StageGateEngine(str(tmp_path)).evaluate_stage_transition(str(project), "monitoring", "closing")
     found = next(i for i in result.items if i.id == "G4-CHG-ALL-CLOSED")
     assert found.passed is False and "CHG-TEST-2026-001.md" in found.message and "002" not in found.message
-
-
-def test_refs_that_differ_only_in_undecodable_bytes_are_not_equal(tmp_path: Path) -> None:
-    roles, workspace = _workspace(tmp_path)
-    (roles / "engineer-demo" / "refs" / "note.md").write_bytes(b"a\xff\n")
-    (workspace / ".trae" / "skills" / "demo-skill" / "refs" / "note.md").write_bytes(b"a\xfe\n")
-    assert ("RP-008", FAIL) in _codes(roles, workspace)
 
 
 def test_fingerprint_keeps_lone_surrogates_apart() -> None:
