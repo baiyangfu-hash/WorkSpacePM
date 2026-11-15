@@ -17,7 +17,7 @@ alwaysApply: true
 | 🔴必读 | LSP-905 | 905_SCL编程规范_LSP.md | 主规范: 命名/语法/METHOD/代码结构/跳转语句 |
 | 🔴必读 | LSP-907 | 907_项目配置规范_LSP.md | .plc.json配置 + 目录结构 |
 | 🟡配套 | LSP-904 | 904_SCL注释规范_LSP.md | 注释格式/嵌套禁令/标点规则 |
-| 🟡配套 | LSP-903 | 903_定时器使用规范_LSP.md | FB_TON使用规则, PT/ET为DINT非TIME |
+| 🟡配套 | LSP-903 | 903_定时器使用规范_LSP.md | 定时器用TIA原生TON_TIME等, PT/ET为TIME（V3.0.0起） |
 | 🟠重要 | LSP-906 | 906_错误预防规则_LSP.md | 实战bug总结检查清单 |
 | 🟢参考 | PLC-023 | 023_PLC程序设计文档模板_PLC.md | 程序设计文档标准模板 |
 | 🟢参考 | INT-815 | 815_PLC接口文档模板_INT.md | FB/FC接口文档标准格式 |
@@ -30,7 +30,7 @@ alwaysApply: true
 | DEV-801 | LSP-905 | 变量命名规范已被905§3覆盖，采用小驼峰风格 |
 | DEV-802 | LSP-905 | 工作流命名规范已被905覆盖 |
 | DEV-810 | LSP-905 | PLC综合规范已被905+904+903拆分替代 |
-| LSP-903-OLD | LSP-903 | Go-Gen纯逻辑定时器方案，已切换到FB_TON共享库 |
+| LSP-903-OLD | LSP-903 | Go-Gen纯逻辑定时器方案，后切换到FB_TON共享库，V3.0.0起改用TIA原生定时器 |
 
 ## 关键编码规则
 
@@ -53,9 +53,9 @@ alwaysApply: true
 
 ### 定时器
 
-12. FB_TON定时器PT/ET参数类型为DINT（毫秒值），不是TIME（903规范）
+12. 定时器用TIA原生`TON_TIME`/`TOF_TIME`/`TP_TIME`/`TONR_TIME`多重实例，PT/ET为TIME，毫秒值用`DINT_TO_TIME`转换（903规范V3.0.0）；新程序不引用`FB_TON`/`FB_TONR`
 13. 定时器调用必须包含完整参数(IN/PT/Q/ET)，Q参数不能为空
-14. 禁止使用TIME类型参数，LSP编译器不支持
+14. 暂不写`T#`时间字面量（`plc check`规则LSP-906-TIMER-TIME-LITERAL仍拦截，903 §3.1）
 
 ### 错误预防
 
@@ -72,7 +72,7 @@ Phase 1: 项目初始化
 Phase 2: 编码实现
   ├→ 905_SCL编程规范 (主规范)
   ├→ 904_SCL注释规范 (注释格式)
-  └→ 903_定时器使用规范 (FB_TON专项)
+  └→ 903_定时器使用规范 (定时器专项)
 
 Phase 3: 错误预防
   └→ 906_错误预防规则 (实战检查清单)

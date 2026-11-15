@@ -71,4 +71,4 @@ alwaysApply: true
 
 ## 冲突处理
 
-当PM通用规范与Python技术栈规范冲突时，以Python技术栈规范（`01_Project自动化项目管理/00_通用规范/`）为准
+当PM通用规范与Python技术栈规范冲突时，以Python技术栈规范（`00_Obsidian_Base全局规范文件仓库/02_Python开发域/`）为准
