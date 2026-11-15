@@ -1,0 +1,131 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-11-15",
+  "_note": "退役词名单：已经退役、不能再当现行规矩写的说法。只登记，本文件自己不执行检查；以后由检查（规范库梳理方案联锁 G3）扫规范库热区、AGENTS.md、roles/、各级 .trae/rules/ 等抄本，命中报警。allow_context 里的词和命中处在同一行时不报（那是在讲它已退役）；allow_paths 下的文件不扫。以后退役一样东西，在这里加一条，所有抄本一起被查出来。改本文件和改规范一样，走规范库变更单、由用户批准。",
+  "terms": [
+    {
+      "id": "RT-001",
+      "kind": "literal",
+      "pattern": "pm-workflow",
+      "ignore_case": true,
+      "retired": "2026-09-09",
+      "source": "AGENTS.md 文首“退役隔离”；技能目录 2026-10-25 删除（PR #147）",
+      "reason": "技能已隔离、删除，不得调用或引用其结论",
+      "replacement": "PM 治理角色，经 CHG、Decision 与 Continuity v2 工作",
+      "allow_context": [
+        "退役",
+        "隔离",
+        "QUARANTINED",
+        "DECOMMISSIONED",
+        "历史",
+        "已废弃",
+        "deprecated",
+        "不得"
+      ],
+      "allow_paths": [
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/",
+        "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/004_PM_WORKFLOW总控Skill使用说明_PM.md"
+      ]
+    },
+    {
+      "id": "RT-002",
+      "kind": "regex",
+      "pattern": "PM_SESSION[^。\\n]{0,30}(入口真源|单一真源|必须采用|必须回写|change_log 中记录)",
+      "ignore_case": false,
+      "retired": "2026-10-10",
+      "source": "AGENTS.md 阶段 3：PM_SESSION 已退役（用户 2026-10-10 裁决），仅作历史证据",
+      "reason": "PM_SESSION 不再是真源，不再刷新",
+      "replacement": "执行状态看 Work/Run/Checkpoint（PM-056）和 AGENTS.md；变更记在业务变更记录或变更单",
+      "allow_context": [
+        "已退役",
+        "历史",
+        "原样保留"
+      ],
+      "allow_paths": [
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/",
+        "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/004_PM_WORKFLOW总控Skill使用说明_PM.md"
+      ]
+    },
+    {
+      "id": "RT-003",
+      "kind": "literal",
+      "pattern": "--auto-fix",
+      "ignore_case": false,
+      "retired": "2026-11-15",
+      "source": "PM-042 V2.5.1 §3.5；命令 ledger reconcile 的修复参数叫 --fix（ui/cli/ledger.py 第 86 行）",
+      "reason": "命令里没有这个参数；台账有差异先报告，不对真台账自动修复",
+      "replacement": "不加 --fix，差异按变更单处理",
+      "allow_context": [
+        "没有 `--auto-fix`",
+        "没有 --auto-fix",
+        "原文"
+      ],
+      "allow_paths": [
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/"
+      ]
+    },
+    {
+      "id": "RT-004",
+      "kind": "regex",
+      "pattern": "\\bFB_(TON|TONR|TOF|TP)\\b",
+      "ignore_case": false,
+      "retired": "2026-11-05",
+      "source": "LSP-903 V3.0.0、LSP-905 §4.3、LSP-906 V3.0.0",
+      "reason": "SysLib 自写定时器包装块，导入 TIA 时类型不存在；新程序不得再用",
+      "replacement": "TIA 原生 TON_TIME / TOF_TIME / TP_TIME / TONR_TIME，PT 写 DINT_TO_TIME(毫秒)",
+      "allow_context": [
+        "SysLib",
+        "老项目",
+        "迁移",
+        "历史",
+        "LSP-903",
+        "不得",
+        "禁用",
+        "禁止",
+        "❌",
+        "旧"
+      ],
+      "allow_paths": [
+        "0100_PLC自动化/01_SharedLibraries/SysLib/",
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/",
+        "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/903_定时器使用规范_LSP.md"
+      ]
+    },
+    {
+      "id": "RT-005",
+      "kind": "literal",
+      "pattern": "定时器三段式",
+      "ignore_case": false,
+      "retired": "2026-11-05",
+      "source": "LSP-906 V3.0.0（删三段式）",
+      "reason": "三段式是 FB_TON 包装块的调用写法，随包装块退役",
+      "replacement": "TIA 原生定时器多重实例，顶部无条件调用（LSP-903 §3）",
+      "allow_context": [
+        "删除",
+        "删三段式",
+        "历史",
+        "不再"
+      ],
+      "allow_paths": [
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/"
+      ]
+    },
+    {
+      "id": "RT-006",
+      "kind": "regex",
+      "pattern": "[A-Za-z]:\\\\{1,2}Users\\\\{1,2}",
+      "ignore_case": true,
+      "retired": "2026-09-07",
+      "source": "CHG-SPEC-2026-009（TOOL-906 去本机路径）",
+      "reason": "写死某台电脑的用户目录，换电脑就失效",
+      "replacement": "相对路径，或按工具自己的发现方式找（如 Get-Command）",
+      "allow_context": [],
+      "allow_paths": [
+        "00_Obsidian_Base全局规范文件仓库/Archive_Cold/",
+        "00_Obsidian_Base全局规范文件仓库/spec_registry.json",
+        "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/无AI离线手册.md"
+      ],
+      "note": "spec_registry.json 的 workspace_root 写死了用户那台电脑的路径（梳理方案 I11），改它要动 spec lint 的代码，另出单；在那之前放在 allow_paths 里。无AI离线手册是写给用户那台笔记本的操作说明（FIX-001 第 5 条要写清哪台电脑、哪个窗口），路径写全是有意的，也放在 allow_paths 里"
+    }
+  ]
+}

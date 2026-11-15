@@ -1,7 +1,7 @@
 ---
 spec_id: TOOL-906
 title: "Mermaid图表工作流规范"
-version: "V2.1.0"
+version: "V2.1.1"
 domain: cross-domain
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/05_跨域工具规范/906_Mermaid图表工作流规范_TOOL.md"
@@ -14,7 +14,7 @@ tags: ["Mermaid", "图表", "流程图", "工作流", "mmdc", "PRD", "导出"]
 
 **文档编号**：TOOL-906
 **文档标题**：Mermaid图表工作流规范
-**文档版本**：V2.1.0
+**文档版本**：V2.1.1
 **编制日期**：2026-05-27
 **适用范围**：工作空间内所有项目的流程图、架构图、时序图等图表的创建、管理与导出
 
@@ -22,6 +22,7 @@ tags: ["Mermaid", "图表", "流程图", "工作流", "mmdc", "PRD", "导出"]
 
 | 版本号 | 变更内容 | 变更人 | 变更日期 |
 |--------|----------|--------|----------|
+| V2.1.1 | 说法对齐：§4 第 4 步和 §8 示例不再记 PM_SESSION 的 change_log（PM_SESSION 已退役）；§6.4 批量导出去掉本机绝对路径，改用 §6.2 的发现方式；附图 PM 节点去掉 PM_SESSION | Claude（规范库甲一） | 2026-11-15 |
 | V2.1.0 | 路径自适应修补：§6.2 去除宿主机绝对路径，改为通用环境发现机制（CHG-SPEC-2026-009） | Antigravity（PM） | 2026-09-07 |
 | V2.1.0 | 基因防污染：正文示例中的 DJ-2026-005 项目专名（边框缓存机工艺流程图/项目编号文件名）替换为通用示例名（F15，CHG-SPEC-2026-003） | ZCode（PM） | 2026-09-06 |
 | V2.0.0 | 从"工具使用指南"升级为"图表工作流规范"，新增用户故事、工作流、图表与文档集成规范 | AI助手 | 2026-05-27 |
@@ -186,7 +187,7 @@ mmdc -i "边框缓存机工艺流程图_V2.mmd" -o "边框缓存机工艺流程�
 1. 更新 .mmd 源文件
 2. 重新导出 PNG/SVG
 3. 更新引用该图表的 .md 文档中的说明文字
-4. 在 PM_SESSION 的 change_log 中记录变更
+4. 在项目的业务变更记录或变更单里记一行（PM_SESSION 已退役，不再记它的 change_log）
 
 ## 5. 图表与文档集成规范
 
@@ -270,7 +271,7 @@ mmdc -i "流程图.mmd" -o "流程图.png" -w 2400 -b white -s 2
 ### 6.4 批量导出
 
 ```powershell
-$mmdc = "C:\Users\fubai\.trae-cn\binaries\node\global\mmdc.cmd"
+$mmdc = (Get-Command mmdc).Source   # 按 §6.2 的发现方式找 mmdc，不写本机绝对路径
 Get-ChildItem -Recurse -Filter "*.mmd" | ForEach-Object {
     $out = $_.FullName -replace '\.mmd$','.png'
     & $mmdc -i $_.FullName -o $out -w 2400 -s 2 -b white
@@ -417,13 +418,13 @@ PLC 工艺流程图 → 强制独立模式
      > 源文件：[边框缓存机工艺流程图_V2.mmd](边框缓存机工艺流程图_V2.mmd)
 
 7. 需求变更时
-   → 更新 .mmd → 重新导出 PNG → 更新 .md 文字描述 → 记录 change_log
+   → 更新 .mmd → 重新导出 PNG → 更新 .md 文字描述 → 在业务变更记录或变更单里记一行
 ```
 ```mermaid
 flowchart TD
   SYS["SYS-2026-001_WorkspaceGovernance\n治理真源"]
   OBS["00_Obsidian_Base\nspec_registry + DEV/PM/PLC规范"]
-  PM["PM Workflow\nPM_SESSION / CHG / DEC / ledger"]
+  PM["PM 治理\nCHG / DEC / ledger"]
   SW["SW-2026-008 驾驶舱项目\n项目文档、变更、handoff"]
   MOTHER["研发母体\n02_在研项目/.../SW-2026-008.../auto_pm"]
   FULL["fullstack-engineer\nPython/Qt/CLI执行代理"]
