@@ -42,7 +42,7 @@ def test_plc_ingest_service_basic() -> None:
         # 验证生成的资产文件存在
         assert (target_proj / "02_PLC程序" / "工程资产" / "io_points.csv").exists()
         assert (target_proj / "02_PLC程序" / "工程资产" / "communications.yml").exists()
-        assert (target_proj / "02_PLC程序" / "程序文档" / "015_DJ-TEST-001_IO分配表_IO.md").exists()
+        assert (target_proj / "02_PLC程序" / "程序文档" / "015_IO分配表_IO.md").exists()
 
 
 # 以下钉住：摄取只写源工程变量表里读得到的东西，不编控制器、总线、IP、设备和工艺（演示机的拓扑曾被写进每个摄取的项目）
@@ -98,3 +98,63 @@ def test_ingest_keeps_an_existing_communications_file(tmp_path: Path) -> None:
     mine = 'project_id: "DJ-TEST-002"\nchannels:\n  - name: "HMI"\n    endpoint: "人填的"\n'
     project = _ingest(tmp_path, keep_comm=mine)
     assert (project / "02_PLC程序" / "工程资产" / "communications.yml").read_text(encoding="utf-8") == mine
+
+
+# 以下钉住：摄取派生的文档用项目模板的名字，不另起一套带项目号的；项目里已有的同名文档不覆盖（同一项目曾出现两份 IO 分配表）
+STANDARD_DOCS = ("PLC变量定义文档_VAR.md", "015_IO分配表_IO.md", "016_PLC程序设计总文档_PLC.md", "018_自动工艺流程图_FLOW.md")
+
+
+def test_ingest_into_an_empty_project_writes_the_standard_document_names(tmp_path: Path) -> None:
+    project = _ingest(tmp_path)
+    docs = sorted(p.name for p in (project / "02_PLC程序" / "程序文档").iterdir())
+    assert docs == sorted(STANDARD_DOCS)
+
+
+def test_ingest_into_a_template_project_keeps_its_documents_and_stages_its_own(tmp_path: Path) -> None:
+    from auto_pm.application.core.template_service import TemplateService
+
+    templates = Path(__file__).resolve().parents[3] / "templates"
+    project = tmp_path / "0100_PLC自动化" / "DJ-2026-902"
+    TemplateService(str(templates)).copy_template("plc-standard-project", str(project), {"project_id": "DJ-2026-902", "project_name": "测试机"})
+    doc_dir = project / "02_PLC程序" / "程序文档"
+    before = {p.name: p.read_bytes() for p in doc_dir.iterdir()}
+    assert set(STANDARD_DOCS) <= set(before)
+
+    src = tmp_path / "src" / "2_PLC"
+    src.mkdir(parents=True)
+    with open(src / "IO表.csv", "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "Type", "Address", "Comment"])
+        writer.writerow(["I_Start", "BOOL", "X0", "启动按钮"])
+    res = PlcIngestService(workspace_root=str(tmp_path)).ingest_autoshop_project(
+        source_dir=str(tmp_path / "src"), target_project_path=str(project), project_id="DJ-2026-902", project_name="测试机"
+    )
+
+    assert {p.name: p.read_bytes() for p in doc_dir.iterdir()} == before  # nothing overwritten, nothing added beside them
+    drafts = project / ".ingest_staging" / "draft"
+    assert sorted(Path(p).name for p in res.kept_files) == sorted((*STANDARD_DOCS, "io_points.csv"))  # the template ships a point table too
+    for name in STANDARD_DOCS:
+        assert str(drafts / name) in res.generated_files
+        assert "DJ-2026-902" in (drafts / name).read_text(encoding="utf-8")
+    assert "I_Start" in (drafts / "015_IO分配表_IO.md").read_text(encoding="utf-8")
+
+
+def test_ingest_keeps_an_existing_io_points_table(tmp_path: Path) -> None:
+    # 人改过的点表一个字节不动；摄取的点表留在暂存区，结果里点名（#823 验收旁注 1）
+    project = tmp_path / "0100_PLC自动化" / "DJ-TEST-003"
+    assets = project / "02_PLC程序" / "工程资产"
+    assets.mkdir(parents=True)
+    mine = "station,signal_type,address,tag,signal_name,device,comment\ncommon,DI,I0.0,ESTOP_OK,急停回路正常,操作台,人改过\n"
+    (assets / "io_points.csv").write_text(mine, encoding="utf-8")
+    src = tmp_path / "src" / "2_PLC"
+    src.mkdir(parents=True)
+    with open(src / "IO表.csv", "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "Type", "Address", "Comment"])
+        writer.writerow(["I_Start", "BOOL", "X0", "启动按钮"])
+    res = PlcIngestService(workspace_root=str(tmp_path)).ingest_autoshop_project(
+        source_dir=str(tmp_path / "src"), target_project_path=str(project), project_id="DJ-TEST-003", project_name="测试机"
+    )
+    assert (assets / "io_points.csv").read_text(encoding="utf-8") == mine
+    assert str(assets / "io_points.csv") in res.kept_files and str(assets / "io_points.csv") not in res.generated_files
+    assert "I_Start" in (project / ".ingest_staging" / "draft" / "io_points.draft.csv").read_text(encoding="utf-8")

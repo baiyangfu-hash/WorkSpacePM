@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -36,6 +37,9 @@ from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity, warn_runtime_identity
 
 from .docs import docs_group
+
+if TYPE_CHECKING:
+    from auto_pm.application.plc.ingest_service import IngestionResult
 
 console = Console()
 
@@ -343,10 +347,22 @@ def cmd_ingest(ctx: click.Context, source_dir: str, project_id: str, stage_only:
             )
             console.print("\n[bold green]✓ 逆向摄取与标准化资产生成成功！[/bold green]")
             console.print(f"  • 提取变量总数: [bold yellow]{res.total_variables}[/bold yellow] 个")
-            console.print(f"  • 累计生成黄金工程文档与资产: {len(res.generated_files)} 份")
+            _print_ingest_files(res)
     except Exception as e:
         console.print(f"[bold red]✗ 逆向摄取失败: {e}[/bold red]")
         raise click.Abort()
+
+
+def _print_ingest_files(res: IngestionResult) -> None:
+    """照实列出写了哪些文件、哪些已有文档没覆盖（摄取版放在 .ingest_staging/draft/ 等人合并）。"""
+
+    console.print(f"  • 写出文件: {len(res.generated_files)} 份")
+    for path in res.generated_files:
+        console.print(f"    - {path}")
+    if res.kept_files:
+        console.print("[yellow]  • 下面这些项目里已有，没有覆盖；摄取版在 .ingest_staging/draft/ 里（点表是 io_points.draft.csv），请对照合并:[/yellow]")
+        for path in res.kept_files:
+            console.print(f"    - {path}")
 
 
 @plc_group.command(name="promote")
@@ -371,8 +387,7 @@ def cmd_promote(ctx: click.Context, project_id: str) -> None:
         )
         console.print("\n[bold green]✓ 暂存资产成功正式投影至工程！[/bold green]")
         console.print(f"  • 变量总数: {res.total_variables} 个")
-        console.print("  • 正式点表: 02_PLC程序/工程资产/io_points.csv")
-        console.print("  • 自动派生文档: 015_IO分配表_IO.md, PLC变量定义文档_VAR.md")
+        _print_ingest_files(res)
     except Exception as e:
         console.print(f"[bold red]✗ 资产投影失败: {e}[/bold red]")
         raise click.Abort()
