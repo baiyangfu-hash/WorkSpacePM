@@ -222,7 +222,8 @@ class DogfoodRunner:
             return None, "", []
         git_root = Path(git_root_result.stdout.strip()).resolve()
         sha_result = self._run_git(path, "rev-parse", "HEAD")
-        status_result = self._run_git(path, "status", "--porcelain", "--untracked-files=all")
+        # core.quotePath=false：中文等非 ASCII 路径照原字列出，不写成八进制转义码（D-361，TD-SW008-626；D-127，TD-SW008-393）。
+        status_result = self._run_git(path, "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all")
         changed_files = []
         if status_result.returncode == 0:
             changed_files = [self._status_path(line) for line in status_result.stdout.splitlines() if line]

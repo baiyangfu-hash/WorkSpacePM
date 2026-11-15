@@ -39,7 +39,7 @@ CHANGE_NATURES = ("REQ", "DEF", "OPT", "CFG", "EMRG")
 CHANGE_SCOPES = ("LOCAL", "MODULE", "SYSTEM", "CROSS", "SAFE")
 CHANGE_URGENCIES = ("normal", "urgent", "critical")
 # 变更单能转到的状态（`change transition --to` 的取值）。去掉两个批准类：
-# approved、conditionally_approved 只在终端里由用户本人做（approved 在启用口令后要输口令），界面不提供。
+# approved、conditionally_approved 不在工具页做：批准在“决定”页点“批准变更单”（只许用户本人打开的看板点），或用户本人在终端做。
 CHANGE_TARGETS = (
     "draft", "submitted", "under_review", "rejected", "implementing", "pending_acceptance",
     "accepting", "completed", "closed", "archived", "abandoned",
@@ -204,7 +204,7 @@ def _change_transition(params: dict[str, Any]) -> list[str]:
     _need(params, "pid", "number")
     target = str(params.get("to", "")).strip()
     if target in USER_ONLY_TARGETS:
-        raise ToolError("批准类的状态只在终端里由你本人做（有口令要输口令），界面不提供；命令：main.py change transition "
+        raise ToolError("批准类的状态工具页不做：请到“决定”页点“批准变更单”；不走看板的话只在终端里由你本人做（有口令要输口令），命令：main.py change transition "
                         f"<单号> --to {target} --pid <项目>")
     args = ["change", "transition", _flag_text(params["number"], "变更单号"), "--to", _choice(params, "to", CHANGE_TARGETS, "目标状态"),
             "--pid", _flag_text(params["pid"], "项目编号")]

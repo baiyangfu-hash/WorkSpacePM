@@ -137,7 +137,11 @@ def test_decision_buttons_run_write_or_user_only_commands() -> None:
     for decision in decisions.DECISIONS:
         name = _command_of(decision.command)
         assert COMMANDS[name]["class"] in ("write", "user_only"), (decision.command, COMMANDS[name])
-        if decision.pin or decision.user_words:
+        if decision.kind == "change":
+            # change transition 的别的几步由 AI 推，表里是 write；批准、推完成这两步只听用户，由按钮自己的 human_only 把关
+            assert decision.human_only and decision.user_words, f"{decision.key}：变更单按钮必须是 human_only 且带用户原话凭据"
+            assert decision.command == ("change", "transition") and COMMANDS[name]["class"] == "write", (decision.key, COMMANDS[name])
+        elif decision.pin or decision.user_words:
             assert COMMANDS[name]["class"] == "user_only", f"{name}：按钮要口令或用户原话，表里也该是 user_only"
 
 

@@ -43,12 +43,13 @@ class Field:
     hint: str = ""
     required: bool = True
     multiline: bool = False
+    default: str = ""  # 对话框打开时先填上的字（只用于命令自己就有同样缺省值的栏），用户可以改
 
 
 @dataclass(frozen=True)
 class Decision:
     """一个决定按钮。``kind`` 说明它作用在什么对象上：mission（一张卡）、scope_card（待批准的范围卡）、inbox（收件箱条目）、
-    project（一个项目；只在项目详情页出现，“决定”页不挑这一类）。"""
+    project（一个项目；只在项目详情页出现，“决定”页不挑这一类）、change（一张变更单）。"""
 
     key: str
     label: str
@@ -60,6 +61,7 @@ class Decision:
     pin: bool = False  # 口令生效时这条命令会在终端里问口令
     user_words: bool = False  # 命令需要“用户亲手确认”的凭据（--approval-evidence-ref）
     danger: str = ""  # 非空：对话框里用警示色再确认一遍
+    human_only: bool = False  # 只许你本人打开的看板点：看板进程带 AI 标记（或认不出带没带）时这个按钮灰着、也不运行
 
 
 _SWITCH_FIELDS = (
@@ -72,7 +74,7 @@ DECISIONS: tuple[Decision, ...] = (
     Decision(
         "approve_card", "批准范围", "scope_card",
         "批准这张范围卡：只批准你看过的这一版（哈希对不上命令会拒绝）。批准不会启动任何 agent。",
-        ("pm", "approve"), pin=True, user_words=True,
+        ("pm", "approve"), pin=True, user_words=True, human_only=True,
         fields=(Field("admission_release_ref", "撞车放行（没有就留空）",
                       "新卡改的文件和开着的卡重叠，或项目已开满 8 张时，填你放行的原话位置", required=False),),
     ),
@@ -84,7 +86,7 @@ DECISIONS: tuple[Decision, ...] = (
     Decision(
         "accept", "确认验收", "mission",
         "确认验收：记下你已经看过结果。验收后还要点“收口”才会把文件并回控制根。",
-        ("pm", "accept"), states=frozenset({"ACCEPTANCE_PENDING"}), pin=True,
+        ("pm", "accept"), states=frozenset({"ACCEPTANCE_PENDING"}), pin=True, human_only=True,
         danger="验收只能由你本人做；点之前确认你已经看过结果。",
     ),
     Decision(
@@ -95,46 +97,80 @@ DECISIONS: tuple[Decision, ...] = (
     Decision(
         "park", "搁着", "mission",
         "把这张卡记好断点放进“搁着”：交出钥匙，之后谁也不能往它的工作树里写，直到你拿回。",
-        ("pm", "park"), states=frozenset({"ACTIVE"}), pin=True, user_words=True,
+        ("pm", "park"), states=frozenset({"ACTIVE"}), pin=True, user_words=True, human_only=True,
         fields=(Field("reason", "为什么先放下", "例如：客户急改 IO 表"),
                 Field("summary", "断点", "干到哪了、下一步做什么（一行，不换行）")),
     ),
     Decision(
         "unpark", "拿回", "mission",
         "拿回这张卡：先核对工作树没被动过，再发新钥匙（钥匙存本机钱包，不显示）。拿回后先同步 main 再干活。",
-        ("pm", "unpark"), states=frozenset({"PARKED", "BLOCKED"}), pin=True, user_words=True,
+        ("pm", "unpark"), states=frozenset({"PARKED", "BLOCKED"}), pin=True, user_words=True, human_only=True,
         fields=(Field("as_owner", "谁来接着干", "接手的 agent 身份，例如 claude:cloud 或 trae:cn"),),
     ),
     Decision(
         "switch", "插急活", "mission",
         "改干这一张：把手上在干的那张记好断点搁着，再把这张拿起来；第二步失败时第一张稳稳停在“搁着”。",
-        ("pm", "switch"), states=frozenset({"PARKED", "DRAFT", "AWAITING_APPROVAL"}), pin=True, user_words=True,
+        ("pm", "switch"), states=frozenset({"PARKED", "DRAFT", "AWAITING_APPROVAL"}), pin=True, user_words=True, human_only=True,
         fields=_SWITCH_FIELDS,
     ),
     Decision(
         "inbox_confirm", "确认入箱", "inbox",
         "确认这条收件箱事项：只确认你看到的这一版（内容哈希对不上命令会拒绝）。确认不等于开工。",
-        ("pm", "inbox", "confirm"), user_words=True, pin=True,
+        ("pm", "inbox", "confirm"), user_words=True, pin=True, human_only=True,
         fields=(Field("note", "备注（可空）", "一行", required=False),),
     ),
     Decision(
         "inbox_reject", "驳回入箱", "inbox",
         "驳回这条收件箱事项：写明理由，之后它不再出现在“等你”。",
-        ("pm", "inbox", "reject"), user_words=True, pin=True,
+        ("pm", "inbox", "reject"), user_words=True, pin=True, human_only=True,
         fields=(Field("note", "驳回理由", "一行"),),
     ),
     # 项目生命周期（CHG-SCPT-2026-654）：只在项目详情页的“项目状态”一块出现，而且要先跑过不带 --confirm 的预演、预演通过才出现。
     Decision(
         "project_archive", "确认归档", "project",
         "归档这个项目：只把登记表里的项目状态改成“已归档”，目录不搬，编号和路径不变。命令自己会再查一遍五项，有一项不过就拒绝。",
-        ("project", "archive"), pin=True, user_words=True,
+        ("project", "archive"), pin=True, user_words=True, human_only=True,
     ),
     Decision(
         "project_reactivate", "确认重新激活", "project",
         "把这个“已归档”的项目改回“在研”：只改登记表里的项目状态，目录不动。不是“已归档”的项目命令会拒绝。",
-        ("project", "reactivate"), pin=True, user_words=True,
+        ("project", "reactivate"), pin=True, user_words=True, human_only=True,
+    ),
+    # 变更单（M8 的 8.1）：命令是现成的 change transition，一次只推一步。按钮只对正好停在前一步的单出现。
+    Decision(
+        "change_approve", "批准变更单", "change",
+        "批准这张变更单：从“审核中”推到“已批准”，批准人和这次点击的凭据写进变更单和审计日志。只批你看过的这一张。",
+        ("change", "transition"), states=frozenset({"under_review"}), pin=True, user_words=True, human_only=True,
+        fields=(Field("comment", "批准意见（可空）", "一行；不填时变更单里记“同意”", required=False),),
+    ),
+    Decision(
+        "change_complete", "推到完成", "change",
+        "把这张变更单从“验收中”推到“已完成”：验证结论写进变更单。命令会再查一遍验证项清单，有没过的就拒绝。",
+        ("change", "transition"), states=frozenset({"accepting"}), user_words=True, human_only=True,
+        fields=(Field("verification_conclusion", "验证结论", "要有“通过”两个字，例如：全部通过", default="全部通过"),),
     ),
 )
+
+# 变更单按钮推到哪个状态（change transition --to）；出现在哪个状态见上面的 states。
+CHANGE_TARGET = {"change_approve": "approved", "change_complete": "completed"}
+# 变更单状态的白话：和 auto_pm.domain.change.constants.STATUS_LABELS 逐字一致（测试对照）；本包不 import auto_pm，所以照抄用得到的几个。
+CHANGE_STATUS_LABEL = {"draft": "草稿", "submitted": "已提交", "under_review": "审核中", "approved": "已批准",
+                       "conditionally_approved": "有条件批准", "implementing": "实施中", "pending_acceptance": "待验收",
+                       "accepting": "验收中"}
+# 这几个状态的单还没走到按钮那一步：页面写一行说明，不出按钮（前面几步由 AI 用同一条命令推）。
+CHANGE_BEFORE_APPROVE = ("draft", "submitted")
+CHANGE_BEFORE_COMPLETE = ("approved", "conditionally_approved", "implementing", "pending_acceptance")
+HUMAN_ONLY_AGENT = "这个看板是带 AI 标记的会话打开的（{markers}）：这个按钮只许你本人打开的看板点。请你自己双击看板的 bat 重新打开。"
+HUMAN_ONLY_UNKNOWN = "认不出这个看板是不是 AI 会话打开的（找不到主程序里的标记名单，多半是看板被单独拷走了）：这个按钮先不开放。请用控制根里的 bat 打开看板。"
+
+
+
+def human_only_block(markers: Sequence[str] | None) -> str:
+    """看板进程带没带 AI 标记 → human_only 按钮灰着的原因；空串＝可以点。None（认不出）按不开放处理。"""
+    if markers is None:
+        return HUMAN_ONLY_UNKNOWN
+    return HUMAN_ONLY_AGENT.format(markers="、".join(markers)) if markers else ""
+
 
 BY_KEY = {item.key: item for item in DECISIONS}
 
@@ -208,6 +244,7 @@ class Target:
     ticket_hash: str = ""
     title: str = ""
     state: str = ""
+    change_id: str = ""
 
 
 class DecisionError(ValueError):
@@ -290,7 +327,8 @@ def build_args(
     approver = _free(approver, "批准人")
     evidence = ""
     if decision.user_words:
-        subject = target.project_id if decision.kind == "project" else (target.mission_id or target.request_id or target.item_id)
+        subject = target.project_id if decision.kind == "project" else (
+            target.change_id or target.mission_id or target.request_id or target.item_id)
         evidence = click_evidence(decision.key, subject, now)
 
     if decision.key == "approve_card":
@@ -315,6 +353,13 @@ def build_args(
                  "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
         if value.get("note"):
             args += ["--note", value["note"]]
+    elif decision.kind == "change":  # 批准变更单 / 推到完成：同一条 change transition，一次一步；批准人和凭据两种情况都传（留痕）
+        args += [_ident(target.change_id, "变更单号"), "--to", CHANGE_TARGET[decision.key], "--pid", _ident(target.project_id, "项目编号"),
+                 "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
+        if decision.key == "change_complete":
+            args += ["--verification-conclusion", _need(value.get("verification_conclusion", ""), "验证结论")]
+        elif value.get("comment"):
+            args += ["--comment", value["comment"]]
     elif decision.kind == "project":  # 归档 / 重新激活：项目号 + --confirm + “用户亲手点了这个按钮”的凭据
         args += [_ident(target.project_id, "项目编号"), "--confirm", "--approval-evidence-ref", evidence]
     else:  # pragma: no cover - 新按钮必须在这里接线，test_every_decision_builds_a_command 会拦住
@@ -433,12 +478,13 @@ def read_failure(what: str, command: str, rc: int | None, output: str, *, key: s
 class CardVM:
     """决定页上的一张卡：一个对象 + 现在可以点的按钮。"""
 
-    column: str  # 在干 / 等你 / 搁着 / 已关 / 范围卡 / 收件箱
+    column: str  # 在干 / 等你 / 搁着 / 已关 / 范围卡 / 收件箱 / 变更单
     heading: str
     detail: str
     target: Target
     decisions: tuple[Decision, ...]
     sev: str = ""  # "" / "risk"（搁着超过 7 天）
+    blocked: str = ""  # 非空：这张卡上 human_only 的按钮灰着，旁边写这句原因
 
 
 @dataclass(frozen=True)
@@ -458,6 +504,7 @@ class DecisionsVM:
     pin_text: str = ""
     notes: tuple[str, ...] = field(default_factory=tuple)
     failures: tuple[ReadFailure, ...] = ()
+    blocked: str = ""  # 非空：这一页 human_only 的按钮都灰着（看板是 AI 会话打开的，或认不出），这句是原因
 
 
 PIN_TEXT = {
@@ -467,7 +514,7 @@ PIN_TEXT = {
     "unknown": "批准口令：没读到状态（按未生效处理，命令自己会判）",
 }
 
-_COLUMN_ORDER = ("范围卡", "收件箱", "等你", "在干", "搁着", "已关")
+_COLUMN_ORDER = ("变更单", "范围卡", "收件箱", "等你", "在干", "搁着", "已关")
 
 
 def _for_state(state: str, mission_open_active: bool) -> tuple[Decision, ...]:
@@ -485,6 +532,8 @@ def build_vm(
     *,
     stale_ids: frozenset[str] = frozenset(),
     failures: Sequence[ReadFailure] = (),
+    changes: Sequence[tuple[str, Any]] = (),
+    human_only_block: str = "",
 ) -> DecisionsVM:
     """把看板的 Mission（需有 mission_id / project_id / title / state / column）和只读命令读到的对象排成卡。
 
@@ -492,21 +541,38 @@ def build_vm(
     """
 
     cards: list[CardVM] = []
+    notes: list[str] = []
+    waiting = {"change_approve": 0, "change_complete": 0}
+    for pid, order in changes:  # （项目号, pm_dashboard.ChangeOrderInfo）：状态是变更单文件 §3.4 里的原文
+        status = str(getattr(order, "status", "")).strip()
+        buttons = tuple(d for d in DECISIONS if d.kind == "change" and status in d.states)
+        waiting["change_approve"] += status in CHANGE_BEFORE_APPROVE
+        waiting["change_complete"] += status in CHANGE_BEFORE_COMPLETE
+        if not buttons:
+            continue
+        target = Target(project_id=pid, change_id=order.change_id, title=f"{order.change_id} {order.what}".strip(), state=status)
+        cards.append(CardVM("变更单", target.title, f"{order.change_id} · {pid} · {CHANGE_STATUS_LABEL.get(status, status)}", target, buttons,
+                            blocked=human_only_block))
+    if waiting["change_approve"]:
+        notes.append(f"另有 {waiting['change_approve']} 张变更单还是草稿或已提交，没送到“审核中”，所以这里没有“批准变更单”按钮。")
+    if waiting["change_complete"]:
+        notes.append(f"另有 {waiting['change_complete']} 张变更单已批准但还没走到“验收中”，所以这里没有“推到完成”按钮。")
     active_projects = {m.project_id for m in missions if m.state == "ACTIVE"}
     for pid, targets in pending.items():
         for t in targets:
             cards.append(CardVM("范围卡", t.title or t.request_id, f"请求 {t.request_id} · 哈希 {t.plan_hash[:12]}…", t,
-                                (BY_KEY["approve_card"],)))
+                                (BY_KEY["approve_card"],), blocked=human_only_block))
     for pid, targets in inbox.items():
         for t in targets:
             cards.append(CardVM("收件箱", t.title or t.item_id, f"条目 {t.item_id} · 哈希 {t.ticket_hash[:12]}…", t,
-                                (BY_KEY["inbox_confirm"], BY_KEY["inbox_reject"])))
+                                (BY_KEY["inbox_confirm"], BY_KEY["inbox_reject"]), blocked=human_only_block))
     for m in missions:
         buttons = _for_state(m.state, m.project_id in active_projects)
         if m.state in ("CLOSED", "CANCELLED") or not buttons:
             continue
         target = Target(project_id=m.project_id, mission_id=m.mission_id, title=m.title, state=m.state)
         cards.append(CardVM(m.column, m.title or m.mission_id, f"{m.mission_id} · {m.project_id} · {pd.STATE_LABEL.get(m.state, m.state)}", target, buttons,
-                            "risk" if m.mission_id in stale_ids else ""))
+                            "risk" if m.mission_id in stale_ids else "", blocked=human_only_block))
     cards.sort(key=lambda c: (_COLUMN_ORDER.index(c.column) if c.column in _COLUMN_ORDER else 99, c.heading))
-    return DecisionsVM(tuple(cards), pin_mode, PIN_TEXT.get(pin_mode, PIN_TEXT["unknown"]), failures=tuple(failures))
+    return DecisionsVM(tuple(cards), pin_mode, PIN_TEXT.get(pin_mode, PIN_TEXT["unknown"]), tuple(notes), failures=tuple(failures),
+                       blocked=human_only_block)

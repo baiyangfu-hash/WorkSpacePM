@@ -31,6 +31,7 @@ from cockpit_board import viewmodel as vm  # noqa: E402
 API = g.API
 RULES = gh.RULES_WORKFLOW
 SHA = {n: f"{n:02x}" * 20 for n in range(0x10, 0x20)}  # 40 位十六进制，每个 PR 一个
+NOT_RUN_YET = "rules-gate 还没在当前头提交上跑出结果（刚推送时常见）"
 
 
 def _pull(number: int, draft: bool = False, sha: str | None = None) -> dict[str, Any]:
@@ -101,7 +102,7 @@ def test_rules_state_per_pull(tmp_path: Path) -> None:
     assert pulls[0x10].rules.files == (".trae/rules/a.md", "AGENTS.md", "roles/x/SKILL.md")  # 只收规则文件，排好序
     assert pulls[0x14].rules.files == ("AGENTS.md",)  # 把规则文件改名搬走也是改它：认旧路径
     assert pulls[0x12].rules.files == ()
-    assert "还没" in pulls[0x14].rules.detail  # 还没有 rules-gate 运行记录：说清是刚推送
+    assert pulls[0x14].rules.detail == NOT_RUN_YET  # 还没有 rules-gate 运行记录：说清是刚推送
     assert pulls[0x10].rules.url.endswith("/actions/runs/7")  # 红的那次运行页面
 
 
@@ -147,6 +148,37 @@ def test_rules_survive_the_cache_round_trip(tmp_path: Path) -> None:
     assert again.from_cache and not again.fresh
     cached = _by_number(again)
     assert cached[0x10].rules == _by_number(snap)[0x10].rules and isinstance(cached[0x10].rules.files, tuple)
+
+
+# ---------------------------------------------------------------- D-364：rules-gate 进了应跑名单以后，那句话不变
+
+
+def test_d364_rules_gate_expected_but_not_run_yet_keeps_the_same_sentence(tmp_path: Path) -> None:
+    g._repo_with_targets(tmp_path, (RULES,))
+    table = _table([_pull(0x14)], {0x14: [{"filename": "AGENTS.md"}]}, {0x14: []})
+    snap = _snap(tmp_path, table)
+    pull = _by_number(snap)[0x14]
+    check = next(c for c in pull.ci if c.workflow == RULES)
+    assert (check.state, check.detail) == ("notrun", "应跑没跑")  # 检查清单里照实多出这一项
+    assert pull.rules.state == "waiting" and pull.rules.detail == NOT_RUN_YET  # 不是“没批准”，是还没跑
+    assert "应跑没跑" not in pull.rules.detail and "评论里还没有你" not in pull.rules.detail
+    assert pull.gate == "notrun"  # 合起来的门禁不因为这一项算红（不是 fail）
+    row = vm.github_vm(snap, g.NOW, g.OFFSET).rows[0]
+    assert (row.rules.text, row.rules.sev, row.rules.tip) == ("等你批准", "block", NOT_RUN_YET)
+    assert row.gate.sev != "block"
+    assert not [i for i in vm.github_issues(snap) if f"#{0x14} " in i.title]
+
+
+def test_d364_rules_gate_really_red_keeps_the_not_approved_sentence(tmp_path: Path) -> None:
+    g._repo_with_targets(tmp_path, (RULES,))
+    table = _table([_pull(0x10)], {0x10: [{"filename": "AGENTS.md"}]}, {0x10: [_gate(SHA[0x10], "failure")]})
+    pull = _by_number(_snap(tmp_path, table))[0x10]
+    assert pull.rules.state == "waiting"
+    assert pull.rules.detail == "rules-gate 红：评论里还没有你对当前头提交的批准"  # 真跑了、真红：原来那一支没改坏
+    skipped = _table([_pull(0x10)], {0x10: [{"filename": "AGENTS.md"}]}, {0x10: [_gate(SHA[0x10], "skipped")]})
+    g._repo_with_targets(tmp_path / "b", (RULES,))
+    other = _by_number(_snap(tmp_path / "b", skipped))[0x10]
+    assert other.rules.detail == "rules-gate 没跑（skipped）：评论里还没有你对当前头提交的批准"  # 真跑了但结论是跳过一类的：不算“还没跑”，照旧走后面的分支
 
 
 # ---------------------------------------------------------------- 门禁：等你批准的红不算作者要修的红

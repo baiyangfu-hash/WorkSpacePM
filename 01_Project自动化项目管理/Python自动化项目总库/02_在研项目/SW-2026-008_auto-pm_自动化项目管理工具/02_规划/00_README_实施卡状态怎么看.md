@@ -8,12 +8,12 @@
 2. **卡内写的“当前”“现行”“下一步”也停在写卡当天。** 同一文件里同时出现旧版本号（如 1.2.x）、已退役的 PM_SESSION、pm-workflow，都按历史读。
 3. **现在做到哪、能做什么，只看这些：**
    - 工作区根执行只读 `main.py pm orient <项目号> --json`（新克隆在发布指针更新前用 `pm resume`）；
-   - 当前计划与状态投影：`SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md` 的“当前投影”；
+   - 当前计划与状态投影：`驾驶舱开发基线_20261114/02_里程碑与WBS.md` 的“当前排序”（2026-11-14 起；此前是 39 号计划）；
    - 现行发布版：`00_Infrastructure/auto_pm/active_release.json`；
    - 某张卡有没有执行、有没有合并：看对应的 Work / Run / Decision / CHG 和 GitHub 上的 PR，不看卡头。
 
 ## 其他容易看错的地方
 
-- `010_Cockpit_OS_后续原子迭代WBS_PM.md`：头部写 `READY_FOR_NG-WP-24`，但治理总计划 26 号写明 NG-WP-24～48 已失效；它是历史副本。
+- `010_Cockpit_OS_后续原子迭代WBS_PM.md`：头部写 `READY_FOR_NG-WP-24`，但治理总计划 26 号写明 NG-WP-24～48 已失效；它是历史副本（2026-11-14 已移到 `archive/`）。
 - 同目录的 `archive/` 和 `Html原型预览/` 下的旧文件按历史读；`archive/2026-11-04_*` 里各有 `INDEX.md` 写明旧路径和原因。
 - 命令以 `009_CLI命令参考.md` 为准（实测生成），不要照卡里的旧命令抄。

@@ -1,11 +1,11 @@
 ---
-project_id: {{ project_id }}
-project_name: {{ project_name }}
-project_type: {{ project_type | default('single_machine') }}
-business_line: {{ business_line }}
+project_id: '{{ project_id | replace("'", "''") }}'
+project_name: '{{ project_name | replace("'", "''") }}'
+project_type: '{{ project_type | default('single_machine') | replace("'", "''") }}'
+business_line: '{{ business_line | replace("'", "''") }}'
 created_date: 2026-08-23
 author: PM_Workflow
-version: {{ version | default('V1.0.0') }}
+version: '{{ version | default('V1.0.0') | replace("'", "''") }}'
 status: approved
 ---
 

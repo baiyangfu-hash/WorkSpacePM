@@ -606,8 +606,20 @@ def test_the_twelve_existing_zero_based_arrays_in_db_files_are_only_warnings() -
     severities: list[str] = []
     for name in names:
         if name.endswith((".db", ".udt")):
-            severities += [v.severity for v in SclLinter.lint_file(repo / name).violations]
+            severities += [
+                v.severity for v in SclLinter.lint_file(repo / name).violations if v.rule_id == SclLinter.ARRAY_LOWER_BOUND_RULE
+            ]  # .db 里另有全局 DB 放 FB 实例的警告（TD-596），那条另有测试
     assert severities == ["WARNING"] * 12
+
+
+def test_005_global_vars_has_the_nine_fb_instances_and_they_are_only_warnings() -> None:
+    """TD-SW008-596：005 的 GlobalVars.db 第 43～51 行 9 个 FB 实例，按 LSP-905 §4.11 报警告（第一阶段不拦）。"""
+    from pathlib import Path
+
+    repo = next(p for p in Path(__file__).resolve().parents if (p / "0100_PLC自动化").is_dir())
+    db = repo / "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db"
+    found = [v for v in SclLinter.lint_file(db).violations if v.rule_id == SclLinter.GLOBAL_DB_FB_INSTANCE_RULE]
+    assert [(v.line_number, v.severity) for v in found] == [(n, "WARNING") for n in range(43, 52)]
 
 
 def test_a_listed_declaration_in_another_db_is_still_an_error() -> None:

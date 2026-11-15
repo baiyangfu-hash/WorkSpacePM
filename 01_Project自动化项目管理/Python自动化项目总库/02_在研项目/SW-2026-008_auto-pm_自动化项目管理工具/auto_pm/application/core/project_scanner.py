@@ -43,6 +43,28 @@ def first_problem(error: ValidationError) -> str:
     return f"字段 {field} 的值无效（{details[0]['msg']}）"
 
 
+
+def scan_skips_folder(name: str) -> bool:
+    """扫描器跳过的文件夹名：以 . 或 _ 开头，或名字里带“归档”、archive、trash（不分大小写）。"""
+
+    return name.startswith((".", "_")) or "归档" in name or "archive" in name.lower() or "trash" in name.lower()
+
+
+def unfindable_project_folder(name: str) -> str:
+    """项目文件夹叫这个名字时建得出来却找不到的原因；名字没问题返回空串（TD-SW008-619，D-354）。
+
+    扫描器跳过上面那几类名字，登记表还拒绝路径里带 backup、备份 的（``WorkspaceRegistryService``），
+    这样的项目 project register、show、archive 都找不到，所以 project create、project import 先拒绝。
+    """
+
+    folded = name.casefold()
+    if scan_skips_folder(name) or "backup" in folded or "备份" in name:
+        return (
+            f"项目文件夹名 {name} 以 . 或 _ 开头，或带“归档”“备份”、archive、trash、backup 这类字样，"
+            "扫描和登记都会跳过它，建出来也找不到；换个名字"
+        )
+    return ""
+
 class ProjectScanner:
     """项目扫描器 - 递归扫描工作空间，识别项目"""
 
@@ -583,9 +605,7 @@ class ProjectScanner:
             entry_path = os.path.join(path, entry)
             if not os.path.isdir(entry_path):
                 continue
-            if entry.startswith(".") or entry.startswith("__") or entry.startswith("_"):
-                continue
-            if "归档" in entry or "archive" in entry.lower() or "trash" in entry.lower():
+            if scan_skips_folder(entry):
                 continue
 
             # 判断是否是项目目录；一个项目的元数据坏了只跳过它，不能拖垮整个工作区的扫描（D2）

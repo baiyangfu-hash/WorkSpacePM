@@ -7,9 +7,9 @@ from pathlib import Path
 
 import click
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
-from auto_pm.application.core.claim_service import ClaimError
+from auto_pm.application.core.claim_service import ClaimError, ClaimService
 from auto_pm.ui.cli import claim as claim_cli
 
 PROJECT = "proj/app"
@@ -130,7 +130,8 @@ def test_add_paths_command_lifts_paths_to_the_root_and_reports_the_new_list(monk
     class _Service:
         def add_paths(self, card: str, *, owner: str, paths: list[str]) -> Claim:
             seen.update(card=card, owner=owner, paths=paths)
-            return Claim(card, owner, "m", ("a", *paths), "g", "t", "c")
+            # TD-SW008-611 起命令看 written：服务真推了新提交才说“已追加”
+            return Claim(card, owner, "m", ("a", *paths), "g", "t", "c", written=True)
 
     monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
     monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
@@ -141,6 +142,29 @@ def test_add_paths_command_lifts_paths_to_the_root_and_reports_the_new_list(monk
     assert result.exit_code == 0, result.output
     assert seen == {"card": "340", "owner": "claude", "paths": [f"{PROJECT}/auto_pm/x.py"]}
     assert "已追加路径" in result.output and "领卡时间和到期时间不变" in result.output
+
+
+def test_add_paths_command_says_nothing_was_written_when_the_paths_were_already_held(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TD-SW008-611（D-346）：要加的路径都已在占位里，服务原样返回、什么都没推；命令不说“已追加”。"""
+    from auto_pm.application.core.claim_service import Claim
+
+    root, project = _tree(tmp_path)
+
+    class _Service:
+        def add_paths(self, card: str, *, owner: str, paths: list[str]) -> Claim:
+            return Claim(card, owner, "m", tuple(paths), "g", "t", "c")  # written 默认 False：没推
+
+    monkeypatch.setattr(claim_cli, "_service", lambda ctx: _Service())
+    monkeypatch.setattr(claim_cli, "_root", lambda ctx: str(root))
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(claim_cli.claim_group, ["add-paths", "340", "--paths", "auto_pm/x.py", "--as", "claude"])
+
+    assert result.exit_code == 0, result.output
+    assert "已追加路径" not in result.output
+    assert "这次什么都没写" in result.output
 
 
 def test_add_paths_command_exits_one_with_the_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -254,3 +278,106 @@ def test_td485_reclaim_says_reclaimed_only_when_it_wrote(monkeypatch: pytest.Mon
     assert "卡 c2 的占位已收回（远程已记为 reclaimed）" in _write_outcome(monkeypatch, *args, reclaimed=True)
     said = _write_outcome(monkeypatch, *args, reclaimed=False)
     assert "早就是 reclaimed，这次什么都没写" in said and "已收回" not in said
+
+
+# ── claim note / claim log (hand-over record) ─────────────────────────────
+
+
+def _note_repo(tmp_path: Path) -> tuple[Path, Path]:
+    """A bare origin with one commit on main and one clone that holds claim CARD-T-001 on ``p``."""
+
+    from tests.git_support import git_do
+
+    identity = ("user.email=t@example.invalid", "user.name=tester")
+    origin = tmp_path / "origin.git"
+    clone = tmp_path / "clone"
+    git_do(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin), config=identity)
+    git_do(tmp_path, "clone", "-q", str(origin), str(clone), config=identity)
+    (clone / "p").mkdir()
+    (clone / "p" / "draft.md").write_text("draft\n", encoding="utf-8")
+    git_do(clone, "add", ".", config=identity)
+    git_do(clone, "commit", "-q", "-m", "seed", config=identity)
+    git_do(clone, "push", "-q", "origin", "HEAD:main", config=identity)
+    ClaimService(clone, machine="m").open("CARD-T-001", paths=["p"], goal="g", owner="claude", machine="m")
+    return origin, clone
+
+
+def _note_cli(clone: Path, *args: str) -> Result:
+    return CliRunner().invoke(
+        claim_cli.claim_group, list(args), obj=type("Ctx", (), {"control_root": str(clone), "workspace_root": ""})()
+    )
+
+
+def test_note_then_log_tells_who_is_next_what_to_do_and_what_to_read(tmp_path: Path) -> None:
+    _, clone = _note_repo(tmp_path)
+
+    first = _note_cli(
+        clone, "note", "CARD-T-001", "--kind", "draft", "--to", "audit", "--next", "预核草稿", "--as", "claude",
+        "--ref", "p/draft.md", "--read-first", "p/draft.md", "--ref-outside", "plans/x.md#" + "a" * 64,
+    )
+    assert first.exit_code == 0, first.output
+    assert "已记第 1 笔（起草" in first.output and "下一棒：audit，预核草稿" in first.output
+    second = _note_cli(
+        clone, "note", "CARD-T-001", "--kind", "ask-user", "--to", "user", "--next", "等用户在本机说话", "--as", "audit",
+        "--ask-user", "批准 CHG-SCPT-2026-900", "--chg", "CHG-SCPT-2026-900",
+    )
+    assert second.exit_code == 0, second.output
+
+    shown = _note_cli(clone, "log", "CARD-T-001")
+    assert shown.exit_code == 0, shown.output
+    lines = shown.output.strip().splitlines()
+    assert lines[-3].startswith("最后一笔：请用户，audit → user，")
+    assert lines[-2] == "下一棒：user，等用户在本机说话"
+    assert lines[-1] == "先读：无"
+    assert "仓库外引用 plans/x.md" in shown.output and "（没核）" in shown.output
+    assert "请用户说（只是提示，不是批准）：批准 CHG-SCPT-2026-900" in shown.output
+
+    as_json = _note_cli(clone, "log", "CARD-T-001", "--json")
+    assert [item["kind"] for item in json.loads(as_json.output)] == ["draft", "ask-user"]
+
+
+def test_note_refusal_exits_one_says_why_and_pushes_nothing(tmp_path: Path) -> None:
+    from tests.git_support import git_out
+
+    origin, clone = _note_repo(tmp_path)
+    before = git_out(origin, "for-each-ref")
+
+    wrong_state = _note_cli(clone, "note", "CARD-T-001", "--kind", "draft", "--to", "audit", "--next", "用户已批准", "--as", "claude")
+    wrong_hash = _note_cli(clone, "note", "CARD-T-001", "--kind", "draft", "--to", "a", "--next", "x", "--ref", "p/none.md", "--as", "c")
+
+    assert wrong_state.exit_code == 1 and "状态词“已批准”" in wrong_state.output and "状态去状态单里看" in wrong_state.output
+    assert wrong_hash.exit_code == 1 and "里不存在" in wrong_hash.output
+    assert git_out(origin, "for-each-ref") == before
+
+
+def test_note_offline_exits_two_and_prints_the_note_to_record_again(tmp_path: Path) -> None:
+    from tests.git_support import git_do
+
+    _, clone = _note_repo(tmp_path)
+    git_do(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    result = _note_cli(clone, "note", "CARD-T-001", "--kind", "draft", "--to", "audit", "--next", "预核", "--as", "claude")
+
+    assert result.exit_code == 2
+    assert "没有记上，也没有存在本机" in result.output
+    assert '"next_step": "预核"' in result.output and '"card": "CARD-T-001"' in result.output
+
+
+def test_log_empty_record_missing_claim_and_offline_view(tmp_path: Path) -> None:
+    _, clone = _note_repo(tmp_path)
+
+    empty = _note_cli(clone, "log", "CARD-T-001")
+    missing = _note_cli(clone, "log", "CARD-T-404")
+    offline = _note_cli(clone, "log", "CARD-T-001", "--no-fetch")
+
+    assert empty.exit_code == 0 and "这张卡还没有交接记录。" in empty.output
+    assert missing.exit_code == 1 and "没有这张卡的占位" in missing.output
+    assert offline.exit_code == 0 and "离线视图" in offline.output
+
+
+def test_note_usage_error_exits_two(tmp_path: Path) -> None:
+    _, clone = _note_repo(tmp_path)
+
+    result = _note_cli(clone, "note", "CARD-T-001", "--kind", "draft", "--to", "audit")
+
+    assert result.exit_code == 2 and "--next" in result.output

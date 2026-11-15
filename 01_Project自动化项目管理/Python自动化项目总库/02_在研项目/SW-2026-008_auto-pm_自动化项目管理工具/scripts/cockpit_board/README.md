@@ -63,6 +63,8 @@
 | 推送 manual/ 分支、打开 GitHub 开 PR、提交 | 本版不做，灰着，提示去命令提示符做 | — |
 | 批准范围、开工（工位里） | 不运行命令，跳到“决定”页（见 `DECISION_BUTTONS_WIRED`） | — |
 | “决定”页的 9 个按钮 | 见 `DECISIONS.md`：每个按钮一条 `main.py pm …` 命令 | 命令 + 退出码 + 原文，失败红条常驻 |
+| “决定”页的“批准变更单”“推到完成” | 见 `DECISIONS.md`“变更单的两个按钮”：`main.py change transition …`，一次一步 | 同上 |
+| 只许你本人点的 11 个按钮 | 见 `DECISIONS.md`“只许你本人点”：AI 会话拉起的看板里灰着、也不运行；你双击 bat 打开的照旧 | 记录里写“(未运行)” |
 | 新建项目（工具页“项目”页签） | `project create --stack … --name … --auto-id --business-line … [--mode …]`；“只试一次，不写”勾着时带 `--dry-run` | 先“预览命令”再运行；命令 + 退出码 + 原文 |
 | 登记（工具页“项目”页签） | `project register <项目号> [--kind …]`；“只试一次，不写”勾着时带 `--dry-run`；从不传 `--status` | 同上；真登记成功后提示“登记表有一处没提交的改动”，看板不提交登记表 |
 | 归档…、重新激活…、重新检查（项目详情页） | 预演：`project archive <项目号>` / `project reactivate <项目号>`，不带 `--confirm`，只查不改 | 输出原样摆在“项目状态”一块 |

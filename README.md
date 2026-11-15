@@ -9,7 +9,7 @@
 |---|---|
 | 规则（所有 AI 共用的真源） | `AGENTS.md` |
 | 进门第一步（只读定位） | `.trae/skills/cockpit-entry/SKILL.md` |
-| 现在到哪了 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/39_PM-Flow_恢复与可用化总方案_WBS_PM.md` 的“当前投影” |
+| 现在到哪了 | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md` 的“当前排序” |
 | 什么能用、什么不能用 | `docs/功能清单.md` |
 | 问题登记在哪 | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md` |
 | 交接手册（用户已定的做法、分工） | `docs/handover/README.md` |

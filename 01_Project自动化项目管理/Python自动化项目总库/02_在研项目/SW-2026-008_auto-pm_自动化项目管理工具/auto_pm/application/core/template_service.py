@@ -20,6 +20,10 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
+class TemplateUpdateUnavailableError(RuntimeError):
+    """copier 增量更新跑不起来（答案文件没记模板来源和版本，或模板不是独立 Git 仓库）；消息是给人看的中文。"""
+
+
 class TemplateService:
     """Copier 模板调度 Service"""
 
@@ -146,6 +150,7 @@ class TemplateService:
 
         Raises:
             FileNotFoundError: 项目缺少 .copier-answers.yml
+            TemplateUpdateUnavailableError: copier 增量更新跑不起来（D-376），项目文件不动
         """
         answers_path = os.path.join(project_path, ".copier-answers.yml")
         if not os.path.isfile(answers_path):
@@ -159,16 +164,23 @@ class TemplateService:
             log.info("Copier update 预览: project=%s, template=%s", project_path, info.get("template"))
             return {"project_path": project_path, "updated": False, "dry_run": True, "info": info}
 
+        answers = self._read_answers(project_path)
+        blocker = self._update_blocker(answers)
+        if not blocker and not overwrite:
+            blocker = (
+                "copier 做增量更新必须允许改已有文件（template update 要带 --overwrite，冲突处会留冲突标记）；"
+                "这次没带，项目文件一个没动（D-376）"
+            )
+        if blocker:
+            raise TemplateUpdateUnavailableError(blocker)
+
         import copier
 
         log.info("Copier update: project=%s, overwrite=%s", project_path, overwrite)
 
-        # 工位清单是 `when: false` 的题，copier 更新时不读旧答案、会退回默认的 [Station1]，
-        # 所以从答案文件里读回来显式传（TD-SW008-525，D-260）。老工程的答案文件里没有，就不传。
-        data: dict[str, Any] = {}
-        stations = self._read_answers(project_path).get("station_instances")
-        if isinstance(stations, list) and stations:
-            data["station_instances"] = stations
+        # `when: false` 的题（工位清单、业务线、PLC 品牌型号等）copier 更新时不读旧答案、会退回默认值，
+        # 所以把答案文件里记着的全部读回来显式传（TD-SW008-525/D-260 只读回了工位清单；TD-SW008-608/D-343 补全）。
+        data = self._kept_answers(answers)
 
         copier.run_update(
             dst_path=project_path,
@@ -180,6 +192,98 @@ class TemplateService:
 
         log.info("模板更新完成: %s", project_path)
         return {"project_path": project_path, "updated": True}
+
+    def _template_dir(self, answers: dict[str, Any]) -> str:
+        """答案文件记的模板在本机哪里：驾驶舱自带的同名模板优先，否则按记下的路径原样认；找不到返回空串。"""
+
+        src = str(answers.get("_src_path") or "")
+        if not src or "://" in src or src.startswith("git@"):
+            return ""
+        own = os.path.join(self.templates_dir, os.path.basename(src.replace("\\", "/").rstrip("/")))
+        if os.path.isfile(os.path.join(own, "copier.yml")):
+            return own
+        return src if os.path.isfile(os.path.join(src, "copier.yml")) else ""
+
+    def _update_blocker(self, answers: dict[str, Any]) -> str:
+        """copier 增量更新跑不起来的原因（中文）；跑得起来返回空串（D-376，TD-SW008-641）。
+
+        copier 只能对“答案文件记着模板来源和版本、模板本身是独立 Git 仓库”的项目做增量更新。
+        这里先查清楚再说真话，不让 copier 抛英文报错；只读，不写任何文件。
+        """
+
+        src = str(answers.get("_src_path") or "")
+        if not src or not answers.get("_commit"):
+            return (
+                "这个项目的 .copier-answers.yml 没记模板来源和版本（_src_path、_commit），"
+                "copier 不知道从哪个版本的模板增量更新，模板更新做不了；项目文件一个没动（D-376）"
+            )
+        if "://" in src or src.startswith("git@"):
+            return ""  # 远程 Git 模板：交给 copier 自己取
+        template = self._template_dir(answers)
+        if not template:
+            return f"答案文件记的模板 {src} 在本机找不到，模板更新做不了；项目文件一个没动（D-376）"
+        if not self._is_git_repo_root(template):
+            return (
+                f"模板目录 {template} 不是独立的 Git 仓库，copier 只能从 Git 仓库里的模板做增量更新；"
+                "驾驶舱自带的模板都放在工作区仓库里面，所以现在模板更新做不了；项目文件一个没动（D-376）"
+            )
+        return ""
+
+    @staticmethod
+    def _is_git_repo_root(path: str) -> bool:
+        """``path`` 本身是不是一个 Git 仓库的根（copier 判“模板能不能增量更新”用的同一条标准）；读不出算不是。"""
+
+        import subprocess
+
+        try:
+            done = subprocess.run(
+                ["git", "-C", path, "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if done.returncode != 0:
+            return False
+        try:
+            top = done.stdout.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return False
+        return os.path.normcase(os.path.realpath(top)) == os.path.normcase(os.path.realpath(path))
+
+    def _kept_answers(self, answers: dict[str, Any]) -> dict[str, Any]:
+        """答案文件里记着的、模板里是 `when: false` 的题：原样读回来交给 copier（TD-SW008-608，D-343）。
+
+        记成空（None）、空列表的不传，让模板默认值照旧；`type: str`（或没写 type）的题按字符串传，
+        免得型号 1500 这类答案被 YAML 读成数字。模板读不出就一项都不传。
+        """
+
+        import yaml
+
+        template = self._template_dir(answers)
+        if not template:
+            return {}
+        try:
+            with open(os.path.join(template, "copier.yml"), encoding="utf-8") as f:
+                questions = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError) as e:
+            log.warning("读取模板 copier.yml 失败: %s: %s", template, e)
+            return {}
+        if not isinstance(questions, dict):
+            return {}
+        data: dict[str, Any] = {}
+        for key, spec in questions.items():
+            if key.startswith("_") or not isinstance(spec, dict) or spec.get("when") is not False:
+                continue
+            if key not in answers:
+                continue
+            value = answers[key]
+            if value is None or (isinstance(value, (list, dict)) and not value):
+                continue
+            kind = spec.get("type", "str")
+            data[key] = str(value) if kind == "str" and not isinstance(value, str) else value
+        return data
 
     @staticmethod
     def _read_answers(project_path: str) -> dict[str, Any]:

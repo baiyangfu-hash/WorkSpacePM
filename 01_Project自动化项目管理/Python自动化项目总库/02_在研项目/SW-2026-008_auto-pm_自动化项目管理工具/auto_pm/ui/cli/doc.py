@@ -15,6 +15,7 @@ from auto_pm.application.core.doc_inject_service import DocInjectService
 from auto_pm.application.core.doc_refresh_service import DocRefreshService
 from auto_pm.application.core.doc_services import DocCheckService, DocSyncService
 from auto_pm.application.core.project_service import ProjectService
+from auto_pm.domain.doc.link_check import dead_links
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
@@ -46,11 +47,18 @@ def doc_sync_cmd(ctx: click.Context) -> None:
 
 
 @doc_group.command("check")
+@click.option(
+    "--project", "project_id", default=None,
+    help="只读：改查这个项目 .md 文档里的相对链接有没有死链（报“文件:行”，跳过归档目录；有死链或读不了的文件退出码 1）",
+)
 @click.pass_context
-def doc_check_cmd(ctx: click.Context) -> None:
-    """静态审计文档与代码的一致性及版本锁"""
+def doc_check_cmd(ctx: click.Context, project_id: str | None) -> None:
+    """静态审计文档与代码的一致性及版本锁；带 --project 时改查该项目文档的相对链接死链"""
     app_ctx: AppContext = ctx.obj
     workspace_root = Path(app_ctx.workspace_root or os.getcwd())
+    if project_id is not None:
+        _check_project_links(workspace_root, project_id)
+        return
 
     service = DocCheckService(workspace_root=workspace_root)
     results = service.check_all()
@@ -74,6 +82,27 @@ def doc_check_cmd(ctx: click.Context) -> None:
     else:
         console.print(Panel("[bold red]❌ 存在未同步的文档滞后项，请先执行 auto-pm doc sync 修复！[/bold red]", title="Doc Check 结果"))
         raise click.exceptions.Exit(1)
+
+
+def _check_project_links(workspace_root: Path, project_id: str) -> None:
+    """``doc check --project``（TD-SW008-606）：只读，逐条打印死链“文件:行”，有死链或读不了的文件退出码 1。"""
+    project = ProjectService(workspace_root=str(workspace_root)).get_project(project_id)
+    if not project:
+        console.print(f"[bold red]错误：[/bold red]未找到项目 '{project_id}'（项目不存在）")
+        raise click.exceptions.Exit(1)
+
+    report = dead_links(project.path)
+    for d in report.dead:
+        console.print(f"{escape(d.file)}:{d.line} 链接找不到：{escape(d.target)}", highlight=False)
+    for name in report.unreadable:
+        console.print(f"{escape(name)} 读不了（不是 UTF-8 也不是 GBK，或打不开），里面的链接没查", highlight=False)
+    if report.passed:
+        console.print(f"[bold green]{project_id}：查了 {report.scanned} 份 .md，相对链接都找得到[/bold green]")
+        return
+    console.print(
+        f"[bold red]{project_id}：查了 {report.scanned} 份 .md，死链 {len(report.dead)} 处，读不了 {len(report.unreadable)} 份[/bold red]"
+    )
+    raise click.exceptions.Exit(1)
 
 
 @doc_group.command("inject")

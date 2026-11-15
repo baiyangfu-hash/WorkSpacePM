@@ -22,7 +22,10 @@ from rich.table import Table
 
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.project_service import ProjectService
-from auto_pm.application.core.template_service import TemplateService
+from auto_pm.application.core.template_service import (
+    TemplateService,
+    TemplateUpdateUnavailableError,
+)
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity
 
 console = Console()
@@ -80,6 +83,9 @@ def cmd_update(
     except FileNotFoundError as e:
         console.print(f"[red]错误: {e}[/red]")
         console.print("[yellow]项目缺少 .copier-answers.yml，无法增量更新[/yellow]")
+        ctx.exit(1)
+    except TemplateUpdateUnavailableError as e:
+        console.print(f"[red]模板更新做不了: {e}[/red]")
         ctx.exit(1)
     except Exception as e:
         console.print(f"[red]更新失败: {e}[/red]")

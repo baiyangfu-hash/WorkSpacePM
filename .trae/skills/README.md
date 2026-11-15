@@ -1,6 +1,6 @@
 # 本地技能入口说明
 
-规则真源是根目录 `AGENTS.md`。可用技能以 `.agents/skills.json` 的登记为准（`cockpit-entry`、`fullstack-engineer`、`plc-electrical-engineer`）；另有未登记的维护技能 `find-skills`。
+规则真源是根目录 `AGENTS.md`。可用技能以 `.agents/skills.json` 的登记为准（`cockpit-entry`、`fullstack-engineer`、`plc-electrical-engineer`）。
 
 > **正本在 `roles/`（驾驶舱公共角色库）**：`fullstack-engineer`、`plc-electrical-engineer` 和公共契约 `shared` 的正文与参考资料只存在于 `roles/`；本目录下同名的三个目录只剩一页指路牌，不得再放正文。
 
@@ -20,12 +20,6 @@ Python / 上位机 / 前后端的实现、联调、修复与验证。
 
 PLC / HMI / 电气交付项目的程序与技术文档。
 
-## 维护入口
-
-### `find-skills`
-
-查找外部技能、评估是否需要安装新技能。
-
 ## 已隔离，禁止使用
 
 - `pm-workflow`：自 2026-09-09 起为 `QUARANTINED / DECOMMISSIONED`，不得调用。目录已于 2026-10-25 按用户决定删除（历史内容见 Git 历史与既有 Decision，不作当前指令）。PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作。
@@ -36,6 +30,7 @@ PLC / HMI / 电气交付项目的程序与技术文档。
 以下技能已归档到 `.trae/skills_archive/`：
 
 - `breakdown-plan`
+- `find-skills`（2026-11-14 归档：教 agent 去公开技能市场找并安装外部技能，未登记进技能注册表）
 - `github-project-management`
 - `prd`
 - `product-requirements`
@@ -48,4 +43,4 @@ PLC / HMI / 电气交付项目的程序与技术文档。
 - 有已授权的 Work，做软件实现、调试、联调：`fullstack-engineer`
 - 有已授权的 Work，做 PLC / 电气程序与文档：`plc-electrical-engineer`
 - 新需求、缺陷或想法：按 `cockpit-entry` 用用户原话入收件箱（`pm inbox add`），不要直接动手
-- 需要扩展新能力：`find-skills`
+- 需要扩展新能力：先告诉用户，由用户决定；不要自行上网找技能安装
