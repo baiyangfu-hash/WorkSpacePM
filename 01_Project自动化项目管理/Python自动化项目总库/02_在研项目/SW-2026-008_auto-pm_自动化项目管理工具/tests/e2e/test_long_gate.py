@@ -9,6 +9,7 @@ import importlib.util
 import json
 import locale
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -162,6 +163,20 @@ def _wait_for(pred: Any, timeout: float = 60) -> None:
     raise AssertionError("condition not reached in time")
 
 
+def _runner_log(lab: dict[str, Path]) -> str:
+    log = lab["out"] / "long_gate.log"
+    return log.read_text(encoding="utf-8", errors="replace") if log.exists() else "(no runner log)"
+
+
+def _wait_or_show_log(lab: dict[str, Path], pred: Any, timeout: float = 60) -> None:
+    """``_wait_for`` that, on a timeout, puts the runner log into the failure (D-225: a crashed runner read as a slow one)."""
+
+    try:
+        _wait_for(pred, timeout=timeout)
+    except AssertionError as error:
+        raise AssertionError(f"{error}; runner log:\n{_runner_log(lab)}") from None
+
+
 def _state(lab: dict[str, Path]) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads((lab["out"] / "long_gate_state.json").read_text(encoding="utf-8")))
 
@@ -213,10 +228,11 @@ def test_full_round_writes_the_run_g2_layout_and_renews_first(lab: dict[str, Pat
 def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
     """The 10-23 failure: the session's process tree is torn down. `launch` must leave nothing in that tree."""
 
-    cfg = _config(lab, [_step(lab, "rest", wait=60), _step(lab, "core")], interval=2)
+    # The scheduled task is named after the config: with this process id in it, two test processes never share one task (D-225).
+    cfg = _config(lab, [_step(lab, "rest", wait=60), _step(lab, "core")], interval=2, name=f"drill-{os.getpid()}")
     session = subprocess.Popen([PY, "-B", str(SCRIPT), "launch", "--config", str(cfg), "--wait", "60"],
                                stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", start_new_session=(os.name != "nt"))
-    _wait_for(lambda: _runs(lab, "rest") == 1)
+    _wait_or_show_log(lab, lambda: _runs(lab, "rest") == 1)
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(session.pid)], capture_output=True, check=False)
     else:
@@ -228,13 +244,100 @@ def test_session_killed_runner_keeps_going(lab: dict[str, Path]) -> None:
         counts.append(int((lab["tools"] / "renew_count").read_text()))
         return True
 
-    _wait_for(_record_count)
+    _wait_or_show_log(lab, _record_count)
     count = counts[0]
-    _wait_for(lambda: int((lab["tools"] / "renew_count").read_text()) >= count + 2, timeout=30)  # renewals go on
+    _wait_or_show_log(lab, lambda: int((lab["tools"] / "renew_count").read_text()) >= count + 2, timeout=30)  # renewals go on
     (lab["tools"] / "release_rest").write_text("")
-    _wait_for(lambda: (lab["out"] / "DONE").exists())
+    _wait_or_show_log(lab, lambda: (lab["out"] / "DONE").exists())
     assert _state(lab)["result"] == "DONE"
     assert _runs(lab, "rest") == 1 and _runs(lab, "core") == 1
+
+
+def test_a_waiting_timeout_shows_the_runner_log(lab: dict[str, Path]) -> None:
+    lab["out"].mkdir()
+    (lab["out"] / "long_gate.log").write_text("2026-11-15T04:06:43+00:00 runner crashed: GateError: x\n", encoding="utf-8")
+    with pytest.raises(AssertionError) as caught:
+        _wait_or_show_log(lab, lambda: False, timeout=0.3)
+    assert "condition not reached in time" in str(caught.value) and "runner crashed: GateError: x" in str(caught.value)
+
+
+# ── D-225 (TD-SW008-490): a failed git call says how it failed, and the runner asks again before it gives up ──
+
+
+def test_a_failed_git_call_records_the_exit_code_stdout_and_stderr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    mod = _module()
+    # What the 11-15 gate saw: non-zero, nothing on stderr.  0xC0000142 is the code Windows gives a process that could not start.
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 3221225794, stdout=b"", stderr=b""))
+    with pytest.raises(mod.GitCallError) as caught:
+        mod.git_bytes(tmp_path, "status", "--porcelain=v1")
+    text = str(caught.value)
+    assert text.startswith("git status --porcelain=v1 failed: exit 3221225794 (0xC0000142)")
+    assert "stderr: (empty)" in text and "stdout: (empty)" in text
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 128, stdout=b"half\n", stderr=b"fatal: x\n"))
+    with pytest.raises(mod.GitCallError) as caught:
+        mod.git_bytes(tmp_path, "rev-parse", "HEAD")
+    assert str(caught.value) == "git rev-parse HEAD failed: exit 128; stderr: 'fatal: x'; stdout: 'half'"
+
+
+def _flaky_git(mod: ModuleType, monkeypatch: pytest.MonkeyPatch, failures: int) -> list[str]:
+    """The first ``failures`` `git status` calls fail like the 11-15 gate's; everything else is the real git."""
+
+    real = subprocess.run
+    calls: list[str] = []
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[bytes]:
+        if "status" in argv:
+            calls.append("status")
+            if len(calls) <= failures:
+                return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"")
+        return cast(subprocess.CompletedProcess[bytes], real(argv, **kw))
+
+    monkeypatch.setattr(mod.subprocess, "run", run)
+    return calls
+
+
+def test_the_fingerprint_asks_git_again_and_logs_every_failed_try(lab: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    cfg = {"fingerprint": {"git_worktree": str(lab["wt"])}}
+    expected = mod.tree_fingerprint(cfg)
+    calls = _flaky_git(mod, monkeypatch, failures=2)
+    lines: list[str] = []
+    pauses: list[float] = []
+    assert mod.fingerprint_with_retry(cfg, lines.append, "start", sleep=pauses.append) == expected
+    assert len(calls) == 3 and pauses == [1.0, 3.0]
+    assert len(lines) == 2 and all("start: git try" in line and "exit 1; stderr: (empty)" in line for line in lines)
+    assert "try 1/3" in lines[0] and "try 2/3" in lines[1]
+
+
+def test_the_fingerprint_gives_up_after_the_last_git_try(lab: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    calls = _flaky_git(mod, monkeypatch, failures=99)
+    lines: list[str] = []
+    with pytest.raises(mod.GitCallError):
+        mod.fingerprint_with_retry({"fingerprint": {"git_worktree": str(lab["wt"])}}, lines.append, "start", sleep=lambda _s: None)
+    assert len(calls) == mod.GIT_ATTEMPTS == 3
+    assert lines[-1].endswith("giving up") and "try 3/3" in lines[-1]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in git is a script on PATH, which Windows CreateProcess does not run as git")
+def test_the_runner_survives_a_git_call_that_fails_at_start(lab: dict[str, Path]) -> None:
+    # A real runner process; a stand-in `git` first on PATH fails the first `status` with nothing on stderr, then hands over.
+    real_git = shutil.which("git")
+    assert real_git
+    bin_dir = lab["root"] / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "git"
+    fake.write_text("#!/bin/sh\n"
+                    f"if [ ! -e '{lab['tools']}/git_failed_once' ] && echo \" $* \" | grep -q ' status '; then\n"
+                    f"  : > '{lab['tools']}/git_failed_once'; exit 1\nfi\n"
+                    f"exec '{real_git}' \"$@\"\n", encoding="utf-8")
+    fake.chmod(0o755)
+    cfg = _config(lab, [_step(lab, "rest")])
+    r = _run(cfg, "run", env=dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}"))
+    assert r.returncode == 0, r.stderr + _runner_log(lab)
+    log = _runner_log(lab)
+    assert "start: git try 1/3 failed: git status" in log and "exit 1; stderr: (empty)" in log
+    assert _state(lab)["result"] == "DONE"
 
 
 def test_runner_killed_mid_step_resumes_only_the_unfinished_step(lab: dict[str, Path]) -> None:
