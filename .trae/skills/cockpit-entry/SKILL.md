@@ -15,9 +15,9 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 - Trae 里的 AI：`.\.trae\bin\pm-as-trae.ps1 <命令参数>`，等价于 `& ".\.venv\Scripts\python.exe" ".\main.py" <命令参数>`，只是这一条命令期间带上 `AUTO_PM_AGENT=trae:cn`，结束即还原。命令只认冒号前面那段（trae），冒号后面的 `cn` 只是备注，国际版同样适用；效果和上面的通用脚本取 `trae:cn` 相同。
 - 非 Windows 的 shell：只对单条命令设置，如 `AUTO_PM_AGENT=cursor python main.py pm orient <项目编号> --json`。
 
-需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用这些脚本运行（带标记会被拒绝），照原有说法在终端里原样运行或交给用户。
+要用户批准的命令（名单见 `AGENTS.md` FLOW-002“点动”）：用户亲口批准了，带上那句话的位置去跑（`--approval-evidence-ref user-confirmation:<用户那条消息的时间或编号>`）；用户没说过的不跑，交给用户。`pm sign-risk` 带 agent 标记一律被拒，只能交给用户在自己的终端跑。
 
-## 进门四步
+## 进门（AGENTS.md“进门”一节的细则）
 
 1. **确认当前目录是控制根（主工作区）**：
 
@@ -33,21 +33,23 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    & ".\.venv\Scripts\python.exe" ".\main.py" project list
    ```
 
-3. **定位**（只读）：
+3. **进门一条命令**（只读）：
 
    ```powershell
-   & ".\.venv\Scripts\python.exe" ".\main.py" pm orient <项目编号> --json
+   & ".\.venv\Scripts\python.exe" ".\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具\scripts\pm_flows.py" entry <项目编号>
    ```
 
-   如果报 `No such command 'orient'`：说明本机生效的发布版本还没有这条命令（仓库里记录的发布版本 1.3.3-d8f7c8b 就没有，新克隆的工作区在发布指针更新前会遇到）。这不是故障，改用同样只读的 `pm resume <项目编号> --json`，照第 4 步报告；不要为此切换或部署版本。
+   它依次跑项目体检（第一步就是 `pm orient`）、占位表 `claim list`，再对登记路径落在本项目里、还没放下的每张卡跑 `claim log`，最后列出每张卡交接记录的最后三行和“先读这些文件”。
+
+   脚本用不了时，在根目录按顺序手敲：`main.py pm orient <项目编号> --json`、`main.py claim list`，再对本项目的每张卡 `main.py claim log <卡号>`；完整步骤也可以用 `pm_flows.py steps entry` 列出。任何一条报 `No such command '…'`，说明本机生效的发布版本还没有这条命令：照实告诉用户；没有 `orient` 时改用同样只读的 `pm resume <项目编号> --json`；不要为此切换或部署版本。
 
    不知道项目编号时，也可以在根目录用 `context resolve --path <项目目录>` 让系统识别项目。
 
-4. **用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里每个 Work 的编号和状态原样报告，不要自己判断哪个是历史遗留、哪个在做。
+4. **先读完交接记录列出的文件，再用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里每个 Work 的编号和状态原样报告，不要自己判断哪个是历史遗留、哪个在做。
 
 ## 没有已授权的 Work 之前，只能用这些只读命令
 
-`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`，以及 `git status`、`git log`、`git diff`。
+`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`、`claim list`、`claim log`，AGENTS.md FLOW-002 的 `pm_flows.py entry`、`checkup`、`steps`（脚本只串命令分类表里归“读”的命令），以及 `git status`、`git log`、`git diff`。
 
 这些命令出错或报差异时，输出里可能建议你运行修复命令（例如 `ledger reconcile --fix`、`doc sync`）。这些修复命令会写文件，不在清单里：不要运行，把输出原文报告给用户并停下。
 
@@ -64,7 +66,6 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
 4. **出计划给用户看**：用中文列出 需求原文（照抄用户原话）/ 目标 / 可改范围（具体文件路径）/ 本次预计改动的文件 / 是否涉及安全回路 / 验收标准及每条对应的命令和期望退出码 / 风险 / 回退办法 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。**是否碰安全回路（急停、安全门、光栅、联锁、安全继电器、双手启动）必须写明“是”或“否”**；填“是”按安全区走，先仿真、再请用户在 PR 上写“安全签字 + 提交号”后才能合并。然后停下，等用户亲口说“确认开工”。
 5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。
-   **已启用批准口令时**（`main.py pm approver-pin status` 显示“已生效”）：`pm approve` 和第 8 步的 `pm accept` 会在终端里提示用户输入批准口令，批准人和证据由口令决定，`--approver`/`--approval-evidence-ref` 可不填。你只把完整命令（`main.py pm approve --request-id <请求号> --plan-hash <哈希>`）在 IDE 终端里运行或交给用户，等用户本人在终端里敲口令；**绝不向用户索要口令、绝不让用户把口令发到对话里、绝不设法绕过**（伪造终端、改登记文件、调内部函数都算违规）。`pm approver-pin init` 只能用户本人运行。
 
    `pm plan` 必须带齐七栏：`--original-request`（照抄用户原话）、`--scope`、`--declared-dirty`、`--safety-circuit 是|否`、每条 `--acceptance` 配一条 `--check "命令 => 退出码"`、`--risk`（写真实风险，不能写“无”）、`--rollback`。`--declared-dirty` 逐个列出本次要改的文件，必须是可改范围的子集，不许留空。`pm approve` 带全参数时同样七栏都要带。缺哪栏驾驶舱会直接列出来，按提示补齐即可，不要绕过。
 6. **动手**：只改范围卡列出的路径。所有 `change` 命令都带 `--pid <项目编号>`。界面的“批准范围并开始”和 `pm execute`、`run_approved_planning` 都会启动 Codex 执行器（已挂起），不要点、不要调。IDE 里的 agent 自己写代码按下面顺序走，每条命令的参数以 `--help` 为准，全部在控制根运行：
@@ -75,8 +76,8 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
    5. 质量验证：`main.py pm verify --mission-id <Mission 编号> --lease-wallet`。它用本 Run 自己的租约（从本机钱包读，不打印口令）跑领域门禁、生成系统证据检查点；通过后 Mission 进入“等待用户验收”，退出码 0。没通过时退出码非 0，`reason` 是原因，原样报告给用户，改好后再运行一次 `pm verify`。门禁正在跑的时候不做这一步。
    不要自己把工作树的文件拷回控制根：收口时驾驶舱会按字节并回（见第 8 步）。
 7. **自检**：交给用户验收前，范围卡里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑。`pm verify` 之后工作树里不要再改任何文件，改了收口会被拒，要重新验证、重新验收。
-8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”（已启用批准口令时界面会拒绝，改为请用户在终端运行 `main.py pm accept --mission-id <Mission 编号>` 并输入口令，然后你运行 `main.py pm close --mission-id <Mission 编号>`）。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：把工作树里验收过的文件按字节并回控制根、推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**，也**不替用户提交 Git**。用户已经验收、但收口没完成（界面显示“重试同步”）时，你可以运行 `main.py pm close --mission-id <Mission 编号>`，它和“重试同步”是同一个收口；它只收用户已验收的任务，失败时退出码非 0，`reason` 是原因。收口完成后：
-   1. 用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；
+8. **验收与收口**：请用户在驾驶舱界面上亲手点“确认验收”。这个按钮先记下用户验收，再走 `close_accepted` 一步收口：把工作树里验收过的文件按字节并回控制根、推进 Run、Work 和 Mission，把证据写进变更单、同步台账，但**不推进变更单状态**，也**不替用户提交 Git**。用户已经验收、但收口没完成（界面显示“重试同步”）时，你可以运行 `main.py pm close --mission-id <Mission 编号>`，它和“重试同步”是同一个收口；它只收用户已验收的任务，失败时退出码非 0，`reason` 是原因。收口完成后：
+   1. 用 `change transition <单号> --to <下一状态> --pid <项目编号>` 把变更单逐步推到 `completed`；推到批准、推到完成要先有用户在看板点按钮，或在本机主对话里亲口说，再带上那句话的位置去跑（`AGENTS.md` 红线 1）；
    2. 运行 `main.py ledger reconcile <项目编号>` 只读对账，结果报告给用户；
    3. 告诉用户哪些文件已并回控制根、尚未提交，请用户提交：驾驶舱自动生成的变更单和台账改动，跟交付的代码放在同一次提交里交，不要漏交（下一单动同一批文件前必须先提交）。
 
@@ -86,7 +87,7 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 ## 换 agent
 
-当前持有者运行 `main.py pm handoff` 交接（不用 `reclaim`），把输出的 handoff_id 告诉用户后停止写入；接手方先做上面的四步定位，再用 `main.py pm takeover` 接手，从对方的 Checkpoint 接着做，不重做已完成的部分。不要自己编造口令，也不要读取别人的口令文件。
+交出去之前，在卡上用 `main.py claim note` 记一笔（最后一笔、下一棒、先读什么，规矩见 AGENTS.md FLOW-002“交接记录”）；接手方先做上面的进门，读完交接记录列出的文件，再记一笔 `--kind takeover`。卡上有带租约的 Run 时，还要由当前持有者运行 `main.py pm handoff` 交租约（不用 `reclaim`），把输出的 handoff_id 告诉用户后停止写入；接手方用 `main.py pm takeover` 接手，从对方的 Checkpoint 接着做，不重做已完成的部分。不要自己编造口令，也不要读取别人的口令文件。
 
 ## 不要做
 

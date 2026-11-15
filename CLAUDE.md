@@ -4,7 +4,7 @@
 
 @AGENTS.md
 
-1. **新会话第一件事**：读 `.trae/skills/cockpit-entry/SKILL.md` 并照它做——确认当前目录是控制根、确认项目编号、运行只读定位命令，再用中文向用户报告当前焦点、下一步合法动作和冲突。
+1. **新会话第一件事**：照 `AGENTS.md`“进门”一节做：在控制根跑 `pm_flows.py entry <项目编号>`，读完它列出的文件，再用中文向用户报告当前焦点、下一步合法动作和冲突；确认控制根、项目编号、脚本用不了时怎么手敲，见 `.trae/skills/cockpit-entry/SKILL.md`。
 2. **没有已授权的 Work、Run 与有效租约之前，只允许只读命令**；命令输出里建议的修复命令（如 `--fix`、`doc sync`）不要运行。
-3. **本机 Claude Code 的工位和分支前缀**：见 `AGENTS.md` 的“多 agent 工位与控制根规则 (WS-001)”（基名 `claude`，分支 `claude/`；工位目录名用别名 `claude-<会话ID前6位>`，名字规则见该节）。
+3. **本机 Claude Code 的工位和分支前缀**：见 `AGENTS.md` 的“多 agent 工位与控制根规则 (WS-001)”（基名 `claude`，分支 `claude/`；工位目录名用别名 `claude-<会话ID前6位>`，名字规则见附录 `roles/shared/refs/agents_附录/03_工位细则.md`）。
 4. **不得使用**已隔离的 `pm-workflow`；`PM_SESSION` 和聊天文字都不是授权。

@@ -79,7 +79,7 @@ description: 全局开发规则，适用于工作空间内所有项目的通用�
 - **工作在 `0100_PLC自动化/` 下**：
   - 必须全面遵循 Siemens LSP 扩展生态及 LSP-905/906/907/908 规范；
   - 严守语法白名单（禁 GOTO/标号/REPEAT/指针/METHOD）；
-  - 定时器必须使用自定义 FB_TON/FB_TONR，PT/ET 必须为 DINT 毫秒数，严禁使用 `T#` 字面量；
+  - 定时器以 LSP-903 为准：用 TIA 原生 `TON_TIME`/`TOF_TIME`/`TP_TIME`/`TONR_TIME` 多重实例，PT/ET 为 TIME，毫秒值用 `DINT_TO_TIME` 转换，暂不写 `T#` 字面量；新程序不引用 SysLib 的 `FB_TON`/`FB_TONR` 包装块；
   - 所有定时器必须在 FB 顶部无条件批量调用，严禁放入 IF/CASE 分支；
   - CASE 状态机必须带 ELSE 容错分支；严禁中文变量名与中文全角标点；
   - 项目必须配置 `.plc.json` 且使用 `libraries` 数组指向 SysLib。

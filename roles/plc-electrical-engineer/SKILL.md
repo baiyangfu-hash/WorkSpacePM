@@ -22,7 +22,7 @@ description: "执行已授权的 PLC、SCL/ST 与电气接口任务；支持只�
 ## Execution
 
 - 仅修改 Work scope 与 owned paths 的交集；发现未声明 dirty path、Git 基线漂移或 lease 失效立即停止。
-- 遵循 LSP-905~908、STD-830/840/850/860：语法白名单、DINT 定时器三段式、CASE 防死锁 ELSE、OMAC 状态机、首出诊断。
+- 遵循 LSP-903~908、STD-830/840/850/860：语法白名单、定时器用 TIA 原生 `TON_TIME` 等多重实例（以 LSP-903 为准，新程序不引用 `FB_TON`/`FB_TONR`）、CASE 防死锁 ELSE、OMAC 状态机、首出诊断。
 - IT/OT 接口只按已批准的 INT 契约使用 OPC UA 或 Modbus TCP；未知现场硬件事实必须停下澄清。
 - `.plc.json`、全局模板、发布指针和范围外文件只有在 Decision 明确授权时可改。
 - PLC 交付边界为静态检查全绿；TIA Portal/InoProShop 导入、编译和下发由 User 完成并回传外部证据。
