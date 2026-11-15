@@ -340,6 +340,60 @@ def test_the_runner_survives_a_git_call_that_fails_at_start(lab: dict[str, Path]
     assert _state(lab)["result"] == "DONE"
 
 
+def test_only_a_failed_git_call_is_asked_again(lab: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    # The retry is for a git call that returned non-zero; any other refusal (or git missing) stops at once (#820 audit WARN-1 ②).
+    mod = _module()
+    cfg = {"fingerprint": {"git_worktree": str(lab["wt"])}}
+    for error in (mod.GateError("not a git call"), FileNotFoundError("git")):
+        tries: list[int] = []
+
+        def broken(_cfg: dict[str, Any], error: BaseException = error, tries: list[int] = tries) -> str:
+            tries.append(1)
+            raise error
+
+        monkeypatch.setattr(mod, "tree_fingerprint", broken)
+        lines: list[str] = []
+        pauses: list[float] = []
+        with pytest.raises(type(error)):
+            mod.fingerprint_with_retry(cfg, lines.append, "start", sleep=pauses.append)
+        assert (len(tries), lines, pauses) == (1, [], []), type(error).__name__
+
+
+def test_every_fingerprint_of_the_runner_goes_through_the_retry() -> None:
+    # Start (new round and resume check) and after each step: none of them calls tree_fingerprint directly (#820 audit WARN-1 ①).
+    import ast
+
+    tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    runner = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Runner")
+    called = [n.func.id for n in ast.walk(runner) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    assert "tree_fingerprint" not in called
+    assert called.count("fingerprint_with_retry") == 3
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in git is a script on PATH, which Windows CreateProcess does not run as git")
+def test_the_runner_survives_a_git_call_that_fails_after_a_step(lab: dict[str, Path]) -> None:
+    # The runner calls `git status` twice at start, then once after each step; the stand-in fails the third call once.
+    real_git = shutil.which("git")
+    assert real_git
+    bin_dir = lab["root"] / "bin"
+    bin_dir.mkdir()
+    count = lab["tools"] / "git_status_calls"
+    fake = bin_dir / "git"
+    fake.write_text("#!/bin/sh\n"
+                    "if echo \" $* \" | grep -q ' status '; then\n"
+                    f"  n=$(( $(cat '{count}' 2>/dev/null || echo 0) + 1 )); echo $n > '{count}'\n"
+                    "  [ $n -eq 3 ] && exit 1\n"
+                    "fi\n"
+                    f"exec '{real_git}' \"$@\"\n", encoding="utf-8")
+    fake.chmod(0o755)
+    cfg = _config(lab, [_step(lab, "rest"), _step(lab, "core")])
+    r = _run(cfg, "run", env=dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}"))
+    assert r.returncode == 0, r.stderr + _runner_log(lab)
+    log = _runner_log(lab)
+    assert "step rest finished: git try 1/3 failed: git status" in log and "start: git try" not in log
+    assert _state(lab)["result"] == "DONE" and _runs(lab, "rest") == 1 and _runs(lab, "core") == 1
+
+
 def test_runner_killed_mid_step_resumes_only_the_unfinished_step(lab: dict[str, Path]) -> None:
     cfg = _config(lab, [_step(lab, "rest"), _step(lab, "core", wait=120), _step(lab, "judge", stop_on_fail=True)])
     runner = _start(cfg)
