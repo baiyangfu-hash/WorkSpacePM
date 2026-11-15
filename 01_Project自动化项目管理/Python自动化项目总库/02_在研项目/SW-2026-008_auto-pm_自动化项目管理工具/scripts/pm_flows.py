@@ -9,6 +9,8 @@
 2. 退出码不是 0 就算这一步红。“交卷到收口”停在红的那一步，报出整条命令和退出码，后面的不跑；
    “项目体检”全是只读，每一步都跑完，最后出小结表点名红的步骤和命令，有红就退出 1（协调者 03:55Z 裁定）。
    项目号、卡号格式不对直接报用法错，一条命令都不跑。
+   退出码：0＝走完；1＝有一步红了；2＝用法或环境不对（项目号、卡号、``--done`` 停点名写错，或控制根没有
+   ``main.py``），一条命令都没跑；3＝停在停点，等人做完那一步再带 ``--done`` 接着走（不是走完，也不是失败）。
 3. “项目体检”全程只读。“交卷到收口”只跑只读的检查；每个会改状态的步骤前都停下，打印要用户本人说的话
    和那一步的命令，由用户或经用户同意的 agent 去跑，跑完再带 ``--done`` 接着走。推到完成那一步永远不由脚本执行。
 4. 每次运行都在控制根 ``.auto-pm/reports/flows/`` 落一份运行记录（时间、项目号、逐步命令原文、退出码、停在哪一步）。
@@ -223,14 +225,21 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _stage_index(steps: Sequence[Step], done: str) -> int:
-    """--done 给的那一步之后从哪一步开始。"""
+# 退出码（见文件头规矩第 2 条）。
+EXIT_DONE = 0
+EXIT_RED = 1
+EXIT_USAGE = 2
+EXIT_STOPPED = 3
+
+
+def _stage_index(steps: Sequence[Step], done: str) -> int | None:
+    """--done 给的那一步之后从哪一步开始；停点名不对返回 None。"""
     if not done:
         return 0
     for index, step in enumerate(steps):
         if step.key == done and step.kind == "stop":
             return index + 1
-    raise SystemExit(f"--done 只认这些停点：{'、'.join(s.key for s in steps if s.kind == 'stop')}")
+    return None
 
 
 def run_flow(
@@ -243,23 +252,27 @@ def run_flow(
     runner: Runner = subprocess.run,
     out: Callable[[str], None] = print,
 ) -> int:
-    """按顺序跑一个流程。返回 0＝走完或停在停点；1＝有一步红了；2＝用法或环境不对（一条命令都没跑）。
+    """按顺序跑一个流程。返回 0＝走完；1＝有一步红了；2＝用法或环境不对（一条命令都没跑）；3＝停在停点。
 
     “项目体检”每一步都跑完，最后出小结表，任一步红就退出 1；“交卷到收口”一步红就停在那一步。
     """
     steps = FLOWS[flow]
     if not PID_PATTERN.match(pid):
         out(f"项目号格式不对：{pid!r}（应像 DJ-2026-005），一条命令都没跑")
-        return 2
+        return EXIT_USAGE
     if flow == "closeout" and not MISSION_PATTERN.match(mission):
         out(f"卡号格式不对：{mission!r}（应像 MISSION-3E5ED659C44DE219），一条命令都没跑")
-        return 2
+        return EXIT_USAGE
     if not (root / "main.py").is_file():
         out(f"控制根里没有 main.py：{root}（请在控制根运行，或用 --root 指过去）")
-        return 2
+        return EXIT_USAGE
+    start = _stage_index(steps, done)
+    if start is None:
+        stops = "、".join(s.key for s in steps if s.kind == "stop") or "（这个流程没有停点）"
+        out(f"--done 写的停点名不对：{done!r}；只认这些停点：{stops}。一条命令都没跑")
+        return EXIT_USAGE
     python = resolve_python(root)
     plc = is_plc_project(root, pid)
-    start = _stage_index(steps, done)
     record: dict[str, Any] = {
         "flow": flow,
         "flow_name": FLOW_NAMES[flow],
@@ -283,7 +296,7 @@ def run_flow(
         + f"；解释器 {python}"
     )
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
-    code = 0
+    code = EXIT_DONE
     for number, step in enumerate(steps[start:], start=start + 1):
         command = command_of(step, python, root, pid, mission)
         result = StepResult(number, step.key, step.label, shown(command))
@@ -306,6 +319,7 @@ def run_flow(
                 out(f"  要用户本人说的话：{record['stopped_at']['say']}")
             out(f"  这一步的命令：{result.command}")
             out(f"  做完后接着走：在原命令后面加 --done {step.key}")
+            code = EXIT_STOPPED
             break
         if step.only == PLC_ONLY and plc is not True:
             result.status = (
@@ -350,7 +364,7 @@ def run_flow(
             result.status = "红"
             record["steps"].append(result.__dict__)
             out(f"  ✗ 第 {number} 步「{step.label}」红：退出码 {result.rc}（接着跑下一步）")
-            code = 1
+            code = EXIT_RED
             continue
         if result.rc != 0:
             result.status = "失败"
@@ -366,7 +380,7 @@ def run_flow(
             out(
                 f"\n✗ 停在第 {number} 步「{step.label}」：命令 {result.command} 退出码 {result.rc}，后面的步骤没跑。"
             )
-            code = 1
+            code = EXIT_RED
             break
         result.status = "通过"
         record["steps"].append(result.__dict__)
@@ -401,7 +415,7 @@ def run_flow(
         out(f"运行记录：{record_path}")
     except OSError as error:
         out(f"运行记录没写成：{type(error).__name__}: {error}")
-        return code or 1
+        return code or EXIT_RED
     return code
 
 
