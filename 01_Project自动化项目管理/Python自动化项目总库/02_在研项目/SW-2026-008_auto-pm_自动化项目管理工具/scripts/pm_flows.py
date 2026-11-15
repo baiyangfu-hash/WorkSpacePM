@@ -1,11 +1,19 @@
-"""自动流程第一批（WBS 10.6）：“项目体检”和“交卷到收口”，只按顺序调现有的驾驶舱命令。
+"""自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”和“进门”，只按顺序调现有的驾驶舱命令。
 
 用法（在控制根，用控制根 .venv 里的 Python；Windows 是 .venv\\Scripts\\python.exe）：
+  python <本项目>/scripts/pm_flows.py entry <项目号>
   python <本项目>/scripts/pm_flows.py checkup <项目号>
   python <本项目>/scripts/pm_flows.py closeout <项目号> --mission-id <卡号> [--done <已做完的一步>]
+  python <本项目>/scripts/pm_flows.py steps <entry|checkup|closeout>
+
+“进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``claim list`` 看占位表，再对登记路径落在
+本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件。
+“steps”只列出一个流程的每一步和整条命令，一条都不跑，也不写运行记录。
 
 规矩（协调者 2026-11-14 01:35Z 裁定的做法，这里照做）：
 1. 只串联：每一步都是一条现成的 ``main.py`` 命令，原样运行，原样显示输出和退出码；脚本不判断、不改写结果。
+   两处例外，都只读：体检最后一步“工作区根目录清洁”是脚本自己看一眼控制根顶层有没有临时文件（DEV-TMP-001），
+   有就提醒，不算红、不删；“进门”从 ``claim list --json`` 的输出里挑出路径落在本项目目录里的卡，再逐张跑 ``claim log``。
 2. 退出码不是 0 就算这一步红。“交卷到收口”停在红的那一步，报出整条命令和退出码，后面的不跑；
    “项目体检”全是只读，每一步都跑完，最后出小结表点名红的步骤和命令，有红就退出 1（协调者 03:55Z 裁定）。
    项目号、卡号格式不对直接报用法错，一条命令都不跑。
@@ -53,8 +61,16 @@ PLC_ONLY = "plc"
 PID_PATTERN = re.compile(r"^[A-Z]{2,4}-\d{4}-\d{3}$")
 MISSION_PATTERN = re.compile(r"^MISSION-[A-Z0-9-]+$")
 
-# 一步红了还接着跑的流程：体检十步全只读，是一张报警一览，红了也要看到后面几步（协调者 03:55Z 裁定）。
-KEEP_GOING = frozenset({"checkup"})
+# 一步红了还接着跑的流程：体检和进门全只读，是一张报警一览，红了也要看到后面几步（协调者 03:55Z 裁定）。
+KEEP_GOING = frozenset({"checkup", "entry"})
+
+# 工作区根目录清洁（DEV-TMP-001 第 1、3 条）：控制根顶层不该留这些。只看顶层，只提醒，不删。
+ROOT_LITTER_PREFIXES = ("tmp_",)
+ROOT_LITTER_NAMES = frozenset({".coverage", "htmlcov", ".pytest_cache", "coverage.xml"})
+ROOT_LITTER_SUFFIXES = (".log", ".tmp")
+
+# 旧发布版本没有交接记录命令时 click 报的原话（AGENTS.md FLOW-002 进门三步）。
+NO_LOG_COMMAND = "No such command 'log'"
 
 
 @dataclass(frozen=True)
@@ -99,7 +115,22 @@ CHECKUP: tuple[Step, ...] = (
         ("{catalog}", "--print"),
         note="现场生成，存进运行记录目录，不入库",
     ),
+    Step(
+        "root_clean",
+        "工作区根目录清洁",
+        ("{rootclean}",),
+        note="脚本自己看控制根顶层有没有 tmp_*、.coverage、htmlcov 这类临时文件；有就提醒，不算红，不删",
+    ),
 )
+
+# 进门：体检全部步骤，再看占位表；占位表之后对本项目的每张卡跑 claim log（运行时按占位表补上）。
+CLAIM_LIST = Step(
+    "claims",
+    "占位表",
+    ("claim", "list", "--json"),
+    note="找出登记路径落在本项目目录里、还没放下的卡（租约到期但没放下的也算，交接记录照样要读）",
+)
+ENTRY: tuple[Step, ...] = (*CHECKUP, CLAIM_LIST)
 
 CLOSEOUT: tuple[Step, ...] = (
     Step("acceptance_scan", "验收命令预检", ("pm", "acceptance-scan", "--pid", "{pid}")),
@@ -153,8 +184,8 @@ CLOSEOUT: tuple[Step, ...] = (
     ),
 )
 
-FLOWS: Mapping[str, tuple[Step, ...]] = {"checkup": CHECKUP, "closeout": CLOSEOUT}
-FLOW_NAMES = {"checkup": "项目体检", "closeout": "交卷到收口"}
+FLOWS: Mapping[str, tuple[Step, ...]] = {"entry": ENTRY, "checkup": CHECKUP, "closeout": CLOSEOUT}
+FLOW_NAMES = {"entry": "进门", "checkup": "项目体检", "closeout": "交卷到收口"}
 
 # 分类表里归“写”、但读码确认不带写开关时只读的命令。每条写明依据；测试核它们在流程里不带写开关。
 READ_BY_CODE: Mapping[str, str] = {
@@ -187,16 +218,69 @@ def resolve_python(root: Path, os_name: str | None = None) -> Path:
     return candidate if candidate.is_file() else Path(sys.executable)
 
 
-def is_plc_project(root: Path, pid: str) -> bool | None:
-    """项目登记表里这个项目在 0100_PLC自动化/ 下返回 True；读不到登记表或查不到项目返回 None。"""
+def project_root_of(root: Path, pid: str) -> str | None:
+    """项目登记表里这个项目的目录（仓库根起，正斜杠，不带末尾斜杠）；读不到登记表或查不到项目返回 None。"""
     try:
         data = json.loads((root / REGISTRY).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     for project in data.get("projects", []):
         if isinstance(project, dict) and project.get("project_id") == pid:
-            return str(project.get("project_root", "")).replace("\\", "/").startswith(PLC_ROOT)
+            return str(project.get("project_root", "")).replace("\\", "/").strip("/") or None
     return None
+
+
+def is_plc_project(root: Path, pid: str) -> bool | None:
+    """项目登记表里这个项目在 0100_PLC自动化/ 下返回 True；读不到登记表或查不到项目返回 None。"""
+    project_root = project_root_of(root, pid)
+    return None if project_root is None else (project_root + "/").startswith(PLC_ROOT)
+
+
+def root_litter(root: Path) -> list[str]:
+    """控制根顶层的临时文件名（DEV-TMP-001），按名字排好；只看不删。"""
+    try:
+        names = sorted(entry.name for entry in root.iterdir())
+    except OSError:
+        return []
+    return [
+        name
+        for name in names
+        if name in ROOT_LITTER_NAMES
+        or name.startswith(ROOT_LITTER_PREFIXES)
+        or name.endswith(ROOT_LITTER_SUFFIXES)
+    ]
+
+
+def project_cards(claims: Any, project_root: str) -> tuple[list[dict[str, Any]], int]:
+    """占位表（``claim list --json`` 的输出）里，有登记路径落在 ``project_root`` 下、还没放下的卡（按卡号排好），
+    和落在本项目下但已放下（status ``released``，PR 已合、卡已收）的张数。租约到期但没放下的照样算：交接记录还要读。
+    """
+    if not isinstance(claims, list):
+        raise ValueError("占位表不是列表")
+    prefix = project_root.rstrip("/") + "/"
+    picked = []
+    released = 0
+    for claim in claims:
+        if not isinstance(claim, dict) or not isinstance(claim.get("card"), str):
+            raise ValueError("占位表里有一项缺卡号")
+        paths = [str(path).replace("\\", "/").lstrip("/") for path in claim.get("paths") or []]
+        if not any(path == project_root or path.startswith(prefix) for path in paths):
+            continue
+        if claim.get("status") == "released":
+            released += 1
+        else:
+            picked.append(claim)
+    return sorted(picked, key=lambda claim: str(claim["card"])), released
+
+
+def handover_lines(text: str) -> dict[str, str]:
+    """``claim log`` 输出末尾的三行（最后一笔、下一棒、先读），原话照抄；没有交接记录时返回空。"""
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        for label in ("最后一笔", "下一棒", "先读"):
+            if line.startswith(label + "："):
+                found[label] = line[len(label) + 1 :]
+    return found
 
 
 def _fill(args: Sequence[str], pid: str, mission: str) -> list[str]:
@@ -242,6 +326,67 @@ def _stage_index(steps: Sequence[Step], done: str) -> int | None:
     return None
 
 
+def _print_handover(handover: Sequence[Mapping[str, Any]], out: Callable[[str], None]) -> None:
+    """进门最后一段：每张卡交接记录的最后三行（原话），和接手前先读的文件。"""
+    out("\n【交接记录】（下面是记录里的原话，不是状态；卡的状态看上面的体检和占位表）")
+    if not handover:
+        out("本项目目录下没有没放下的占位，没有交接记录要读。")
+        return
+    read_first: list[str] = []
+    for item in handover:
+        free = "（占位已放下或租约到期）" if item.get("free") else ""
+        out(f"- {item['card']}{free}")
+        if "最后一笔" not in item:
+            out(
+                f"  {item['note']}。"
+                if item.get("note")
+                else "  这张卡还没有交接记录，或记录没读出来（看上面那一步的输出）。"
+            )
+            continue
+        for label in ("最后一笔", "下一棒", "先读"):
+            out(f"  {label}：{item.get(label, '')}")
+        for path in str(item.get("先读", "")).split("、"):
+            if path and path != "无" and path not in read_first:
+                read_first.append(path)
+    if read_first:
+        out("接手前先读完这些文件，再向用户报告，不要直接动手：")
+        for path in read_first:
+            out(f"  {path}")
+
+
+def print_steps(flow: str, out: Callable[[str], None] = print) -> int:
+    """只列出一个流程的每一步和整条命令（项目号写成 <项目编号>），一条都不跑，不写运行记录。"""
+    out(f"【{FLOW_NAMES[flow]}】的步骤（只列不跑）：")
+    out("| 步 | 名字 | 命令 | 谁来做 | 说明 |")
+    out("|---|---|---|---|---|")
+    rows = list(FLOWS[flow])
+    for number, step in enumerate(rows, start=1):
+        args = [
+            arg.replace("{pid}", "<项目编号>").replace("{mission}", "<卡号>") for arg in step.args
+        ]
+        if args[0] == "{plan}":
+            command = f"scripts/plan_status.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
+        elif args[0] == "{catalog}":
+            command = (
+                f"scripts/command_catalog.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
+            )
+        elif args[0] == "{rootclean}":
+            command = "（脚本自己看控制根顶层）"
+        else:
+            command = "main.py " + " ".join(args)
+        who = step.who or "脚本跑（只读）"
+        note = "；".join(
+            part for part in (step.note, "只 PLC 项目" if step.only == PLC_ONLY else "") if part
+        )
+        out(f"| {number} | {step.label} | `{command}` | {who} | {note} |")
+    if flow == "entry":
+        out(
+            f"| {len(rows) + 1}… | 交接记录 | `main.py claim log <卡号>` | 脚本跑（只读） | "
+            "对上一步挑出的每张卡各跑一次，最后列出最后三行和先读的文件 |"
+        )
+    return EXIT_DONE
+
+
 def run_flow(
     flow: str,
     pid: str,
@@ -254,7 +399,8 @@ def run_flow(
 ) -> int:
     """按顺序跑一个流程。返回 0＝走完；1＝有一步红了；2＝用法或环境不对（一条命令都没跑）；3＝停在停点。
 
-    “项目体检”每一步都跑完，最后出小结表，任一步红就退出 1；“交卷到收口”一步红就停在那一步。
+    “项目体检”和“进门”每一步都跑完，最后出小结表，任一步红就退出 1；“交卷到收口”一步红就停在那一步。
+    根目录清洁只提醒，不算红。
     """
     steps = FLOWS[flow]
     if not PID_PATTERN.match(pid):
@@ -297,7 +443,27 @@ def run_flow(
     )
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     code = EXIT_DONE
-    for number, step in enumerate(steps[start:], start=start + 1):
+    queue = list(steps[start:])
+    number = start
+    finished = True
+    handover: list[dict[str, Any]] = []
+    while queue:
+        step = queue.pop(0)
+        number += 1
+        if step.args[0] == "{rootclean}":
+            result = StepResult(number, step.key, step.label, "（脚本自己看控制根顶层，不跑命令）")
+            litter = root_litter(root)
+            result.status = "提醒" if litter else "通过"
+            result.output_tail = (
+                [f"根目录有临时文件：{'、'.join(litter)}（DEV-TMP-001：用完就删；本脚本不删）"]
+                if litter
+                else ["根目录没有临时文件"]
+            )
+            record["steps"].append(result.__dict__)
+            out(f"\n▶ 第 {number} 步「{step.label}」：{result.command}")
+            for line in result.output_tail:
+                out(f"  {line}")
+            continue
         command = command_of(step, python, root, pid, mission)
         result = StepResult(number, step.key, step.label, shown(command))
         if step.kind == "stop":
@@ -320,6 +486,7 @@ def run_flow(
             out(f"  这一步的命令：{result.command}")
             out(f"  做完后接着走：在原命令后面加 --done {step.key}")
             code = EXIT_STOPPED
+            finished = False
             break
         if step.only == PLC_ONLY and plc is not True:
             result.status = (
@@ -332,6 +499,7 @@ def run_flow(
             continue
         out(f"\n▶ 第 {number} 步「{step.label}」：{result.command}")
         began = time.monotonic()
+        stdout = ""
         try:
             completed = runner(
                 command,
@@ -345,25 +513,75 @@ def run_flow(
                 env=env,
             )
             result.rc = int(completed.returncode)
-            text = (completed.stdout or "") + (completed.stderr or "")
+            stdout = completed.stdout or ""
+            text = stdout + (completed.stderr or "")
         except subprocess.TimeoutExpired:
             text = f"超过 {STEP_TIMEOUT} 秒没跑完，已停"
         except OSError as error:
             text = f"起不来：{type(error).__name__}: {error}"
         result.seconds = round(time.monotonic() - began, 2)
         lines = text.splitlines()
+        if step.key == "claims" and result.rc == 0:
+            project_root = project_root_of(root, pid)
+            released = 0
+            try:
+                cards, released = project_cards(json.loads(stdout), project_root or "")
+            except ValueError as error:
+                lines = [f"占位表的输出读不懂（{error}），没法挑出本项目的卡", *lines[:OUTPUT_TAIL]]
+                result.rc = None
+                cards = []
+            else:
+                if project_root is None:
+                    lines = ["登记表里查不到这个项目的目录，没法挑出本项目的卡；不跑交接记录"]
+                    cards = []
+                else:
+                    lines = [f"本项目目录：{project_root}"] + (
+                        [
+                            f"{claim['card']} 持有人 {claim.get('owner', '')} 领卡 {claim.get('claimed_at', '')}"
+                            + ("（已放下或租约到期，视为空闲）" if claim.get("free") else "")
+                            for claim in cards
+                        ]
+                        or ["本项目目录下没有没放下的占位"]
+                    )
+                    if released:
+                        lines.append(
+                            f"另有 {released} 张已放下的卡（PR 已合、卡已收），不读交接记录"
+                        )
+                for claim in cards:
+                    card = str(claim["card"])
+                    handover.append({"card": card, "free": bool(claim.get("free"))})
+                    queue.append(Step("claim_log", f"交接记录 {card}", ("claim", "log", card)))
+        if step.key == "claim_log" and result.rc == 0:
+            for item in handover:
+                if item["card"] == step.args[2]:
+                    item.update(handover_lines(stdout))
+        if step.key == "claim_log" and result.rc != 0 and NO_LOG_COMMAND in text:
+            # 本机生效的发布版本还没有交接记录命令：后面几张卡结果一样，不再跑；照实报，不绕过（FLOW-002）。
+            skipped = [later for later in queue if later.key == "claim_log"]
+            queue = [later for later in queue if later.key != "claim_log"]
+            lines.append(
+                "本机生效的发布版本还没有交接记录命令（claim log）：照实告诉用户，不要绕过去；"
+                + (f"后面 {len(skipped)} 张卡的交接记录也读不了，不再跑" if skipped else "")
+            )
+            for item in handover:
+                item.setdefault("note", "发布版本没有 claim log，没读")
         result.output_tail = lines[-OUTPUT_TAIL:]
-        for line in lines:
+        # 进门时命令目录不刷屏：全文照样存进运行记录目录，屏幕上只说存在哪。
+        quiet = flow == "entry" and step.key == "catalog" and result.rc == 0
+        for line in [] if quiet else lines:
             out(f"  {line}")
         if step.key == "catalog" and result.rc == 0:
             catalog_path = reports / f"{stamp}_{flow}_{pid}_命令目录.md"
             result.output_tail = [f"全文存在 {catalog_path}"]
             record.setdefault("catalog", str(catalog_path))
             record["_catalog_text"] = text
+            if quiet:
+                out(f"  命令目录全文存在 {catalog_path}（{len(lines)} 行）")
         if result.rc != 0 and flow in KEEP_GOING:
             result.status = "红"
             record["steps"].append(result.__dict__)
-            out(f"  ✗ 第 {number} 步「{step.label}」红：退出码 {result.rc}（接着跑下一步）")
+            shown_rc = "读不懂输出" if result.rc is None else f"退出码 {result.rc}"
+            out(f"  ✗ 第 {number} 步「{step.label}」红：{shown_rc}（接着跑下一步）")
             code = EXIT_RED
             continue
         if result.rc != 0:
@@ -381,10 +599,11 @@ def run_flow(
                 f"\n✗ 停在第 {number} 步「{step.label}」：命令 {result.command} 退出码 {result.rc}，后面的步骤没跑。"
             )
             code = EXIT_RED
+            finished = False
             break
         result.status = "通过"
         record["steps"].append(result.__dict__)
-    else:
+    if finished:
         if flow in KEEP_GOING:
             record["result"] = "走完，有红" if code else "走完，全过"
             out(f"\n【{FLOW_NAMES[flow]}】小结：")
@@ -402,6 +621,9 @@ def run_flow(
                 if red
                 else "✓ 没有红的步骤。"
             )
+            if flow == "entry":
+                record["handover"] = handover
+                _print_handover(handover, out)
         else:
             record["result"] = "走完"
             out(f"\n✓ 【{FLOW_NAMES[flow]}】走完。")
@@ -427,6 +649,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--root", type=Path, default=DEFAULT_ROOT, help="控制根（默认按本脚本位置往上找）"
     )
     sub = parser.add_subparsers(dest="flow", required=True)
+    entry = sub.add_parser(
+        "entry", help="进门：项目体检，再看占位表和本项目每张卡的交接记录；全程只读"
+    )
+    entry.add_argument("pid")
+    steps = sub.add_parser("steps", help="只列出一个流程的每一步和整条命令，一条都不跑")
+    steps.add_argument(
+        "name", choices=sorted(FLOWS), metavar="流程名", help="entry、checkup 或 closeout"
+    )
     checkup = sub.add_parser("checkup", help="项目体检：全程只读，每步都跑完，最后出小结表")
     checkup.add_argument("pid")
     closeout = sub.add_parser("closeout", help="交卷到收口：只跑只读检查，改状态的步骤前停下")
@@ -438,6 +668,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="上次停在哪一步、那一步已经做完（verify、accept、close、transition、worktree）",
     )
     options = parser.parse_args(argv)
+    if options.flow == "steps":
+        return print_steps(options.name)
     return run_flow(
         options.flow,
         options.pid,

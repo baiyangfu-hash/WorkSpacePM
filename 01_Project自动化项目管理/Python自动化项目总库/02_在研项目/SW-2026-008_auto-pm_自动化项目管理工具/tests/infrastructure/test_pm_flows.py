@@ -153,7 +153,8 @@ def test_checkup_runs_every_step_in_order_and_writes_a_record(
     assert len(records) == 1
     record = json.loads(records[0].read_text(encoding="utf-8"))
     assert record["result"] == "走完，全过" and record["pid"] == "DJ-2026-005"
-    assert [step["rc"] for step in record["steps"]] == [0] * 10
+    assert [step["rc"] for step in record["steps"]] == [0] * 10 + [None]
+    assert record["steps"][-1]["key"] == "root_clean" and record["steps"][-1]["status"] == "通过"
     assert record["steps"][0]["command"].endswith("main.py pm orient DJ-2026-005")
     assert Path(record["catalog"]).is_file()
 
@@ -430,3 +431,244 @@ def test_no_step_calls_a_bare_python_or_a_shell(flows: ModuleType) -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "shell=True" not in source
     assert '"python"' not in source and "'python'" not in source
+
+
+# ── 进门、只列步骤、根目录清洁（瘦身方案单一：K5、K2） ──────────────────────────
+
+
+class EntryRunner(FakeRunner):
+    """``claim list --json`` 回一张给定的占位表，``claim log <卡>`` 回给定的记录原文；其余同 FakeRunner。"""
+
+    def __init__(
+        self,
+        claims: Any,
+        logs: dict[str, str] | None = None,
+        fail: dict[str, int] | None = None,
+    ) -> None:
+        super().__init__(fail)
+        self.claims = claims
+        self.logs = logs or {}
+
+    def __call__(self, command: list[str], **kwargs: Any) -> SimpleNamespace:
+        reply = super().__call__(command, **kwargs)
+        tail = command[3:]
+        if reply.returncode == 0 and tail[:3] == ["claim", "list", "--json"]:
+            reply.stdout = self.claims if isinstance(self.claims, str) else json.dumps(self.claims)
+            reply.stderr = "（离线视图提示走 stderr，不该混进 JSON）\n"
+        if reply.returncode == 0 and tail[:2] == ["claim", "log"]:
+            reply.stdout = self.logs.get(tail[2], "这张卡还没有交接记录。\n")
+        return reply
+
+
+_LOG_A = (
+    "第 1 笔 起草 …\n"
+    "最后一笔：接手，claude-aaaaaa → 下一班，2026-11-14T18:57:14+00:00\n"
+    "下一棒：下一班，已读 018，下一步对 025\n"
+    "先读：0100_PLC自动化/DJ-2026-005/025.md、0100_PLC自动化/DJ-2026-005/018.md\n"
+)
+_LOG_B = (
+    "最后一笔：搁置，claude-bbbbbb → 用户，2026-11-14T10:00:00+00:00\n"
+    "下一棒：用户，等用户定\n"
+    "先读：0100_PLC自动化/DJ-2026-005/018.md\n"
+)
+_CLAIMS = [
+    {
+        "card": "trial-a",
+        "owner": "claude-aaaaaa",
+        "paths": ["0100_PLC自动化/DJ-2026-005/018.md"],
+        "free": False,
+        "status": "active",
+    },
+    {
+        "card": "old-b",
+        "owner": "claude-bbbbbb",
+        "paths": ["0100_PLC自动化/DJ-2026-005"],
+        "free": True,
+        "status": "active",
+    },
+    {
+        "card": "done-e",
+        "owner": "claude-eeeeee",
+        "paths": ["0100_PLC自动化/DJ-2026-005/x.md"],
+        "free": True,
+        "status": "released",
+    },
+    {"card": "other-c", "owner": "x", "paths": ["0100_PLC自动化/DJ-2026-0050/a.md"], "free": False},
+    {"card": "none-d", "owner": "x", "paths": [], "free": False},
+]
+
+
+def test_entry_runs_the_checkup_then_the_claims_then_each_card_of_the_project(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    root = _root(tmp_path)
+    runner = EntryRunner(_CLAIMS, {"trial-a": _LOG_A, "old-b": _LOG_B})
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 0
+
+    ran = runner.ran()
+    assert ran[:8] == [
+        "pm orient DJ-2026-005",
+        "pm control-root-status DJ-2026-005",
+        "pm missions --pid DJ-2026-005",
+        "ledger reconcile DJ-2026-005",
+        "plc check DJ-2026-005",
+        "doc check",
+        "plc docs check DJ-2026-005",
+        "prototype check --pid DJ-2026-005",
+    ]
+    # 体检之后看占位表；只有路径落在本项目目录里、还没放下的卡才读交接记录
+    # （DJ-2026-0050 不算 005 的；只占号没路径的不算；已放下的 done-e 不读；租约到期没放下的 old-b 照读）
+    assert ran[-3:] == ["claim list --json", "claim log old-b", "claim log trial-a"]
+    text = "\n".join(lines)
+    assert "另有 1 张已放下的卡（PR 已合、卡已收），不读交接记录" in text
+    assert "下一棒：下一班，已读 018，下一步对 025" in text and "下一棒：用户，等用户定" in text
+    assert "old-b（占位已放下或租约到期）" in text
+    tail = text[text.index("接手前先读完这些文件") :]
+    assert tail.count("0100_PLC自动化/DJ-2026-005/018.md") == 1, "先读的文件去重"
+    assert "0100_PLC自动化/DJ-2026-005/025.md" in tail
+    assert "不是状态" in text, "要说明交接记录里的话不当状态"
+    assert not any(line.startswith("  ran command_catalog") for line in lines), (
+        "进门时命令目录不刷屏"
+    )
+    record = json.loads(
+        next((root / ".auto-pm" / "reports" / "flows").glob("*_entry_DJ-2026-005.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["result"] == "走完，全过"
+    assert [item["card"] for item in record["handover"]] == ["old-b", "trial-a"]
+    assert record["handover"][1]["下一棒"] == "下一班，已读 018，下一步对 025"
+    assert Path(record["catalog"]).is_file()
+
+
+def test_entry_without_a_card_of_the_project_says_so(flows: ModuleType, tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    runner = EntryRunner([_CLAIMS[2]])
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 0
+    assert runner.ran()[-1] == "claim list --json"
+    assert "本项目目录下没有没放下的占位，没有交接记录要读。" in lines
+
+
+def test_entry_keeps_going_when_the_claim_list_is_red(flows: ModuleType, tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    runner = EntryRunner(_CLAIMS, fail={"claim list": 2})
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
+    assert not any(command.startswith("claim log") for command in runner.ran())
+    assert any("「占位表」" in line and "红" in line for line in lines)
+
+
+def test_entry_turns_red_when_the_claim_list_is_not_json(flows: ModuleType, tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    runner = EntryRunner("not json")
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
+    assert any("读不懂" in line for line in lines)
+    assert not any(command.startswith("claim log") for command in runner.ran())
+
+
+def test_entry_reads_no_log_when_the_project_is_not_registered(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    root = _root(tmp_path, "DJ-2026-009", "0100_PLC自动化/DJ-2026-009")
+    runner = EntryRunner(_CLAIMS)
+    lines: list[str] = []
+
+    flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append)
+    assert not any(command.startswith("claim log") for command in runner.ran())
+    assert any("查不到这个项目的目录" in line for line in lines)
+
+
+def test_entry_has_no_stop_point_and_only_reads(flows: ModuleType) -> None:
+    assert all(step.kind == "run" for step in flows.ENTRY)
+    assert flows.ENTRY[: len(flows.CHECKUP)] == flows.CHECKUP, "进门先做完整的体检"
+    assert "entry" in flows.KEEP_GOING
+
+
+def test_steps_lists_every_step_and_runs_nothing(
+    flows: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("steps 不该跑任何命令")
+
+    monkeypatch.setattr(flows.subprocess, "run", refuse)
+    monkeypatch.chdir(tmp_path)
+    for name, steps in flows.FLOWS.items():
+        assert flows.main(["--root", str(tmp_path), "steps", name]) == 0
+        printed = capsys.readouterr().out
+        for step in steps:
+            assert f"| {step.label} |" in printed
+    assert "`main.py pm orient <项目编号>`" in _steps_text(flows, "checkup")
+    assert "`main.py pm verify --mission-id <卡号> --lease-wallet`" in _steps_text(
+        flows, "closeout"
+    )
+    assert "`main.py claim log <卡号>`" in _steps_text(flows, "entry")
+    assert not (tmp_path / ".auto-pm").exists(), "steps 不写运行记录"
+
+
+def _steps_text(flows: ModuleType, name: str) -> str:
+    lines: list[str] = []
+    flows.print_steps(name, out=lines.append)
+    return "\n".join(lines)
+
+
+def test_root_clean_names_leftovers_but_is_not_red_and_deletes_nothing(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    root = _root(tmp_path)
+    for name in ("tmp_probe.py", ".coverage", "run.log"):
+        (root / name).write_text("x", encoding="utf-8")
+    (root / "htmlcov").mkdir()
+    lines: list[str] = []
+
+    assert (
+        flows.run_flow("checkup", "DJ-2026-005", root=root, runner=FakeRunner(), out=lines.append)
+        == 0
+    )
+    text = "\n".join(lines)
+    assert "根目录有临时文件：.coverage、htmlcov、run.log、tmp_probe.py" in text
+    assert "| 11 | 工作区根目录清洁 | 提醒 |" in text
+    assert all(
+        (root / name).exists() for name in ("tmp_probe.py", ".coverage", "run.log", "htmlcov")
+    )
+
+
+def test_root_litter_ignores_ordinary_files(flows: ModuleType, tmp_path: Path) -> None:
+    for name in ("main.py", "AGENTS.md", "README.md", ".gitignore"):
+        (tmp_path / name).write_text("x", encoding="utf-8")
+    (tmp_path / ".auto-pm").mkdir()
+    assert flows.root_litter(tmp_path) == []
+
+
+def test_entry_says_plainly_when_the_release_has_no_claim_log(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    class OldRelease(EntryRunner):
+        def __call__(self, command: list[str], **kwargs: Any) -> SimpleNamespace:
+            if command[3:5] == ["claim", "log"]:
+                self.calls.append({"command": command, **kwargs})
+                return SimpleNamespace(
+                    returncode=2, stdout="", stderr="Error: No such command 'log'.\n"
+                )
+            return super().__call__(command, **kwargs)
+
+    root = _root(tmp_path)
+    runner = OldRelease(_CLAIMS)
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
+    logs = [command for command in runner.ran() if command.startswith("claim log")]
+    assert logs == ["claim log old-b"], "第一张就报没有这条命令，后面几张不再跑"
+    text = "\n".join(lines)
+    assert "本机生效的发布版本还没有交接记录命令（claim log）：照实告诉用户，不要绕过去" in text
+    assert "后面 1 张卡的交接记录也读不了，不再跑" in text
+    assert text.count("发布版本没有 claim log，没读。") == 2
