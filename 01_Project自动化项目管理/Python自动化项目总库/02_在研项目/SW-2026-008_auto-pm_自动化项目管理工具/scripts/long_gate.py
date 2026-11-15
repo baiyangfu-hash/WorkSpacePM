@@ -85,6 +85,17 @@ class GateError(Exception):
     pass
 
 
+class GitCallError(GateError):
+    """A git call of the fingerprint returned non-zero (D-225: the message carries the exit code, stdout and stderr)."""
+
+
+# D-225 (TD-SW008-490): under a full gate's load a git call of the runner failed with nothing on stderr, and the runner died
+# 1 s after it started.  A fingerprint is a read-only pair of git calls, so a failed one is asked again a few times, each try
+# logged; after the last try the runner still stops (fail-closed), never guesses a fingerprint.
+GIT_ATTEMPTS = 3
+GIT_RETRY_PAUSES_S = (1.0, 3.0)
+
+
 def _say(msg: str) -> None:
     # Under pythonw (how the scheduled task runs it) there is no console: sys.stderr is None.
     if sys.stderr is not None:
@@ -303,8 +314,36 @@ def git_bytes(wt: Path, *args: str) -> bytes:
         check=False,
     )
     if r.returncode != 0:
-        raise GateError(f"git {' '.join(args)} failed: {r.stderr.decode(errors='replace').strip()[:300]}")
+        raise GitCallError(f"git {' '.join(args)} failed: exit {_exit_text(r.returncode)}; "
+                           f"stderr: {_clip(r.stderr)}; stdout: {_clip(r.stdout)}")
     return r.stdout
+
+
+def _exit_text(code: int) -> str:
+    """The exit code as git's caller saw it; outside 0..255 also in hex, the form a Windows NTSTATUS is looked up by."""
+
+    return str(code) if 0 <= code <= 255 else f"{code} (0x{code & 0xFFFFFFFF:08X})"
+
+
+def _clip(raw: bytes | None) -> str:
+    text = (raw or b"").decode(errors="replace").strip()
+    return repr(text[:300]) if text else "(empty)"
+
+
+def fingerprint_with_retry(cfg: dict[str, Any], log: Any, where: str, sleep: Any = time.sleep) -> str | None:
+    """``tree_fingerprint`` with a failed git call asked again up to ``GIT_ATTEMPTS`` times in all; every failed try is logged."""
+
+    for attempt in range(1, GIT_ATTEMPTS + 1):
+        try:
+            return tree_fingerprint(cfg)
+        except GitCallError as error:
+            if attempt == GIT_ATTEMPTS:
+                log(f"{where}: git try {attempt}/{GIT_ATTEMPTS} failed: {error}; giving up")
+                raise
+            pause = GIT_RETRY_PAUSES_S[attempt - 1]
+            log(f"{where}: git try {attempt}/{GIT_ATTEMPTS} failed: {error}; trying again in {pause:g} s")
+            sleep(pause)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def tree_fingerprint(cfg: dict[str, Any]) -> str | None:
@@ -877,7 +916,7 @@ class Runner:
         else:
             self.state = {"schema": SCHEMA, "name": self.cfg["name"], "config_sha256": self.sha,
                           "started_at": iso(utc_now()), "resumes": 0, "steps": {},
-                          "bytes_at_start": tree_fingerprint(self.cfg)}
+                          "bytes_at_start": fingerprint_with_retry(self.cfg, self.log, "start")}
         self.state["result"] = None
         self.state["runner_pid"] = os.getpid()
         hold_marker = self.cfg["lease"].get("hold_until_marker")
@@ -897,7 +936,7 @@ class Runner:
                 expected = rec.get("bytes_after")
             else:
                 break
-        current = tree_fingerprint(self.cfg)
+        current = fingerprint_with_retry(self.cfg, self.log, "start")
         if current != expected:
             return self._refuse("candidate worktree bytes differ from the state the last finished step left")
 
@@ -1020,7 +1059,7 @@ class Runner:
         p["exit"].write_text(f"{code}\n", encoding="utf-8", newline="\n")
         rec.update(exit=code, finished=local_stamp(), finished_utc=iso(utc_now()))
         p["finished"].write_text(rec["finished"] + "\n", encoding="utf-8", newline="\n")
-        rec["bytes_after"] = tree_fingerprint(self.cfg)
+        rec["bytes_after"] = fingerprint_with_retry(self.cfg, self.log, f"step {key} finished")
         rec["status"] = "done"
         rec.pop("child_pid", None)
         self.save()
