@@ -287,18 +287,15 @@ def test_closeout_never_runs_a_state_changing_command(flows: ModuleType, tmp_pat
     stops = [step.key for step in flows.CLOSEOUT if step.kind == "stop"]
     for done in ["", *stops]:
         lines: list[str] = []
-        assert (
-            flows.run_flow(
-                "closeout",
-                "DJ-2026-005",
-                root=root,
-                mission="MISSION-ABC123",
-                done=done,
-                runner=runner,
-                out=lines.append,
-            )
-            == 0
-        )
+        assert flows.run_flow(
+            "closeout",
+            "DJ-2026-005",
+            root=root,
+            mission="MISSION-ABC123",
+            done=done,
+            runner=runner,
+            out=lines.append,
+        ) == (0 if done == stops[-1] else 3), done
     ran = runner.ran()
     for forbidden in (
         "pm verify ",
@@ -333,8 +330,8 @@ def test_closeout_stop_prints_the_command_and_the_words_for_the_user(
             runner=FakeRunner(),
             out=lines.append,
         )
-        == 0
-    )
+        == 3
+    ), "停在停点退出 3，和走完的 0 区分开"
 
     text = "\n".join(lines)
     assert "第 8 步「变更单推到完成」会改状态" in text
@@ -348,15 +345,45 @@ def test_closeout_stop_prints_the_command_and_the_words_for_the_user(
 
 
 def test_done_only_accepts_stop_points(flows: ModuleType, tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="--done 只认这些停点"):
-        flows.run_flow(
-            "closeout",
-            "DJ-2026-005",
-            root=_root(tmp_path),
-            mission="MISSION-ABC123",
-            done="settle_scan",
-            runner=FakeRunner(),
+    """--done 写错停点名是用法错：退出 2，说清只认哪些停点，一条命令都不跑。"""
+    root = _root(tmp_path)
+    runner = FakeRunner()
+    lines: list[str] = []
+    for wrong in ("settle_scan", "acept"):
+        assert (
+            flows.run_flow(
+                "closeout",
+                "DJ-2026-005",
+                root=root,
+                mission="MISSION-ABC123",
+                done=wrong,
+                runner=runner,
+                out=lines.append,
+            )
+            == 2
+        ), wrong
+    assert runner.ran() == []
+    assert "--done 写的停点名不对：'settle_scan'" in lines[0]
+    assert "只认这些停点：verify、accept、close、transition、worktree" in lines[0]
+    assert not (root / ".auto-pm" / "reports" / "flows").exists(), "用法错不落运行记录"
+
+
+def test_done_on_main_cli_exits_2(flows: ModuleType, tmp_path: Path) -> None:
+    assert (
+        flows.main(
+            [
+                "--root",
+                str(_root(tmp_path)),
+                "closeout",
+                "DJ-2026-005",
+                "--mission-id",
+                "MISSION-ABC123",
+                "--done",
+                "settle_scan",
+            ]
         )
+        == 2
+    )
 
 
 def test_no_main_py_is_a_usage_error(flows: ModuleType, tmp_path: Path) -> None:
