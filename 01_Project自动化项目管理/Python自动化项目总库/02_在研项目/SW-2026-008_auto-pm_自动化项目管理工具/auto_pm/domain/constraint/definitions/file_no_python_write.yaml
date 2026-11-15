@@ -21,6 +21,6 @@ scope:
     - "**/node_modules/**"
 rules:
   - type: "no_external_write"
-    description: "文件修改必须通过 auto-pm constraint guard 预检"
+    description: "文件哈希和登记过的快照对不上就算违规（快照由 constraint guard 登记；这条命令 2026-11-14 起在帮助里隐藏）"
     check: "hash_mismatch"
 auto_fix: false

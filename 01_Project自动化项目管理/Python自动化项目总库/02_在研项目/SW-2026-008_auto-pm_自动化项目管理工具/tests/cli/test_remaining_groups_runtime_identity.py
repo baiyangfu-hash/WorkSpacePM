@@ -18,7 +18,7 @@ from auto_pm.ui.cli.dogfood import dogfood_group
 from auto_pm.ui.cli.git_hook import git_hook_group
 from auto_pm.ui.cli.pm import pm_group
 from auto_pm.ui.cli.session import pm_session_group
-from auto_pm.ui.cli.workflow import _DELEGATED_TO_PM, workflow_group
+from auto_pm.ui.cli.workflow import workflow_group
 
 MODULES = (dogfood_cli, git_hook_cli, session_cli, workflow_cli)
 
@@ -42,19 +42,16 @@ def test_every_command_in_these_groups_is_classified() -> None:
     }
     for name, group in groups.items():
         writes, reads = CLASSIFIED[name]
-        native = (
-            set(group.commands) - set(_DELEGATED_TO_PM)
-            if name == "workflow"
-            else set(group.commands)
-        )
-        assert native == writes | reads, name
+        assert set(group.commands) == writes | reads, name
 
 
-def test_the_workflow_aliases_of_pm_commands_are_the_pm_commands_themselves() -> None:
-    """They inherit every pm guard only because they are the same objects: a copy would silently drop the guard."""
+def test_the_workflow_group_carries_no_pm_command_any_more() -> None:
+    """退役批一：workflow 下原来的 7 个 pm 旧名已去掉，组里不能再挂着任何一个 pm 命令对象（挂上就绕过了这里的分类）。"""
 
-    for name in _DELEGATED_TO_PM:
-        assert workflow_group.commands[name] is pm_group.commands[name], name
+    pm_objects = {id(command) for command in pm_group.commands.values()}
+    assert not [
+        name for name, command in workflow_group.commands.items() if id(command) in pm_objects
+    ]
 
 
 @pytest.fixture

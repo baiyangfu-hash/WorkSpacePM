@@ -14,29 +14,19 @@ from rich.table import Table
 
 from auto_pm.domain.constraint.workflow import WorkflowEngine
 from auto_pm.ui.cli.caller_path import CallerPath
-from auto_pm.ui.cli.pm import pm_group
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 console = Console()
 
-_DELEGATED_TO_PM = (
-    "plan",
-    "approve",
-    "confirm-start",
-    "execute",
-    "accept",
-    "resume",
-    "context",
-)
 _UNKNOWN_ACTION = (
     "旧 workflow 动作 {name} 已退役，不会恢复旧写入状态机；"
-    "可用：list/run/history/status（工作流引擎）与 "
-    "plan/approve/confirm-start/execute/accept/resume/context（等同 pm 同名命令）。"
+    "可用：list/run/history/status（工作流引擎）；"
+    "plan/approve/confirm-start/execute/accept/resume/context 这 7 个旧名也已退役（退役批一），改用 pm 同名命令。"
 )
 
 
 class _WorkflowGroup(click.Group):
-    """Keep the engine commands, delegate old PM actions to ``pm``, refuse everything else."""
+    """Keep the engine commands and refuse everything else, the 7 retired PM aliases included."""
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
@@ -166,7 +156,3 @@ def workflow_status(ctx: click.Context, run_id: str) -> None:
     for log in r.get("step_logs", []):
         console.print(f"  {log}")
 
-
-# The aliases ARE the pm command objects: they inherit every pm guard and add no write path.
-for _name in _DELEGATED_TO_PM:
-    workflow_group.add_command(pm_group.commands[_name], _name)

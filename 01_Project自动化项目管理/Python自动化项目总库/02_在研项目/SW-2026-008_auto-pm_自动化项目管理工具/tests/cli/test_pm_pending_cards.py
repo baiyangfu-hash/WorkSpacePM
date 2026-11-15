@@ -480,21 +480,21 @@ def test_c13_a_linked_worktree_is_refused_for_every_new_form(cli_runner: CliRunn
 # --------------------------------------------------------------------------- c14: the old workflow entry delegates
 
 
-def test_c14_workflow_delegates_plan_and_approve_but_not_the_new_listings(
+def test_c14_the_old_workflow_entry_refuses_plan_approve_and_the_new_listings(
     cli_runner: CliRunner, tmp_path: Path
 ) -> None:
+    """退役批一：workflow 下的 pm 旧名去掉了，plan、approve 和新加的两张列表一样被拒，什么都不写。"""
+
     _setup_planning(tmp_path)
     _cockpit_draft(tmp_path)
 
-    via_workflow = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", "plan", "--request-id", COCKPIT, *SCOPE])
+    for arguments in (["plan", "--request-id", COCKPIT, *SCOPE], ["approve", "--request-id", COCKPIT]):
+        refused = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", *arguments])
+        assert refused.exit_code == 2, arguments
+        assert "旧 workflow 动作" in refused.output
+        assert "改用 pm 同名命令" in refused.output
     via_pm = _run(cli_runner, tmp_path, "plan", "--request-id", COCKPIT, *SCOPE)
-    card = json.loads(via_workflow.output)
-    approved = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", *_approve_args(COCKPIT, card["plan_hash"])])
-
-    assert via_workflow.exit_code == 0 and via_pm.exit_code == 0
-    assert via_workflow.output == via_pm.output
-    assert approved.exit_code == 0, approved.output
-    assert json.loads(approved.output)["authorization_status"] == "AUTHORIZED"
+    assert via_pm.exit_code == 0
     for name in ("drafts", "pending"):
         refused = cli_runner.invoke(cli, ["-w", str(tmp_path), "workflow", name, "--project-id", PROJECT])
         assert refused.exit_code == 2

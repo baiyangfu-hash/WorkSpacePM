@@ -153,15 +153,8 @@ vartable detect-format
 vartable list-encodings
 vartable list-formats
 vartable parse
-workflow accept
-workflow approve
-workflow confirm-start
-workflow context
-workflow execute
 workflow history
 workflow list
-workflow plan
-workflow resume
 workflow run
 workflow status
 worktree close
