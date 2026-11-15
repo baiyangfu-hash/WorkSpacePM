@@ -11,7 +11,7 @@
     "never": 12,
     "read": 69,
     "user_only": 24,
-    "write": 119
+    "write": 120
   },
   "commands": {
     "change create": {
