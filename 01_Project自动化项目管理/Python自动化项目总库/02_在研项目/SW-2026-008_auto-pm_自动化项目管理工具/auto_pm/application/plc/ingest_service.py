@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -35,7 +36,16 @@ class IngestionResult:
     total_ios: int = 0
     extracted_tables: list[str] = field(default_factory=list)
     generated_files: list[str] = field(default_factory=list)
+    # 项目里已有、本次没有覆盖的文件（io_points.csv 和四份标准文档）；摄取版在 .ingest_staging/draft/ 里，等人对照合并
+    kept_files: list[str] = field(default_factory=list)
 
+
+
+# 摄取派生的四份标准文档，名字和 templates/plc-standard-project 的 02_PLC程序/程序文档/ 一样（不带项目号）
+VAR_DOC = "PLC变量定义文档_VAR.md"
+IO_DOC = "015_IO分配表_IO.md"
+PLC_DOC = "016_PLC程序设计总文档_PLC.md"
+FLOW_DOC = "018_自动工艺流程图_FLOW.md"
 
 
 class PlcIngestService:
@@ -159,13 +169,21 @@ class PlcIngestService:
         # 1. 投影正式工程资产: io_points.csv
         assets_dir = target_path / "02_PLC程序" / "工程资产"
         assets_dir.mkdir(parents=True, exist_ok=True)
+        # 项目里已有的 io_points.csv（建项目时模板生成、或人改过的）不覆盖：点表丢了会接错线。
+        # 摄取的点表留在暂存区 .ingest_staging/draft/io_points.draft.csv，记进 kept_files，等人对照合并。
         io_csv_path = assets_dir / "io_points.csv"
-        if draft_csv.exists():
+        if io_csv_path.exists():
+            if not draft_csv.exists():
+                draft_csv.parent.mkdir(parents=True, exist_ok=True)
+                self._generate_io_csv(all_variables, draft_csv)
+            result.kept_files.append(str(io_csv_path))
+        elif draft_csv.exists():
             import shutil
             shutil.copy2(draft_csv, io_csv_path)
+            result.generated_files.append(str(io_csv_path))
         else:
             self._generate_io_csv(all_variables, io_csv_path)
-        result.generated_files.append(str(io_csv_path))
+            result.generated_files.append(str(io_csv_path))
 
         # 2. 投影正式工程资产: communications.yml
         # 源工程变量表里没有通讯配置：项目里已有的（建项目时模板生成、或人填过的）不覆盖，没有才写一份待填写的空清单
@@ -174,27 +192,27 @@ class PlcIngestService:
             self._generate_comm_yml(project_id, comm_yml_path)
             result.generated_files.append(str(comm_yml_path))
 
-        # 3. 自动派生标准文档: {project_id}_PLC变量定义文档_VAR.md
+        # 3～6. 派生标准文档：文件名和项目模板的一样（读文档的程序认的就是这些名字）。
+        # 建项目时模板已经生成了同名文档、或人已经填过的，不覆盖：摄取版写进 .ingest_staging/draft/ 同名文件，等人对照合并。
         doc_dir = target_path / "02_PLC程序" / "程序文档"
         doc_dir.mkdir(parents=True, exist_ok=True)
-        var_doc_path = doc_dir / f"{project_id}_PLC变量定义文档_VAR.md"
-        self._generate_var_doc(project_id, project_name, all_variables, var_doc_path)
-        result.generated_files.append(str(var_doc_path))
-
-        # 4. 自动派生标准文档: 015_{project_id}_IO分配表_IO.md
-        io_doc_path = doc_dir / f"015_{project_id}_IO分配表_IO.md"
-        self._generate_io_doc(project_id, project_name, all_variables, io_doc_path)
-        result.generated_files.append(str(io_doc_path))
-
-        # 5. 自动派生标准文档: 016_{project_id}_PLC程序设计总文档_PLC.md
-        plc_doc_path = doc_dir / f"016_{project_id}_PLC程序设计总文档_PLC.md"
-        self._generate_plc_doc(project_id, project_name, result, plc_doc_path)
-        result.generated_files.append(str(plc_doc_path))
-
-        # 6. 自动派生标准文档: 018_{project_id}_自动工艺流程图_FLOW.md
-        flow_doc_path = doc_dir / f"018_{project_id}_自动工艺流程图_FLOW.md"
-        self._generate_flow_doc(project_id, project_name, flow_doc_path)
-        result.generated_files.append(str(flow_doc_path))
+        draft_dir = staging_dir / "draft"
+        writers: tuple[tuple[str, Callable[[Path], None]], ...] = (
+            (VAR_DOC, lambda out: self._generate_var_doc(project_id, project_name, all_variables, out)),
+            (IO_DOC, lambda out: self._generate_io_doc(project_id, project_name, all_variables, out)),
+            (PLC_DOC, lambda out: self._generate_plc_doc(project_id, project_name, result, out)),
+            (FLOW_DOC, lambda out: self._generate_flow_doc(project_id, project_name, out)),
+        )
+        for name, write in writers:
+            target = doc_dir / name
+            if target.exists():
+                draft_dir.mkdir(parents=True, exist_ok=True)
+                write(draft_dir / name)
+                result.kept_files.append(str(target))
+                result.generated_files.append(str(draft_dir / name))
+            else:
+                write(target)
+                result.generated_files.append(str(target))
 
         return result
 

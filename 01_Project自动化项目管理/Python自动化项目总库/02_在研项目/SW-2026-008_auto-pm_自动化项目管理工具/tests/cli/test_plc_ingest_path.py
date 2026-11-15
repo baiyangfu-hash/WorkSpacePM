@@ -28,7 +28,7 @@ class _Recorder:
             def call(**kwargs: Any) -> SimpleNamespace:
                 self.calls.append((name, kwargs))
                 return SimpleNamespace(
-                    total_variables=0, total_alarms=0, total_servos=0, total_ios=0, generated_files=[], promoted_files=[]
+                    total_variables=0, total_alarms=0, total_servos=0, total_ios=0, generated_files=[], promoted_files=[], kept_files=[]
                 )
 
             return call
