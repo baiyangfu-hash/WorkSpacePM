@@ -168,9 +168,11 @@ class PlcIngestService:
         result.generated_files.append(str(io_csv_path))
 
         # 2. 投影正式工程资产: communications.yml
+        # 源工程变量表里没有通讯配置：项目里已有的（建项目时模板生成、或人填过的）不覆盖，没有才写一份待填写的空清单
         comm_yml_path = assets_dir / "communications.yml"
-        self._generate_comm_yml(project_id, comm_yml_path)
-        result.generated_files.append(str(comm_yml_path))
+        if not comm_yml_path.exists():
+            self._generate_comm_yml(project_id, comm_yml_path)
+            result.generated_files.append(str(comm_yml_path))
 
         # 3. 自动派生标准文档: {project_id}_PLC变量定义文档_VAR.md
         doc_dir = target_path / "02_PLC程序" / "程序文档"
@@ -273,39 +275,18 @@ class PlcIngestService:
                     v.address,
                     v.name,
                     v.comment or v.name,
-                    "Inovance GL20",
+                    "待填写",
                     f"源表: {v.source_table}"
                 ])
 
     def _generate_comm_yml(self, project_id: str, out_path: Path) -> None:
-        """生成 communications.yml"""
-        content = f"""# {project_id} 工业通讯总线拓扑
-ethercat:
-  master: Inovance H5U
-  cycle_time_us: 1000
-  slaves:
-    - name: SV1_X_Axis
-      type: Inovance IS620N / SV660N
-      node_id: 1
-      comment: 龙门水平 X 轴伺服
-    - name: SV2_Y_Axis
-      type: Inovance IS620N / SV660N
-      node_id: 2
-      comment: 龙门前后 Y 轴伺服
-    - name: SV3_Z_Axis
-      type: Inovance IS620N / SV660N
-      node_id: 3
-      comment: 龙门升降 Z 轴伺服
-    - name: GL20_RemoteIO
-      type: Inovance GL20 Coupler
-      node_id: 4
-      comment: 气动阀岛与传感器 IO 耦合器
+        """生成待填写的 communications.yml（格式同项目模板：channels 列表）。
 
-ethernet_ip:
-  ip_address: "192.168.1.88"
-  subnet_mask: "255.255.255.0"
-  gateway: "192.168.1.1"
-  target_host: "192.168.1.200 (上位 SCADA/MES)"
+        源工程变量表里读不到控制器、总线和 IP，这里不编任何设备或地址，只留空清单等人按电气图纸填。
+        """
+        content = f"""# {project_id} 通讯对象清单：摄取时源工程变量表里没有通讯配置，按电气图纸补齐
+project_id: "{project_id}"
+channels: []
 """
         out_path.write_text(content, encoding="utf-8")
 
@@ -325,7 +306,7 @@ project_id: "{project_id}"
 
 # PLC变量定义文档 (VAR) - {project_id} {project_name}
 
-> **摄取来源**：AutoShop 源工程逆向全量摄取
+> **摄取来源**：源工程 CSV 变量表逆向摄取
 > **数据总规模**：累计 `{len(variables)}` 个变量点位
 
 ---
@@ -334,13 +315,13 @@ project_id: "{project_id}"
 
 | 领域分类 | 点位数量 | 典型应用与映射说明 |
 | :--- | :---: | :--- |
-| **Alarm (报警矩阵)** | **{sum(1 for v in variables if v.domain_category == 'Alarm')}** | 全机光幕、急停、伺服过载、气缸超时报警 |
-| **Servo (多轴伺服)** | **{sum(1 for v in variables if v.domain_category == 'Servo')}** | EtherCAT X/Y/Z 多轴坐标、速度、转矩控制 |
-| **Process (自动工序)** | **{sum(1 for v in variables if v.domain_category == 'Process')}** | 步序标志、抓取完成、隔纸放置、满垛信号 |
-| **Recipe (配方参数)** | **{sum(1 for v in variables if v.domain_category == 'Recipe')}** | 规格尺寸、码垛层数、排布点阵坐标 |
-| **IO (硬件输入输出)** | **{sum(1 for v in variables if v.domain_category == 'IO')}** | 传感器检测、电磁阀驱动、真空发生器 |
-| **General (公共控制)** | **{sum(1 for v in variables if v.domain_category == 'General')}** | 全局控制字、状态字、中间逻辑辅助位 |
-| **总计** | **{len(variables)}** | **工业控制数据字典全景** |
+| **Alarm (报警)** | **{sum(1 for v in variables if v.domain_category == 'Alarm')}** | 表名带“报警”或变量名带 Alarm |
+| **Servo (伺服)** | **{sum(1 for v in variables if v.domain_category == 'Servo')}** | 表名带“伺服”或变量名带 Axis、SV_ |
+| **IO (输入输出)** | **{sum(1 for v in variables if v.domain_category == 'IO')}** | 表名带 IO 或地址以 X、Y 开头 |
+| **Recipe (配方)** | **{sum(1 for v in variables if v.domain_category == 'Recipe')}** | 表名带“配方”或变量名带 Recipe |
+| **Process (自动工序)** | **{sum(1 for v in variables if v.domain_category == 'Process')}** | 表名带“自动”或变量名带 Auto |
+| **General (其他)** | **{sum(1 for v in variables if v.domain_category == 'General')}** | 以上都不是 |
+| **总计** | **{len(variables)}** | 按表名、变量名、地址自动分类，分类以人工复核为准 |
 
 ---
 
@@ -378,12 +359,12 @@ project_id: "{project_id}"
 """
         di_list = [v for v in io_vars if v.address.startswith("X")]
         for v in di_list:
-            content += f"| **{v.address}** | `{v.name}` | DI (24VDC) | {v.comment or v.name} | 本地/GL20 模块 |\n"
+            content += f"| **{v.address}** | `{v.name}` | DI | {v.comment or v.name} | 待填写 |\n"
 
         content += """\n## 2. 数字量输出 (DO) 映射清单\n\n| 物理端子 | 变量名 | 信号类型 | 执行器/电磁阀描述 | 关联机构 |\n| :---: | :--- | :---: | :--- | :--- |\n"""
         do_list = [v for v in io_vars if v.address.startswith("Y")]
         for v in do_list:
-            content += f"| **{v.address}** | `{v.name}` | DO (晶体管) | {v.comment or v.name} | 阀岛/指示灯 |\n"
+            content += f"| **{v.address}** | `{v.name}` | DO | {v.comment or v.name} | 待填写 |\n"
 
         out_path.write_text(content, encoding="utf-8")
 
@@ -402,29 +383,22 @@ project_id: "{project_id}"
 
 # 016_{project_id}_PLC程序设计总文档_PLC
 
-## 1. 控制系统总纲与架构
+## 1. 摄取所得
 
-本项目为 **{project_name}**，主控采用汇川 H5U PLC，基于 EtherCAT 现场总线实现多轴高速插补与工步协同。
+本项目为 **{project_name}**。以下数字来自源工程 CSV 变量表，控制器、总线和工位源工程变量表里读不到，留待填写。
 
-- 控制器型号：汇川 H5U-1616MTD
-- 现场总线：EtherCAT 1ms 同步周期
+- 控制器型号：待填写
+- 现场总线：待填写
 - 变量总规模：{result.total_variables} 点位
-- 报警矩阵：{result.total_alarms} 项报警深度监控
+- 报警点位：{result.total_alarms} 个
+- 伺服相关点位：{result.total_servos} 个
+- 硬件 IO 点位：{result.total_ios} 个
 
 ---
 
 ## 2. 工位划分与功能块映射
 
-1. **工位 1：龙门三轴伺服运动系统 (`FB_1001_GantryMotion`)**
-   - 负责 X/Y/Z 轴绝对定位、插补取料与下料码垛；
-2. **工位 2：隔纸自动平铺机构 (`FB_1002_PaperSeparator`)**
-   - 负责隔纸料仓检测、真空吸附与平铺放置；
-3. **工位 3：托盘升降与输送移载 (`FB_1003_PalletLiftConveyor`)**
-   - 负责托盘就位检测、分层码垛高度自适应升降与满垛出料；
-4. **工位 4：进料对齐与气爪机构 (`FB_1004_FrameInfeedAlign`)**
-   - 负责边框来料光电检测与气缸前后左右纠偏对齐；
-5. **工位 5：全机公共报警与通信 (`FB_2001_CommonAlarm`)**
-   - 负责 {result.total_alarms} 项故障状态监控、安全联锁与 MES/HMI 数据通信。
+待填写：按工艺方案列出工位和对应功能块，摄取不推断工位。
 """
         out_path.write_text(content, encoding="utf-8")
 
@@ -441,20 +415,11 @@ project_id: "{project_id}"
 
 # 018_{project_id}_自动工艺流程图_FLOW
 
+待填写：源工程变量表里没有工艺流程，按工艺方案画出步序。
+
 ```mermaid
 graph TD
-    A[空托盘移入就位] --> B[边框来料光电检测]
-    B --> C[气缸对齐纠偏]
-    C --> D[龙门伺服X/Y/Z定位抓取]
-    D --> E[托盘码放分层落料]
-    E --> F{{当前层是否码满?}}
-    F -- 否 --> B
-    F -- 是 --> G[机械手吸附并放置隔纸]
-    G --> H[托盘升降伺服下降一层高度]
-    H --> I{{总垛层数是否达到设定值?}}
-    I -- 否 --> B
-    I -- 是 --> J[满垛输出至接驳位]
-    J --> A
+    S0([待填写：第一步]) --> S1[待填写：下一步]
 ```
 """
         out_path.write_text(content, encoding="utf-8")
