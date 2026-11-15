@@ -9,10 +9,7 @@ description: "按已批准的 INT 点表先做画面：HTML 原型、HMI 画面�
 
 ## 启动门禁
 
-1. 从工作区根运行 `& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" pm resume <PID> --json`。
-2. 核对 `release_id`、conflicts、项目路径和当前 Work/Run。存在冲突时 fail closed。
-3. Grooming 只读；Execution 必须具备匹配的 `decision_id`、`work_id`、`run_id`、owner、owned paths 与有效 lease。
-4. 不得读取或调用 `pm-workflow`，不得用 PM_SESSION 或 handoff.v1 推定授权。
+照 `../shared/refs/start_and_handoff.md` 的“开工门禁”做。
 
 ## Grooming
 
@@ -21,7 +18,7 @@ description: "按已批准的 INT 点表先做画面：HTML 原型、HMI 画面�
 
 ## Execution
 
-- 仅修改 Work scope 与 owned paths 的交集；发现未声明 dirty path、Git 基线漂移或 lease 失效立即停止。
+- 执行边界照 `../shared/refs/start_and_handoff.md` 的“执行边界”。
 - 画面里的每个按钮、指示灯、数值框都绑定到已批准点表里的变量；不新增变量，不改点表。
 - 缺失条件要在画面上自诊断显示（为什么不能动），手动寸动要有互锁提示。具体做法见规范 STD-909（人机交互四步呈现）、STD-910（HMI HTML 原型部件库）、STD-911（桌面 HTML 原型脚手架）、DEV-301 与 DEV-216（QML 视图层边界）。
 - 不修改依赖、发布指针或范围外文件，除非 Decision 明确授权。
@@ -33,4 +30,4 @@ description: "按已批准的 INT 点表先做画面：HTML 原型、HMI 画面�
 & "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" doc check
 ```
 
-适用门禁 Exit 0 后创建 Continuity Checkpoint；换 Agent 时创建 handoff.v2。门禁要求：导航零死链、JS 函数与信号槽零未定义、画面变量与点表一一对应。回执遵循共享契约，区分 PASS、FAIL、NOT_RUN。不得修改 `PM_SESSION_*.md`、`.auto-pm/ai_feedback.json` 或 handoff.v1 文件。
+门禁要求：导航零死链、JS 函数与信号槽零未定义、画面变量与点表一一对应。适用门禁 Exit 0 后，交接照 `../shared/refs/start_and_handoff.md` 的“交接”做。

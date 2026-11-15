@@ -19,12 +19,16 @@ code so a card or an audit can quote it:
 * RP-005 a legacy name is claimed by two packs
 * RP-006 a required spec id is not in spec_registry.json (UNVERIFIED when the registry is absent)
 * RP-007 a relative ``.md`` pointer inside a pack does not resolve
-* RP-008 the pack differs from the old skill it replaces, or the old skill cannot be found
-  (only ``\"retired\": true`` in role.json skips it; no workspace gives UNVERIFIED)
+* RP-008 a pack that points at the one master copy of its procedure (``legacy.mode`` ``pointer``) does
+  not name that file, the file or its section heading is gone, or the pack copies the section
+  instead of pointing at it; the old copy modes (``body-equal``, ``section-contained``) are refused:
+  a second hand-kept copy drifted the day only the master was edited (CHG-SCPT-2026-682).
+  Only ``\"retired\": true`` in role.json skips it; no workspace gives UNVERIFIED
 * RP-009 a text file of the library is not valid UTF-8 or shows mojibake (U+FFFD, C1 controls,
-  UTF-8 read as Latin-1); a ref that differs from the old skill only because the old file is
-  itself broken is listed under ``legacy.known_diffs`` and is accepted only while the old file is
-  still not valid UTF-8
+  UTF-8 read as Latin-1)
+* RP-010 the same long line sits in two packs' SKILL.md, or a pack repeats a line of ``roles/shared/refs``
+  or of a master file (any pack's ``legacy.source``, AGENTS.md, CLAUDE.md): what several roles share is
+  written once and each pack points at it (lines with a pointer and code blocks do not count)
 """
 
 from __future__ import annotations
@@ -52,7 +56,13 @@ REQUIRED_KEYS = (
     "enforcement",
 )
 OLD_SKILLS_RELPATH = ".trae/skills"
-LEGACY_MODES = frozenset({"body-equal", "section-contained"})
+POINTER_MODE = "pointer"
+# Modes that kept a second copy of the master text in the pack and compared the two; refused since 682.
+RETIRED_COPY_MODES = frozenset({"body-equal", "section-contained"})
+# A copied line this long is a copy, not a shared phrase (headings like "## 不要做" stay allowed).
+COPIED_LINE_MIN_CHARS = 20
+# Workspace files whose rules a pack may point at but never repeat (RP-010), besides every pack's legacy.source.
+MASTER_RELPATHS = ("AGENTS.md", "CLAUDE.md")
 SPEC_REGISTRY_RELPATH = "00_Obsidian_Base全局规范文件仓库/spec_registry.json"
 # Only pointers that start like a relative path are followed; bare file names in prose are not.
 MD_POINTER = re.compile(r"(?:\.\./|\./|refs/)[\w./\-]+\.md")
@@ -94,6 +104,23 @@ class RoleCheckResult:
         }
 
 
+def _own_long_lines(body: str) -> set[str]:
+    """Long prose lines of a SKILL.md body: not inside a code block, not a pointer to a shared file, not a heading."""
+    lines: set[str] = set()
+    fenced = False
+    for raw in body.split("\n"):
+        line = raw.strip()
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced or line.startswith("#") or len(line) < COPIED_LINE_MIN_CHARS:
+            continue
+        if MD_POINTER.search(line) or OLD_SKILLS_RELPATH in line:
+            continue  # "照 ../shared/refs/x.md 做" is the pointer itself; every pack may say it
+        lines.add(line)
+    return lines
+
+
 def default_roles_dir(workspace_root: Path) -> Path:
     """The role library of a workspace: ``roles/`` at its root."""
     return Path(workspace_root) / ROLES_DIRNAME
@@ -116,15 +143,7 @@ def split_front_matter(text: str) -> tuple[dict[str, str], str]:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: parsed or shown only; the copy-equality check compares bytes
-
-
-def _is_utf8(path: Path) -> bool:
-    try:
-        path.read_bytes().decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True
+    return path.read_text(encoding="utf-8", errors="replace")  # lenient-decode: parsed or shown only; RP-009 fails a file that is not UTF-8
 
 
 class RolePackService:
@@ -163,10 +182,63 @@ class RolePackService:
             self._check_specs(pack, config, spec_ids, result)
             self._check_pointers(pack, result)
             self._check_encoding(pack, result)
-            self._check_equivalence(pack, config, result)
+            self._check_pointer_to_master(pack, config, result)
         if self.roles_dir is not None and (self.roles_dir / SHARED_DIR).is_dir():
             self._check_encoding(self.roles_dir / SHARED_DIR, result)
+        self._check_no_line_shared_between_packs(result)
         return result
+
+    def _check_no_line_shared_between_packs(self, result: RoleCheckResult) -> None:
+        """RP-010: a long line in two packs' SKILL.md, or in a pack and a shared ref or master file, is a hand-kept copy.
+
+        Lines shared only among the master files and shared refs themselves are not this check's business: it
+        reports a line only when a pack's SKILL.md is one of its owners.
+        """
+        owners: dict[str, list[str]] = {}
+        packs = {pack.name for pack in self.role_dirs()}
+        for label, master in self._master_files():
+            for line in sorted(_own_long_lines(split_front_matter(_read(master))[1])):
+                owners.setdefault(line, []).append(label)
+        shared_refs = self.roles_dir / SHARED_DIR / "refs" if self.roles_dir is not None else None
+        if shared_refs is not None and shared_refs.is_dir():
+            for ref in sorted(shared_refs.glob("*.md")):
+                for line in sorted(_own_long_lines(_read(ref))):
+                    owners.setdefault(line, []).append(f"shared/refs/{ref.name}")
+        for pack in self.role_dirs():
+            if not (pack / "SKILL.md").is_file():
+                continue
+            _, body = split_front_matter(_read(pack / "SKILL.md"))
+            for line in sorted(_own_long_lines(body)):
+                owners.setdefault(line, []).append(pack.name)
+        for line, names in sorted(owners.items()):
+            copiers = [name for name in names if name in packs]
+            if len(names) > 1 and copiers:
+                self._add(
+                    result,
+                    "RP-010",
+                    copiers[-1],
+                    f"{'、'.join(names)} 里抄了同一句 {line[:40]!r}：正本只留一处，共用的写在 roles/shared/refs，各岗位指路",
+                )
+
+    def _master_files(self) -> list[tuple[str, Path]]:
+        """AGENTS.md, CLAUDE.md and every file a pack's ``legacy.source`` points at, as (label, path); needs a workspace."""
+        root = self.workspace_root
+        if root is None:
+            return []
+        relpaths = list(MASTER_RELPATHS)
+        for pack in self.role_dirs():
+            try:
+                legacy = json.loads(_read(pack / "role.json")).get("legacy")
+            except (OSError, ValueError, AttributeError):
+                continue  # RP-001/RP-002 report a missing or broken role.json
+            if isinstance(legacy, dict) and legacy.get("mode") == POINTER_MODE and legacy.get("source"):
+                relpaths.append(str(legacy["source"]))
+        found: list[tuple[str, Path]] = []
+        for relpath in dict.fromkeys(relpaths):
+            path = root / relpath
+            if path.is_file():
+                found.append((relpath, path))
+        return found
 
     def _check_encoding(self, folder: Path, result: RoleCheckResult) -> None:
         """RP-009: every text file decodes as UTF-8 and shows no mojibake."""
@@ -272,11 +344,13 @@ class RolePackService:
                 if not target.is_file() or roles_root not in target.parents:
                     self._add(result, "RP-007", pack.name, f"{source.name} 里的指针 {pointer} 找不到")
 
-    def _check_equivalence(self, pack: Path, config: dict[str, Any], result: RoleCheckResult) -> None:
-        """RP-008: the pack says what the old skill said.
+    def _check_pointer_to_master(self, pack: Path, config: dict[str, Any], result: RoleCheckResult) -> None:
+        """RP-008: the procedure has one master copy; the pack points at it and does not copy it.
 
-        A missing old skill is told apart from a retired one: only ``"retired": true`` in role.json
-        switches the comparison off, so a mistyped path can never make the check pass silently.
+        ``legacy`` is either ``{"retired": true}`` (nothing to point at) or ``{"mode": "pointer", "source": <file>,
+        "from_heading": <heading>}``: SKILL.md names ``source``, the heading is still in ``source``, and no heading
+        or long line of the section from that heading on is copied into the pack.  Editing the master then needs
+        no second edit anywhere.
         """
         legacy = config.get("legacy")
         if legacy is None or not (pack / "SKILL.md").is_file():
@@ -286,56 +360,53 @@ class RolePackService:
             return
         if legacy.get("retired") is True:
             return
-        root = self.workspace_root
-        if root is None or not (root / OLD_SKILLS_RELPATH).is_dir():
-            self._add(result, "RP-008", pack.name, "找不到旧技能目录 .trae/skills，与旧技能的一致性未核对", UNVERIFIED)
-            return
-        source = root / str(legacy.get("source", ""))
-        if not source.is_file():
+        mode = legacy.get("mode")
+        if mode in RETIRED_COPY_MODES:
             self._add(
                 result,
                 "RP-008",
                 pack.name,
-                f"旧技能 {legacy.get('source')} 不存在；路径写错请改正，已退役请在 role.json 的 legacy 里写 \"retired\": true",
+                f"legacy.mode {mode!r} 已停用：不再在角色包里抄一份正本、再靠检查比对；"
+                f"本页改成指路，role.json 写 \"mode\": \"{POINTER_MODE}\"",
             )
             return
-        mode = legacy.get("mode")
-        if mode not in LEGACY_MODES:
-            self._add(result, "RP-008", pack.name, f"legacy.mode {mode!r} 不认识，只认 {sorted(LEGACY_MODES)}")
+        if mode != POINTER_MODE:
+            self._add(result, "RP-008", pack.name, f"legacy.mode {mode!r} 不认识，只认 {POINTER_MODE!r}")
             return
-        _, old_body = split_front_matter(_read(source))
-        _, new_body = split_front_matter(_read(pack / "SKILL.md"))
-        if mode == "body-equal" and old_body != new_body:
-            self._add(result, "RP-008", pack.name, f"正文与旧技能 {legacy.get('source')} 不逐字一致")
-        elif mode == "section-contained":
-            heading = str(legacy.get("from_heading", ""))
-            start = old_body.find(heading)
-            if start == -1:
-                self._add(result, "RP-008", pack.name, f"旧技能里找不到章节 {heading!r}")
-            elif old_body[start:] not in new_body:
-                self._add(result, "RP-008", pack.name, f"正文没有逐字包含旧技能从 {heading!r} 起的内容")
-        refs = legacy.get("refs")
-        if refs:
-            known = legacy.get("known_diffs") or {}
-            self._check_refs_equal(pack, root / str(refs), result, known if isinstance(known, dict) else {})
-
-    def _check_refs_equal(
-        self, pack: Path, old_refs: Path, result: RoleCheckResult, known_diffs: dict[str, Any]
-    ) -> None:
-        """Every file of the old refs/ exists in the pack with the same text."""
-        if not old_refs.is_dir():
-            self._add(result, "RP-008", pack.name, f"旧技能的 refs 目录 {old_refs.name} 不存在；路径写错请改正，已退役请写 retired")
+        root = self.workspace_root
+        if root is None or not (root / OLD_SKILLS_RELPATH).is_dir():
+            self._add(result, "RP-008", pack.name, "找不到 .trae/skills，指路是否有效未核对", UNVERIFIED)
             return
-        for old in sorted(old_refs.rglob("*")):
-            if not old.is_file():
-                continue
-            relative = old.relative_to(old_refs)
-            new = pack / "refs" / relative
-            if not new.is_file():
-                self._add(result, "RP-008", pack.name, f"refs/{relative.as_posix()} 缺失（旧技能里有）")
-            elif new.read_bytes().replace(b"\r\n", b"\n") != old.read_bytes().replace(b"\r\n", b"\n"):
-                # Compared as bytes: two copies that differ only in undecodable bytes must not read as equal through '?'.
-                name = f"refs/{relative.as_posix()}"
-                if name in known_diffs and not _is_utf8(old):
-                    continue  # the old file is itself broken (RP-009 would fail it); the repaired copy may differ
-                self._add(result, "RP-008", pack.name, f"{name} 与旧技能不一致")
+        source_text = str(legacy.get("source", ""))
+        source = root / source_text
+        if not source_text or not source.is_file():
+            self._add(
+                result,
+                "RP-008",
+                pack.name,
+                f"指路的正本 {legacy.get('source')} 不存在；路径写错请改正，没有正本了请在 role.json 的 legacy 里写 \"retired\": true",
+            )
+            return
+        _, master_body = split_front_matter(_read(source))
+        _, pack_body = split_front_matter(_read(pack / "SKILL.md"))
+        heading = str(legacy.get("from_heading", ""))
+        start = master_body.find(heading) if heading else -1
+        if start == -1:
+            self._add(result, "RP-008", pack.name, f"正本 {source_text} 里找不到章节 {heading!r}；正本改了标题请同步改 role.json 的 from_heading")
+            return
+        if source_text not in pack_body:
+            self._add(result, "RP-008", pack.name, f"SKILL.md 没有写出指路的正本 {source_text}")
+        section_lines = {line.strip() for line in master_body[start:].split("\n")}
+        pack_lines = {line.strip() for line in pack_body.split("\n")}
+        copied = sorted(
+            line
+            for line in section_lines & pack_lines
+            if (line.startswith("#") and line.lstrip("#").strip()) or len(line) >= COPIED_LINE_MIN_CHARS
+        )
+        if copied:
+            self._add(
+                result,
+                "RP-008",
+                pack.name,
+                f"SKILL.md 抄了正本 {source_text} 的 {len(copied)} 行（如 {copied[0][:40]!r}）：只指路，不抄",
+            )
