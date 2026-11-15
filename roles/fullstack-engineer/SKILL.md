@@ -9,10 +9,7 @@ description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；�
 
 ## 启动门禁
 
-1. 从工作区根运行 `& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" pm resume <PID> --json`。
-2. 核对 `release_id`、conflicts、项目路径和当前 Work/Run。存在冲突时 fail closed。
-3. Grooming 只读；Execution 必须具备匹配的 `decision_id`、`work_id`、`run_id`、owner、owned paths 与有效 lease。
-4. 不得读取或调用 `pm-workflow`，不得用 PM_SESSION 或 handoff.v1 推定授权。
+照 `../shared/refs/start_and_handoff.md` 的“开工门禁”做。
 
 ## Grooming
 
@@ -21,7 +18,7 @@ description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；�
 
 ## Execution
 
-- 仅修改 Work scope 与 owned paths 的交集；发现未声明 dirty path、Git 基线漂移或 lease 失效立即停止。
+- 执行边界照 `../shared/refs/start_and_handoff.md` 的“执行边界”。
 - 遵循 DEV-300、DEV-210、DEV-216、DEV-218：PySide6/QML 五层边界、DTO/Bridge 契约、`QThreadPool + QRunnable`、可观测错误处理。
 - 不修改依赖、`pyproject.toml`、发布指针或范围外文件，除非 Decision 明确授权。
 - 禁止为测试硬编码或 Mock 核心业务；修复缺陷时检查模板、生成器和门禁是否需要同一授权包内溯源修复。
@@ -35,4 +32,4 @@ description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；�
 & "<ws>\.venv\Scripts\python.exe" -m mypy <owned_paths>
 ```
 
-所有适用门禁 Exit 0 后创建 Continuity Checkpoint；换 Agent 时创建 handoff.v2。回执遵循共享契约，明确区分 PASS、FAIL、NOT_RUN 和既有债务。不得修改 `PM_SESSION_*.md`、`.auto-pm/ai_feedback.json` 或 handoff.v1 文件。
+所有适用门禁 Exit 0 后，交接照 `../shared/refs/start_and_handoff.md` 的“交接”做。

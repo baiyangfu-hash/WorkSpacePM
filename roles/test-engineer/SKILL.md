@@ -15,10 +15,9 @@ description: "测试验证与独立审计合一：跑门禁与测试、审 PR；
 
 ## 启动门禁
 
-1. 从工作区根运行 `& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" pm resume <PID> --json`。
-2. 核对 `release_id`、conflicts、项目路径和当前 Work/Run。存在冲突时 fail closed。
-3. 测试验证需要匹配的 Work/Run 与有效 lease；单 PR 审计不占 Run，但只写 `reviews/`。
-4. 不得读取或调用 `pm-workflow`，不得用 PM_SESSION 或 handoff.v1 推定授权。
+照 `../shared/refs/start_and_handoff.md` 的“开工门禁”做。
+
+测试验证需要匹配的 Work/Run 与有效 lease；单 PR 审计不占 Run，但只写 `reviews/`。
 
 ## 测试验证
 
@@ -34,4 +33,4 @@ description: "测试验证与独立审计合一：跑门禁与测试、审 PR；
 
 ## 交接
 
-适用门禁 Exit 0 后创建 Continuity Checkpoint；换 Agent 时创建 handoff.v2。回执遵循共享契约，区分 PASS、FAIL、NOT_RUN。不得修改 `PM_SESSION_*.md`、`.auto-pm/ai_feedback.json` 或 handoff.v1 文件。
+适用门禁 Exit 0 后，交接照 `../shared/refs/start_and_handoff.md` 的“交接”做。
