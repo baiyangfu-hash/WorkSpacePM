@@ -1,7 +1,7 @@
 ---
 spec_id: PLC-023
 title: "PLC程序设计文档模板"
-version: "V2.2.0"
+version: "V2.2.1"
 domain: plc
 lifecycle: stable
 canonical_path: "00_Obsidian_Base全局规范文件仓库/03_PLC自动化域/023_PLC程序设计文档模板_PLC.md"
@@ -13,7 +13,7 @@ tags: ["程序设计", "文档模板", "PLC"]
 ## 1. 文档基础信息
 
 **文档标题**：[PLC程序设计文档标题]
-**文档版本**：V2.2.0
+**文档版本**：V2.2.1
 **编制日期**：[日期]
 **编制人**：PLC专家
 **审核人**：[技术负责人/用户]
@@ -26,6 +26,7 @@ tags: ["程序设计", "文档模板", "PLC"]
 
 | 版本号 | 变更内容 | 变更人 | 变更日期 | 详细说明 |
 |--------|----------|--------|----------|----------|
+| V2.2.1 | 定时器说法对齐 LSP-903 V3.0.0：§5.3.2 代码模板、§6.4.2 示例、§7.1 前缀表不再用 `FB_TON`，改 TIA 原生 `TON_TIME` | Claude（规范库甲一） | 2026-11-15 | §6.4.2 表里 `.PT` 一行的“DINT扫描周期数”改为 TIME；“成员访问简写”表其余行未改，见示例前注 |
 | V2.2.0 | P1 吸收增强: I/O映射表9列(有效电平/失效默认态/断线处置)、新增§5.4.3 OB调度表、状态机表增超时→报警号列、§8.1四位报警分段、§8.2吸收B6三列(双语文本/HMI颜色/分类)、§10.1安全功能矩阵化、DJ-005示例通用化并入§14.4存档 | ZCode（PM） | 2026-09-06 | CHG-SPEC-2026-003 (F08/F15 + B3/B4/B5/B6/B8 吸收) |
 | V2.1.0 | 修复与905/903/906规范的6项直接矛盾 | AI Assistant | 2026-06-21 | C-02: §6.4.2/§6.5.2定时器示例从TIME字面量改为DINT类型(与903/906对齐); C-03: §6.5.2 METHOD删除CALL_前缀(与905§2.1对齐); C-04: §5.3.2/§6.3/§7.1等中文变量名改为英文(与905§3.3对齐); §6.5.4 DUT_AlarmInfo.nTimestamp从TIME改为DINT; §6.4.2定时器实例从TON改为FB_TON |
 | V2.0.0 | 基于DJ-2026-005项目实践全面重构,新增三层解耦架构、Region标记体系、FB标准化文件头、ST编程规范等核心章节 | Trae | 2026-04-25 | 新增§4.4软件分层架构(三层解耦模型)、§5.3 Region标记编号体系(100~900)、§5.4标准程序执行流程、§6.1.5 FB标准化文件头格式(8个必填项)、§6.4定时器/计数器简化命名、§6.5 IEC 61131-3 ST语言编程规范(METHOD/CASE/DUT)、§7.1前缀体系速查表、§8.1报警编码分段策略重构、§15代码审查检查清单 |
@@ -224,7 +225,7 @@ VAR
     //#endregion 310_状态机核心变量
 
     //#region 320_定时器 覆盖所有时序需求
-    fb_tActionTimer : FB_TON;  // 通用动作等待定时器
+    fb_tActionTimer : TON_TIME;  // 通用动作等待定时器 (TIA 原生, LSP-903)
     //#endregion 320_定时器
 END_VAR
 //#endregion 300_VAR
@@ -535,27 +536,25 @@ FB_ConveyorLayer1(
 | `.IN` | `.tIn` | `s_tAction.tIn := TRUE` | 输入使能 |
 | `.Q` | `.tQ` | `IF s_tAction.tQ THEN` | 输出完成 |
 | `.R` | `.tR` | `s_tAction.tR := TRUE` | 复位 |
-| `.PT` | `.tPt` | `s_tAction.tPt := 3000` | 预设时间(DINT扫描周期数) |
+| `.PT` | `.tPt` | `s_tAction.tPt := 3000` | 预设时间(TIME；毫秒值用 `DINT_TO_TIME` 转换，LSP-903) |
 | `.ET` | `.tEt` | `nElapsed := s_tAction.tEt` | 已计时 |
 
 **使用示例**:
 
-```st
+> 定时器写法以 LSP-903 V3.0.0 为准：TIA 原生 `TON_TIME` / `TOF_TIME` / `TP_TIME` / `TONR_TIME` 多重实例，全参数调用，PT 是 TIME（毫秒值用 `DINT_TO_TIME` 转换），之后只读 `.Q` / `.ET`。下面的示例按 903 §3 改写（规范库甲一，2026-11-15）；上表“成员访问简写”是 V2.0 时的命名建议，TIA 原生定时器的成员名就是 `IN`/`PT`/`Q`/`ET`，以 903 为准。
+
+```scl
 VAR
-    fb_tActionTimer : FB_TON;  // ✅ 正确: fb_t前缀+功能描述
+    fb_tActionTimer : TON_TIME;  // ✅ 正确: fb_t前缀+功能描述, TIA 原生定时器多重实例
 END_VAR
 
-(* 使用定时器 - 简化成员访问 *)
-fb_tActionTimer.IN := TRUE;
-fb_tActionTimer.PT := 2000;                          // DINT扫描周期数
-fb_tActionTimer(IN := fb_tActionTimer.IN,
-                 PT := fb_tActionTimer.PT,
-                 Q => fb_tActionTimer.Q,
-                 ET => fb_tActionTimer.ET);
-IF fb_tActionTimer.Q THEN                            // ✅ 检查完成
+// 调用: 全参数, PT 是 TIME (毫秒值用 DINT_TO_TIME 转换)
+#fb_tActionTimer(IN := s_bActionStart,
+                 PT := DINT_TO_TIME(2000));
+IF #fb_tActionTimer.Q THEN                            // ✅ 检查完成
     (* 超时处理 *)
 END_IF;
-diElapsedTime := fb_tActionTimer.ET;                  // ✅ 读取已计时(DINT类型)
+diElapsedTime := TIME_TO_DINT(#fb_tActionTimer.ET);   // ✅ 已计时转成毫秒 DINT
 ```
 
 ### 6.5 IEC 61131-3 ST语言编程规范 (DEV-V2.0 新增)
@@ -667,7 +666,7 @@ END_TYPE
 | `s_` | 静态变量(内部) | `fb_tActionTimer`, `s_iStep` | FB的VAR(状态保持) |
 | `m_` | 中间变量(临时) | `m_bTempFlag` | VAR_TEMP(单周期有效) |
 | `c_` | 常量 | `STP_IDLE`, `ALM_TIMEOUT` | VAR_CONSTANT |
-| `fb_t` | 定时器实例 | `fb_tStartDelay`, `fb_tCooling` | FB_TON/FB_TONR实例 |
+| `fb_t` | 定时器实例 | `fb_tStartDelay`, `fb_tCooling` | TON_TIME/TONR_TIME 等 TIA 原生定时器实例（LSP-903） |
 | `ct` | 计数器实例 | `ctProductCount`, `ctBatchDown` | CTU/CTD实例 |
 
 #### 7.1.2 数据类型后缀规范 (DEV-V2.0 新增)
