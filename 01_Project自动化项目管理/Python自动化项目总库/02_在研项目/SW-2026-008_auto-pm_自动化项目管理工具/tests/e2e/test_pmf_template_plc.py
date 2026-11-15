@@ -31,7 +31,6 @@ PID, NAME = "DJ-2026-901", "TESTMACHINE"
 
 EXPECTED_TEMPLATE_FILES = [
     ".copier-answers.yml",
-    ".github/hooks/.gitkeep",
     ".gitignore",
     ".plc.json",
     ".trae/specs/.gitkeep",
