@@ -48,11 +48,14 @@ def test_clicking_run_shows_a_running_receipt_before_the_command_finishes(qtbot:
     qtbot.addWidget(page)
     controller = worktree_controller.WorktreeController(page, tmp_path, lambda: None, runner=slow_runner,
                                                         markers=lambda: NO_MARKERS)
-    controller.run(_close_action())
-    # 命令还在跑：页上已经有一张“正在运行”的回执
-    assert page.receipts and page.receipts[-1].output == worktree_controller.RUNNING
-    assert page.receipts[-1].command == "main.py worktree close claude-1b7302"
-    release.set()
+    try:
+        controller.run(_close_action())
+        # 命令还在跑：页上已经有一张“正在运行”的回执，退出码还没有（不能是 0，免得被当成已经成功）
+        assert page.receipts and page.receipts[-1].output == worktree_controller.RUNNING
+        assert page.receipts[-1].rc is None
+        assert page.receipts[-1].command == "main.py worktree close claude-1b7302"
+    finally:
+        release.set()  # 断言失败也放行后台命令，不让线程挂到超时
     qtbot.waitUntil(lambda: not controller.busy(), timeout=10_000)
     assert page.receipts[-1].rc == 0
 
