@@ -641,7 +641,35 @@ def run_flow(
     return code
 
 
+def utf8_output(streams: Sequence[Any] | None = None) -> None:
+    """启动时把 stdout、stderr 改成写 UTF-8，免得中文 Windows 上输出一重定向就崩。
+
+    用户本机 2026-11-16 实测：输出接到文件或管道、没设 PYTHONUTF8 时，Python 按系统代码页（GBK）写，
+    第 500 行 ``out(f"\\n▶ 第 {number} 步…")`` 的“▶”GBK 里没有，``UnicodeEncodeError: 'gbk' codec can't encode character '▶'``，
+    进门流程第一步就停。和 ``00_Infrastructure/auto_pm/environment/env_check.py`` 同一做法：
+    真终端用终端自己的编码，写不出的字换成 ``\\u25b6`` 这样的转义，看得见、不崩；
+    重定向、接管道、被别的程序（AI agent、CI）读走时一律写 UTF-8，读的一方按 UTF-8 解。
+    子命令的输出本来就按 UTF-8 读（``run_flow`` 给子进程设了 PYTHONUTF8=1，读时 ``encoding="utf-8"``），这里只管本脚本自己写出去的。
+    """
+    for stream in (sys.stdout, sys.stderr) if streams is None else streams:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # 测试把输出换成 StringIO 时没有这个方法
+            continue
+        try:
+            tty = bool(stream.isatty())
+        except (OSError, ValueError):
+            tty = False
+        try:
+            if tty:
+                reconfigure(errors="backslashreplace")
+            else:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):  # 已经读过的流不许改编码：照旧写，最多回到原来的样子，不因此不跑
+            continue
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    utf8_output()
     parser = argparse.ArgumentParser(
         description="自动流程第一批：项目体检、交卷到收口（只串联现有命令）"
     )

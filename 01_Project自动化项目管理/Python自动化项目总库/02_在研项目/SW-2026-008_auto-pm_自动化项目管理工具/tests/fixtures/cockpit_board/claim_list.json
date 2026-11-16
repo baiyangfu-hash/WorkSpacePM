@@ -1,0 +1,36 @@
+[
+  {
+    "card": "005-001-retire-hooks",
+    "owner": "claude-fc1e6b",
+    "machine": "vm",
+    "paths": [
+      "0100_PLC自动化/DJ-2026-005/.github/hooks/README.md",
+      "0100_PLC自动化/DJ-2026-005/.github/hooks/hooks.json"
+    ],
+    "goal": "DJ-2026-005 的 CHG-SCPT-2026-001 退役批五：005 的 .github/hooks 六个旧会话钩子原样挪进 00_项目管理/06_PM_SESSION历史/2026-11-15_退役_会话钩子/",
+    "claimed_at": "2026-11-15T04:35:12+00:00",
+    "age_days": 1,
+    "stale": false,
+    "commit": "d0f8be07923179ed09bead4d9c5466a3347026f0",
+    "status": "released",
+    "expires_at": "2026-11-15T08:35:12+00:00",
+    "free": true
+  },
+  {
+    "card": "695-launcher-worktree",
+    "owner": "claude-66c1f2",
+    "machine": "vm",
+    "paths": [
+      "00_Infrastructure/auto_pm/launcher/launch.py",
+      "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/auto_pm/contracts/acceptance_command.py"
+    ],
+    "goal": "CHG-SCPT-2026-695：启动器不再把工位路径改回控制根（A2 假绿），出计划时拒不写工位路径的 pytest 验收命令（P-3）（7 个文件；冻结补丁 0ab601a5）",
+    "claimed_at": "2026-11-16T07:46:52+00:00",
+    "age_days": 0,
+    "stale": false,
+    "commit": "a6dc9558c5cf9607a5f1dc4c199267e152219621",
+    "status": "active",
+    "expires_at": "2026-11-16T15:01:51+00:00",
+    "free": false
+  }
+]

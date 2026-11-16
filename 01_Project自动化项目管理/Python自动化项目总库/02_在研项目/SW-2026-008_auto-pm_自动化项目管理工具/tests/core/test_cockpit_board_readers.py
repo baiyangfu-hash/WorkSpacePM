@@ -29,6 +29,7 @@ CASES: dict[str, tuple[str, str]] = {
     "inbox": ("pm_inbox.json", "items"),
     "worktree_list": ("worktree_list.json", "branch"),
     "worktree_sweep": ("worktree_sweep.json", "items"),
+    "claim_list": ("claim_list.json", "card"),
     "project_list": ("project_list.json", "project_id"),
     "plc_check": ("plc_check.json", "items"),
     "long_run": ("long_run_status.json", "tasks"),

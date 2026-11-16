@@ -159,7 +159,8 @@ class DecisionController(QObject):
             blocked = decisions.human_only_block(self.markers()) if decision.human_only else ""
             if blocked:  # 按钮本来就灰着；这里再拦一道，别的入口调进来也不运行
                 raise decisions.DecisionError(blocked)
-            args = decisions.build_args(decision, target, values, approver=self.page.approver(), pin_enforced=pin, now=self.now())
+            approver, rest = decisions.split_approver(values, self.page.approver())  # 确认框里有“批准人”一栏就用框里的
+            args = decisions.build_args(decision, target, rest, approver=approver, pin_enforced=pin, now=self.now())
         except decisions.DecisionError as error:  # 对话框已拦过，这里兜底，不静默
             refused = actions.Receipt(self.now().strftime("%H:%M"), decision.label, "(未运行)", 1, False, str(error))
             self.page.add_receipt(refused)

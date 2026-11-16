@@ -13,6 +13,8 @@ from collections.abc import Callable, Mapping
 from cockpit_board import theme
 from cockpit_board.actions import Receipt
 from cockpit_board.decisions import (
+    APPROVER_KEY,
+    APPROVER_LABEL,
     PIN_TEXT,
     CardVM,
     Decision,
@@ -20,6 +22,8 @@ from cockpit_board.decisions import (
     DecisionsVM,
     ReadFailure,
     Target,
+    needs_approver,
+    split_approver,
 )
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
@@ -29,6 +33,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -43,7 +48,7 @@ class ConfirmDialog(QDialog):
 
     def __init__(self, decision: Decision, target: Target, pin_enforced: bool,
                  preview: Callable[[Mapping[str, str]], str], on_copy: Callable[[str], None],
-                 parent: QWidget | None = None, *, blocked: str = "") -> None:
+                 parent: QWidget | None = None, *, blocked: str = "", approver: str = "") -> None:
         super().__init__(parent)
         self.decision, self.target, self.preview, self.on_copy = decision, target, preview, on_copy
         self.blocked = blocked if decision.human_only else ""  # 非空：只许你本人点的按钮，这里确认键一直灰着
@@ -64,9 +69,29 @@ class ConfirmDialog(QDialog):
             frame.setProperty("sev", "risk")
             QVBoxLayout(frame).addWidget(c.label(decision.danger))
             outer.addWidget(frame)
+        self.toggles: dict[str, QPushButton] = {}
+        if needs_approver(decision, pin_enforced):
+            # 用户 2026-11-16 第一次用看板，把名字填进了“批准意见”（R5）：批准人就放在框里第一栏，先填上“决定”页顶上那一栏的名字
+            outer.addWidget(c.label(APPROVER_LABEL, "muted", wrap=False))
+            who = QLineEdit(approver)
+            who.setPlaceholderText("你的名字（批准记录里显示的批准人）；改了这里，页顶的“批准人”也跟着记住")
+            who.setObjectName(f"field_{APPROVER_KEY}")
+            who.textChanged.connect(self._refresh)
+            self.inputs[APPROVER_KEY] = who
+            outer.addWidget(who)
         for item in decision.fields:
-            outer.addWidget(c.label(item.label + ("" if item.required else "（可空）"), "muted", wrap=False))
             box: QLineEdit | QPlainTextEdit = QPlainTextEdit() if item.multiline else QLineEdit()
+            name = c.label(item.label + ("" if item.required else "（可空）"), "muted", wrap=False)
+            if item.collapsed:  # 平时用不上的栏：一句话说什么时候才填，点“展开”才出输入框
+                toggle = c.button("展开", "", "展开这一栏")
+                toggle.setProperty("field", item.key)
+                toggle.clicked.connect(lambda _checked=False, k=item.key: self.toggle(k))
+                self.toggles[item.key] = toggle
+                outer.addWidget(c.hrow(name, toggle, 1))
+                outer.addWidget(c.label(item.note, "small"))
+                box.setVisible(False)
+            else:
+                outer.addWidget(name)
             if item.multiline:
                 box.setFixedHeight(64)
             box.setPlaceholderText(item.hint)
@@ -99,6 +124,13 @@ class ConfirmDialog(QDialog):
         row.addWidget(self.run_button)
         outer.addLayout(row)
         self._refresh()
+
+    def toggle(self, key: str) -> None:
+        """收起的栏点“展开”/“收起”。收起时不清空已填的字：填了就照样进命令，等价命令里看得见。"""
+        box, toggle = self.inputs[key], self.toggles[key]
+        show = box.isHidden()
+        box.setVisible(show)
+        toggle.setText("收起" if show else "展开")
 
     def values(self) -> dict[str, str]:
         return {key: (box.toPlainText() if isinstance(box, QPlainTextEdit) else box.text()).strip()
@@ -234,12 +266,17 @@ class DecisionsPage(QWidget):
 
     def open_dialog(self, decision: Decision, target: Target, *, run: bool = True) -> ConfirmDialog:
         pin = self.vm.pin_mode == "enforced"
-        dialog = ConfirmDialog(decision, target, pin,
-                               lambda values: self.preview(decision, target, values, self.approver(), pin),
-                               self.on_copy, self, blocked=self.vm.blocked)
+        def preview(values: Mapping[str, str]) -> str:
+            approver, rest = split_approver(values, self.approver())
+            return self.preview(decision, target, rest, approver, pin)
+
+        dialog = ConfirmDialog(decision, target, pin, preview, self.on_copy, self, blocked=self.vm.blocked, approver=self.approver())
         self.last_dialog = dialog
         if run and dialog.exec() == QDialog.DialogCode.Accepted:
-            self.run_requested.emit(decision, target, dialog.values(), dialog.via_terminal)
+            values = dialog.values()
+            if values.get(APPROVER_KEY):  # 框里填的名字记回页顶那一栏，下一个框先填上它
+                self.approver_input.setText(values[APPROVER_KEY])
+            self.run_requested.emit(decision, target, values, dialog.via_terminal)
         return dialog
 
     def add_receipt(self, receipt: Receipt) -> None:

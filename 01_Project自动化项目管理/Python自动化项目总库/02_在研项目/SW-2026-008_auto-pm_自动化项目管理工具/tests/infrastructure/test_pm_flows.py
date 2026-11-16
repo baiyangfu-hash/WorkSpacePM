@@ -675,3 +675,64 @@ def test_entry_says_plainly_when_the_release_has_no_claim_log(
     assert "本机生效的发布版本还没有交接记录命令（claim log）：照实告诉用户，不要绕过去" in text
     assert "后面 1 张卡的交接记录也读不了，不再跑" in text
     assert text.count("发布版本没有 claim log，没读。") == 2
+
+
+# ---- 中文 Windows 上输出一重定向就崩（用户本机 2026-11-16：UnicodeEncodeError: 'gbk' codec can't encode character '▶'）----
+
+_FAKE_MAIN = (
+    "import sys\n"
+    "args = sys.argv[1:]\n"
+    "if args[:2] == ['claim', 'list']:\n"
+    "    print('[]')\n"
+    "else:\n"
+    "    print('替身命令 ✓ ▶ ' + ' '.join(args))\n"
+)
+
+
+@pytest.mark.parametrize("flow", ["entry", "checkup", "closeout", "steps"])
+def test_output_piped_in_gbk_does_not_crash(flow: str, tmp_path: Path) -> None:
+    """像中文 Windows 上把输出接到文件或管道：没设 PYTHONUTF8，管道编码是 GBK。四个子命令都要跑到最后、不崩，
+    写出来的是 UTF-8（读的一方按 UTF-8 解得出“▶ 第 1 步”）。替身 main.py 只回一行字，不碰真账本。"""
+    import os
+    import subprocess
+
+    root = _root(tmp_path)
+    (root / "main.py").write_text(_FAKE_MAIN, encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if key not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+    env["PYTHONIOENCODING"] = "gbk"
+    args = {
+        "entry": ["entry", "DJ-2026-005"],
+        "checkup": ["checkup", "DJ-2026-005"],
+        "closeout": ["closeout", "DJ-2026-005", "--mission-id", "MISSION-3E5ED659C44DE219"],
+        "steps": ["steps", "entry"],
+    }[flow]
+    done = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "--root", str(root), *args],
+        capture_output=True, timeout=600, env=env, check=False, cwd=str(root),
+    )
+    stdout = done.stdout.decode("utf-8")  # 不加 errors：写出来的不是 UTF-8 就在这里红
+    stderr = done.stderr.decode("utf-8", errors="replace")
+    assert "UnicodeEncodeError" not in stderr, stderr[-2000:]
+    assert done.returncode in (0, 1, 3), (done.returncode, stderr[-2000:])  # 走完、有红、停在停点都算跑到了头，不是崩
+    if flow == "steps":
+        assert stdout.strip(), "steps 什么都没列"
+    else:
+        assert "▶ 第 1 步" in stdout and "运行记录" in stdout, stdout[-2000:]
+
+
+def test_utf8_output_writes_utf8_when_piped_and_escapes_on_a_gbk_terminal(flows: ModuleType) -> None:
+    import io
+
+    class Terminal(io.TextIOWrapper):
+        def isatty(self) -> bool:
+            return True
+
+    piped_bytes, tty_bytes = io.BytesIO(), io.BytesIO()
+    piped = io.TextIOWrapper(piped_bytes, encoding="gbk")
+    terminal = Terminal(tty_bytes, encoding="gbk")
+    flows.utf8_output([piped, terminal, io.StringIO()])  # StringIO 没有 reconfigure：跳过，不报错
+    for stream in (piped, terminal):
+        stream.write("▶ 第 1 步")
+        stream.flush()
+    assert piped_bytes.getvalue().decode("utf-8") == "▶ 第 1 步"
+    assert tty_bytes.getvalue().decode("gbk") == "\\u25b6 第 1 步"  # 终端自己的编码，写不出的字转义成看得见的样子

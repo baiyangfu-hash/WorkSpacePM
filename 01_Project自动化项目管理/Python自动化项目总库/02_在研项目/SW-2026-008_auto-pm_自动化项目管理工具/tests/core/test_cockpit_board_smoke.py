@@ -30,6 +30,7 @@ from tests.core import test_pm_dashboard_gui as gui_tests  # noqa: E402 - 复用
 SAMPLES = {
     "orient": "orient.json", "missions": "pm_missions.json", "pending": "pm_pending.json", "inbox": "pm_inbox.json",
     "worktree_list": "worktree_list.json", "worktree_sweep": "worktree_sweep.json", "long_run": "long_run_status.json",
+    "claim_list": "claim_list.json",
 }
 # 侧栏上的页：功能 1 今天、2 任务、3 PR 与审计、4 问题、8 工作树与分支、13 要你出手都在里面
 FUNCTION_PAGES = {"home", "tasks", "prs", "issues", "worktrees", "attention"}

@@ -44,6 +44,8 @@ class Field:
     required: bool = True
     multiline: bool = False
     default: str = ""  # 对话框打开时先填上的字（只用于命令自己就有同样缺省值的栏），用户可以改
+    collapsed: bool = False  # 平时用不上的栏：默认收起，旁边一句 ``note`` 说什么时候才要填，点“展开”才看得见输入框
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,8 @@ DECISIONS: tuple[Decision, ...] = (
         "批准这张范围卡：只批准你看过的这一版（哈希对不上命令会拒绝）。批准不会启动任何 agent。",
         ("pm", "approve"), pin=True, user_words=True, human_only=True,
         fields=(Field("admission_release_ref", "撞车放行（没有就留空）",
-                      "新卡改的文件和开着的卡重叠，或项目已开满 8 张时，填你放行的原话位置", required=False),),
+                      "新卡改的文件和开着的卡重叠，或项目已开满 8 张时，填你放行的原话位置", required=False, collapsed=True,
+                      note="平时不用填：只有命令说新卡和开着的卡改同一批文件、或项目已开满 8 张时，才展开填你放行的原话位置"),),
     ),
     Decision(
         "begin_work", "确认开工", "mission",
@@ -174,10 +177,26 @@ def human_only_block(markers: Sequence[str] | None) -> str:
 
 BY_KEY = {item.key: item for item in DECISIONS}
 
+APPROVER_LABEL = "批准人（你的名字）"
+APPROVER_KEY = "approver"  # 确认框里“批准人”一栏在 values 里的键；不是命令行选项，拼命令前先拿出来（split_approver）
+
+
+def split_approver(values: Mapping[str, str], fallback: str) -> tuple[str, dict[str, str]]:
+    """（批准人，其余各栏）。确认框里有“批准人”一栏就用框里填的；没有这一栏（不要批准人的按钮、或别处直接调进来）用 ``fallback``。"""
+    rest = {key: value for key, value in values.items() if key != APPROVER_KEY}
+    return (str(values[APPROVER_KEY]) if APPROVER_KEY in values else fallback), rest
+
+
+def needs_approver(decision: Decision, pin_enforced: bool) -> bool:
+    """这条命令要不要传 --approver（和 build_args 里传的那几处一一对应，测试对照）：确认框里就放一栏“批准人”，先填上“决定”页顶上那一栏的名字。"""
+    if decision.key == "approve_card":
+        return not pin_enforced  # 口令生效时批准人由口令决定，不传
+    return decision.key in ("inbox_confirm", "inbox_reject") or decision.kind == "change"
+
 # 决定页上允许出现的按钮文字，另加弹窗里的两个确认键。测试按它清点。
 # （“确认归档”“确认重新激活”也在 DECISIONS 里，但“决定”页不画它们：build_vm 只挑 mission、scope_card、inbox 三类。）
 DECISION_BUTTONS = frozenset({item.label for item in DECISIONS}) | frozenset({
-    "确认并运行", "在终端窗口里运行", "取消", "知道了", "复制命令", "展开控制台", "收起控制台",
+    "确认并运行", "在终端窗口里运行", "取消", "知道了", "复制命令", "展开控制台", "收起控制台", "展开", "收起",
 })
 # 永远不加的动作（同 policy.NEVER，另加几条本页特有的）；按钮文字、对话框文字里都不许出现。
 NEVER_WORDS = (*policy.NEVER, "启动 agent", "强推")
@@ -334,7 +353,7 @@ def build_args(
     if decision.key == "approve_card":
         args += ["--request-id", _ident(target.request_id, "范围卡请求编号"), "--plan-hash", _hash(target.plan_hash, "范围卡哈希")]
         if not pin_enforced:  # 口令生效时批准人和凭据由口令决定，不再传
-            args += ["--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
+            args += ["--approver", _need(approver, APPROVER_LABEL), "--approval-evidence-ref", evidence]
         if value.get("admission_release_ref"):
             args += ["--admission-release-ref", value["admission_release_ref"]]
     elif decision.key in ("begin_work", "accept", "close"):
@@ -350,12 +369,12 @@ def build_args(
                  "--approval-evidence-ref", evidence]
     elif decision.key in ("inbox_confirm", "inbox_reject"):
         args += [_ident(target.item_id, "收件箱条目编号"), "--ticket-hash", _hash(target.ticket_hash, "条目哈希"),
-                 "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
+                 "--approver", _need(approver, APPROVER_LABEL), "--approval-evidence-ref", evidence]
         if value.get("note"):
             args += ["--note", value["note"]]
     elif decision.kind == "change":  # 批准变更单 / 推到完成：同一条 change transition，一次一步；批准人和凭据两种情况都传（留痕）
         args += [_ident(target.change_id, "变更单号"), "--to", CHANGE_TARGET[decision.key], "--pid", _ident(target.project_id, "项目编号"),
-                 "--approver", _need(approver, "批准人（你的名字）"), "--approval-evidence-ref", evidence]
+                 "--approver", _need(approver, APPROVER_LABEL), "--approval-evidence-ref", evidence]
         if decision.key == "change_complete":
             args += ["--verification-conclusion", _need(value.get("verification_conclusion", ""), "验证结论")]
         elif value.get("comment"):

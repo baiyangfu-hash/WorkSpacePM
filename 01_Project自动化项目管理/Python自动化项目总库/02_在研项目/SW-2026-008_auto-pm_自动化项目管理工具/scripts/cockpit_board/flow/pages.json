@@ -47,7 +47,9 @@
         {
           "command": "worktree list",
           "args": [
-            "--json"
+            "--json",
+            "--deep",
+            "--no-size"
           ],
           "reader": "worktree_list"
         },
@@ -58,6 +60,19 @@
             "--no-fetch"
           ],
           "reader": "worktree_sweep"
+        },
+        {
+          "command": "claim list",
+          "args": [
+            "--json",
+            "--no-fetch"
+          ],
+          "reader": "claim_list"
+        },
+        {
+          "command": "long-run status",
+          "args": [],
+          "reader": "long_run"
         }
       ],
       "empty_text": "没有工位",

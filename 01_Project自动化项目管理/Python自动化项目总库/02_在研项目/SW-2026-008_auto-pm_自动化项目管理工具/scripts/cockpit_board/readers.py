@@ -135,6 +135,14 @@ def parse_worktree_sweep(text: str) -> Parsed:
     return Parsed(OK, {"applied": bool(value.get("applied")), "fetch_warning": str(value.get("fetch_warning") or ""), "items": rows})
 
 
+def parse_claim_list(text: str) -> Parsed:
+    """`claim list --json --no-fetch`：占位表，每张有 card、owner、paths、status；空列表是“没有占位”，不是读不懂。"""
+    value = lenient_json(text)
+    if not isinstance(value, list) or not all(isinstance(row, dict) and "card" in row and "status" in row for row in value):
+        return unreadable("不是占位表（每张要有 card、status）")
+    return Parsed(OK, {"claims": value})
+
+
 def parse_project_list(text: str) -> Parsed:
     """`project list --json`：受管项目，每个要有 project_id。"""
     value = lenient_json(text)
@@ -175,6 +183,7 @@ READERS: dict[str, Callable[[str], Parsed]] = {
     "inbox": parse_inbox,
     "worktree_list": parse_worktree_list,
     "worktree_sweep": parse_worktree_sweep,
+    "claim_list": parse_claim_list,
     "project_list": parse_project_list,
     "plc_check": parse_plc_check,
     "long_run": parse_long_run,
