@@ -1,8 +1,12 @@
 """D-357：带待整理记录（``intake_notes`` 表）的账本，交给老发布版读，会怎样。
 
-用新代码建一本账（一条待整理、一条已转正），再用仓库里两个发布指针（现役、上一版）指向的发布目录里的代码，
-在子进程里各跑三条只读命令。老版本不认识这张表：命令照常返回、看不见记录、不动账本；记录不丢。
-发布目录找不到时本文件报失败并写明原因，不跳过。
+用新代码建一本账（一条待整理、一条已转正），再用仓库里发布目录的代码在子进程里跑三条只读命令。
+“老版本”不跟着发布指针走（指针一切换到带这个功能的版本，前提就不成立了；#840 切到 368c1af 时就红了）：
+从 deployment_manifest.json 里按 built_at 从新到旧找第一个“有入箱、没有待整理记录”的发布
+（``auto_pm/infrastructure/intake_store.py`` 在、但里面没有 ``intake_notes``）。老版本不认识这张表：
+命令照常返回、看不见记录、不动账本；记录不丢。两个发布指针指向的版本按它自己有没有这个功能来断言：
+没有的照老版本断言，有的要看得见待整理记录、同样不动账本。
+发布目录找不到、或者一个老版本都找不到时，本文件报失败并写明原因，不跳过。
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -32,6 +37,9 @@ pytestmark = pytest.mark.external_reads  # D-200: reads the release pointers and
 
 PROJECT = "SW-2026-008"
 POINTERS = ("active_release.json", "previous_release.json")
+OLDER = "older"  # the newest release in the manifest that has the inbox but not the notes table
+INTAKE_STORE = Path("auto_pm") / "infrastructure" / "intake_store.py"
+NOTES_TABLE = "intake_notes"
 READ_COMMANDS = (
     ("pm", "inbox", "list", "--project-id", PROJECT),
     ("pm", "orient", PROJECT, "--json"),
@@ -64,6 +72,44 @@ def _release_dir(pointer: str) -> Path:
     if not release_path or not (release / "auto_pm" / "__main__.py").is_file():
         pytest.fail(f"发布指针 {pointer} 指向的发布目录不在或不完整：{release}", pytrace=False)
     return release
+
+
+def _has_notes(release: Path) -> bool:
+    """Whether a release's code knows the notes table (D-357); a release without the inbox at all does not."""
+
+    store = release / INTAKE_STORE
+    return store.is_file() and NOTES_TABLE in store.read_text(encoding="utf-8", errors="replace")
+
+
+def _older_release() -> Path:
+    """The newest release in the manifest that has the inbox (``intake_store.py``) but not the notes table.
+
+    Picked by what the code holds, not by a pointer, so switching the pointers to a release with notes leaves the
+    premise true.  A release without the inbox at all cannot run ``pm inbox list`` and is not an older reader.
+    """
+
+    infrastructure = _infrastructure()
+    manifest_path = infrastructure / "deployment_manifest.json"
+    if not manifest_path.is_file():
+        pytest.fail(f"发布清单不存在：{manifest_path}", pytrace=False)
+    releases = json.loads(manifest_path.read_text(encoding="utf-8", errors="replace")).get("releases", {})
+    built: list[tuple[datetime, str]] = []
+    for release_id, entry in releases.items():
+        stamp = str(entry.get("built_at", "")) if isinstance(entry, dict) else ""
+        if stamp:
+            built.append((datetime.fromisoformat(stamp), str(release_id)))
+    for _stamp, release_id in sorted(built, reverse=True):
+        release = infrastructure / "releases" / release_id
+        if (release / "auto_pm" / "__main__.py").is_file() and (release / INTAKE_STORE).is_file() and not _has_notes(release):
+            return release
+    pytest.fail(
+        f"{manifest_path} 里找不到有入箱、没有待整理记录（{INTAKE_STORE.as_posix()} 里没有 {NOTES_TABLE}）的发布目录",
+        pytrace=False,
+    )
+
+
+def _reader(name: str) -> Path:
+    return _older_release() if name == OLDER else _release_dir(name)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -142,9 +188,36 @@ def _digest(root: Path) -> str:
     return hashlib.sha256((root / ".auto-pm" / "continuity.db").read_bytes()).hexdigest()
 
 
+def test_an_older_release_reads_a_ledger_with_notes_sees_none_and_changes_nothing(tmp_path: Path) -> None:
+    release = _older_release()
+    assert not _has_notes(release)
+    _assert_sees_none_and_changes_nothing(release, tmp_path, OLDER)
+
+
 @pytest.mark.parametrize("pointer", POINTERS)
-def test_an_older_release_reads_a_ledger_with_notes_sees_none_and_changes_nothing(tmp_path: Path, pointer: str) -> None:
+def test_a_pointed_release_reads_a_ledger_with_notes_as_its_code_says(tmp_path: Path, pointer: str) -> None:
+    """Each pointed release is held to what its own code holds: without the table it is an older reader; with it
+    the waiting note is listed, and neither kind changes the ledger."""
+
     release = _release_dir(pointer)
+    if not _has_notes(release):
+        _assert_sees_none_and_changes_nothing(release, tmp_path, pointer)
+        return
+    raw_id, turned_id, _item_id = _ledger(tmp_path)
+    before = _digest(tmp_path)
+    for command in READ_COMMANDS:
+        result = _old(release, tmp_path, "-m", "auto_pm", "-w", str(tmp_path), *command)
+        assert result.returncode == 0, f"{pointer} {' '.join(command)}\n{result.stdout}\n{result.stderr}"
+        assert _digest(tmp_path) == before, f"{pointer} {' '.join(command)} 动了账本"
+    listed = _old(release, tmp_path, "-m", "auto_pm", "-w", str(tmp_path), *READ_COMMANDS[0])
+    assert raw_id in listed.stdout, f"{pointer} 有待整理记录功能，pm inbox list 却没列出 {raw_id}\n{listed.stdout}"
+    assert _digest(tmp_path) == before
+    store = IntakeStore(tmp_path)
+    assert [note.note_id for note in store.list_notes(PROJECT)] == [raw_id]
+    assert [note.note_id for note in store.list_notes(PROJECT, (NoteStatus.TRIAGED,))] == [turned_id]
+
+
+def _assert_sees_none_and_changes_nothing(release: Path, tmp_path: Path, pointer: str) -> None:
     raw_id, turned_id, item_id = _ledger(tmp_path)
     before = _digest(tmp_path)
 
@@ -162,9 +235,9 @@ def test_an_older_release_reads_a_ledger_with_notes_sees_none_and_changes_nothin
     assert [note.note_id for note in store.list_notes(PROJECT, (NoteStatus.TRIAGED,))] == [turned_id]
 
 
-@pytest.mark.parametrize("pointer", POINTERS)
+@pytest.mark.parametrize("pointer", (OLDER, *POINTERS))
 def test_an_older_release_accepts_the_new_orient_answer(tmp_path: Path, pointer: str) -> None:
-    release = _release_dir(pointer)
+    release = _reader(pointer)
     raw_id, _turned_id, _item_id = _ledger(tmp_path)
     answer = CliRunner().invoke(cli, ["-w", str(tmp_path), "pm", "orient", PROJECT, "--json"])
     assert answer.exit_code == 0, answer.output
@@ -190,3 +263,52 @@ def test_a_missing_release_directory_fails_with_the_reason_instead_of_skipping(m
         _release_dir("active_release.json")
     with pytest.raises(pytest.fail.Exception, match="previous_release.json 不存在"):
         _release_dir("previous_release.json")
+
+
+def _manifest(infrastructure: Path, releases: dict[str, str]) -> None:
+    (infrastructure / "deployment_manifest.json").write_text(
+        json.dumps({"releases": {release: {"built_at": stamp} for release, stamp in releases.items()}}),
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _payload(infrastructure: Path, release: str, store: str | None) -> None:
+    package = infrastructure / "releases" / release / "auto_pm"
+    (package / "infrastructure").mkdir(parents=True)
+    (package / "__main__.py").write_text("", encoding="utf-8", errors="replace")
+    if store is not None:
+        (package / "infrastructure" / "intake_store.py").write_text(store, encoding="utf-8", errors="replace")
+
+
+def test_the_older_release_is_the_newest_with_the_inbox_and_without_notes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    infrastructure = tmp_path / "00_Infrastructure" / "auto_pm"
+    _payload(infrastructure, "1.0.0-noinbox", None)
+    _payload(infrastructure, "1.1.0-inbox-old", "CREATE TABLE intake_items\n")
+    _payload(infrastructure, "1.1.1-inbox", "CREATE TABLE intake_items\n")
+    _payload(infrastructure, "1.1.2-noinbox", None)  # newer than 1.1.1 but without the inbox: cannot run pm inbox list
+    _payload(infrastructure, "1.2.0-notes", "CREATE TABLE intake_items\nCREATE TABLE intake_notes\n")
+    _manifest(
+        infrastructure,
+        {
+            "1.0.0-noinbox": "2026-09-06T13:29:39.4500876Z",
+            "1.1.0-inbox-old": "2026-11-01T00:00:00+00:00",
+            "1.1.1-inbox": "2026-11-02T00:00:00+00:00",
+            "1.1.2-noinbox": "2026-11-02T12:00:00+00:00",
+            "1.2.0-notes": "2026-11-03T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_infrastructure", lambda: infrastructure)
+    assert _older_release().name == "1.1.1-inbox"  # newest without notes; the release with notes and the newer one with no inbox are passed over
+
+
+def test_no_older_release_in_the_manifest_fails_with_the_reason_instead_of_skipping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    infrastructure = tmp_path / "00_Infrastructure" / "auto_pm"
+    _payload(infrastructure, "1.0.0-noinbox", None)
+    _payload(infrastructure, "1.2.0-notes", "CREATE TABLE intake_notes\n")
+    _manifest(infrastructure, {"1.0.0-noinbox": "2026-09-06T00:00:00+00:00", "1.2.0-notes": "2026-11-03T00:00:00+00:00"})
+    monkeypatch.setattr(sys.modules[__name__], "_infrastructure", lambda: infrastructure)
+    with pytest.raises(pytest.fail.Exception, match="找不到有入箱、没有待整理记录"):
+        _older_release()

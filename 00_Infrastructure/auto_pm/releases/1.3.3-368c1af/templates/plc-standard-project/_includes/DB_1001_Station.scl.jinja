@@ -1,0 +1,11 @@
+﻿{% set station = station_instances[slot - 1] -%}
+// ============================================================================
+// DB_1001_{{ station }}_{{ project_tag }}: FB_1001_Station1_{{ project_tag }} 的背景数据块 (工位 {{ station }})
+// 说明: 背景 DB 不写变量, 变量来自 FB; 由 OB123 单实例调用 "DB_1001_{{ station }}_{{ project_tag }}"(...).
+//       TIA 全局 DB 里不能放 FB 实例 (LSP-905 §4.11), 所以每个工位用自己的背景 DB; 各工位共用 FB_1001_Station1_{{ project_tag }}.
+// ============================================================================
+
+DATA_BLOCK "DB_1001_{{ station }}_{{ project_tag }}"
+"FB_1001_Station1_{{ project_tag }}"
+BEGIN
+END_DATA_BLOCK
