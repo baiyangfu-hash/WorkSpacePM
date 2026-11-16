@@ -96,6 +96,15 @@ def test_baseline_files_match_the_manifest() -> None:
             for name in sorted(on_disk & set(listed))
             if _sha256(root / name) != listed[name]
         ]
+        # 用户的实测截图跟着基准件一起入库，下次不用翻聊天记录找
+        for evidence in sample.get("evidence_files", []):
+            path = BASELINE_DIR / evidence["path"]
+            if not path.is_file():
+                problems.append(f"{sample['id']}：证据文件不在：{evidence['path']}")
+            elif _sha256(path) != evidence["sha256"]:
+                problems.append(
+                    f"{sample['id']}：证据文件哈希和 manifest 不一致：{evidence['path']}"
+                )
     assert problems == []
 
 
