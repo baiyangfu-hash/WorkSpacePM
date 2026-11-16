@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from auto_pm.contracts.user_evidence import user_evidence_problem
 from auto_pm.infrastructure.control_root_guard import authority_path_covered, clean_git_environment
 from auto_pm.infrastructure.git_timeout import run_git_bounded
 
@@ -502,9 +503,9 @@ class ClaimService:
 
         if not reason.strip():
             raise ClaimError("收回占位必须写明原因（--reason）")
-        prefix = "user-confirmation:"
-        if not approval_ref.startswith(prefix) or len(approval_ref[len(prefix):].strip()) < 6:
-            raise ClaimError("收回别人的占位只听用户的：--approval-evidence-ref 写成 user-confirmation:<用户那条消息的时间或编号>")
+        # K6: the one definition of the user's words (8 characters or more, not written by an agent), as every approval uses.
+        if problem := user_evidence_problem(approval_ref.strip()):
+            raise ClaimError(f"收回别人的占位只听用户的：{problem}（--approval-evidence-ref）")
         claim = self._find(card)
         if claim.status != "active":
             return claim  # already released or reclaimed: nothing to write

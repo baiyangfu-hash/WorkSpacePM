@@ -21,6 +21,8 @@ from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job
 from auto_pm.application.core.release_deploy import DeployError
 from auto_pm.application.core.release_ledger import LedgerError
 from auto_pm.application.core.release_trial_service import ReleaseTrialError, ReleaseTrialService
+from auto_pm.contracts.user_evidence import user_evidence_problem
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import (
     require_runtime_identity_for_workspace,
@@ -74,10 +76,14 @@ def release_deploy(
     """部署前预检；加 --no-check-only 才真部署：预检全绿 → 建账 → 构建 → 切换 → 自检 → 失败自动回退，成功才收口并写回执。"""
 
     if not check_only:
-        require_runtime_identity_for_workspace(ctx)  # a real deploy writes the ledger and the pointers: the runtime identity must be clean first
         missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--card-file", card_file), ("--drill-script", drill_script)) if not value]
         if missing:
             raise click.ClickException("真部署还缺：" + "、".join(missing))
+        # K6: the same check every approval uses (8 characters or more, not written by an agent), first and before anything is
+        # built: a weaker reference used to pass this door and be refused later by ``change transition`` mid-bookkeeping.
+        if problem := user_evidence_problem(confirm_ref.strip()):
+            raise click.ClickException(f"--confirm-ref 不被接受：{problem}；没有用户原话不批准、不部署")
+        require_runtime_identity_for_workspace(ctx)  # a real deploy writes the ledger and the pointers: the runtime identity must be clean first
         arm_for_heavy_job("deploy-gate")  # D-168: armed = the memory gate MAY freeze this process tree while it builds and checks; D-174: the adapter disarms before the pointers move; never raises
     report = check.preflight(_root(ctx), commit, gate_verdict=gate_verdict, audit_signoff=audit_signoff)
     if as_json and check_only:
@@ -103,11 +109,19 @@ def release_deploy(
 
 @release_group.command(name="rollback")
 @click.argument("backup_dir", type=CallerPath(path_type=Path, exists=True, file_okay=False))
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="agent 会话必填：用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；用户本人在自己的终端运行不用填",
+)
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出")
 @click.pass_context
-def release_rollback(ctx: click.Context, backup_dir: Path, as_json: bool) -> None:
+def release_rollback(ctx: click.Context, backup_dir: Path, approval_evidence_ref: str, as_json: bool) -> None:
     """用切换前的指针备份把有效版本退回去：先核对备份校验和，只还原指针，不动数据库、不回滚已装发布。"""
 
+    # K6: going back to another release is the user's call.  This is the first check and it reads only the environment and the
+    # given reference (no ledger, no identity, no PIN), so once the user has said so the rollback runs at once.
+    refuse_agent_approval("退回发布版本（release rollback）", approval_evidence_ref)
     warn_runtime_identity(ctx, wiring.IDENTITY_PROJECT)  # the runtime may be exactly what is broken: warn, never refuse
     try:
         result = ops.rollback(_root(ctx), backup_dir, wiring.cockpit_identity)

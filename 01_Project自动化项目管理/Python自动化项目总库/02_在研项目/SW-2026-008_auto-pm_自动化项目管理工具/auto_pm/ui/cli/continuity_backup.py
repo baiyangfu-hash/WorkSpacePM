@@ -15,6 +15,7 @@ from auto_pm.infrastructure.continuity_backup import (
     verify_backup_file,
 )
 from auto_pm.infrastructure.continuity_store import ContinuityStoreError
+from auto_pm.ui.cli.approval_pin import refuse_agent_approval
 from auto_pm.ui.cli.caller_path import CallerPath
 
 
@@ -98,10 +99,18 @@ def verify_backup_command(ctx: click.Context, backup_file: Path | None, as_json:
 @click.command(name="restore-backup")
 @click.argument("backup_file", type=CallerPath(path_type=Path))
 @click.option("--yes", is_flag=True, help="不再询问，直接恢复。")
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="agent 会话必填：用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；用户本人在自己的终端运行不用填",
+)
 @click.pass_context
-def restore_backup_command(ctx: click.Context, backup_file: Path, yes: bool) -> None:
+def restore_backup_command(ctx: click.Context, backup_file: Path, yes: bool, approval_evidence_ref: str) -> None:
     """Replace the live ledger with a verified backup; the replaced files are kept, never deleted."""
 
+    # K6: replacing the ledger is the user's call, with or without --yes.  First check; it reads only the environment and the
+    # given reference, so it works when the ledger itself is what broke, and once the user has said so the restore runs at once.
+    refuse_agent_approval("用备份替换在用账本（continuity restore-backup）", approval_evidence_ref)
     service = _service(ctx)
     if not yes:
         click.confirm(
