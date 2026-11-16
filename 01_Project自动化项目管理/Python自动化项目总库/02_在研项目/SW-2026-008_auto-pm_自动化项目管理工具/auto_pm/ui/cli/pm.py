@@ -66,7 +66,11 @@ from auto_pm.domain.change.decision_service import DecisionError, DecisionServic
 from auto_pm.infrastructure import memory_gate_status
 from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 from auto_pm.infrastructure.state_backup import read_state_backup_status
-from auto_pm.ui.cli.approval_pin import approval_pin_enforced, read_approval_pin
+from auto_pm.ui.cli.approval_pin import (
+    approval_pin_enforced,
+    read_approval_pin,
+    refuse_agent_approval,
+)
 from auto_pm.ui.cli.caller_path import CallerPath, caller_cwd_default
 from auto_pm.ui.cli.runtime_identity_guard import (
     project_of_mission,
@@ -404,7 +408,7 @@ def _dry_run_plan(
     click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "") -> None:
+def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: str = "", evidence_ref: str = "") -> None:
     try:
         _require_control_root(ctx)
         require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
@@ -414,7 +418,7 @@ def _emit_card(ctx: click.Context, action: str, mission_id: str, root_work_id: s
         elif action == "approve":
             card = facade.approve(mission_id, root_work_id)
         elif action == "confirm-start":
-            card = facade.confirm_start(mission_id)
+            card = facade.confirm_start(mission_id, approval_evidence_ref=evidence_ref)
         elif action == "execute":
             card = facade.execute(mission_id)
         elif action == "accept":
@@ -1386,10 +1390,18 @@ def approve_pm(
 
 @pm_group.command(name="confirm-start")
 @click.option("--mission-id", required=True)
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="agent 会话必填：用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；用户本人在自己的终端或看板上点不用填",
+)
 @click.pass_context
-def confirm_start_pm(ctx: click.Context, mission_id: str) -> None:
+def confirm_start_pm(ctx: click.Context, mission_id: str, approval_evidence_ref: str) -> None:
     """执行用户的唯一开工确认；内部授权编号不会暴露给用户。"""
-    _emit_card(ctx, "confirm-start", mission_id)
+    # K6 (audit 用户专属命令_拦agent核实_20261115): the user's one start confirmation; an agent session needs the user's words,
+    # checked before anything else, so the refusal touches no ledger.
+    refuse_agent_approval(f"确认开工（任务 {mission_id}）", approval_evidence_ref)
+    _emit_card(ctx, "confirm-start", mission_id, evidence_ref=approval_evidence_ref.strip())
 
 
 @pm_group.command(name="execute")
@@ -1454,9 +1466,17 @@ def execute_pm(
 
 @pm_group.command(name="accept")
 @click.option("--mission-id", required=True)
+@click.option(
+    "--approval-evidence-ref",
+    default="",
+    help="agent 会话必填：用户原话所在的位置，写成 user-confirmation:<用户消息的时间或编号>；用户本人在自己的终端或看板“确认验收”不用填",
+)
 @click.pass_context
-def accept_pm(ctx: click.Context, mission_id: str) -> None:
+def accept_pm(ctx: click.Context, mission_id: str, approval_evidence_ref: str) -> None:
     """记录最终用户验收；已启用批准口令时须用户本人在终端输入口令。关闭动作仍受治理门禁约束。"""
+    # K6: the final acceptance is the user's; before anything else (and before the PIN prompt) an agent session needs the
+    # user's words.  The board's “确认验收” button runs this from a board without agent markers, so it passes unchanged.
+    refuse_agent_approval(f"记最终验收（任务 {mission_id}）", approval_evidence_ref)
     try:
         _require_control_root(ctx)
         require_runtime_identity(ctx, project_of_mission(ctx, mission_id))
@@ -1464,7 +1484,9 @@ def accept_pm(ctx: click.Context, mission_id: str) -> None:
         raise click.ClickException(str(error)) from error
     approval_pin = read_approval_pin(_control_root_path(ctx), summary=f"最终验收：任务 {mission_id}（确认你已经看过结果）")
     try:
-        card = _facade(ctx).accept(mission_id, approval_pin=approval_pin)
+        card = _facade(ctx).accept(
+            mission_id, approval_pin=approval_pin, approval_evidence_ref=approval_evidence_ref.strip()
+        )
     except (PmFacadeError, WorktreePolicyError) as error:
         raise click.ClickException(str(error)) from error
     click.echo(card.model_dump_json(indent=2))

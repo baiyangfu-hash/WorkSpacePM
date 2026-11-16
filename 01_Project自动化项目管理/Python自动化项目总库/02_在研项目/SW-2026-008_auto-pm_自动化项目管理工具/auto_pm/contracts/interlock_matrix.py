@@ -137,7 +137,9 @@ COMMANDS: dict[str, CommandSpec] = {
         "real deploy only with --no-check-only and a user-confirmation ref; the pre-flight alone writes nothing",
     ),
     "release rollback": CommandSpec(
-        CommandKind.NORMAL, ("workspace=control_root",), ("G-MUTATION-ROOT",), "puts the pointers back from a verified backup; warns about a broken identity, never refuses on it",
+        CommandKind.NORMAL, ("workspace=control_root", "operator=user"), ("G-MUTATION-ROOT", "G-AGENT-APPROVAL"),
+        "puts the pointers back from a verified backup; warns about a broken identity, never refuses on it; "
+        "an agent session needs the user's words (K6), checked first",
     ),
     "release trial": CommandSpec(CommandKind.READ_ONLY, (), (), "copies the active release to a scratch folder outside the workspace; writes no ledger, pointer or workspace file (D-05)"),
     "project recycle-list": CommandSpec(CommandKind.READ_ONLY, (), (), "lists the recycle area by directory name only; deletes, moves and writes nothing (TD-208)"),

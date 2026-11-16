@@ -13,7 +13,7 @@ from pathlib import Path
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import caller_agent, caller_alias
+from auto_pm.application.core.agent_worktree_service import caller_agent, recorder
 from auto_pm.application.core.claim_note_service import (
     KINDS,
     VERDICTS,
@@ -72,13 +72,23 @@ def normalise_paths(root: Path, cwd: Path, paths: Sequence[str]) -> tuple[list[s
 
 
 def _owner(explicit: str) -> str:
-    """Default owner is this conversation's alias (``claude-a119dc``), so two conversations of one agent never share a claim (D-112).
+    """Who writes this claim or note.  Default is this conversation's alias (``claude-a119dc``), so two conversations of one agent
+    never share a claim (D-112); no session id falls back to the bare agent name.  A claim made before D-112 carries the bare name;
+    only an explicit ``--as claude`` can release or renew it.
 
-    No session id (or the user's own terminal) falls back to the bare agent name, as before.  A claim made before D-112 carries the
-    bare name; only an explicit ``--as claude`` can release or renew it.
+    Never "user" (audit 持有人字段记成user_只读核_20261115): a session without any agent marker is written as ``no-agent-marker``
+    (``recorder``).  A caller the cockpit cannot name (a marker off the roster, or markers that disagree) is refused outright,
+    ``--as`` or not, as the station commands refuse it: every claim command that writes goes through here.
     """
 
-    return explicit.strip() or caller_alias() or caller_agent().strip("?") or "user"
+    if caller_agent() == "?":
+        _fail(
+            ClaimError(
+                "认不出调用方（带了 AI 标记，但不在名册里，或几个标记说法不一）：占位和交接记录要记清是谁写的。"
+                "请按 AGENTS.md 的名字规则设好 AUTO_PM_AGENT（名册里的基名：claude、trae、cursor、vscode、codex）再运行"
+            )
+        )
+    return explicit.strip() or recorder()
 
 
 def _fail(error: ClaimError) -> None:
@@ -95,7 +105,7 @@ def claim_group() -> None:
 @click.argument("card")
 @click.option("--paths", "paths", multiple=True, required=True, help="要改的路径，可重复；目录覆盖其下全部文件")
 @click.option("--goal", default="", help="一句话目标")
-@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（agent 名或 user）")
+@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（本对话别名或 agent 名；没带 AI 标记记 no-agent-marker）")
 @click.pass_context
 def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str, owner: str) -> None:
     """领卡。CARD 写卡号，或写 auto 取下一个空号。"""
@@ -112,7 +122,7 @@ def open_claim(ctx: click.Context, card: str, paths: tuple[str, ...], goal: str,
 
 @claim_group.command(name="number")
 @click.option("--goal", required=True, help="一句话说明这个号用来做什么卡（必填：别人看占位表靠它认出这个号是谁拿去做什么的）")
-@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（agent 名或 user）")
+@click.option("--as", "owner", default="", help="谁领的；缺省取调用方（本对话别名或 agent 名；没带 AI 标记记 no-agent-marker）")
 @click.pass_context
 def number_claim(ctx: click.Context, goal: str, owner: str) -> None:
     """只领号：取下一个不会撞的卡号，不占任何路径（落卡文件时用；开工时再 `claim add-paths` 补路径）。"""

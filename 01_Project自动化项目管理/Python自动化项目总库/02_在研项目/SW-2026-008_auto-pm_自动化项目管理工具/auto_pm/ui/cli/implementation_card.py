@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import click
@@ -18,6 +19,7 @@ from auto_pm.application.core.implementation_card_service import (
     ImplementationCardError,
     ImplementationCardService,
 )
+from auto_pm.application.core.lease_handover_service import agent_markers
 from auto_pm.contracts.implementation_card import (
     Boundaries,
     EvidenceMap,
@@ -202,6 +204,13 @@ def validate_card(ctx: click.Context, card_id: str) -> None:
 @click.pass_context
 def approve_card(ctx: click.Context, card_id: str, approver: str, approval_evidence: str) -> None:
     """Attach external user approval to an already reviewed card (the user's PIN once one is committed, gap 9)."""
+    # K6: a user-only command (old-format cards, not to be used); it takes no user words, so an agent session is always refused,
+    # like ``pm approver-pin init``.  Before the PIN prompt, as ``decision create`` does.
+    markers = agent_markers(os.environ)
+    if markers:
+        raise click.ClickException(
+            f"这是 agent 会话（{'、'.join(markers)}），不能给实施卡 {card_id} 挂用户批准；旧格式实施卡不再用，确需时请用户本人在自己的终端运行"
+        )
     proof = require_approval_pin(
         Path(ctx.find_root().obj.control_root), summary=f"批准实施卡 {card_id}", purpose="card-approve", subject=card_id, approver=approver
     )

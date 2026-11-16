@@ -18,11 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from auto_pm.contracts.user_evidence import user_evidence_problem
+
 PROJECT_ID = "SW-2026-008"
 CHANGE_WALK = ("draft", "submitted", "under_review", "approved", "implementing")
 CLOSE_WALK = ("implementing", "pending_acceptance", "accepting", "completed")
 WORK_CLOSE = ("IN_PROGRESS", "VERIFYING", "ACCEPTED", "CLOSED")
-CONFIRM_PREFIX = "user-confirmation:"
 _CHG = re.compile(r"CHG-[A-Z]+-\d{4}-\d+")
 
 
@@ -56,9 +57,10 @@ class DeployPlan:
     decision_id: str = ""
 
     def __post_init__(self) -> None:
-        reference = self.confirm_ref
-        if not reference.startswith(CONFIRM_PREFIX) or len(reference[len(CONFIRM_PREFIX):].strip()) < 6:
-            raise LedgerError("缺少用户确认引用：--confirm-ref 写成 user-confirmation:<用户那条消息的时间或编号>；没有它不批准、不部署")
+        # K6: the one definition of the user's words (contracts.user_evidence), the same one ``change transition`` applies to
+        # this reference later in the bookkeeping; a laxer check here let a reference through that failed halfway.
+        if problem := user_evidence_problem(self.confirm_ref):
+            raise LedgerError(f"缺少用户确认引用：{problem}（--confirm-ref）；没有它不批准、不部署")
         if not self.decision_id:
             # The id carries a date; a resume after UTC midnight must reuse the first run's id, not mint a second Decision.
             saved = _load_state_file(self.state_file).get("decision_id", "")
@@ -140,7 +142,7 @@ def _walk(port: LedgerPort, change_id: str, sequence: Sequence[str], plan: Deplo
             return
         target = sequence[sequence.index(status) + 1]
         args = ["change", "transition", change_id, "--pid", PROJECT_ID, "--to", target, "--approver", plan.approver]
-        if target == "approved":
+        if target in ("approved", "completed"):  # both steps are the user's (FLOW-001); the user's switch consent covers this order
             args += ["--approval-evidence-ref", plan.confirm_ref]
         if target in comments:
             args += ["--verification-conclusion" if target == "completed" else "--comment", comments[target]]

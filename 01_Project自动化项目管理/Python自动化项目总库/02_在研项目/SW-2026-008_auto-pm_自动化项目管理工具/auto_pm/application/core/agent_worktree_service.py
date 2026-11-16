@@ -30,6 +30,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from auto_pm.contracts.intake import NOTE_ACTOR_NO_MARKER, NOTE_ACTOR_UNKNOWN
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     clean_git_environment,
@@ -131,6 +132,24 @@ def caller_alias() -> str:
     if not caller or caller == _UNKNOWN_CALLER:
         return ""
     return session_alias(base=caller)
+
+
+def recorder() -> str:
+    """Who to write down as having done this, never "user" (audit 持有人字段记成user_只读核_20261115).
+
+    A roster agent is written as this conversation's alias (``claude-a119dc``), or its bare name without a session id; a marker
+    that names nobody on the roster (or markers that disagree) as ``unknown-agent``; no marker at all as ``no-agent-marker``.
+    The last one is deliberately not "user": an agent that forgot ``AUTO_PM_AGENT`` looks exactly the same, so the record must
+    not vouch for a human it cannot tell apart (same words as ``pm inbox``, ``contracts.intake``).  Only the label; whether the
+    caller may act at all is each command's own check.
+    """
+
+    caller = caller_agent()
+    if not caller:
+        return NOTE_ACTOR_NO_MARKER
+    if caller == _UNKNOWN_CALLER:
+        return NOTE_ACTOR_UNKNOWN
+    return session_alias(base=caller) or caller
 
 
 def ensure_session_id(control_root: str | Path) -> None:
@@ -625,7 +644,7 @@ class AgentWorktreeService:
     def _release_locked(self, agent: str, *, via: str = "release") -> ReleaseResult:
         """回收一个别名工位，并把每一次回收（成功、被拒、失败）追加记到 ``.auto-pm/logs/station-reclaim.jsonl``（D-166）。"""
 
-        record: dict[str, object] = {"agent": agent, "via": via, "caller": caller_alias() or caller_agent() or "user"}
+        record: dict[str, object] = {"agent": agent, "via": via, "caller": recorder()}
         try:
             result = self._release_checked(agent, record)
         except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
@@ -837,7 +856,7 @@ class AgentWorktreeService:
         record: dict[str, object] = {
             "agent": name,
             "via": "orphan-record",
-            "caller": caller_alias() or caller_agent() or "user",
+            "caller": recorder(),
             "reason": reason,
         }
         try:
@@ -1251,7 +1270,7 @@ class AgentWorktreeService:
         record: dict[str, object] = {
             "agent": station.name,
             "via": via,
-            "caller": caller_alias() or caller_agent() or "user",
+            "caller": recorder(),
             "branch": station.branch,
             "head": station.head,
             "path": str(station.path),

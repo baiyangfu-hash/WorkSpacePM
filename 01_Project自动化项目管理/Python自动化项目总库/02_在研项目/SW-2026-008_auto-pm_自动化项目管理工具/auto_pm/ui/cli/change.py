@@ -566,7 +566,7 @@ def cmd_verify(
     "--approval-evidence-ref",
     "approval_evidence_ref",
     default="",
-    help="agent 会话批准（--to approved 或 --to conditionally_approved）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
+    help="agent 会话批准（--to approved 或 --to conditionally_approved）或推到完成（--to completed）时必填：用户原话位置 user-confirmation:<用户消息的时间或编号>；用户本人在终端运行可不填",
 )
 @click.pass_context
 def cmd_transition(
@@ -595,6 +595,10 @@ def cmd_transition(
         )
         if proof is not None:
             approver = proof.approver
+    elif new_status == "completed":
+        # K6: 推到完成 is the user's too (FLOW-001; AGENTS.md 交卷到收口 step 8).  The board's “推到完成” button brings its click
+        # evidence and the deploy bookkeeping brings the user's switch consent; an agent session with neither is refused here.
+        refuse_agent_approval(f"把变更单 {change_number} 推到完成", approval_evidence_ref)
     # After the approval PIN (audit 72): a PIN refusal comes first, as it always did; no write happens before this check.
     require_runtime_identity_for_change(ctx, change_number, pid)
     svc = ChangeService(app_ctx.workspace_root)
