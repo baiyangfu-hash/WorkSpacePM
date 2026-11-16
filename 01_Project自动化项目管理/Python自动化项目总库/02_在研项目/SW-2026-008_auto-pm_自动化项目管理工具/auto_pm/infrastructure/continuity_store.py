@@ -7089,6 +7089,20 @@ class ContinuityStore:
             rows = conn.execute(query, (work_id,)).fetchall()
             return tuple(self._get_run(conn, str(row["run_id"])) for row in rows)
 
+    def list_open_runs_in_worktree(self, worktree: str | Path) -> tuple[RunItem, ...]:
+        """Read-only: the Runs that are not finished and work in ``worktree`` (the commit hook asks this, card 280)."""
+
+        wanted = Path(worktree).resolve()
+        with self._read_connection() as conn:
+            rows = conn.execute(
+                """SELECT run_id, worktree_path FROM run_items
+                WHERE state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                ORDER BY updated_at DESC, run_id"""
+            ).fetchall()
+            return tuple(
+                self._get_run(conn, str(row["run_id"])) for row in rows if Path(str(row["worktree_path"])).resolve() == wanted
+            )
+
     def list_live_runs_under_finished_work(self, subject_project_id: str) -> tuple[RunItem, ...]:
         """Read-only ledger-wide scan: Runs that are not terminal although their Work is accepted, closed or cancelled.
 

@@ -23,7 +23,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from auto_pm.application.core.claim_service import (
@@ -31,6 +31,7 @@ from auto_pm.application.core.claim_service import (
     _CLAIM_REF,
     _LOCAL_REF,
     AUTO_RETRIES,
+    ClaimContentionError,
     ClaimError,
     ClaimService,
     _decode,
@@ -77,6 +78,7 @@ class Note:
     commit: str
     card: str
     data: dict[str, object]
+    retries: int = field(default=0, compare=False)  # how many times someone else wrote first and this one was put on top again
 
     @property
     def kind(self) -> str:
@@ -103,7 +105,7 @@ class ClaimNoteService(ClaimService):
 
         self._check_card(card)
         if fetch:
-            self._fetch()
+            self._fetch(card=card)
         tip = self._tip_commit(card)
         if not tip:
             raise ClaimNoteRefusedError(f"没有这张卡的占位：{card}（先 `claim number` 领号或 `claim open` 订卡，同一个号用到底）")
@@ -160,7 +162,7 @@ class ClaimNoteService(ClaimService):
             kind=kind, sender=sender, to=to, next_step=next_step, chg=chg, pr=pr, verdict=verdict, verify=verify,
             changed=changed, risk=risk, caution=caution, ask_user=ask_user, read_first=read_first, refs_outside=refs_outside,
         )
-        self._fetch()  # offline -> ClaimError: a note that cannot reach origin is not recorded anywhere (no local queue)
+        self._fetch(card=card)  # offline -> ClaimError: a note that cannot reach origin is not recorded anywhere (no local queue)
         head = self._resolve_head(git_head, pr)
         note["git_head"] = head
         note["refs"] = [{"path": path, "sha256": self._blob_sha256(head, path, "--ref")} for path in self._clean_paths(refs)]
@@ -181,12 +183,15 @@ class ClaimNoteService(ClaimService):
             commit = self._commit(card, payload, tip)
             ref = f"{_CLAIM_REF}{card}"
             result = self._run(["push", f"--force-with-lease={ref}:{tip}", self._remote, f"{commit}:{ref}"])
-            if result.returncode == 0:
-                self._fetch()
-                return Note(sequence=len(existing) + 1, commit=commit, card=card, data=note)
-            self._fetch()  # someone else wrote first (a renewal or another note): read again and put this one on top
+            if result.returncode == 0 or self._landed(card, commit):  # git may fail only on the local tracking ref after origin took it
+                self._refresh_after_push(card)  # origin has it: a failed local refresh does not make it "not recorded"
+                return Note(sequence=len(existing) + 1, commit=commit, card=card, data=note, retries=attempt)
+            text = _decode(result.stderr).strip()
+            if not ("stale info" in text or "rejected" in text or "fetch first" in text):
+                raise ClaimError("交接记录没推成功：" + text)
             if attempt == AUTO_RETRIES - 1:
-                raise ClaimError("交接记录没推成功：" + _decode(result.stderr).strip())
+                raise ClaimContentionError(f"交接记录没推成功：别人刚记了一笔，已重试 {AUTO_RETRIES} 次都被抢先；过一会儿原样再记一次。git 原文：{text}")
+            self._fetch(card=card)  # someone else wrote first (a renewal or another note): read again and put this one on top
         raise ClaimError("交接记录没推成功")  # pragma: no cover - the loop always returns or raises
 
     # ── rules ─────────────────────────────────────────────────────────

@@ -364,3 +364,14 @@ def test_admission_release_is_folded_with_a_one_line_note(qapp: QApplication) ->
     toggle.click()
     assert not box.isHidden() and toggle.text() == "收起"
     assert {"展开", "收起"} <= decisions.DECISION_BUTTONS
+
+
+def test_the_clean_dialog_shows_the_sweep_verdict_with_the_kind_and_the_head() -> None:
+    """G 工位止血（卡 280）：sweep 判可清的 detached 目录，确认框写明是门禁目录还是手工 detached 目录、HEAD 是哪个提交。"""
+    said = "门禁目录，不在分支上（detached HEAD 84d472996970），这个提交已在 origin/main 上，目录干净，没有长任务在用"
+    sweep = [dict(item, remove=True, reason=said) if str(item["target"]).endswith("/gate-manual") else item for item in SWEEP]
+    gate = _row(_view(sweep=sweep), "gate-manual")
+    assert gate.blocked == "" and gate.action is not None
+    assert ("清理清单判词", said) in gate.action.facts
+    formal = _row(_view(), "gate-formal").action
+    assert formal is not None and ("清理清单判词", "已并进 main、干净") in formal.facts

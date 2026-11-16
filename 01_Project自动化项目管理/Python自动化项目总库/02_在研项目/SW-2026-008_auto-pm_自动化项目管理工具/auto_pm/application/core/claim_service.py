@@ -20,6 +20,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -42,10 +43,27 @@ AUTO_RENEW_CAP = timedelta(hours=12)  # keep-alive never carries a claim past 12
 AUTO_RENEW_FETCH_SECONDS = 10.0  # the keep-alive may not hold a checkpoint up
 STALE_DAYS = 2
 AUTO_RETRIES = 8
+# A local ref lock held by another command in the same clone (two conversations noting at once): wait and fetch again, this
+# many times, before saying so (G 工位止血 1, card 280).  Seconds grow 0.2, 0.4, ... up to 1.6; about five seconds in all.
+LOCK_RETRIES = 6
+_sleep = time.sleep  # tests replace it
+
+
+def _lock_race(text: str) -> bool:
+    """True when Git failed only because another command in this clone holds a ref lock (not the network, not origin)."""
+
+    return "cannot lock ref" in text or "unable to update local ref" in text or ".lock': File exists" in text
 
 
 class ClaimError(RuntimeError):
     """The claim cannot be made or read; the message says why and what to do next."""
+
+
+class ClaimContentionError(ClaimError):
+    """Another command in this clone was updating the local claim refs at the same moment, and still was after the retries.
+
+    Not offline and not origin's fault: someone else just wrote (a note, a renewal).  Said in those words, never "离线" (card 280).
+    """
 
 
 def lease_duration() -> timedelta:
@@ -330,7 +348,7 @@ class ClaimService:
         # Compare-and-swap: create only if absent (previous == ""), or take over only if the branch still stands at the free tip we saw.
         result = self._run(["push", f"--force-with-lease={ref}:{previous}", self._remote, f"{commit}:{ref}"])
         if result.returncode == 0:
-            self._fetch()
+            self._refresh_after_push(card)
             return self._parse(card, commit, message)
         text = _decode(result.stderr)
         if "stale info" in text or "rejected" in text or "already exists" in text:
@@ -499,6 +517,10 @@ class ClaimService:
         Nothing is deleted: a commit marked ``reclaimed`` (who, why, when, on whose word) goes on top, so the history stays and the card is free.
         An ``active`` claim whose lease ran out is reclaimed the same way (TD-SW008-485): the user's word must be on record.  Only a
         claim that is already released or reclaimed is returned as it is, with ``written`` False.
+
+        A claim still inside its lease is never reclaimed, with or without the user's word (G 工位止血 2, card 280): its holder
+        opened, renewed or noted it within the last lease, so it is not silent, and a well-formed ``user-confirmation:`` written by
+        an agent could otherwise take a card someone is working on.  Wait for the lease to run out, or the holder releases it.
         """
 
         if not reason.strip():
@@ -509,6 +531,12 @@ class ClaimService:
         claim = self._find(card)
         if claim.status != "active":
             return claim  # already released or reclaimed: nothing to write
+        if not claim.free:
+            last = _decode(self._git(["show", "-s", "--format=%cI", claim.commit], allow_failure=True)).strip() or claim.claimed_at
+            raise ClaimError(
+                f"{claim.label()} 没到期（租到 {claim.expires_at}，最后动静 {last}）：没到期、有动静的占位谁都不能收，"
+                "带不带用户原话都一样。等租期过了再收，或请持有人自己 `claim release`"
+            )
         payload = self._payload(claim, "reclaimed")
         payload.update(
             {
@@ -544,17 +572,58 @@ class ClaimService:
         commit = self._commit(claim.card, payload, claim.commit)
         ref = f"{_CLAIM_REF}{claim.card}"
         result = self._run(["push", f"--force-with-lease={ref}:{claim.commit}", self._remote, f"{commit}:{ref}"], timeout=timeout)
-        if result.returncode != 0:
+        if result.returncode != 0 and not self._landed(claim.card, commit):
             raise ClaimError(f"{failure}：" + _decode(result.stderr).strip())
-        self._fetch(timeout=timeout)
+        self._refresh_after_push(claim.card, timeout=timeout)
         return replace(self._parse(claim.card, commit, f"claim {claim.card}\n" + json.dumps(payload, ensure_ascii=False)), written=True)
 
     # ── git plumbing ──────────────────────────────────────────────────
 
-    def _fetch(self, *, timeout: float | None = None) -> None:
-        result = self._run(["fetch", "--prune", self._remote, f"+{_CLAIM_REF}*:{_LOCAL_REF}*"], timeout=timeout)
-        if result.returncode != 0:
-            raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{_decode(result.stderr).strip()}")
+    def _fetch(self, *, timeout: float | None = None, card: str = "") -> None:
+        """Bring the local copies of the remote claims up to date.
+
+        Two commands in one clone (two conversations writing notes at once) race for the same local ref locks; the loser's fetch
+        fails with ``cannot lock ref`` although origin answered fine.  That is waited out and retried (``LOCK_RETRIES``).  When a
+        lock on *another* card's ref is still held after that, a command about one ``card`` fetches only that card's ref -- the
+        other card is none of its business.  Only a failure that is not a lock race is called offline (G 工位止血 1, card 280).
+        """
+
+        everything = ["fetch", "--prune", self._remote, f"+{_CLAIM_REF}*:{_LOCAL_REF}*"]
+        text = ""
+        for attempt in range(LOCK_RETRIES + 1):
+            result = self._run(everything, timeout=timeout)
+            if result.returncode == 0:
+                return
+            text = _decode(result.stderr).strip()
+            if not _lock_race(text):
+                raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{text}")
+            if card:
+                one = self._run(["fetch", self._remote, f"+{_CLAIM_REF}{card}:{_LOCAL_REF}{card}"], timeout=timeout)
+                if one.returncode == 0:
+                    return
+                text = _decode(one.stderr).strip() or text
+                if not _lock_race(text):
+                    raise ClaimError(f"无法读取远程占位（离线或没有 {self._remote}）：{text}")
+            if attempt < LOCK_RETRIES:
+                _sleep(min(0.2 * 2**attempt, 1.6))
+        raise ClaimContentionError(
+            f"别人刚记了一笔（本机的占位引用正被同一台电脑上的另一条命令更新），已重试 {LOCK_RETRIES} 次仍没读到；"
+            f"不是断网，过一会儿原样再跑一次。git 原文：{text}"
+        )
+
+    def _landed(self, card: str, commit: str) -> bool:
+        """True when origin's ``claims/<card>`` already points at ``commit`` (the push went through even if git reported a local error)."""
+
+        result = self._run(["ls-remote", self._remote, f"{_CLAIM_REF}{card}"])
+        return result.returncode == 0 and _decode(result.stdout).split("\t", 1)[0].strip() == commit
+
+    def _refresh_after_push(self, card: str, *, timeout: float | None = None) -> None:
+        """After a push that origin accepted, refresh the local copy; a failure here does not undo what origin already has."""
+
+        try:
+            self._fetch(timeout=timeout, card=card)
+        except ClaimError as error:
+            self.keepalive_warnings.append(f"卡 {card} 已经推上 {self._remote}，只是本机副本没刷新（{error}）；下次读占位时会补上")
 
     def _run(self, arguments: list[str], *, stdin: bytes | None = None, timeout: float | None = None) -> subprocess.CompletedProcess[bytes]:
         return run_git_bounded(
