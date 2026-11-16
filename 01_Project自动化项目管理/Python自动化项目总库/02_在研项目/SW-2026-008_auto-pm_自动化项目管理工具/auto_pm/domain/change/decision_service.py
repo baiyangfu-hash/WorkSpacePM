@@ -30,7 +30,7 @@ from auto_pm.contracts.user_evidence import (
     is_user_confirmation,
     names_an_agent,
 )
-from auto_pm.contracts.workspace_context import WorkspaceRegistry
+from auto_pm.contracts.workspace_context import WorkspaceProjectMapping, WorkspaceRegistry
 from auto_pm.infrastructure.control_root_guard import (
     ControlRootGuardError,
     require_control_root,
@@ -45,6 +45,15 @@ _RUNTIME_CHANGE_STATUSES = frozenset({"approved", "implementing"})
 # Change cabinets of a registered project: the five-process-group layout and the PLC template layout.
 _CHANGE_MONITOR_DIRS = ("04_监控", "11_监控")
 _PLAN_HASH = re.compile(r"[0-9a-f]{64}\Z")
+# The Workspace Registry's fields have one source, its models (contracts.workspace_context); the registry service writes and
+# checks through the same models.  This check used to keep its own copy of the field list, so when CHG-SCPT-2026-650 added
+# kind/status/status_before_delete to the model, every registry carrying them refused every Decision (DJ-2026-005 trial,
+# 2026-11-16).  Strictness is unchanged: a missing required field or a field the model does not know is still refused.
+_REGISTRY_TOP_FIELDS = frozenset(WorkspaceRegistry.model_fields)
+_REGISTRY_PROJECT_FIELDS = frozenset(WorkspaceProjectMapping.model_fields)
+_REGISTRY_REQUIRED_PROJECT_FIELDS = frozenset(
+    name for name, field in WorkspaceProjectMapping.model_fields.items() if field.is_required()
+)
 
 
 class DecisionError(Exception):
@@ -747,24 +756,22 @@ class DecisionService:
             if "\ufffd" in text:
                 raise DecisionValidationError("Workspace Registry 包含无效 UTF-8")
             payload = json.loads(text, object_pairs_hook=self._reject_duplicate_registry_fields)
-            if not isinstance(payload, dict) or set(payload) != {"schema_version", "projects"}:
+            if not isinstance(payload, dict) or set(payload) != _REGISTRY_TOP_FIELDS:
                 raise DecisionValidationError("Workspace Registry 顶层字段不完整或未知")
             projects = payload.get("projects")
             if not isinstance(projects, list):
                 raise DecisionValidationError("Workspace Registry projects 必须是数组")
-            required_project_fields = {"project_id", "project_root", "development_root"}
-            allowed_project_fields = required_project_fields | {
-                "control_project_id",
-                "control_pm_session",
-                "runtime_root",
-            }
             for item in projects:
-                if (
-                    not isinstance(item, dict)
-                    or not required_project_fields.issubset(item)
-                    or not set(item).issubset(allowed_project_fields)
-                ):
-                    raise DecisionValidationError("Workspace Registry project 字段不完整或未知")
+                if not isinstance(item, dict):
+                    raise DecisionValidationError("Workspace Registry project 字段不完整或未知：有一条不是对象")
+                missing = sorted(_REGISTRY_REQUIRED_PROJECT_FIELDS - set(item))
+                unknown = sorted(set(item) - _REGISTRY_PROJECT_FIELDS)
+                if missing or unknown:
+                    # Name the entry and the fields, so the one line to fix can be found (it used to say only "字段不完整或未知").
+                    raise DecisionValidationError(
+                        f"Workspace Registry project 字段不完整或未知：{str(item.get('project_id', ''))[:80] or '（没有 project_id）'}"
+                        f" 缺 {'、'.join(missing) or '无'}，多出 {'、'.join(unknown) or '无'}"
+                    )
             registry = WorkspaceRegistry.model_validate(payload)
         except DecisionError:
             raise
