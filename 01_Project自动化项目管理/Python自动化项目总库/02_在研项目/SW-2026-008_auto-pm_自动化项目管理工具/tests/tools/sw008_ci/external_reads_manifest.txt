@@ -25,6 +25,7 @@ tests/domain/test_secret_patterns.py
 tests/e2e/test_pmf_python.py
 tests/e2e/test_pmf_template_plc.py
 tests/e2e/test_raw_requirement_drill.py
+tests/e2e/test_launcher_keeps_the_run_worktree.py
 tests/e2e/test_release_pycache_drill.py
 tests/e2e/test_trial_run_drill.py
 tests/infrastructure/test_claude_settings_deny_rules.py

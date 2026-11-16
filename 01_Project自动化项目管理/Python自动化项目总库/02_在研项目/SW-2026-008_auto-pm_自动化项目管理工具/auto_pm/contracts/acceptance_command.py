@@ -25,6 +25,7 @@ __all__ = [
     "parse_command",
     "shell_fragility_problem",
     "with_git_quotepath",
+    "worktree_target_problem",
 ]
 
 #: Git prints non-ASCII path names as octal escapes ("\344\270\255") unless this is off.
@@ -227,8 +228,8 @@ def _targets_worktree(argv: tuple[str, ...]) -> bool:
     return any(WORKTREE_PLACEHOLDER in item or "worktrees" in item.replace("\\", "/") for item in argv[1:])
 
 
-def _runs_pytest_or_script(argv: tuple[str, ...]) -> bool:
-    """pytest, or a Python script other than ``main.py`` (cockpit commands are pointed at the worktree by environment)."""
+def _runs_pytest(argv: tuple[str, ...]) -> bool:
+    """``pytest …`` / ``py.test …`` or ``python -m pytest …``."""
 
     name = PurePath(argv[0].replace("\\", "/")).name.lower()
     if name.startswith(("pytest", "py.test")):
@@ -236,10 +237,42 @@ def _runs_pytest_or_script(argv: tuple[str, ...]) -> bool:
     if not _is_python(argv[0]):
         return False
     rest = argv[1:]
-    if "-m" in rest and rest.index("-m") + 1 < len(rest) and rest[rest.index("-m") + 1] == "pytest":
+    return "-m" in rest and rest.index("-m") + 1 < len(rest) and rest[rest.index("-m") + 1] == "pytest"
+
+
+def _runs_pytest_or_script(argv: tuple[str, ...]) -> bool:
+    """pytest, or a Python script other than ``main.py`` (cockpit commands are pointed at the worktree by environment)."""
+
+    if _runs_pytest(argv):
         return True
-    scripts = [item for item in rest if item.lower().endswith(".py")]
+    if not _is_python(argv[0]):
+        return False
+    scripts = [item for item in argv[1:] if item.lower().endswith(".py")]
     return bool(scripts) and PurePath(scripts[0].replace("\\", "/")).name.lower() != "main.py"
+
+
+def worktree_target_problem(text: str, *, windows: bool | None = None) -> str:
+    """Why a pytest command would judge the control root instead of the Run's worktree, or an empty string.
+
+    ``pm verify`` runs approved commands from the control root.  ``main.py`` cockpit commands are pointed at the worktree
+    by environment (the launcher keeps it, DJ-2026-005 trial A2), but pytest collects whatever its paths name relative to
+    that directory: without ``{worktree}`` (or an explicit ``.auto-pm/worktrees/…`` path) it tests the control root's
+    files, and passes or fails on code the Run never touched (trial round 4 P-3).  Refused at plan time.  A Python script
+    keeps only the hint (:func:`command_hints`): it may read ``AUTO_PM_RUN_WORKTREE`` itself, which the text cannot show.
+    A command that cannot be parsed is not judged here (:func:`command_problem` reports it).
+    """
+
+    try:
+        argv = parse_command(text, windows=windows).argv
+    except AcceptanceCommandError:
+        return ""
+    if not _runs_pytest(argv) or _targets_worktree(argv):
+        return ""
+    return (
+        "pytest 命令在控制根里运行，没写工位路径就测的是控制根的文件，不是本任务工位里改的文件（会假绿或假红）："
+        f"测试路径写成 {WORKTREE_PLACEHOLDER}/…（验证时换成工位路径），例如 "
+        f"python -m pytest {WORKTREE_PLACEHOLDER}/<项目目录>/tests -q"
+    )
 
 
 def _non_ascii(value: str) -> bool:
@@ -254,7 +287,8 @@ def command_hints(text: str, *, windows: bool | None = None) -> tuple[str, ...]:
     except AcceptanceCommandError:
         return ()
     hints: list[str] = []
-    if _runs_pytest_or_script(argv) and not _targets_worktree(argv):
+    # pytest without the worktree is refused outright (:func:`worktree_target_problem`); only scripts get the advice.
+    if _runs_pytest_or_script(argv) and not _runs_pytest(argv) and not _targets_worktree(argv):
         hints.append(
             "pytest 或脚本命令在控制根里运行，默认检查的是控制根的文件，不是本任务工位里改的文件：路径写成 "
             f"{WORKTREE_PLACEHOLDER}/…（验证时换成工位路径），或让脚本自己读环境变量 AUTO_PM_RUN_WORKTREE；"
