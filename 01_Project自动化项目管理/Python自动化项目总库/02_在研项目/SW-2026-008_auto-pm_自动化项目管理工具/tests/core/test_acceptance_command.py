@@ -15,6 +15,7 @@ from auto_pm.contracts.acceptance_command import (
     parse_command,
     shell_fragility_problem,
     with_git_quotepath,
+    worktree_target_problem,
 )
 from auto_pm.contracts.plan_checklist import (
     AcceptanceCheck,
@@ -152,17 +153,17 @@ def _problems(*commands: str) -> tuple[str, ...]:
 
 
 def test_the_plan_checklist_names_the_command_that_cannot_run_without_a_shell() -> None:
-    problems = _problems("python -m pytest -q", "pytest && ruff check")
+    problems = _problems("python -m pytest {worktree}/tests -q", "pytest && ruff check")
     assert len(problems) == 1
     assert problems[0].startswith("⑤第 2 条验收命令不能照原文执行") and "shell 符号" in problems[0]
 
 
 def test_a_plan_with_plain_commands_has_no_problem() -> None:
-    assert _problems("python -m pytest -q", "python main.py plc check DJ-2026-011") == ()
+    assert _problems("python -m pytest {worktree}/tests -q", "python main.py plc check DJ-2026-011") == ()
 
 
 def test_a_blank_command_is_reported_once_by_the_count_rule_only() -> None:
-    problems = _problems("python -m pytest", "  ")
+    problems = _problems("python -m pytest {worktree}/tests", "  ")
     assert len(problems) == 1 and "每条验收标准的命令和退出码" in problems[0]
 
 
@@ -172,15 +173,59 @@ def test_a_blank_command_is_reported_once_by_the_count_rule_only() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        "python -m pytest tests/test_alarm.py -q",
-        "pytest tests -q",
         "python scripts/check_io.py",
-        r".venv\Scripts\python.exe -m pytest tests",
+        r".venv\Scripts\python.exe -B scripts\check_io.py --strict",
     ],
 )
-def test_pytest_and_scripts_that_do_not_name_the_worktree_get_the_hint(command: str) -> None:
+def test_scripts_that_do_not_name_the_worktree_get_the_hint(command: str) -> None:
     hints = command_hints(command, windows=True)
     assert len(hints) == 1 and "控制根" in hints[0] and "{worktree}" in hints[0] and "AUTO_PM_RUN_WORKTREE" in hints[0]
+    assert worktree_target_problem(command, windows=True) == ""  # a script may read AUTO_PM_RUN_WORKTREE itself
+
+
+PYTEST_ON_THE_CONTROL_ROOT = (
+    "python -m pytest tests/test_alarm.py -q",
+    "pytest tests -q",
+    "pytest",
+    "python -m pytest -q",
+    r".venv\Scripts\python.exe -m pytest tests",
+    r".venv\Scripts\python.exe -B -m pytest 0100_PLC自动化\SW-2026-901\tests -q",
+    "py.test tests",
+)
+
+
+@pytest.mark.parametrize("command", PYTEST_ON_THE_CONTROL_ROOT)
+def test_a_pytest_command_that_does_not_name_the_worktree_is_refused_not_just_hinted(command: str) -> None:
+    """Trial round 4 P-3: run from the control root, it tests files the Run never touched (false green or false red)."""
+    problem = worktree_target_problem(command, windows=True)
+    assert "控制根" in problem and "{worktree}" in problem
+    assert command_hints(command, windows=True) == ()  # refused instead; no duplicate advice
+
+
+# The plan checklist parses with this platform's rules: only the forms that read the same on both are used here.
+@pytest.mark.parametrize("command", [text for text in PYTEST_ON_THE_CONTROL_ROOT if "\\" not in text])
+def test_the_plan_checklist_refuses_a_pytest_command_that_does_not_name_the_worktree(command: str) -> None:
+    problems = _problems(command)
+    assert len(problems) == 1 and problems[0].startswith("⑤第 1 条验收命令不能照原文执行") and "{worktree}" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -m pytest {worktree}/tests/test_alarm.py -q",
+        r".venv\Scripts\python.exe -m pytest {worktree}\0100_PLC自动化\SW-2026-901\tests -q",
+        "python -m pytest .auto-pm/worktrees/trae/tests -q",
+        "pytest --rootdir {worktree} {worktree}/tests",
+    ],
+)
+def test_a_pytest_command_that_names_the_worktree_is_not_refused(command: str) -> None:
+    assert worktree_target_problem(command, windows=True) == ""
+    if "\\" not in command:
+        assert _problems(command) == ()
+
+
+def test_the_worktree_rule_leaves_unparsable_text_to_command_problem() -> None:
+    assert worktree_target_problem("pytest && x", windows=False) == ""
 
 
 @pytest.mark.parametrize(
