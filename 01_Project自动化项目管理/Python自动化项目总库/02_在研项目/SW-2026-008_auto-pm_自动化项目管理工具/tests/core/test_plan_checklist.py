@@ -60,7 +60,7 @@ def _filled(**overrides: object) -> PlanChecklist:
         "safety_circuit": "否",
         "acceptance_checks": (
             AcceptanceCheck(command="python main.py plc check DJ-2026-011", expected_exit_code=0),
-            AcceptanceCheck(command="python -m pytest tests/test_alarm_reset.py", expected_exit_code=0),
+            AcceptanceCheck(command="python -m pytest {worktree}/tests/test_alarm_reset.py", expected_exit_code=0),
         ),
         "rollback": ROLLBACK,
     }
@@ -313,7 +313,7 @@ def test_pm_plan_refuses_an_undecided_safety_answer_and_a_bad_check(tmp_path: Pa
     _setup_planning(tmp_path)
     base = ("--original-request", "加报警汇总", "--rollback", ROLLBACK)
     undecided = CliRunner().invoke(
-        cli, ["-w", str(tmp_path), "pm", *_plan_args(*base, "--safety-circuit", "不确定", "--check", "pytest => 0")]
+        cli, ["-w", str(tmp_path), "pm", *_plan_args(*base, "--safety-circuit", "不确定", "--check", "pytest {worktree}/tests => 0")]
     )
     bad_check = CliRunner().invoke(
         cli, ["-w", str(tmp_path), "pm", *_plan_args(*base, "--safety-circuit", "否", "--check", "pytest")]
@@ -331,7 +331,7 @@ def test_pm_plan_with_all_seven_fields_passes(tmp_path: Path) -> None:
             "-w", str(tmp_path), "pm",
             *_plan_args(
                 "--original-request", "加报警汇总", "--safety-circuit", "否",
-                "--check", "python -m pytest tests/test_alarm.py => 0", "--rollback", ROLLBACK,
+                "--check", "python -m pytest {worktree}/tests/test_alarm.py => 0", "--rollback", ROLLBACK,
             ),
         ],
     )
