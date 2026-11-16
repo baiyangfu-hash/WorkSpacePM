@@ -292,6 +292,174 @@ def test_shared_pointers_headings_and_code_blocks_are_not_copies(tmp_path: Path)
     assert _codes(roles, workspace) == set()
 
 
+LONG_MASTER_LINE = (
+    "1. **先对账再动手**：这一句是正本长条文里的第一句，单独拿出来也有二十个字以上；"
+    "后面这一句也够长，讲的是另一件事，岗位说明同样不许抄。\n"
+)
+FIRST_SENTENCE = "**先对账再动手**：这一句是正本长条文里的第一句，单独拿出来也有二十个字以上"
+
+
+def _with_agents_line(tmp_path: Path) -> tuple[Path, Path]:
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("# 入口\n\n" + LONG_MASTER_LINE, encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    return roles, workspace
+
+
+def _add_to_pack(roles: Path, text: str) -> None:
+    (roles / "engineer-demo" / "SKILL.md").write_text(_skill("engineer-demo", PACK_BODY + text), encoding="utf-8")
+
+
+ONE_SENTENCE = "这一整行只有一句话，讲的是先对账再动手，岗位说明里不许再抄"
+
+
+@pytest.mark.parametrize("marker", ["", "- ", "* ", "2. ", "（3）", "> ", "- [ ] "])
+def test_a_numbered_master_line_copied_behind_another_list_marker_is_refused(tmp_path: Path, marker: str) -> None:
+    """JB8R on #834 (L2): a whole AGENTS.md line copied with "- " in front of it slipped past a whole-line compare."""
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n3. {ONE_SENTENCE}\n", encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, f"\n{marker}{ONE_SENTENCE}\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_a_master_line_numbered_inside_bold_marks_is_compared_without_its_number(tmp_path: Path) -> None:
+    """``**3.** 规矩`` is numbered like ``3. 规矩``: the bold marks come off before the number does."""
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n**3.** {ONE_SENTENCE}\n", encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, f"\n- {ONE_SENTENCE}\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_a_master_line_copied_with_bold_or_code_marks_added_is_refused(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n{ONE_SENTENCE}\n", encoding="utf-8")
+    _add_to_pack(roles, "\n**" + ONE_SENTENCE.replace("先对账再动手", "`先对账再动手`") + "**\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_one_sentence_of_a_long_master_line_is_refused(tmp_path: Path) -> None:
+    """JB8R on #834 (L1): only the first sentence of a long AGENTS.md line was copied."""
+    roles, workspace = _with_agents_line(tmp_path)
+    _add_to_pack(roles, "\n" + FIRST_SENTENCE + "。\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "照岗位的习惯写一句开头，" + FIRST_SENTENCE + "，再接一句岗位自己的话。\n",
+        "| 规矩 | " + FIRST_SENTENCE + " |\n",
+    ],
+)
+def test_a_master_sentence_set_inside_other_words_or_a_table_cell_is_refused(tmp_path: Path, line: str) -> None:
+    """The copied sentence sits inside a longer line of the pack, not on a line of its own."""
+    roles, workspace = _with_agents_line(tmp_path)
+    _add_to_pack(roles, "\n" + line)
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_a_line_copied_from_a_shared_ref_subfolder_is_refused(tmp_path: Path) -> None:
+    """JB8R on #834 (L3): roles/shared/refs/agents_附录/ was not read because only the top level was scanned."""
+    roles, workspace = _workspace(tmp_path)
+    appendix = roles / "shared" / "refs" / "agents_附录"
+    appendix.mkdir()
+    (appendix / "01_命令速查.md").write_text("# 速查\n\n" + SHARED_LINE, encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, SHARED_LINE)
+    messages = [item.message for item in RolePackService(roles, workspace).check().findings if item.code == "RP-010"]
+    assert messages and "shared/refs/agents_附录/01_命令速查.md" in messages[0]
+
+
+def test_a_pointer_in_one_sentence_does_not_hide_the_rule_next_to_it(tmp_path: Path) -> None:
+    """A master line that names a shared file is a pointer only in that sentence; its other sentences stay masters."""
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n照 `../shared/refs/skill_coordination.md` 做；{ONE_SENTENCE}。\n", encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, f"\n{ONE_SENTENCE}。\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_quoting_a_command_or_pointing_at_a_shared_folder_is_not_a_copy(tmp_path: Path) -> None:
+    """Commands and folder pointers are names every pack may write; only Chinese prose counts as a copied rule."""
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(
+        "# 入口\n\n| 4 | ledger reconcile <项目编号> | 不加 --fix |\n\n细则见 `roles/shared/refs/agents_附录/`\n", encoding="utf-8"
+    )
+    _add_to_pack(roles, "\n收口后跑 `main.py ledger reconcile <项目编号>`，细则见 `roles/shared/refs/agents_附录/`。\n")
+    assert _codes(roles, workspace) == set()
+
+
+def test_short_sentences_alone_are_not_copies_but_together_they_are(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("# 入口\n\n先读正本再动手。改完先跑一遍检查，不要跳过。\n", encoding="utf-8")
+    _add_to_pack(roles, "\n先读正本再动手。\n")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, "\n- 先读正本再动手。改完先跑一遍检查，不要跳过。\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+SECOND_SENTENCE = "第二句也要够长才行，讲的是收口以后一定要跑对账命令，不能跳过"
+# Layouts the audit pre-check of the follow-up card tried; the first five slipped past a sentence-by-sentence compare.
+OTHER_LAYOUTS = {
+    "wrapped_over_two_lines": f"\n{ONE_SENTENCE[:12]}\n{ONE_SENTENCE[12:]}\n",
+    "space_put_in": f"\n{ONE_SENTENCE[:10]} {ONE_SENTENCE[10:]}\n",
+    "half_width_commas": "\n" + ONE_SENTENCE.replace("，", ",") + "\n",
+    "made_a_heading": f"\n### {ONE_SENTENCE}\n",
+    "put_in_a_code_block": f"\n```text\n{ONE_SENTENCE}\n```\n",
+    "pointer_put_after": f"\n{ONE_SENTENCE}（见 `../shared/refs/skill_coordination.md`）。\n",
+    "html_comment": f"\n<!-- {ONE_SENTENCE} -->\n",
+    "link_text": f"\n[{ONE_SENTENCE}](https://example.com)\n",
+    "nested_quote_and_list": f"\n> > - {ONE_SENTENCE}\n",
+    "sentences_swapped": f"\n{SECOND_SENTENCE}。{ONE_SENTENCE}。\n",
+}
+
+
+@pytest.mark.parametrize("layout", sorted(OTHER_LAYOUTS))
+def test_a_master_sentence_copied_in_another_layout_is_refused(tmp_path: Path, layout: str) -> None:
+    """Root fix: both sides are compared as a skeleton, so no spacing, punctuation or markdown trick hides a copy."""
+    roles, workspace = _workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n{ONE_SENTENCE}。{SECOND_SENTENCE}。\n", encoding="utf-8")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, OTHER_LAYOUTS[layout])
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_a_pack_sentence_put_in_another_packs_code_block_is_refused(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    _add_to_pack(roles, f"\n{ONE_SENTENCE}\n")
+    _second_pack(roles, f"# Twin\n\n```\n{ONE_SENTENCE}\n```\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_naming_a_long_master_heading_to_point_at_it_is_not_a_copy(tmp_path: Path) -> None:
+    """A heading is a section's name; a pack that names it is pointing, not copying."""
+    roles, workspace = _workspace(tmp_path)
+    heading = "多 agent 工位与控制根规则，每台电脑只克隆一次 (WS-001)"
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n## {heading}\n\n短句。\n", encoding="utf-8")
+    _add_to_pack(roles, f"\n开工位前照 AGENTS.md 的“{heading}”一节做。\n")
+    assert _codes(roles, workspace) == set()
+
+
+def test_a_pack_sentence_that_contains_a_short_master_table_header_is_not_a_copy(tmp_path: Path) -> None:
+    """JB8R on #838 (WARN-1): a table header is long on the page but short once its bars and spaces are gone; a
+    pack's own sentence that holds those few words is not a copy, while a whole long row copied still is."""
+    roles, workspace = _workspace(tmp_path)
+    row = "| 本机 Claude Code（含在 VS Code 里跑的） | `R/.auto-pm/worktrees/claude` | `claude/` |"
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n| agent | 工位 | 分支前缀 |\n|------|------|------|\n{row}\n", encoding="utf-8")
+    _add_to_pack(roles, "\n按 agent 工位分支前缀的对照来起分支名，PLC 卡也一样。\n")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, f"\n{row}\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
+def test_a_master_section_line_copied_behind_a_marker_is_refused_by_rp008(tmp_path: Path) -> None:
+    roles, workspace = _workspace(tmp_path)
+    _add_to_pack(roles, "\n> 这一行足够长，有二十个字以上，抄进角色包就算抄了正本的内容\n")
+    assert any("抄了正本" in message for message in _messages(roles, workspace))
+
+
 def test_front_matter_split_handles_crlf_and_none() -> None:
     meta, body = split_front_matter('---\r\nname: a\r\ndescription: "b"\r\n---\r\nbody\r\n')
     assert meta == {"name": "a", "description": "b"} and body == "body\n"
