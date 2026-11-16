@@ -11,7 +11,6 @@ updated: 2026-09-09
 author: Codex（架构师/PM）
 canonical_path: "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/056_跨Agent工作连续性与恢复协议_PM.md"
 tags: [连续性, Resume, Handoff, Work, Run, Checkpoint, Agent]
-parent: "[[010_通用项目管理规范_PM|010_通用项目管理规范]]"
 related:
   - "[[033_功能模块迭代流程标准_PM]]"
   - "[[042_通用变更管理流程规范_PM]]"
