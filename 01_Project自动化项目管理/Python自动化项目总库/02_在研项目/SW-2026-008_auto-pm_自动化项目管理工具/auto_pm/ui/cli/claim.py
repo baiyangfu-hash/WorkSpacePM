@@ -22,7 +22,7 @@ from auto_pm.application.core.claim_note_service import (
     ClaimNoteService,
     Note,
 )
-from auto_pm.application.core.claim_service import ClaimError, ClaimService
+from auto_pm.application.core.claim_service import ClaimContentionError, ClaimError, ClaimService
 
 
 def _root(ctx: click.Context) -> str:
@@ -146,7 +146,7 @@ def list_claims(ctx: click.Context, as_json: bool, no_fetch: bool) -> None:
         claims = _service(ctx).all_claims(fetch=not no_fetch)
     except ClaimError as error:
         click.echo(f"错误 {error}", err=True)
-        if not no_fetch:
+        if not no_fetch and not isinstance(error, ClaimContentionError):  # 本机抢锁不是离线（卡 280），错误原文已说清
             click.echo("离线或连不上 GitHub 时，可加 --no-fetch 看本机上次抓到的占位（可能不是最新，不能当作没人占着）", err=True)
         raise SystemExit(2) from error
     if no_fetch:
@@ -327,12 +327,17 @@ def note_claim(
         return
     except ClaimError as error:
         click.echo(f"错误 {error}", err=True)
-        click.echo("这一笔没有记上，也没有存在本机。联网后原样重记：", err=True)
+        if isinstance(error, ClaimContentionError):  # 本机抢写，不是断网（卡 280）
+            click.echo("这一笔没有记上，也没有存在本机。别人刚记了一笔、已重试；过一会儿原样重记：", err=True)
+        else:
+            click.echo("这一笔没有记上，也没有存在本机。联网后原样重记：", err=True)
         click.echo(json.dumps({"card": card, **{key: value for key, value in arguments.items() if value not in ("", None, ())}}, ensure_ascii=False), err=True)
         raise SystemExit(2) from error
     if as_json:
         click.echo(json.dumps(note.as_json(), ensure_ascii=False, indent=2))
         return
+    if note.retries:
+        click.echo(f"别人刚记了一笔，已重试 {note.retries} 次，放在它后面记上了")
     click.echo(f"已记第 {note.sequence} 笔（{KINDS[note.kind]}，记录 {note.commit[:12]}）；下一棒：{note.text('to')}，{note.text('next')}")
 
 
@@ -350,7 +355,7 @@ def log_claim(ctx: click.Context, card: str, as_json: bool, no_fetch: bool) -> N
         return
     except ClaimError as error:
         click.echo(f"错误 {error}", err=True)
-        if not no_fetch:
+        if not no_fetch and not isinstance(error, ClaimContentionError):  # 本机抢锁不是离线（卡 280），错误原文已说清
             click.echo("离线或连不上 GitHub 时，可加 --no-fetch 看本机上次抓到的记录（可能不是最新）", err=True)
         raise SystemExit(2) from error
     if no_fetch:

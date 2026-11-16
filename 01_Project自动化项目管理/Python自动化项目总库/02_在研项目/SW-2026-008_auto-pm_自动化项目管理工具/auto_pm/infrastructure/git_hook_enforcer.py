@@ -842,11 +842,47 @@ def enforce_pre_commit(
     )
     if snapshot is None:
         return 1
+    run_code = _enforce_no_open_run(workspace_root, control_root)
     ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
     plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
     secret_code = _enforce_secret_scan(workspace_root)
     ignored_code = _enforce_ignored_additions(workspace_root)
-    return 1 if ledger_code != 0 or plc_code != 0 or secret_code != 0 or ignored_code != 0 else 0
+    return 1 if run_code != 0 or ledger_code != 0 or plc_code != 0 or secret_code != 0 or ignored_code != 0 else 0
+
+
+def _enforce_no_open_run(workspace_root: Path, control_root: Path | None) -> int:
+    """工位里有没收口的 Run 就拒绝提交（G 工位止血第 3 条，卡 280；试车九条第 5 条）。
+
+    Run 开工时记下工位的提交号，``pm verify`` 按它取证；Run 开着时在工位里提交，HEAD 一挪，这个 Run 的证据就作废了。
+    以前钩子只看提交说明里有没有单号，写上单号就提交成了。控制根本身不是哪个 Run 的工位；本机没有账本（云端克隆、
+    没登记过 Run）就没有 Run 可查，照旧放行。账本在却读不出来时拒绝：分不清有没有开着的 Run，不当作没有。
+    """
+    if control_root is None:
+        return 0
+    try:
+        if workspace_root.resolve() == control_root.resolve():
+            return 0
+    except OSError:
+        return 0
+    if not (control_root / ".auto-pm" / "continuity.db").is_file():
+        return 0
+    from auto_pm.contracts.run_open_commit import run_open_commit_hint
+    from auto_pm.infrastructure.continuity_store import ContinuityStore
+
+    try:
+        runs = ContinuityStore(control_root).list_open_runs_in_worktree(workspace_root)
+    except Exception as exc:  # noqa: BLE001 - any read failure means "cannot tell", which refuses
+        print(f"❌ [auto-pm pre-commit] 物理拦截：读不出账本里这个工位有没有开着的 Run，为防止证据作废已拒绝提交：{exc}")
+        return 1
+    if not runs:
+        return 0
+    run = runs[0]
+    print("=" * 70)
+    print(f"❌ [auto-pm pre-commit] 物理拦截：{run_open_commit_hint(run.git_head)}")
+    print(f"   Run {run.run_id}（{getattr(run.state, 'value', run.state)}）在这个工位：{workspace_root}")
+    print("   改动留在工作树里不用提交，pm verify 按 Run 记的提交号取证；收口后由驾驶舱按字节并回控制根。")
+    print("=" * 70)
+    return 1
 
 
 def _enforce_ignored_additions(workspace_root: Path) -> int:

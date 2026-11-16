@@ -1194,6 +1194,11 @@ class AgentWorktreeService:
             )
         if agent is not None:
             return SweepItem(target, "other", False, f"本次只清 {agent} 的工位")
+        if _detached_candidate(station):
+            hold = self._detached_hold(station)
+            if hold:
+                return SweepItem(target, "other", False, hold)
+            return SweepItem(target, "other", True, _detached_verdict(station))
         refusal = self._refusal(station)
         if refusal:
             return SweepItem(target, "other", False, refusal)
@@ -1203,6 +1208,25 @@ class AgentWorktreeService:
         if not station.merged:
             return SweepItem(target, "other", False, "分支还没并进 main，在做的活，保留")
         return SweepItem(target, "other", True, f"{station.branch} 已并进 main，目录干净")
+
+    def _detached_hold(self, station: Station) -> str:
+        """Why a hand-made detached directory must be kept ("" when ``sweep --apply`` may remove it) (G 工位止血, card 280).
+
+        ``git worktree add --detach`` (gate runs, hand checks) leaves a directory on no branch, so the branch rules cannot judge
+        it.  It may go when nothing in it can be lost and nothing uses it: no uncommitted or ignored file, HEAD already in
+        ``origin/main`` (so every commit is on GitHub), and no long job (``long-run``) still running in it.  Each of those is read
+        from a real record -- the work tree, Git, ``.auto-pm/long-run/*/status.json`` -- never guessed.
+        """
+
+        if station.dirty_paths:  # detached 目录里有改动（和 _refusal 同一句；行尾注释让 agent_worktree_mutants 的原文仍唯一）
+            shown = "、".join(station.dirty_paths[:3])
+            more = f" 等 {len(station.dirty_paths)} 个" if len(station.dirty_paths) > 3 else ""
+            return f"有未提交的改动：{shown}{more}；先提交或交给用户决定"
+        if station.ignored_paths:
+            return self._other_hold(station)
+        if not station.merged:
+            return f"不在分支上（detached HEAD {station.head[:12]}），这个提交不在 origin/main 上，里面可能有没交出去的提交；保留"
+        return _long_run_using(self._root, station.path)
 
     @staticmethod
     def _other_hold(station: Station) -> str:
@@ -1277,6 +1301,8 @@ class AgentWorktreeService:
             "rescue_ref": "",
         }
         try:
+            if via != "sweep" and _detached_candidate(station):
+                raise StationRefusedError(f"不删 {station.path}：手工开的 detached 目录只由用户 sweep 清，{via} 不动它")
             result = self._remove_station_checked(station, require_merged=require_merged)
         except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
             record.update(
@@ -1308,6 +1334,13 @@ class AgentWorktreeService:
             ),
             idle_seconds=_idle_seconds(station.path),
         )
+        if _detached_candidate(fresh):  # only sweep gets here (``_remove_station`` refuses every other way in)
+            hold = self._detached_hold(fresh)
+            if hold:
+                raise StationRefusedError(f"不删 {station.path}：{hold}")
+            if info.head != station.head:
+                raise StationRefusedError(f"不删 {station.path}：HEAD 从 {station.head[:12]} 变成了 {info.head[:12]}，有人在用")
+            return self._remove_detached(station)
         self._require_removable(fresh)
         if fresh.kind == "other":
             hold = self._other_hold(fresh)
@@ -1333,6 +1366,15 @@ class AgentWorktreeService:
         return CloseResult(
             path=station.path, branch=station.branch, branch_deleted=deleted, note=note
         )
+
+    def _remove_detached(self, station: Station) -> CloseResult:
+        removed = self._git("worktree", "remove", str(station.path))
+        if removed.returncode != 0:
+            leftover = _broken_reason(station.path)
+            warning = f"。注意：{leftover}；用 `worktree list` 看现状，人工处理" if leftover else ""
+            raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}{warning}")
+        self._clear_borrow(station.path.name)
+        return CloseResult(path=station.path, branch="", branch_deleted=False, note=_detached_verdict(station) + "；没有分支可删")
 
     def _delete_local_branch(self, branch: str, *, require_merged: bool) -> bool:
         ref = f"refs/heads/{branch}"
@@ -1725,3 +1767,56 @@ def _tree_size(path: Path) -> int:
             except OSError:
                 continue
     return total
+
+
+LONG_RUN_LIVE_STATES = ("STARTING", "RUNNING")
+
+
+def _detached_candidate(station: Station) -> bool:
+    """A registered, checked directory outside the roster that sits on no branch (``git worktree add --detach``)."""
+
+    return station.kind == "other" and station.registered and station.checked and not station.broken and not station.locked \
+        and not station.branch and bool(station.head)
+
+
+def _detached_verdict(station: Station) -> str:
+    what = "门禁目录" if station.name.lower().startswith("gate") else "手工开的 detached 目录"
+    return f"{what}，不在分支上（detached HEAD {station.head[:12]}），这个提交已在 origin/main 上，目录干净，没有长任务在用"
+
+
+def _long_run_using(root: Path, path: Path) -> str:
+    """Why a long job may still be using ``path`` ("" when no record says so).
+
+    Reads ``<root>/.auto-pm/long-run/<task>/status.json`` (``long-run start`` writes ``cwd``, ``worktree`` and the command).  A task in
+    STARTING or RUNNING whose working directory or judged work tree is ``path`` or inside it, or whose command names ``path``, holds the
+    directory.  A record that cannot be read cannot prove anything, so it holds the directory too.
+    """
+
+    base = root / ".auto-pm" / "long-run"
+    if not base.is_dir():
+        return ""
+    target = path.resolve()
+    for task in sorted(child for child in base.iterdir() if child.is_dir()):
+        status_file = task / "status.json"
+        if not status_file.is_file():
+            continue
+        try:
+            status = json.loads(status_file.read_text(encoding="utf-8", errors="replace"))  # lenient-decode: 只读状态和路径，读坏也当“分不出”保留
+        except (OSError, ValueError) as error:
+            return f"长任务 {task.name} 的状态读不出（{type(error).__name__}），分不出它用不用这个目录；保留"
+        if not isinstance(status, dict) or str(status.get("state", "")) not in LONG_RUN_LIVE_STATES:
+            continue
+        used = [str(status.get(key) or "") for key in ("cwd", "worktree")]
+        inside = any(_inside(Path(value), target) for value in used if value)
+        named = str(target) in str(status.get("command_text") or "") or str(path) in str(status.get("command_text") or "")
+        if inside or named:
+            return f"长任务 {task.name}（{status.get('state')}）正用着这个目录；跑完以后再清"
+    return ""
+
+
+def _inside(candidate: Path, target: Path) -> bool:
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+    return resolved == target or target in resolved.parents

@@ -220,12 +220,14 @@ def test_reclaim_needs_the_users_word_and_frees_the_card_without_deleting_it(pai
     with pytest.raises(ClaimError, match="必须写明原因"):
         pair.cloud.reclaim("332", by="trae", reason=" ", approval_ref="user-confirmation:cmsg_0123456789")
     assert not next(c for c in pair.cloud.all_claims() if c.card == "332").free, "refused calls changed nothing"
+    _set_expiry(pair, "332", "2020-01-01T00:00:00+00:00")  # 卡 280：没到期的占位谁都不能收，先让它过期（没到期被拒见 test_claim_reclaim_active.py）
 
     taken = pair.cloud.reclaim("332", by="trae", reason="没动静", approval_ref="user-confirmation:cmsg_0123456789")
 
     assert taken.status == "reclaimed" and taken.free
     again = pair.cloud.open("332", paths=["p/a"], goal="接手", owner="trae", machine="cloud")
     assert again.owner == "trae", "a reclaimed card can be claimed again, on top of the old history"
+    _set_expiry(pair, "332", "2020-01-01T00:00:00+00:00")
     assert pair.cloud.reclaim("332", by="trae", reason="再收", approval_ref="user-confirmation:cmsg_0123456789").status == "reclaimed"
 
 
@@ -253,6 +255,7 @@ def test_reclaim_refuses_a_reference_that_is_only_the_prefix_and_records_who_why
 
     with pytest.raises(ClaimError, match="只听用户的"):
         pair.cloud.reclaim("335", by="trae", reason="没动静", approval_ref="user-confirmation:ab")
+    _set_expiry(pair, "335", "2020-01-01T00:00:00+00:00")  # 卡 280：没到期的占位谁都不能收
 
     taken = pair.cloud.reclaim("335", by="trae", reason="没动静", approval_ref="user-confirmation:cmsg_0123456789")
 

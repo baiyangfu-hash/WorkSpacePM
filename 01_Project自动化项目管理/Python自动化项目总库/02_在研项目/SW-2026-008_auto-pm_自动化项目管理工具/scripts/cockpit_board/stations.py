@@ -246,8 +246,10 @@ def build_view(
             action = Action("close", "收工位", CLOSE_SUMMARY, ("worktree", "close", name), name, _facts(row))
         else:
             warning = in_use
+            # 确认框照抄清理清单这一项的判词：门禁目录还是手工 detached 目录、HEAD 是哪个提交、有没有长任务在用（G 工位止血，卡 280）
+            verdict = (("清理清单判词", str(item.get("reason") or "（没写原因）")),) if item else ()
             action = Action("sweep_one", "清理", SWEEP_ONE_SUMMARY, ("worktree", "sweep", "--apply", "--only", name, "--no-fetch"),
-                            name, _facts(row))
+                            name, _facts(row) + verdict)
             if human_block:
                 blocked = human_block
             elif running:  # 门禁正跑着时它的目录也是名册外的：分不出是哪一个，就都不放（项目经理 14:15Z：gate-f90fef3 谁都不动）

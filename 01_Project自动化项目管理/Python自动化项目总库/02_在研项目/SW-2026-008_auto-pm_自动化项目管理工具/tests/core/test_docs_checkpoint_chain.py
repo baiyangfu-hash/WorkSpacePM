@@ -264,5 +264,5 @@ def test_d3_d4_a_foreign_dirty_file_and_a_moved_head_explain_what_to_do(tmp_path
          "commit", "-qm", "work commit"],
         check=True,
     )
-    with pytest.raises(ContinuityExecutionError, match=r"HEAD 不一致.*continuity run start"):
+    with pytest.raises(ContinuityExecutionError, match=r"HEAD 不一致.*reset --soft [0-9a-f]{40}.*不要把 Run 转 FAILED"):
         _append_docs(service, candidate)

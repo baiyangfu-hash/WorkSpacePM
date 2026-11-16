@@ -27,6 +27,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from auto_pm.contracts.continuity import RunItem
+from auto_pm.contracts.run_open_commit import run_open_commit_hint
 from auto_pm.domain.models.plc import LANGUAGE_SERVICE_CHECK
 from auto_pm.domain.plc.baseline_compare import diff_failures, lint_failure_keys
 from auto_pm.domain.plc.language_service import LanguageService
@@ -896,9 +897,12 @@ class EvidenceCollectionService:
             raise EvidenceCollectionError(str(error)) from error
         if observed_head != run.git_head:
             raise EvidenceCollectionError(
-                "Run git_head 与受管 worktree 当前 HEAD 不一致；Run 开工之后工作树里提交过或换过分支，"
-                "这个 Run 的证据作废。验证前不要在 Run 的工作树里提交；"
-                "处理：把该 Run 转 FAILED，在当前 HEAD 上用 continuity run start 开新 Run，再 pm verify"
+                run_open_commit_hint(run.git_head)
+                + f"（Run git_head 与受管 worktree 当前 HEAD 不一致：Run 记的是 {run.git_head}，工位现在是 {observed_head}；"
+                "Run 开工之后在工位里提交过。）处理：撤回提交、改动原样留在暂存区："
+                f"git -C \"{candidate}\" reset --soft {run.git_head}，再 pm verify；"
+                "换过分支的，先切回开工时的分支再撤回。不要把 Run 转 FAILED：作业票会跟着转受阻，新 Run 开不出来。"
+                "验证收口以前不要在 Run 的工作树里提交"
             )
         return candidate, observed_head
 
