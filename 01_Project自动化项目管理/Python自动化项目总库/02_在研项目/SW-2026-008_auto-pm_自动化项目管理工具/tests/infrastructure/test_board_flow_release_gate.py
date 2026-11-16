@@ -59,8 +59,17 @@ def test_the_official_gate_runs_each_board_flow_file_in_exactly_one_group(path: 
     assert not deselected, f"正式门禁把 {path} 里的用例剔除了：{deselected}"
 
 
+SKIP_WORDS = ("skip", "skipif", "importorskip", "xfail")
+
+
 def _skip_problems(path: str) -> list[str]:
-    """源码里所有能让用例跳过的写法（文件头那两句 importorskip 除外）。"""
+    """源码里所有能让用例跳过或不算数的写法（文件头那两句 importorskip 除外）。
+
+    * ``skip``、``skipif``、``importorskip`` 不管怎么写（点号、别名、``getattr``）都算；
+    * ``xfail`` 只许写成调用，并且带 ``strict=True`` 和 ``raises=``，不许带 ``run=``（不带括号的 ``@pytest.mark.xfail`` 什么都吞）；
+    * 模块级 ``pytestmark`` 里出现上面任何一样都算（整份文件一起变）；
+    * ``from pytest import skip`` 一类的导入都算（别名调用就看不出来了）。
+    """
 
     tree = ast.parse((PROJECT_DIR / path).read_text(encoding="utf-8", errors="replace"), filename=path)
     allowed: set[int] = set()
@@ -74,22 +83,38 @@ def _skip_problems(path: str) -> list[str]:
             and isinstance(call.args[0], ast.Constant)
             and call.args[0].value in QT_STACK
         ):
-            allowed.add(id(call))
+            allowed.add(id(call.func))
+    calls = {id(c.func): c for c in ast.walk(tree) if isinstance(c, ast.Call)}
     problems = []
     for found in ast.walk(tree):
-        if isinstance(found, ast.Attribute) and found.attr in ("skip", "skipif", "importorskip"):
-            parent_call = next(
-                (c for c in ast.walk(tree) if isinstance(c, ast.Call) and c.func is found), None
-            )
-            if parent_call is not None and id(parent_call) in allowed:
-                continue
+        name = found.attr if isinstance(found, ast.Attribute) else found.id if isinstance(found, ast.Name) else ""
+        if name in ("skip", "skipif", "importorskip") and id(found) not in allowed:
             problems.append(f"第 {found.lineno} 行 {ast.unparse(found)}")
-    for found in ast.walk(tree):
-        if isinstance(found, ast.Call) and isinstance(found.func, ast.Attribute) and found.func.attr == "xfail":
-            if not any(k.arg == "strict" and isinstance(k.value, ast.Constant) and k.value.value is True for k in found.keywords):
+        elif name == "xfail":
+            call = calls.get(id(found))
+            if call is None:
+                problems.append(f"第 {found.lineno} 行 {ast.unparse(found)} 没写成调用（不带 strict、raises，什么错都吞）")
+                continue
+            keywords = {k.arg: k.value for k in call.keywords}
+            strict = keywords.get("strict")
+            if not (isinstance(strict, ast.Constant) and strict.value is True):
                 problems.append(f"第 {found.lineno} 行 xfail 没写 strict=True（修好了不会自己变红）")
-            if not any(k.arg == "raises" for k in found.keywords):
+            if "raises" not in keywords:
                 problems.append(f"第 {found.lineno} 行 xfail 没写 raises=（别的错也会被当成已知缺陷吞掉）")
+            if "run" in keywords:
+                problems.append(f"第 {found.lineno} 行 xfail 写了 run=（run=False 用例根本不跑）")
+        if isinstance(found, ast.ImportFrom) and (found.module or "").split(".")[0] in ("pytest", "_pytest"):
+            hits = [a.name for a in found.names if a.name in (*SKIP_WORDS, "mark", "*")]
+            if hits:
+                problems.append(f"第 {found.lineno} 行 from {found.module} import {hits}（换个名字调用就看不出来）")
+        if isinstance(found, ast.Call) and isinstance(found.func, ast.Name) and found.func.id == "getattr":
+            texts = [a.value for a in found.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+            if any(t in SKIP_WORDS for t in texts):
+                problems.append(f"第 {found.lineno} 行 {ast.unparse(found)}")
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign | ast.AugAssign) else []
+        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets):
+            problems.append(f"第 {node.lineno} 行模块级 pytestmark（整份文件一起被标记）：{ast.unparse(node)[:120]}")
     return problems
 
 
@@ -101,11 +126,12 @@ def test_a_board_flow_file_cannot_skip_quietly(path: str) -> None:
 
 @pytest.mark.parametrize("path", BOARD_FLOW_FILES)
 def test_a_board_flow_file_has_tests_that_must_pass(path: str) -> None:
-    """全是 xfail 的文件，门禁里一个 passed 都不出；每份至少一条不带 xfail 的用例。"""
+    """全是 xfail 的文件，门禁里一个 passed 都不出；每份至少一条除了 parametrize 不带任何标记的用例。"""
 
     tree = ast.parse((PROJECT_DIR / path).read_text(encoding="utf-8", errors="replace"), filename=path)
     tests = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
-    must_pass = [n.name for n in tests if not any("xfail" in ast.unparse(d) for d in n.decorator_list)]
+    # 只带 parametrize 的才算必过：别的标记（包括先赋给一个名字再拿来装饰的 xfail）都不算
+    must_pass = [n.name for n in tests if all(ast.unparse(d).startswith("pytest.mark.parametrize(") for d in n.decorator_list)]
     assert must_pass, f"{path} 里没有一条必须通过的用例：{[n.name for n in tests]}"
 
 
