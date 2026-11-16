@@ -38,25 +38,6 @@
         "RULE-001"
       ]
     },
-    "DEV-002": {
-      "title": "通用项目工作流命名规范",
-      "number": "002",
-      "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/002_通用项目工作流命名规范_DEV.md",
-      "version": "V1.0.1",
-      "type_prefix": "DEV",
-      "domain": "pm",
-      "lifecycle": "stable",
-      "sub_domain": "00_元规则与治理",
-      "tags": [
-        "命名",
-        "工作流"
-      ],
-      "replaces": [],
-      "replaced_by": [],
-      "aliases": [
-        "RULE-002"
-      ]
-    },
     "DEV-003": {
       "title": "跨资源库命名统一规范",
       "number": "003",
@@ -128,22 +109,6 @@
         "PRD",
         "需求",
         "模板"
-      ],
-      "replaces": [],
-      "replaced_by": []
-    },
-    "PM-010": {
-      "title": "通用项目管理规范",
-      "number": "010",
-      "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/02_规划阶段/010_通用项目管理规范_PM.md",
-      "version": "V1.1.1",
-      "type_prefix": "PM",
-      "domain": "pm",
-      "lifecycle": "stable",
-      "sub_domain": "02_规划阶段",
-      "tags": [
-        "管理",
-        "总纲"
       ],
       "replaces": [],
       "replaced_by": []
@@ -364,7 +329,7 @@
       "title": "通用项目文档版本管理与变更核心规范",
       "number": "004-DEV",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/004_通用项目文档版本管理与变更核心规范_DEV.md",
-      "version": "V1.2.0",
+      "version": "V1.2.1",
       "type_prefix": "DEV",
       "domain": "pm",
       "lifecycle": "stable",
@@ -381,7 +346,7 @@
       "title": "通用变更管理流程规范",
       "number": "042",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/042_通用变更管理流程规范_PM.md",
-      "version": "V2.5.1",
+      "version": "V2.6.0",
       "type_prefix": "PM",
       "domain": "pm",
       "lifecycle": "stable",
@@ -405,22 +370,6 @@
       "tags": [
         "变更管理",
         "目录结构"
-      ],
-      "replaces": [],
-      "replaced_by": []
-    },
-    "PM-045": {
-      "title": "变更管理流程执行指南",
-      "number": "045",
-      "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/04_变更管理/045_变更管理流程执行指南_PM.md",
-      "version": "V1.2.0",
-      "type_prefix": "PM",
-      "domain": "pm",
-      "lifecycle": "stable",
-      "sub_domain": "04_变更管理",
-      "tags": [
-        "变更管理",
-        "执行指南"
       ],
       "replaces": [],
       "replaced_by": []
