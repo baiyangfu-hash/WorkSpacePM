@@ -87,30 +87,31 @@ def _skip_problems(path: str) -> list[str]:
     calls = {id(c.func): c for c in ast.walk(tree) if isinstance(c, ast.Call)}
     problems = []
     for found in ast.walk(tree):
+        line = getattr(found, "lineno", 0)
         name = found.attr if isinstance(found, ast.Attribute) else found.id if isinstance(found, ast.Name) else ""
         if name in ("skip", "skipif", "importorskip") and id(found) not in allowed:
-            problems.append(f"第 {found.lineno} 行 {ast.unparse(found)}")
+            problems.append(f"第 {line} 行 {ast.unparse(found)}")
         elif name == "xfail":
             call = calls.get(id(found))
             if call is None:
-                problems.append(f"第 {found.lineno} 行 {ast.unparse(found)} 没写成调用（不带 strict、raises，什么错都吞）")
+                problems.append(f"第 {line} 行 {ast.unparse(found)} 没写成调用（不带 strict、raises，什么错都吞）")
                 continue
             keywords = {k.arg: k.value for k in call.keywords}
             strict = keywords.get("strict")
             if not (isinstance(strict, ast.Constant) and strict.value is True):
-                problems.append(f"第 {found.lineno} 行 xfail 没写 strict=True（修好了不会自己变红）")
+                problems.append(f"第 {line} 行 xfail 没写 strict=True（修好了不会自己变红）")
             if "raises" not in keywords:
-                problems.append(f"第 {found.lineno} 行 xfail 没写 raises=（别的错也会被当成已知缺陷吞掉）")
+                problems.append(f"第 {line} 行 xfail 没写 raises=（别的错也会被当成已知缺陷吞掉）")
             if "run" in keywords:
-                problems.append(f"第 {found.lineno} 行 xfail 写了 run=（run=False 用例根本不跑）")
+                problems.append(f"第 {line} 行 xfail 写了 run=（run=False 用例根本不跑）")
         if isinstance(found, ast.ImportFrom) and (found.module or "").split(".")[0] in ("pytest", "_pytest"):
             hits = [a.name for a in found.names if a.name in (*SKIP_WORDS, "mark", "*")]
             if hits:
-                problems.append(f"第 {found.lineno} 行 from {found.module} import {hits}（换个名字调用就看不出来）")
+                problems.append(f"第 {line} 行 from {found.module} import {hits}（换个名字调用就看不出来）")
         if isinstance(found, ast.Call) and isinstance(found.func, ast.Name) and found.func.id == "getattr":
             texts = [a.value for a in found.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
             if any(t in SKIP_WORDS for t in texts):
-                problems.append(f"第 {found.lineno} 行 {ast.unparse(found)}")
+                problems.append(f"第 {line} 行 {ast.unparse(found)}")
     for node in tree.body:
         targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign | ast.AugAssign) else []
         if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets):
