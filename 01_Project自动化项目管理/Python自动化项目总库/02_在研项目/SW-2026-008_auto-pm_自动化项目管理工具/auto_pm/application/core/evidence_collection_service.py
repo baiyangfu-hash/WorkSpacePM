@@ -2075,7 +2075,7 @@ def _plc_check_output(
     exported from the Run baseline commit, and failures already there do not block.
     """
 
-    from auto_pm.application.core.plc_baseline import PlcPluginPanicError, checked_keys
+    from auto_pm.application.core.plc_baseline import baseline_failure_keys, checked_keys
 
     service = _plc_language_service()
     result, now, incomplete = checked_keys(candidate, root, service)
@@ -2087,15 +2087,13 @@ def _plc_check_output(
     note = baseline.note if baseline else "没有开工基线，现在的失败全部按新增算"
     if baseline is not None and baseline.workspace is not None and baseline.project is not None:
         try:
-            base_result, base_keys, base_incomplete = checked_keys(
-                baseline.workspace, baseline.project, service
-            )
-            if base_incomplete:
-                note = "开工基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算"
-            elif not base_result.not_applicable:
-                base = base_keys
-        except PlcPluginPanicError:
-            raise  # a crashed plugin run has no complete failure list: never turn it into new/fixed lines (D-137)
+            # A crash of the plugin's test process on the baseline makes only the test cases not comparable; an unfinished
+            # plugin run or a not-applicable project makes the whole baseline not comparable.  What is not comparable is
+            # never used: no "known", no "fixed" from it (D-137).  Only a crash on the current run (checked_keys above)
+            # fails the whole gate.
+            base, said = baseline_failure_keys(baseline.workspace, baseline.project, service)
+            if said:
+                note = f"开工{said}"
         except Exception as error:  # the baseline run must never hide a current failure
             note = f"开工基线检查出错（{error}），现在的失败全部按新增算"
     diff = diff_failures(now, base, baseline_note=_with_anchor(note, baseline))
