@@ -16,7 +16,7 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from auto_pm.domain.models.plc import CheckResult
+from auto_pm.domain.models.plc import LANGUAGE_SERVICE_TEST, CheckResult
 from auto_pm.domain.plc.baseline_compare import (
     FailureDiff,
     RecordingLanguageService,
@@ -35,7 +35,16 @@ class PlcBaselineError(RuntimeError):
 
 
 class PlcPluginPanicError(PlcBaselineError):
-    """插件的测试进程 panic 退出：失败清单不完整，这次检查没有“修好／新增”可言，必须按失败处理（D-137）。"""
+    """插件的测试进程 panic 退出：失败清单不完整，这次检查没有“修好／新增”可言，必须按失败处理（D-137）。
+
+    带着这次检查的逐条失败键和不是因 panic 而没跑完的命令：基线那一边只丢掉测试用例那一段，其余照常比
+    （:func:`baseline_failure_keys`）；现在这一版崩了照旧整门失败。
+    """
+
+    def __init__(self, message: str, keys: Counter[str] | None = None, unfinished: frozenset[str] = frozenset()) -> None:
+        super().__init__(message)
+        self.keys: Counter[str] = keys if keys is not None else Counter()
+        self.unfinished = unfinished
 
 
 def _git(repo: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
@@ -146,20 +155,63 @@ def repo_top(path: Path) -> Path:
 def checked_keys(
     workspace: Path, project: Path, service: LanguageService | None
 ) -> tuple[CheckResult, Counter[str], bool]:
-    """跑一次 ``PlcChecker``（插件每个范围只跑一次），返回结果、逐条失败键、插件是否没跑完。"""
+    """跑一次 ``PlcChecker``（插件每个范围只跑一次），返回结果、逐条失败键、插件是否没跑完。
+
+    插件测试进程 panic 就抛 :class:`PlcPluginPanicError`：用在现在这一版上整门失败（D-137）；基线那一边由
+    :func:`baseline_failure_keys` 接住。
+    """
 
     from auto_pm.domain.plc.checker import PlcChecker
 
     recorder = RecordingLanguageService(service, project) if service is not None else None
     result = PlcChecker(str(workspace), language_service=recorder).check_project(str(project))
+    language = recorder.diagnostics if recorder is not None else None
     if recorder is not None and recorder.panic_note:
         raise PlcPluginPanicError(
             f"{recorder.panic_note}。进程一崩，哪些用例失败取决于谁先撞上崩点，每次不一样，"
-            "所以不给“新增／修好”结论，按失败处理（根因是插件原生桩，见 D-37）"
+            "所以不给“新增／修好”结论，按失败处理（根因是插件原生桩，见 D-37）",
+            failure_keys(result, str(project), language),
+            frozenset(recorder.unfinished),
         )
-    language = recorder.diagnostics if recorder is not None else None
     incomplete = recorder.incomplete if recorder is not None else False
     return result, failure_keys(result, str(project), language), incomplete
+
+
+BASELINE_PANIC_NOTE = (
+    "基线上插件测试进程 panic 退出（D-37 原生定时器桩），测试用例这一段基线不可比：基线的测试失败一条都不用，"
+    "现在的测试失败全部按新增算；其余检查照常和基线比"
+)
+BASELINE_INCOMPLETE_NOTE = "基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算"
+BASELINE_NOT_APPLICABLE_NOTE = "基线上这个工程不适用 PLC 检查，现在的失败全部按新增算"
+_TEST_KEY_PREFIXES = (f"{LANGUAGE_SERVICE_TEST} · ", f"plc check · {LANGUAGE_SERVICE_TEST}：")
+
+
+def baseline_failure_keys(
+    workspace: Path, project: Path, service: LanguageService | None
+) -> tuple[Counter[str] | None, str]:
+    """开工基线那一边的逐条失败键和说明：``(None, 原因)`` 表示整个基线不可比，现在的失败全部算新增。
+
+    * 插件**测试**进程 panic（D-37 原生定时器桩）：只有测试用例那一段的失败清单不完整（D-137），这一段一条都不用，
+      现在的测试失败全部算新增、也不会有测试的“修好”行；插件 ``check`` 和其余检查项的失败清单是完整的，照常比。
+      以前整门失败：基线上用原生定时器桩的工程每次都 panic，任何改动都过不了验收（DJ-2026-005 试车 A1）。
+    * 插件没跑完（超时、起不来，不是 panic）：整个基线不用。
+    * 工程在基线上不适用：整个基线不用。
+
+    只有**现在这一版**崩了才整门失败：调用方先对现在这一版调 :func:`checked_keys`。
+    """
+
+    try:
+        result, keys, incomplete = checked_keys(workspace, project, service)
+    except PlcPluginPanicError as crash:
+        if crash.unfinished:  # something besides the crashed test run did not finish either
+            return None, BASELINE_INCOMPLETE_NOTE
+        comparable = Counter({key: count for key, count in crash.keys.items() if not key.startswith(_TEST_KEY_PREFIXES)})
+        return comparable, BASELINE_PANIC_NOTE
+    if incomplete:
+        return None, BASELINE_INCOMPLETE_NOTE
+    if result.not_applicable:
+        return None, BASELINE_NOT_APPLICABLE_NOTE
+    return keys, ""
 
 
 def check_against_baseline(
@@ -177,18 +229,20 @@ def check_against_baseline(
         exported = export_plc_baseline(top, rev, relative, Path(temporary))
         if exported is None:
             return result, diff_failures(now, None, baseline_note=f"{rev} 上还没有这个工程，现在的失败全部按新增算")
-        base_result, base, base_incomplete = checked_keys(Path(temporary), exported, service)
-    if base_incomplete:
-        return result, diff_failures(now, None, baseline_note="基线上 Siemens 语言服务没有跑完，现在的失败全部按新增算")
-    if base_result.not_applicable:
-        return result, diff_failures(now, None, baseline_note="基线上这个工程不适用 PLC 检查，现在的失败全部按新增算")
-    return result, diff_failures(now, base, baseline_note=anchor)
+        base, note = baseline_failure_keys(Path(temporary), exported, service)
+    if base is None:
+        return result, diff_failures(now, None, baseline_note=note)
+    return result, diff_failures(now, base, baseline_note="；".join(part for part in (note, anchor) if part))
 
 
 __all__ = [
     "PlcBaselineError",
     "PlcPluginPanicError",
+    "BASELINE_INCOMPLETE_NOTE",
+    "BASELINE_NOT_APPLICABLE_NOTE",
+    "BASELINE_PANIC_NOTE",
     "baseline_anchor_note",
+    "baseline_failure_keys",
     "check_against_baseline",
     "checked_keys",
     "export_plc_baseline",

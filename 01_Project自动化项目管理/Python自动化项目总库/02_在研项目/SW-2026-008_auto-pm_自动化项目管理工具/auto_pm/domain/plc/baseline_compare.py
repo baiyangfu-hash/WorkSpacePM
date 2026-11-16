@@ -231,6 +231,8 @@ class RecordingLanguageService:
     incomplete: bool = False
     # 插件测试进程 panic 退出：失败清单不完整，不能拿去算“修好／新增”（D-137）
     panic_note: str = ""
+    # 不是因为 panic 而没跑完的命令（"check"/"test"）：基线上只有 test 崩了时，check 和其余检查项仍可比（A1）
+    unfinished: set[str] = field(default_factory=set)
 
     @property
     def available(self) -> bool:
@@ -249,6 +251,8 @@ class RecordingLanguageService:
             tag = root.name
         if result.available and result.exit_code in (-1, None):
             self.incomplete = True
+            if not result.panicked:
+                self.unfinished.add(result.command)
         if result.available and result.panicked and not self.panic_note:
             self.panic_note = result.summary
         lines = result.diagnostics or result.messages

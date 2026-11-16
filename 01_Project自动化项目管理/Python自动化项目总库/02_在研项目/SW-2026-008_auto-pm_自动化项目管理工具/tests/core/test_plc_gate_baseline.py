@@ -243,18 +243,65 @@ def test_d137_a_plugin_panic_on_the_current_run_is_an_error_with_no_new_or_fixed
     assert "new | " not in summary and "fixed | " not in summary and "known | " not in summary
 
 
-def test_d137_a_plugin_panic_only_on_the_baseline_run_is_an_error_not_everything_new(
+def test_d137_a_plugin_panic_only_on_the_baseline_run_makes_only_the_test_cases_not_comparable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The baseline export lives in a ``pmb-`` temp directory; a crash there must not turn the current failures into 'new' lines."""
+    """A1 (DJ-2026-005 trial): the baseline export (a ``pmb-`` temp directory) crashes in the plugin's test run, the
+    current run does not.
+
+    Only the crashed part -- the test cases -- is not used: no test case is "known" or "fixed" from it (D-137), every
+    current test failure is new.  The other checks finished on the baseline and are compared as usual, so a failure that
+    was already there (the sample's two "FB PRD" findings) stays "known" instead of becoming new.  It used to fail the
+    whole gate, so a project whose baseline has the native timer stub could never pass ``pm verify``.
+    """
 
     monkeypatch.setattr(ecs, "_plc_language_service", lambda: PanickingTestLsp(only=lambda root: "pmb-" in str(root)))
 
-    receipt = gate(tmp_path, fb())
+    receipt = gate(tmp_path, fb())  # the three plugin test failures of the 005 sample are still in the current run
 
     assert receipt.status == "FAIL"
+    assert receipt.gates[0].exit_code == 1  # a judged verdict, not an error
     summary = receipt.gates[0].output_summary
-    assert "panic" in summary and "new | " not in summary and "全部按新增算" not in summary
+    assert "基线不可比" in summary and "D-37" in summary and "测试失败全部按新增算" in summary
+    assert summary.count("new | Siemens 语言服务 test") == 3
+    assert "known | Siemens 语言服务 test" not in summary and "fixed | Siemens 语言服务 test" not in summary
+    assert "known | plc check · FB PRD" in summary and "new | plc check" not in summary
+
+
+def test_d137_a_baseline_only_panic_with_a_clean_current_run_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case that blocked DJ-2026-005: the change itself removes every failure, only the baseline crashes."""
+
+    monkeypatch.setattr(ecs, "_plc_language_service", lambda: PanickingTestLsp(only=lambda root: "pmb-" in str(root)))
+
+    receipt = gate(
+        tmp_path, fb(), extra={BASIC_TEST: scltest(pad=84), INTERLOCK_TEST: scltest()}, owned=(ALARM, BASIC_TEST, INTERLOCK_TEST)
+    )
+
+    summary = receipt.gates[0].output_summary
+    assert receipt.status == "PASS", summary
+    assert "基线不可比" in summary and "新增失败 0 条" in summary and "fixed | Siemens 语言服务 test" not in summary
+
+
+def test_d137_a_baseline_panic_together_with_an_unfinished_check_makes_the_whole_baseline_not_comparable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the plugin's ``check`` did not finish on the baseline either, nothing of the baseline is trusted (b19)."""
+
+    class CrashAndTimeout(PanickingTestLsp):
+        def check(self, root: Path) -> LanguageServiceResult:
+            if "pmb-" in str(root):
+                return LanguageServiceResult("check", True, -1, 1, ("命令行未能完成: timeout",), "timeout", diagnostics=("命令行未能完成",))
+            return super().check(root)
+
+    monkeypatch.setattr(ecs, "_plc_language_service", lambda: CrashAndTimeout(only=lambda root: "pmb-" in str(root)))
+
+    receipt = gate(tmp_path, fb())
+
+    summary = receipt.gates[0].output_summary
+    assert receipt.status == "FAIL"
+    assert "没有跑完" in summary and "基线已有失败 0 条" in summary
 
 
 def test_d137_plc_check_baseline_refuses_to_compare_a_panicked_run(tmp_path: Path) -> None:
@@ -653,6 +700,24 @@ def test_b23_plc_check_baseline_with_an_unfinished_baseline_plugin_run_counts_ev
     assert done.exit_code == 1
     assert data["known"] == [] and data["new"]
     assert "没有跑完" in data["baseline_note"]
+
+
+def test_b23b_plc_check_baseline_with_a_baseline_only_plugin_panic_counts_every_test_failure_as_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``plc check --baseline`` and the acceptance gate treat a crashed baseline the same way (one helper)."""
+
+    import json
+
+    root, _ = _cli_workspace(tmp_path)
+
+    done = _plc_check_baseline(root, monkeypatch, PanickingTestLsp(only=lambda path: "pmb-" in str(path)))
+
+    data = json.loads(done.output[done.output.index("{"):])
+    assert done.exit_code == 1
+    assert data["new"] and all(key.startswith("Siemens 语言服务 test") for key in data["new"])
+    assert not any(key.startswith("Siemens 语言服务 test") for key in [*data["known"], *data["fixed"]])
+    assert "基线不可比" in data["baseline_note"] and "D-37" in data["baseline_note"]
 
 
 def test_b24_plc_check_baseline_with_an_unfinished_current_plugin_run_is_an_error(
