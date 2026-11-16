@@ -442,6 +442,18 @@ def test_naming_a_long_master_heading_to_point_at_it_is_not_a_copy(tmp_path: Pat
     assert _codes(roles, workspace) == set()
 
 
+def test_a_pack_sentence_that_contains_a_short_master_table_header_is_not_a_copy(tmp_path: Path) -> None:
+    """JB8R on #838 (WARN-1): a table header is long on the page but short once its bars and spaces are gone; a
+    pack's own sentence that holds those few words is not a copy, while a whole long row copied still is."""
+    roles, workspace = _workspace(tmp_path)
+    row = "| 本机 Claude Code（含在 VS Code 里跑的） | `R/.auto-pm/worktrees/claude` | `claude/` |"
+    (workspace / "AGENTS.md").write_text(f"# 入口\n\n| agent | 工位 | 分支前缀 |\n|------|------|------|\n{row}\n", encoding="utf-8")
+    _add_to_pack(roles, "\n按 agent 工位分支前缀的对照来起分支名，PLC 卡也一样。\n")
+    assert _codes(roles, workspace) == set()
+    _add_to_pack(roles, f"\n{row}\n")
+    assert _codes(roles, workspace) == {("RP-010", FAIL)}
+
+
 def test_a_master_section_line_copied_behind_a_marker_is_refused_by_rp008(tmp_path: Path) -> None:
     roles, workspace = _workspace(tmp_path)
     _add_to_pack(roles, "\n> 这一行足够长，有二十个字以上，抄进角色包就算抄了正本的内容\n")

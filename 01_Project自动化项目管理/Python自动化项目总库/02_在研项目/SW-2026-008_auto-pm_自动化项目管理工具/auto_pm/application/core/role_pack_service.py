@@ -66,6 +66,9 @@ POINTER_MODE = "pointer"
 RETIRED_COPY_MODES = frozenset({"body-equal", "section-contained"})
 # A copied line or sentence this long is a copy, not a shared phrase (headings like "## 不要做" stay allowed).
 COPIED_LINE_MIN_CHARS = 20
+# ... and still this long once spaces, bars and punctuation are gone: a table header such as "| agent | 工位 | 分支前缀 |"
+# is long on the page but only a few words, and a pack's own sentence may hold them (JB8R on #838, WARN-1).
+COPIED_SKELETON_MIN_CHARS = 15
 # Copy tricks a whole-line compare missed (JB8R on #834, audit pre-check of the follow-up card): a list marker,
 # number, quote mark or bold put in front, one sentence of a long line, a sentence set inside other words, a
 # table cell, a line wrapped in two, a space or another comma put in, a sentence made a heading or put in a code
@@ -169,7 +172,10 @@ def _copy_units(text: str, *, skip_code: bool = True, skip_pointers: bool = True
             unit = _normalise(piece)
             if len(unit) < COPIED_LINE_MIN_CHARS or (skip_pointers and (_is_pointer(unit) or not _is_prose(unit))):
                 continue
-            units.setdefault(_skeleton(unit), unit)
+            key = _skeleton(unit)
+            if len(key) < COPIED_SKELETON_MIN_CHARS:
+                continue
+            units.setdefault(key, unit)
     return units
 
 
