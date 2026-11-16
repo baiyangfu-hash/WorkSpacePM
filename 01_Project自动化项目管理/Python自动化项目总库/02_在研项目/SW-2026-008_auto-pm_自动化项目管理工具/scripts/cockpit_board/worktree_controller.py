@@ -23,6 +23,7 @@ from cockpit_board.decision_controller import _Job
 from cockpit_board.widgets.worktrees import WorktreesPage
 
 NOT_ALLOWED = "这条命令不是工位页登记过的几种（policy.WORKTREE_COMMANDS），不运行"
+RUNNING = "正在运行……跑完这里会出结果，这一页会自己重读"
 NOTHING_TO_RECLAIM = "没有可回收的残留持有记录（worktree reclaim --stale 没列出任何一条），什么都没动"
 
 
@@ -57,6 +58,10 @@ class WorktreeController(QObject):
         if self._blocked(action.label, action.args):
             return
         extra: dict[str, Any] = {"runner": self.runner} if self.runner else {}
+        # 点下去马上给个回音：命令要跑几秒，页面上什么都不变，看起来就像“点了没反应”（用户 2026-11-16 14:04 实际遇到）
+        self.page.add_receipt(actions.Receipt(self.now().strftime("%H:%M"), action.label, stations.shown_command(action.args),
+                                              None, False, RUNNING))
+
         def done(result: Any) -> None:
             self._done(action, result)
 
