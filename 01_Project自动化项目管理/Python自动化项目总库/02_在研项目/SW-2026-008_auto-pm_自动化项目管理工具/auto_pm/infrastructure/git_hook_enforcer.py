@@ -856,14 +856,16 @@ def _enforce_no_open_run(workspace_root: Path, control_root: Path | None) -> int
     Run 开工时记下工位的提交号，``pm verify`` 按它取证；Run 开着时在工位里提交，HEAD 一挪，这个 Run 的证据就作废了。
     以前钩子只看提交说明里有没有单号，写上单号就提交成了。控制根本身不是哪个 Run 的工位；本机没有账本（云端克隆、
     没登记过 Run）就没有 Run 可查，照旧放行。账本在却读不出来时拒绝：分不清有没有开着的 Run，不当作没有。
+    解析不出工位或控制根的真实路径时同样拒绝：分不清是不是控制根，不当作是。
     """
     if control_root is None:
         return 0
     try:
         if workspace_root.resolve() == control_root.resolve():
             return 0
-    except OSError:
-        return 0
+    except OSError as exc:
+        print(f"❌ [auto-pm pre-commit] 物理拦截：解析不出工位或控制根的真实路径，分不清这是不是控制根，为防止证据作废已拒绝提交：{exc}")
+        return 1
     if not (control_root / ".auto-pm" / "continuity.db").is_file():
         return 0
     from auto_pm.contracts.run_open_commit import run_open_commit_hint

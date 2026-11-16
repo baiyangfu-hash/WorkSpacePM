@@ -117,3 +117,59 @@ def test_pre_commit_runs_the_check(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     snapshot = git_hook_enforcer.StagedSnapshot(entries=())
     assert git_hook_enforcer.enforce_pre_commit(tmp_path, snapshot, tmp_path / "R") == 1
     assert calls == [(tmp_path, tmp_path / "R")]
+
+
+OPEN_STATES = ("READY", "RUNNING", "BLOCKED", "PENDING", "VERIFYING")
+FINISHED_STATES = ("SUCCEEDED", "FAILED", "CANCELLED")
+
+
+def test_the_two_lists_cover_every_run_state() -> None:
+    """新加一个 Run 状态时这里先红：要想清楚它算不算收口，再放进上面两个名单之一。"""
+    from auto_pm.contracts.continuity import RunState
+
+    assert sorted(OPEN_STATES + FINISHED_STATES) == sorted(state.value for state in RunState)
+
+
+@pytest.mark.parametrize("state", OPEN_STATES + FINISHED_STATES)
+def test_every_unfinished_run_state_refuses_and_every_finished_one_lets_through(
+    tmp_path: Path, state: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """真账本：Run 在工位里，状态逐个换；没收口的五个（含 VERIFYING）都拒，收口的三个都放（预核 a 条）。"""
+    import sqlite3
+
+    clock = Clock()
+    clock.value = datetime.now(UTC)
+    _, service = _services(tmp_path, clock)
+    _start(service)
+    station = tmp_path / ".auto-pm" / "worktrees" / "claude-aaaaaa"
+    station.mkdir(parents=True)
+    with sqlite3.connect(tmp_path / ".auto-pm" / "continuity.db") as conn:
+        changed = conn.execute(
+            "UPDATE run_items SET state=?, worktree_path=? WHERE run_id='RUN-001'", (state, str(station))
+        ).rowcount
+    assert changed == 1
+
+    code = git_hook_enforcer._enforce_no_open_run(station, tmp_path)
+    said = capsys.readouterr().out
+    if state in OPEN_STATES:
+        assert code == 1, f"{state} 没收口，提交要拒"
+        assert "RUN-001" in said and state in said, said
+    else:
+        assert code == 0, f"{state} 已收口，提交要放：{said}"
+
+
+def test_a_path_that_cannot_be_resolved_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    control, station = tmp_path / "R", tmp_path / "W"
+    _ledger(control)
+    station.mkdir()
+    asked = _open_runs(monkeypatch, ())
+
+    def broken(self: Path, strict: bool = False) -> Path:
+        raise OSError("symlink loop")
+
+    monkeypatch.setattr(Path, "resolve", broken)
+    assert git_hook_enforcer._enforce_no_open_run(station, control) == 1
+    assert "解析不出" in capsys.readouterr().out
+    assert asked == []
