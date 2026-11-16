@@ -58,6 +58,7 @@ from cockpit_board.widgets.station import StationPage  # noqa: E402
 from cockpit_board.widgets.tasks import TasksPage  # noqa: E402
 from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
 from cockpit_board.widgets.worktrees import WorktreesPage  # noqa: E402
+from cockpit_board.worktree_controller import WorktreeController  # noqa: E402
 
 WINDOW_TITLE = "驾驶舱总控屏"
 AUTO_REFRESH_MINUTES = 10
@@ -286,7 +287,11 @@ class CockpitWindow(QMainWindow):
         self.decisions.lifecycle_listeners.append(lambda: self.tools.set_register_kind(*self.decisions.register_kind()))
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
         # 骨架 D：4 个读命令的页 + PR 与审计（用窗口的 GitHub 采集）+ 两个只读数据文件的页
-        self.attention, self.tasks, self.worktrees, self.release = AttentionPage(), TasksPage(), WorktreesPage(), ReleasePage()
+        self.attention, self.tasks, self.release = AttentionPage(), TasksPage(), ReleasePage()
+        # 工作树与分支页（看板工位管理单）：每行“收工位”“清理”，另有“清残留持有记录”“清理全部可清项”；按钮背后的命令见 stations.py，
+        # 规矩见 policy.WORKTREE_BUTTONS。命令在后台跑（worktree_controller），跑成了这一页自己重读一遍。
+        self.worktrees = WorktreesPage(options.root, actions.board_agent_markers, self.copy_text)
+        self.worktree_actions = WorktreeController(self.worktrees, options.root, lambda: self._refresh_reads("worktrees"))
         self.prs, self.spine, self.commands = PrsPage(), SpinePage(), CommandsPage()
         self.read_pages: dict[str, c.ReadPage] = {p.key: p for p in (self.attention, self.tasks, self.worktrees, self.release)}
         self.page_reads = shell.page_reads()

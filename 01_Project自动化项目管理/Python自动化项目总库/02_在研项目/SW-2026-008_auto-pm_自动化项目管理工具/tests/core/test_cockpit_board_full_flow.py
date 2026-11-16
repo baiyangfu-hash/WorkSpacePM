@@ -10,7 +10,7 @@
 * R3 项目表只认任务：范围卡在等批准时，“全部项目”页的“现在在干”看得见它（新债三，严格 xfail）；
 * R4 孤卡：卡还开着、作业票被取消，看板和进门定位要给“再开一张作业票”的出口，不是只能退役（第三节三层联动，严格 xfail）。
 * R5 批准人为空：“决定”页顶上的“批准人”框是空的，点要批准人的按钮，确认框要让人找得到去哪填（用户 2026-11-16 第一次用看板就卡在这里，
-  把名字填进了“批准意见”；严格 xfail，小修单修）。
+  把名字填进了“批准意见”；看板工位管理单的 U-1 修好：确认框自己有“批准人”一栏，摘掉了严格 xfail）。
 
 规矩（照设计第七节 7.3 的改动边界）：
 
@@ -524,7 +524,6 @@ def test_r4_an_open_card_whose_work_was_cancelled_offers_a_new_work_not_only_ret
     assert "pm retire" not in said, f"作业票取消后任务还在，不该叫用户退役它：{said[-800:]}"
 
 
-@pytest.mark.xfail(raises=KnownDefectError, strict=True, reason="批准人为空时，确认框只说“缺少批准人”，不说去“决定”页顶上的“批准人”框填（小修单修）")
 def test_r5_an_empty_approver_box_tells_you_where_to_fill_it_in(board: Board) -> None:
     """用户本机没设批准人变量时，“决定”页顶上的“批准人”框是空的。点“确认入箱”（要批准人的按钮都走同一处 ``_need``），
     确认框不能放行，而且要让人一眼找到去哪填：框里自己有“批准人”一栏，或者提示写明在“决定”页顶上的“批准人”框。"""

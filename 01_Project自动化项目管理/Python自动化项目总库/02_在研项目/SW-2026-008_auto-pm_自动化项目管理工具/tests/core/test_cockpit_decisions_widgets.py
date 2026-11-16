@@ -753,7 +753,8 @@ def test_complete_dialog_comes_prefilled_and_blocks_when_the_conclusion_is_clear
     page.approver_input.setText("baiyang")
     target = decisions.Target(project_id="SW-2026-008", change_id="CHG-SCPT-2026-701", title="CHG-SCPT-2026-701 改 IO 表")
     dialog = page.open_dialog(decisions.BY_KEY["change_complete"], target, run=False)
-    assert dialog.values() == {"verification_conclusion": "全部通过"} and dialog.run_button.isEnabled()
+    # 确认框第一栏就是批准人，先填上页顶那一栏的名字（U-1）
+    assert dialog.values() == {"approver": "baiyang", "verification_conclusion": "全部通过"} and dialog.run_button.isEnabled()
     assert "change transition CHG-SCPT-2026-701 --to completed --pid SW-2026-008 --approver baiyang" in dialog.command_label.text()
     assert dialog.command_label.text().endswith('--verification-conclusion "全部通过"')
     _fill(dialog, "verification_conclusion", "")

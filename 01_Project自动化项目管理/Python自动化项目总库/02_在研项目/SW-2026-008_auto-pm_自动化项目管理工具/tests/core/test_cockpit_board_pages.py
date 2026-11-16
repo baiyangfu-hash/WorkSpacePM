@@ -30,7 +30,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "cockpit_board"
 sys.path.insert(0, str(SCRIPTS))
 
 import github_collector as gh  # noqa: E402
-from cockpit_board import actions, app, readers, shell, snapshot  # noqa: E402
+from cockpit_board import actions, app, policy, readers, shell, snapshot  # noqa: E402
 from cockpit_board.widgets import (  # noqa: E402
     attention,
     commands,
@@ -53,6 +53,7 @@ NEW_PAGE_KEYS = (*READ_PAGE_KEYS, "prs", "spine", "commands")
 SAMPLES = {
     "orient": "orient.json", "missions": "pm_missions.json", "pending": "pm_pending.json", "inbox": "pm_inbox.json",
     "worktree_list": "worktree_list.json", "worktree_sweep": "worktree_sweep.json", "long_run": "long_run_status.json",
+    "claim_list": "claim_list.json",
 }
 MISSING = (FIXTURES / "stderr_missing_command.txt").read_text(encoding="utf-8")
 OFFLINE = "fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com\n"
@@ -197,7 +198,7 @@ def test_read_page_without_a_project_skips_project_commands(tmp_path: Path) -> N
     assert all(c.read_state(r)[0] == "unchecked" and r.skipped for r in results)
     # 不要项目号的命令照读
     results = app.read_page(tmp_path, shell.page_reads()["worktrees"], "", _runner("ok", seen), NOW)
-    assert [r.outcome.kind for r in results] == ["ok", "ok"]
+    assert [r.outcome.kind for r in results] == ["ok"] * 4  # 工位列表、清理清单、占位表、长任务
     assert all("--apply" not in command for command in seen)  # 清理只列，不带写开关
 
 
@@ -347,6 +348,9 @@ def test_opening_a_read_page_reads_its_commands_in_the_background(qapp: QApplica
     asked = [command[3:] for command in seen]
     assert ["pm", "missions", "--pid", "DJ-2026-101"] in asked  # 工程工位默认项目
     assert ["worktree", "sweep", "--json", "--no-fetch"] in asked
+    # 工位页：列表要带 --deep 才有未提交、未推送（按钮靠它判能不能点）；占位表给“在干哪张卡”；长任务给“是不是正被门禁用着”
+    assert ["worktree", "list", "--json", "--deep", "--no-size"] in asked
+    assert ["claim", "list", "--json", "--no-fetch"] in asked
     # 打开没有命令的页不起命令
     before = len(seen)
     for key in ("prs", "spine", "commands"):
@@ -367,12 +371,18 @@ def test_read_page_offline_in_the_window_shows_the_state_tag(qapp: QApplication,
 
 
 def test_new_pages_have_no_buttons(qapp: QApplication, tmp_path: Path) -> None:
+    """骨架 D 的新页只读、没有按钮；“工作树与分支”页例外（看板工位管理单，2026-11-16 起有按钮），
+    它的按钮只能取自 policy.WORKTREE_BUTTONS，见下一条测试和 test_cockpit_board_worktrees.py。"""
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = gui_tests._window(qapp, root, db, read_runner=_runner("ok"))
     for key in NEW_PAGE_KEYS:
         window.goto(key)
         _wait(qapp, window)
-        assert not window.router.pages[key].findChildren(QAbstractButton), key
+        buttons = window.router.pages[key].findChildren(QAbstractButton)
+        if key == "worktrees":
+            assert buttons and {b.text() for b in buttons} <= policy.WORKTREE_BUTTONS, [b.text() for b in buttons]
+            continue
+        assert not buttons, key
     window.close()
 
 
