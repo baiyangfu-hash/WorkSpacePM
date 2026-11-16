@@ -61,6 +61,22 @@ def _now_text() -> str:
     return datetime.now().strftime("%H:%M")
 
 
+def child_python(executable: str | None = None) -> str:
+    """起子命令用的 Python：界面若是 pythonw.exe（双击 bat 打开的就是它），换成同目录的 python.exe。
+
+    pythonw 没有控制台：它再起的 ``main.py`` 一层层往下（根入口 → 启动器 → 发布子进程）都是 pythonw，
+    最里层的输出到不了看板接的管道，命令退出码 0、输出 0 字节，看板每一页都成了“只有启动提示，没有结果”
+    （用户 2026-11-16 本机实测：同一条 ``worktree list --json`` 用 python.exe 5 秒出 6 个工位，用 pythonw.exe 0 字节）。
+    换成 python.exe 加 CREATE_NO_WINDOW（``quiet()``）照样不弹黑窗口。同目录没有 python.exe 时原样返回。
+    """
+    current = Path(executable or sys.executable)
+    if current.name.lower() == "pythonw.exe":
+        console = current.with_name("python.exe")
+        if console.is_file():
+            return str(console)
+    return str(current)
+
+
 def no_window_flag() -> int:
     """Windows 的 CREATE_NO_WINDOW；别的系统返回 0。测试替换这一处，不去改全局 os.name。
 
@@ -312,7 +328,7 @@ CHECKS = {
 
 def run_check(root: Path, worktree: Path, project_id: str, key: str, runner: Callable[..., Any] = subprocess.run) -> Receipt:
     label, args = CHECKS[key]
-    command = [sys.executable, "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
+    command = [child_python(), "-B", str(root / "main.py"), "-w", str(worktree), *args, project_id]
     shown = " ".join(command)
     try:
         result = runner(command, cwd=str(root), capture_output=True, encoding="utf-8", timeout=CHECK_TIMEOUT, check=False, **quiet())
@@ -483,7 +499,7 @@ NEEDS_TERMINAL_HINT = "必须由用户本人在自己的终端"
 
 
 def cli_command(root: Path, args: Sequence[str]) -> list[str]:
-    return [sys.executable, "-B", str(root / "main.py"), *args]
+    return [child_python(), "-B", str(root / "main.py"), *args]
 
 
 def needs_terminal(receipt: Receipt) -> bool:
@@ -528,7 +544,7 @@ def open_console(root: Path, label: str, args: Sequence[str], opener: Callable[.
     if not new_console:
         return Receipt(_now_text(), label, shown, None, False, "这台电脑没有可弹出的终端窗口：请把上面的命令复制到终端里运行")
     try:
-        opener([sys.executable, "-B", "-c", _CONSOLE_WRAPPER, *command], cwd=str(root), creationflags=new_console)
+        opener([child_python(), "-B", "-c", _CONSOLE_WRAPPER, *command], cwd=str(root), creationflags=new_console)
     except OSError as error:
         return Receipt(_now_text(), label, shown, None, False, f"{type(error).__name__}: {error}")
     return Receipt(_now_text(), label, shown, None, False, "已在新的终端窗口打开：在那里输入口令、看到结果后，回到这里点“重新读取”")

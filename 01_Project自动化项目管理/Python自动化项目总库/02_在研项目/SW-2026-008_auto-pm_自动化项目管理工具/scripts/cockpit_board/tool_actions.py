@@ -21,14 +21,13 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cockpit_board.actions import Receipt, _now_text, quiet
+from cockpit_board.actions import Receipt, _now_text, child_python, quiet
 
 TOOL_TIMEOUT = 120  # 秒；这几个命令都是读文件或写一个变更单，超过两分钟一定是卡住了
 OUTPUT_LIMIT = 20000  # 回执里最多留这么多字，其余丢掉并写明
@@ -357,7 +356,7 @@ def board_request_id(now: datetime | None = None) -> str:
 
 def full_command(root: Path, args: list[str]) -> list[str]:
     """真正执行的整条命令：和人在命令提示符里敲的一致（-w 控制根）。用界面自己所在的 Python，依赖一定齐。"""
-    return [sys.executable, "-B", str(root / "main.py"), "-w", str(root), *args]
+    return [child_python(), "-B", str(root / "main.py"), "-w", str(root), *args]
 
 
 def shown_command(args: list[str]) -> str:
