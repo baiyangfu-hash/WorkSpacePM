@@ -556,9 +556,11 @@ def test_the_checkpoint_hook_passes_the_runs_owned_paths_and_prints_warnings_on_
             calls.append((owner, tuple(paths)))
             return []
 
+    from auto_pm.application.core import agent_worktree_service as stations
+
     monkeypatch.setattr(module, "ClaimService", FakeService)
-    monkeypatch.setattr(module, "caller_agent", lambda: "claude")
-    monkeypatch.setattr(module, "caller_alias", lambda: "")
+    monkeypatch.setattr(stations, "caller_agent", lambda: "claude")
+    monkeypatch.setattr(stations, "session_alias", lambda *_a, **_k: "")
     ctx = SimpleNamespace(find_root=lambda: SimpleNamespace(obj=SimpleNamespace(control_root="/root", workspace_root="")))
 
     module._keep_claims_alive(ctx, ("p/a", "p/b"))  # type: ignore[arg-type]
@@ -584,19 +586,22 @@ def test_the_checkpoint_hook_renews_as_the_session_alias_when_there_is_one(monke
             owners.append(owner)
             return []
 
+    from auto_pm.application.core import agent_worktree_service as stations
+
     monkeypatch.setattr(module, "ClaimService", FakeService)
-    monkeypatch.setattr(module, "caller_agent", lambda: "claude")
-    monkeypatch.setattr(module, "caller_alias", lambda: "claude-a1b2c3")
+    monkeypatch.setattr(stations, "caller_agent", lambda: "claude")
+    monkeypatch.setattr(stations, "session_alias", lambda *_a, **_k: "claude-a1b2c3")
     ctx = SimpleNamespace(find_root=lambda: SimpleNamespace(obj=SimpleNamespace(control_root="/root", workspace_root="")))
     module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
 
-    monkeypatch.setattr(module, "caller_alias", lambda: "")
-    monkeypatch.setattr(module, "caller_agent", lambda: "?")
+    monkeypatch.setattr(stations, "caller_agent", lambda: "?")
     module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
-    monkeypatch.setattr(module, "caller_agent", lambda: "")
+    monkeypatch.setattr(stations, "caller_agent", lambda: "")
     module._keep_claims_alive(ctx, ("p/a",))  # type: ignore[arg-type]
 
-    assert owners == ["claude-a1b2c3", "user", "user"]
+    # The same names ``claim open`` writes down (``recorder``): an unknown or unmarked caller is never written as "user"
+    # (audit 持有人字段记成user_只读核_20261115); a claim cannot be owned by either name unless someone typed it with --as.
+    assert owners == ["claude-a1b2c3", "unknown-agent", "no-agent-marker"]
 
 
 def test_add_paths_widens_the_claim_without_moving_claimed_at_or_the_lease(pair: Pair) -> None:

@@ -1592,8 +1592,11 @@ class PmFacadeService:
             ("approve", "cancel"),
         )
 
-    def approve(self, mission_id: str, root_work_id: str = "") -> PmConfirmationCard:
-        """Apply the first approval using the Mission-bound Work when available."""
+    def approve(self, mission_id: str, root_work_id: str = "", *, evidence: str = "") -> PmConfirmationCard:
+        """Apply the first approval using the Mission-bound Work when available.
+
+        ``evidence`` (the user's words, ``user-confirmation:<where>``) goes into the transition's idempotency key, as ``accept`` does.
+        """
         mission = self._mission(mission_id)
         requested_root_work_id = root_work_id.strip()
         bound_root_work_id = mission.root_work_id
@@ -1615,6 +1618,7 @@ class PmFacadeService:
                 MissionState.ACTIVE,
                 root_work_id=effective_root_work_id,
                 action="approve",
+                evidence=evidence,
             )
         if mission.state is not MissionState.ACTIVE:
             raise PmFacadeError("当前 Mission 不能进入执行态")
@@ -1625,13 +1629,14 @@ class PmFacadeService:
             ("execute", "resume"),
         )
 
-    def confirm_start(self, mission_id: str) -> PmConfirmationCard:
+    def confirm_start(self, mission_id: str, *, approval_evidence_ref: str = "") -> PmConfirmationCard:
         """Perform the user's one start confirmation without requesting internal IDs.
 
         A Mission approved by ``pm approve --request-id`` is still DRAFT with its Work
         created but not bound; the IDE-agent lane (gap 8) starts here, so the same two
         steps ``run_approved_planning`` takes (plan, then bind the card's own Work) are
-        taken first.  Nothing is relaxed: the Work exists only for this approved card.
+        taken first.  Nothing is relaxed: the Work exists only for this approved card.  ``approval_evidence_ref`` (the user's
+        words an agent session brought, checked by the command) is kept on the approval transition, so who confirmed can be told.
         """
         mission = self._mission(mission_id)
         if mission.state is MissionState.DRAFT:
@@ -1640,7 +1645,7 @@ class PmFacadeService:
         root_work_id = ""
         if mission.state is MissionState.AWAITING_APPROVAL and not mission.root_work_id:
             root_work_id = self._planning_work_id(mission)
-        self.approve(mission_id, root_work_id)
+        self.approve(mission_id, root_work_id, evidence=approval_evidence_ref)
         return self.execute(mission_id)
 
     def _planning_work_id(self, mission: Mission) -> str:
@@ -1730,10 +1735,12 @@ class PmFacadeService:
         except (ContinuityQueryError, ValueError) as error:
             raise PmFacadeError(str(error)) from error
 
-    def accept(self, mission_id: str, *, approval_pin: str = "") -> PmConfirmationCard:
+    def accept(self, mission_id: str, *, approval_pin: str = "", approval_evidence_ref: str = "") -> PmConfirmationCard:
         """Record only the final user acceptance after verification has reached its gate.
 
         With a committed approver PIN the acceptance needs ``approval_pin`` (checked after the quality gate, before any write).
+        Without one, the user's words an agent session brought (``approval_evidence_ref``, checked by the command) are kept on
+        the transition instead of the bare ``format-only:pm-accept``.
         """
         mission = self._mission(mission_id)
         if mission.state is MissionState.ACCEPTANCE_PENDING:
@@ -1750,7 +1757,7 @@ class PmFacadeService:
                 root_work_id=mission.root_work_id,
                 action="accept",
                 # The PIN reference (key id) stays in the transition record, so who accepted can be told afterwards.
-                evidence=proof.evidence_ref if proof is not None else "format-only:pm-accept",
+                evidence=proof.evidence_ref if proof is not None else (approval_evidence_ref.strip() or "format-only:pm-accept"),
             )
         if mission.state is not MissionState.ACCEPTED:
             raise PmFacadeError("当前 Mission 尚未到达用户验收门")
