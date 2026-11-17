@@ -1,0 +1,15 @@
+{
+  "schema_version": "decision_package.v1",
+  "decision_id": "DEC-20261111-A62C9C0D",
+  "project_id": "SW-2026-008",
+  "change_id": "CHG-DOCU-2026-108",
+  "approved_scope": "LOCAL",
+  "approved_files": [
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/02_整改项/活动技术债台账.md"
+  ],
+  "approver": "baiyang",
+  "approved_at": "2026-11-11T17:26:51.448992+00:00",
+  "decision_conclusion": "approved",
+  "conditions": [],
+  "metadata": {}
+}
