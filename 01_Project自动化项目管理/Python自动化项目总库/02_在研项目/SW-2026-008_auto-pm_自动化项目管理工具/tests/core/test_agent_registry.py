@@ -81,7 +81,7 @@ def _rows(root: Path, sql: str) -> list[tuple[object, ...]]:
 # ── 名字规则 ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["antigravity", "kiro", "gemini2", "ab"])
+@pytest.mark.parametrize("name", ["antigravity", "kiro", "gemini2", "ok", "windsurf"])
 def test_good_names_pass(name: str) -> None:
     assert name_problem(name) == ""
 
@@ -99,9 +99,16 @@ def test_good_names_pass(name: str) -> None:
         ("codex", "内置"),
         ("main", "保留"),
         ("claims", "保留"),
-        ("project", "保留"),
-        ("user", "保留"),
+        ("project", "固定词"),
+        ("user", "固定词"),
         ("manual", "保留"),
+        ("board", "固定词"),
+        ("click", "固定词"),
+        ("cmsg", "固定词"),
+        ("confirmation", "固定词"),
+        ("pin", "固定词"),
+        ("deadbeef", "十六进制"),
+        ("ab12", "十六进制"),
     ],
 )
 def test_bad_names_are_refused_with_the_reason(name: str, why: str) -> None:
@@ -304,3 +311,94 @@ def test_the_board_judges_a_registered_ai_station_by_the_prefix_the_command_give
     (shown,) = view.rows
     assert shown.action is not None and shown.action.args == ("worktree", "close", "antigravity-1a2b3c")
     assert "antigravity（会话别名）" in shown.who
+
+
+# ── 审计 865 §3.1：登记任何合法名字后，用户本人的凭据都还能过 ──────────────────
+
+USER_EVIDENCE = (
+    "user-confirmation:board-click:2026-11-17T04:40:44Z:1a2b3c4d5e6f",  # 看板点击（release_ship.confirm_ref）
+    "user-confirmation:2026-11-17T04:40:44Z-cmsg_013MFzja8RTUptLcFWxTQMoxKPxHjYBqNpHRNmrfxvHRGC",  # 引用用户消息号
+    "user-confirmation:2026-11-17T04:27:30Z",  # 纯时间
+    "user-confirmation:gui-click-20261117T042730-1a2b3c4d",  # 旧看板点击（decisions.click_evidence）
+    "user-confirmation:cockpit-0123456789abcdef-1a2b3c4d",  # 驾驶舱点击（pm_cockpit_service）
+    "user-confirmation:pin-0123456789ab-change-approve-0123456789abcdef",  # 口令证明（approval_proof_service）
+)
+
+
+def test_every_reserved_word_is_refused_and_user_evidence_keeps_passing(root: Path) -> None:
+    from auto_pm.application.core.agent_registry import RESERVED_NAMES
+    from auto_pm.contracts.user_evidence import EVIDENCE_FORMAT_WORDS
+
+    assert EVIDENCE_FORMAT_WORDS <= RESERVED_NAMES
+    for word in sorted(RESERVED_NAMES):
+        assert name_problem(word), f"{word} 必须登记不上"
+    for name in ("antigravity", "kiro", "zulu", "windsurf"):
+        AgentRegistryService(root).register(name)
+    for evidence in USER_EVIDENCE:
+        assert user_evidence_problem(evidence) == "", evidence
+    assert "不能是 agent" in user_evidence_problem("user-confirmation:windsurf-2026-11-17")
+
+
+def test_a_reserved_word_written_around_the_service_still_does_not_block_user_evidence(root: Path) -> None:
+    AgentRegistryService(root).register("antigravity")
+    conn = sqlite3.connect(root / ".auto-pm" / "continuity.db")
+    with conn:
+        conn.executemany(
+            "INSERT INTO agent_registry (name, branch_prefix, status, registered_by, registered_at, source_ref)"
+            " VALUES (?, ?, 'active', 'x', 'x', 'x')",
+            [(word, f"{word}/") for word in ("board", "click", "cmsg", "confirmation")],
+        )
+    conn.close()
+    registry._ROSTER_ROOT.clear()
+    use_ledger_roster(root)
+
+    for evidence in USER_EVIDENCE:
+        assert user_evidence_problem(evidence) == "", evidence
+    assert "board" not in AGENT_ROSTER, "凭据固定词即使被直接写进账本也不当 AI 名字"
+
+
+def test_the_evidence_word_list_covers_every_format_the_code_writes() -> None:
+    """代码里新增一种用户凭据格式（user-confirmation:<词>-…）或口令用途（purpose="…"）时，词表必须跟上。"""
+
+    import re
+
+    from auto_pm.contracts.user_evidence import EVIDENCE_FORMAT_WORDS
+
+    project = Path(__file__).resolve().parents[2]
+    found: set[str] = set()
+    for folder in (project / "auto_pm", project / "scripts"):
+        for path in folder.rglob("*.py"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for match in re.finditer(r"user-confirmation:([a-z]+(?:-[a-z]+)*)", text):
+                found.update(part for part in match.group(1).split("-") if part)
+            for match in re.finditer(r'purpose="([a-z-]+)"', text):
+                found.update(part for part in match.group(1).split("-") if part)
+    assert {"board", "click", "gui", "cockpit", "pin", "approve"} <= found, "扫描本身要找得到已知格式"
+    assert found <= EVIDENCE_FORMAT_WORDS, f"凭据格式里新出现的词要加进 user_evidence.EVIDENCE_FORMAT_WORDS：{sorted(found - EVIDENCE_FORMAT_WORDS)}"
+
+
+# ── 审计 865 §3.2、§3.3：读不出来时失败关闭 ─────────────────────────────
+
+
+def test_an_unreadable_registry_makes_user_evidence_fail_closed(root: Path) -> None:
+    AgentRegistryService(root).register("antigravity")
+    service.AGENT_ROSTER.use(lambda: (_ for _ in ()).throw(OSError("disk gone")))
+
+    problem = user_evidence_problem("user-confirmation:2026-11-17T04:27:30Z")
+    assert "读不出来" in problem, "读不出登记表时不能把凭据当成用户的"
+    assert names_an_agent("2026-11-17T04:27:30Z")
+    assert "不能是 agent" in user_evidence_problem("user-confirmation:claude-ok-2026"), "写着内置名字的照旧按 agent 拒"
+
+
+def test_unregister_is_refused_when_the_claim_table_cannot_be_read(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core import claim_service
+
+    AgentRegistryService(root).register("antigravity")
+
+    def broken(self: object, *, fetch: bool = True) -> list[object]:
+        raise claim_service.ClaimError("git for-each-ref 失败")
+
+    monkeypatch.setattr(claim_service.ClaimService, "all_claims", broken)
+    with pytest.raises(AgentRegistryRefusedError, match="占位表读不出来"):
+        AgentRegistryService(root).unregister("antigravity")
+    assert "antigravity" in AGENT_ROSTER

@@ -37,7 +37,11 @@ from auto_pm.infrastructure.continuity_store import (
 NAME = re.compile(r"[a-z][a-z0-9]{1,19}")
 # 驾驶舱自己用的名字，和会被误读的名字：control-root、run-plan 是 codex/ 前缀下驾驶舱自己的分支，claims/ 是占位分支，
 # main 是主干，project 是项目 Claude 的前缀；user 是用户本人（AI 不能叫这个名字），manual/ 是看板“推送 manual/ 分支”用的前缀。
-RESERVED_NAMES = frozenset({"control-root", "run-plan", "claims", "main", "project", "user", "manual"})
+# 再加上用户本人凭据格式里的固定词（board-click、gui-click、pin-<用途>、cmsg_… 等，由 user_evidence 统一给出，审计 865 §3.1）：
+# 登记了这些名字，用户自己点的批准就会被当成 AI 写的。
+RESERVED_NAMES = frozenset({"control-root", "run-plan", "claims", "main", "project", "user", "manual"}) | user_evidence.EVIDENCE_FORMAT_WORDS
+# 只由十六进制字符组成的名字（如 deadbeef）会和凭据里的摘要、看板会话号撞上，同样不收。
+_HEX_ONLY = re.compile(r"[0-9a-f]+")
 VIA = ("terminal", "board")  # 从哪里登记的：用户自己的终端，或用户本人打开的看板
 ACTIVE = "active"
 RETIRED = "retired"
@@ -87,8 +91,12 @@ def name_problem(name: str) -> str:
         return f"名字“{name[:40]}”不合规则：小写字母开头，2～20 位小写字母和数字（不带横线、空格、大写）"
     if name in stations.BUILTIN_ROSTER:
         return f"{name} 是内置的名字，本来就认得，不用登记"
+    if name in user_evidence.EVIDENCE_FORMAT_WORDS:
+        return f"{name} 是用户本人批准凭据格式里的固定词（如 user-confirmation:board-click:…），登记了会让你自己的批准被当成 AI 写的，换一个"
     if name in RESERVED_NAMES:
-        return f"{name} 是驾驶舱保留的名字（{'、'.join(sorted(RESERVED_NAMES))}），换一个"
+        return f"{name} 是驾驶舱保留的名字（{'、'.join(sorted(RESERVED_NAMES - user_evidence.EVIDENCE_FORMAT_WORDS))}），换一个"
+    if _HEX_ONLY.fullmatch(name):
+        return f"{name} 只由十六进制字符组成，会和批准凭据里的摘要撞上，换一个（里面加一个 g～z 的字母就行）"
     return ""
 
 
@@ -195,8 +203,14 @@ class AgentRegistryStore(ContinuityStore):
 
 
 def registered_roster(control_root: str | Path) -> dict[str, str]:
-    """这本账里登记着、还有效的 AI：名字 → 分支前缀。读不了账本就抛错（``AGENT_ROSTER`` 接住后只认内置五个）。"""
+    """这本账里登记着、还有效的 AI：名字 → 分支前缀。
 
+    本机还没有账本（新克隆、云端会话、目录已不在）就是还没人登记，回空；账本在却读不了才抛错
+    （``AGENT_ROSTER`` 接住后只认内置五个，用户证据也跟着从严）。
+    """
+
+    if not (Path(control_root) / ".auto-pm" / "continuity.db").is_file():
+        return {}
     store = AgentRegistryStore(control_root)
     try:
         return {item.name: item.branch_prefix for item in store.list_registrations() if not name_problem(item.name)}
@@ -219,7 +233,16 @@ def use_ledger_roster(control_root: str | Path | None) -> None:
     else:
         root = Path(control_root)
         stations.AGENT_ROSTER.use(lambda: registered_roster(root))
-    user_evidence.use_extra_agent_names(lambda: tuple(stations.AGENT_ROSTER))
+    user_evidence.use_extra_agent_names(_evidence_names)
+
+
+def _evidence_names() -> tuple[str, ...]:
+    """批准证据检查要认的 AI 名字（内置加登记的）；登记表读不出来就抛错，证据检查据此失败关闭（审计 865 §3.2）。"""
+
+    names = tuple(stations.AGENT_ROSTER)
+    if stations.AGENT_ROSTER.read_failed:
+        raise AgentRegistryError("本机 AI 登记表读不出来")
+    return names
 
 
 class AgentRegistryService:

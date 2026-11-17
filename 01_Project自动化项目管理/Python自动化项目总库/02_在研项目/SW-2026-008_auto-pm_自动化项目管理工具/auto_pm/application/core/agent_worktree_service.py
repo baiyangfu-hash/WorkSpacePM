@@ -65,6 +65,7 @@ class _Roster(Mapping[str, str]):
         self._builtin = dict(builtin)
         self._source: RegisteredSource | None = None
         self._registered: dict[str, str] | None = None
+        self._failed = False
         self._lock = threading.Lock()
 
     def use(self, source: RegisteredSource | None) -> None:
@@ -73,6 +74,7 @@ class _Roster(Mapping[str, str]):
         with self._lock:
             self._source = source
             self._registered = None
+            self._failed = False
 
     def registered(self) -> dict[str, str]:
         """The registered AIs (name -> branch prefix) that are not built in."""
@@ -80,15 +82,25 @@ class _Roster(Mapping[str, str]):
         with self._lock:
             if self._registered is None:
                 loaded: Mapping[str, str] = {}
+                self._failed = False
                 if self._source is not None:
                     try:
                         loaded = self._source()
                     except Exception:  # noqa: BLE001 - a roster that cannot be read is the built-in roster (fail-closed)
                         loaded = {}
+                        self._failed = True
                 self._registered = {
                     name: prefix for name, prefix in loaded.items() if name not in self._builtin and prefix == f"{name}/"
                 }
             return dict(self._registered)
+
+    @property
+    def read_failed(self) -> bool:
+        """The registered part could not be read (only the built-in five are known): checks that need it must fail closed."""
+
+        self.registered()
+        with self._lock:
+            return self._failed
 
     def _all(self) -> dict[str, str]:
         return {**self._builtin, **self.registered()}
