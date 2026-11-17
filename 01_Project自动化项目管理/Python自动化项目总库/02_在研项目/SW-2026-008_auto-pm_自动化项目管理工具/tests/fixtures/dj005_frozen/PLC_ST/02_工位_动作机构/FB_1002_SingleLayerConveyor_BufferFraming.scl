@@ -1,0 +1,395 @@
+﻿(* ================================================================= *)
+(*  功能块名称: FB_1002_SingleLayerConveyor_BufferFraming             *)
+(*  功能描述:   单层边框输送机 10 步状态机 (4 层各调用一次)           *)
+(*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
+(*                                                                   *)
+(*  依据:                                                            *)
+(*    - 详细设计说明书_DSN.md 5.1 / 5.2                              *)
+(*    - 接口文档_INT.md 4.5 / 5 / 8 / 9                              *)
+(*    - 原程序 PDF 的送料分料块 (步序 0/1/2/10/20/30/50/60/70/80)    *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
+(*                                                                   *)
+(*  与 DSN 的差异 (评审请确认):                                      *)
+(*    1. 不再调用 FB_1011 / FB_1012: 阻挡、分料命令直接输出 Y30 系列, *)
+(*       电机三个输出直接给出; 8 个气缸位置各自一个 5 s 定时器        *)
+(*       (DSN 5.2 要求逐点报警, FB_1011 只给一个合并超时)             *)
+(*    2. 新增输入 bStopPending, 新增输出 bAtRest (DSN 4.1 停止收尾)  *)
+(*    3. 安全区丢失时, 任意步的正转 / 反转 / 慢速都立即切断           *)
+(*       (REQ R-CONV-03 "不在安全区时正在送料的立即停")                *)
+(* ================================================================= *)
+
+FUNCTION_BLOCK FB_1002_SingleLayerConveyor_BufferFraming
+
+VAR_INPUT
+    i_dInitRevMs        : DINT;     // 初始化反转时长 ms (10000)
+    i_dPreBlockMs       : DINT;     // 阻挡前到位延时 ms (3000)
+    i_dSlowFeedMs       : DINT;     // 慢速到位延时 ms (2000)
+    i_dReleaseOkMs      : DINT;     // 取走后延时, 有"取料完成" ms (1000)
+    i_dReleaseNgMs      : DINT;     // 取走后延时, 无"取料完成" ms (8000)
+    i_dStarveMs         : DINT;     // 缺料判定时间 ms (10000)
+    i_dCylTimeoutMs     : DINT;     // 气缸位置报警时间 ms (5000)
+END_VAR
+
+VAR_IN_OUT
+    io_stLayer          : ST_SingleLayer;   // 本层全部数据
+END_VAR
+
+VAR
+    (* 工艺定时器 (三段式: 顶部调用, 逻辑段置 IN, 下一扫描读 Q) *)
+    fb_tInitRev         : TON_TIME;       // 步 2 反转 10 s
+    s_bInitRevIn        : BOOL := FALSE;
+    s_bInitRevQ         : BOOL := FALSE;
+    s_dInitRevEt        : DINT := 0;
+
+    fb_tPreBlock        : TON_TIME;       // 步 20 阻挡前到位 3 s
+    s_bPreBlockIn       : BOOL := FALSE;
+    s_bPreBlockQ        : BOOL := FALSE;
+    s_dPreBlockEt       : DINT := 0;
+
+    fb_tSlowFeed        : TON_TIME;       // 步 60 慢速 2 s
+    s_bSlowFeedIn       : BOOL := FALSE;
+    s_bSlowFeedQ        : BOOL := FALSE;
+    s_dSlowFeedEt       : DINT := 0;
+
+    fb_tRelease         : TON_TIME;       // 步 80 取走后延时 1 s / 8 s
+    s_bReleaseIn        : BOOL := FALSE;
+    s_bReleaseQ         : BOOL := FALSE;
+    s_dReleaseEt        : DINT := 0;
+    s_dReleasePt        : DINT := 0;    // 本扫描生效的延时设定
+
+    fb_tStarve          : TON_TIME;       // 缺料 10 s
+    s_bStarveIn         : BOOL := FALSE;
+    s_bStarveQ          : BOOL := FALSE;
+    s_dStarveEt         : DINT := 0;
+
+    (* 气缸位置报警定时器: 命令后 5 s 位置未到 *)
+    fb_tBlkUp1          : TON_TIME;
+    s_bBlkUp1In         : BOOL := FALSE;
+    s_bBlkUp1Q          : BOOL := FALSE;
+    s_dBlkUp1Et         : DINT := 0;
+    fb_tBlkUp2          : TON_TIME;
+    s_bBlkUp2In         : BOOL := FALSE;
+    s_bBlkUp2Q          : BOOL := FALSE;
+    s_dBlkUp2Et         : DINT := 0;
+    fb_tBlkDn1          : TON_TIME;
+    s_bBlkDn1In         : BOOL := FALSE;
+    s_bBlkDn1Q          : BOOL := FALSE;
+    s_dBlkDn1Et         : DINT := 0;
+    fb_tBlkDn2          : TON_TIME;
+    s_bBlkDn2In         : BOOL := FALSE;
+    s_bBlkDn2Q          : BOOL := FALSE;
+    s_dBlkDn2Et         : DINT := 0;
+    fb_tSepUp1          : TON_TIME;
+    s_bSepUp1In         : BOOL := FALSE;
+    s_bSepUp1Q          : BOOL := FALSE;
+    s_dSepUp1Et         : DINT := 0;
+    fb_tSepUp2          : TON_TIME;
+    s_bSepUp2In         : BOOL := FALSE;
+    s_bSepUp2Q          : BOOL := FALSE;
+    s_dSepUp2Et         : DINT := 0;
+    fb_tSepDn1          : TON_TIME;
+    s_bSepDn1In         : BOOL := FALSE;
+    s_bSepDn1Q          : BOOL := FALSE;
+    s_dSepDn1Et         : DINT := 0;
+    fb_tSepDn2          : TON_TIME;
+    s_bSepDn2In         : BOOL := FALSE;
+    s_bSepDn2Q          : BOOL := FALSE;
+    s_dSepDn2Et         : DINT := 0;
+
+    (* 边沿 *)
+    fb_trUnload         : R_TRIG;    // 退料上升沿
+    s_bUnloadEdge       : BOOL := FALSE;
+
+    (* 状态与内部命令 *)
+    s_iStep             : INT := 0;     // 当前步
+    s_bFwd              : BOOL := FALSE;    // 正转命令 (输出前再受 Hold / 安全区限制)
+    s_bRev              : BOOL := FALSE;    // 反转命令
+    s_bSlow             : BOOL := FALSE;    // 慢速命令
+    s_bPreBlockTiming   : BOOL := FALSE;    // 步 20: 阻挡前已亮过, 计时标志 (传感器掉了也继续)
+    s_bSlowTiming       : BOOL := FALSE;    // 步 60: 慢速已开始计时标志
+    s_bPosAllOk         : BOOL := FALSE;    // 步 1: 8 个气缸位置点全部符合
+    s_bBothPick         : BOOL := FALSE;    // 取料位开关 1、2 都亮
+    s_bAnyPick          : BOOL := FALSE;    // 取料位开关 1、2 任一亮
+    s_bOutFwd           : BOOL := FALSE;    // 实际正转输出
+    s_bOutRev           : BOOL := FALSE;    // 实际反转输出
+    s_bFullSlow         : BOOL := FALSE;    // 满料减速生效
+END_VAR
+
+VAR CONSTANT
+    STEP_IDLE           : INT := 0;     // 分支 / 待机
+    STEP_INIT_WAIT      : INT := 1;     // 状态判断
+    STEP_INIT_RUN       : INT := 2;     // 初始化反转
+    STEP_SEND_ON        : INT := 10;    // 放行, 正转
+    STEP_ARRIVE         : INT := 20;    // 运行到阻挡前
+    STEP_SEPARATE       : INT := 30;    // 分料下降
+    STEP_BLOCK_DOWN     : INT := 50;    // 阻挡下降
+    STEP_SLOW_FEED      : INT := 60;    // 送到取料位
+    STEP_REQUEST        : INT := 70;    // 请求取料
+    STEP_RELEASE        : INT := 80;    // 等取走
+END_VAR
+
+BEGIN
+    REGION 00_Timers 定时器统一调用 (顶部, 无条件)
+    fb_tInitRev(IN := s_bInitRevIn, PT := DINT_TO_TIME(i_dInitRevMs));
+    s_bInitRevQ := fb_tInitRev.Q;
+    s_dInitRevEt := TIME_TO_DINT(fb_tInitRev.ET);
+    fb_tPreBlock(IN := s_bPreBlockIn, PT := DINT_TO_TIME(i_dPreBlockMs));
+    s_bPreBlockQ := fb_tPreBlock.Q;
+    s_dPreBlockEt := TIME_TO_DINT(fb_tPreBlock.ET);
+    fb_tSlowFeed(IN := s_bSlowFeedIn, PT := DINT_TO_TIME(i_dSlowFeedMs));
+    s_bSlowFeedQ := fb_tSlowFeed.Q;
+    s_dSlowFeedEt := TIME_TO_DINT(fb_tSlowFeed.ET);
+    fb_tRelease(IN := s_bReleaseIn, PT := DINT_TO_TIME(s_dReleasePt));
+    s_bReleaseQ := fb_tRelease.Q;
+    s_dReleaseEt := TIME_TO_DINT(fb_tRelease.ET);
+    fb_tStarve(IN := s_bStarveIn, PT := DINT_TO_TIME(i_dStarveMs));
+    s_bStarveQ := fb_tStarve.Q;
+    s_dStarveEt := TIME_TO_DINT(fb_tStarve.ET);
+    fb_tBlkUp1(IN := s_bBlkUp1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkUp1Q := fb_tBlkUp1.Q;
+    s_dBlkUp1Et := TIME_TO_DINT(fb_tBlkUp1.ET);
+    fb_tBlkUp2(IN := s_bBlkUp2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkUp2Q := fb_tBlkUp2.Q;
+    s_dBlkUp2Et := TIME_TO_DINT(fb_tBlkUp2.ET);
+    fb_tBlkDn1(IN := s_bBlkDn1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkDn1Q := fb_tBlkDn1.Q;
+    s_dBlkDn1Et := TIME_TO_DINT(fb_tBlkDn1.ET);
+    fb_tBlkDn2(IN := s_bBlkDn2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkDn2Q := fb_tBlkDn2.Q;
+    s_dBlkDn2Et := TIME_TO_DINT(fb_tBlkDn2.ET);
+    fb_tSepUp1(IN := s_bSepUp1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepUp1Q := fb_tSepUp1.Q;
+    s_dSepUp1Et := TIME_TO_DINT(fb_tSepUp1.ET);
+    fb_tSepUp2(IN := s_bSepUp2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepUp2Q := fb_tSepUp2.Q;
+    s_dSepUp2Et := TIME_TO_DINT(fb_tSepUp2.ET);
+    fb_tSepDn1(IN := s_bSepDn1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepDn1Q := fb_tSepDn1.Q;
+    s_dSepDn1Et := TIME_TO_DINT(fb_tSepDn1.ET);
+    fb_tSepDn2(IN := s_bSepDn2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepDn2Q := fb_tSepDn2.Q;
+    s_dSepDn2Et := TIME_TO_DINT(fb_tSepDn2.ET);
+    fb_trUnload(CLK := io_stLayer.bUnload);
+    s_bUnloadEdge := fb_trUnload.Q;
+    END_REGION
+
+    REGION 01_Derived 本扫描派生量
+    s_bBothPick := io_stLayer.bPick1 AND io_stLayer.bPick2;
+    s_bAnyPick := io_stLayer.bPick1 OR io_stLayer.bPick2;
+    s_bPosAllOk := (NOT io_stLayer.bBlkUp1) AND (NOT io_stLayer.bBlkUp2)
+                   AND io_stLayer.bBlkDn1 AND io_stLayer.bBlkDn2
+                   AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2
+                   AND (NOT io_stLayer.bSepDn1) AND (NOT io_stLayer.bSepDn2);
+
+    (* 过程定时器的 IN 每扫描先清零, 由所在步重新置位 (Hold / Reset 时即清零重算) *)
+    s_bInitRevIn := FALSE;
+    s_bPreBlockIn := FALSE;
+    s_bSlowFeedIn := FALSE;
+    s_bReleaseIn := FALSE;
+    s_dReleasePt := i_dReleaseNgMs;
+    END_REGION
+
+    REGION 02_FaultResetSequence 异常停机 / 退料上升沿整层复位 (R-CONV-08), 否则本层未 Hold 时步序执行
+    IF io_stLayer.bReset OR s_bUnloadEdge THEN
+        s_iStep := STEP_IDLE;
+        s_bFwd := FALSE;
+        s_bRev := FALSE;
+        s_bSlow := FALSE;
+        s_bPreBlockTiming := FALSE;
+        s_bSlowTiming := FALSE;
+        io_stLayer.bBlockDown := FALSE;     // 阻挡升起
+        io_stLayer.bSepDown := FALSE;       // 分料升起
+        io_stLayer.bReady := FALSE;
+        io_stLayer.bRequest := FALSE;
+    ELSIF NOT io_stLayer.bHold THEN
+        CASE s_iStep OF
+            STEP_IDLE:
+                // 步 0 分支: 电机全停, 请求取料清零
+                io_stLayer.bRequest := FALSE;
+                s_bFwd := FALSE;
+                s_bRev := FALSE;
+                s_bSlow := FALSE;
+                IF io_stLayer.bInitReq AND (NOT io_stLayer.bReady) THEN
+                    s_iStep := STEP_INIT_WAIT;
+                ELSIF io_stLayer.bAutoRun AND io_stLayer.bReady AND io_stLayer.bSafeZone
+                      AND (NOT io_stLayer.bStopPending) THEN
+                    IF s_bAnyPick THEN
+                        s_iStep := STEP_SLOW_FEED;      // 取料位已有料, 直接去送到取料位
+                    ELSE
+                        s_iStep := STEP_SEND_ON;
+                    END_IF;
+                ELSIF (NOT io_stLayer.bAutoRun) AND (NOT io_stLayer.bInitReq) AND io_stLayer.bUnload THEN
+                    s_iStep := STEP_INIT_WAIT;          // 退料: 重新初始化
+                END_IF;
+
+            STEP_INIT_WAIT:
+                // 步 1: 阻挡下降, 分料升起, 等 8 个位置点符合
+                io_stLayer.bBlockDown := TRUE;
+                io_stLayer.bSepDown := FALSE;
+                IF io_stLayer.bSafeZone AND s_bPosAllOk THEN
+                    s_bRev := TRUE;
+                    s_iStep := STEP_INIT_RUN;
+                END_IF;
+
+            STEP_INIT_RUN:
+                // 步 2: 反转排空 (时长 i_dInitRevMs), 到时置准备完成
+                s_bRev := TRUE;
+                // 反转实际输出被 Hold / 离开安全区切断时不计时, 保证实际反转满 i_dInitRevMs
+                s_bInitRevIn := (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
+                IF s_bInitRevQ THEN
+                    s_bRev := FALSE;
+                    s_bSlow := FALSE;
+                    io_stLayer.bReady := TRUE;
+                    io_stLayer.bUnload := FALSE;
+                    s_iStep := STEP_IDLE;
+                END_IF;
+
+            STEP_SEND_ON:
+                // 步 10: 阻挡 / 分料升起, 位置到后快速正转
+                io_stLayer.bRequest := FALSE;
+                IF io_stLayer.bAutoRun THEN
+                    io_stLayer.bBlockDown := FALSE;
+                END_IF;
+                io_stLayer.bSepDown := FALSE;
+                IF io_stLayer.bStopPending AND (NOT io_stLayer.bPreBlock) THEN
+                    // 停止收尾: 还没有料到阻挡前, 不再开新循环
+                    s_bFwd := FALSE;
+                    s_iStep := STEP_IDLE;
+                ELSIF io_stLayer.bSafeZone AND io_stLayer.bBlkUp1 AND io_stLayer.bBlkUp2
+                      AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2 THEN
+                    s_bFwd := TRUE;
+                    s_bSlow := FALSE;
+                    s_iStep := STEP_ARRIVE;
+                END_IF;
+
+            STEP_ARRIVE:
+                // 步 20: 阻挡前到位光电一亮就计时, 掉了也继续; 到时停正转
+                IF io_stLayer.bPreBlock THEN
+                    s_bPreBlockTiming := TRUE;
+                END_IF;
+                s_bPreBlockIn := s_bPreBlockTiming;
+                IF s_bPreBlockQ THEN
+                    s_bFwd := FALSE;
+                    s_bPreBlockTiming := FALSE;
+                    s_iStep := STEP_SEPARATE;
+                ELSIF io_stLayer.bStopPending AND (NOT s_bPreBlockTiming) THEN
+                    s_bFwd := FALSE;
+                    s_iStep := STEP_IDLE;
+                END_IF;
+
+            STEP_SEPARATE:
+                // 步 30: 分料下降压住第 2 根
+                IF io_stLayer.bPreBlock AND io_stLayer.bSepUp1 AND io_stLayer.bSepUp2 THEN
+                    io_stLayer.bSepDown := TRUE;
+                END_IF;
+                IF io_stLayer.bSepDn1 AND io_stLayer.bSepDn2 THEN
+                    s_iStep := STEP_BLOCK_DOWN;
+                END_IF;
+
+            STEP_BLOCK_DOWN:
+                // 步 50: 取料位空且阻挡前有料才放下阻挡, 让第 1 根通过
+                IF (NOT s_bAnyPick) AND io_stLayer.bPreBlock THEN
+                    io_stLayer.bBlockDown := TRUE;
+                    IF io_stLayer.bBlkDn1 AND io_stLayer.bBlkDn2 THEN
+                        s_iStep := STEP_SLOW_FEED;
+                    END_IF;
+                END_IF;
+
+            STEP_SLOW_FEED:
+                // 步 60: 安全区内正转送到取料位; 两个开关都亮转慢速并计时
+                IF io_stLayer.bSafeZone THEN
+                    s_bFwd := TRUE;
+                    s_bSlow := s_bBothPick;
+                    IF s_bBothPick THEN
+                        s_bSlowTiming := TRUE;
+                    END_IF;
+                ELSE
+                    s_bFwd := FALSE;
+                    s_bSlow := FALSE;
+                    s_bSlowTiming := FALSE;
+                END_IF;
+                s_bSlowFeedIn := s_bSlowTiming;
+                IF s_bSlowFeedQ THEN
+                    s_bFwd := FALSE;
+                    s_bSlow := FALSE;
+                    s_bSlowTiming := FALSE;
+                    s_iStep := STEP_REQUEST;
+                END_IF;
+
+            STEP_REQUEST:
+                // 步 70: 阻挡升起, 电机都停且位置到后发请求取料
+                io_stLayer.bBlockDown := FALSE;
+                IF s_bBothPick AND io_stLayer.bBlkUp1 AND io_stLayer.bBlkUp2
+                   AND (NOT s_bOutFwd) AND (NOT s_bOutRev) AND (NOT s_bFwd) AND (NOT s_bSlow) THEN
+                    io_stLayer.bRequest := TRUE;
+                    s_iStep := STEP_RELEASE;
+                END_IF;
+
+            STEP_RELEASE:
+                // 步 80: 等取走; 取料位两开关都灭后按"取料完成"选 1 s / 8 s (每扫描重判)
+                io_stLayer.bRequest := TRUE;
+                IF io_stLayer.bPickDone THEN
+                    s_dReleasePt := i_dReleaseOkMs;
+                ELSE
+                    s_dReleasePt := i_dReleaseNgMs;
+                END_IF;
+                IF NOT s_bAnyPick THEN
+                    s_bReleaseIn := TRUE;
+                END_IF;
+                IF s_bReleaseQ THEN
+                    io_stLayer.bRequest := FALSE;
+                    IF io_stLayer.bStopPending THEN
+                        s_iStep := STEP_IDLE;       // 停止收尾: 不再开新循环
+                    ELSE
+                        s_iStep := STEP_SEND_ON;
+                    END_IF;
+                END_IF;
+
+        ELSE
+            // 步序异常值: 回安全步 0
+            s_iStep := STEP_IDLE;
+        END_CASE;
+    END_IF;
+    END_REGION
+
+    REGION 03_MotorOutput 电机输出: Hold 或不在安全区一律切断 (R-CONV-03/04)
+    s_bOutFwd := s_bFwd AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
+    s_bOutRev := s_bRev AND (NOT io_stLayer.bHold) AND io_stLayer.bSafeZone;
+    // 满料减速: 满料 1、2 同亮且正转时立即慢速, 条件消失立即撤销 (R-CONV-02)
+    s_bFullSlow := io_stLayer.bFull1 AND io_stLayer.bFull2 AND s_bOutFwd;
+    io_stLayer.bFwd := s_bOutFwd;
+    io_stLayer.bRev := s_bOutRev;
+    // 慢速只在有方向时输出 (变频器约定: 单独慢速不转动)
+    io_stLayer.bSlow := (s_bSlow OR s_bFullSlow) AND (s_bOutFwd OR s_bOutRev);
+    END_REGION
+
+    REGION 04_NoMaterialAlarm 缺料 (R-CONV-05): 正转连续 10 s 既没到阻挡前又没到取料位
+    s_bStarveIn := s_bOutFwd AND (NOT io_stLayer.bPreBlock) AND (NOT s_bBothPick);
+    io_stLayer.arrTrig[9] := s_bStarveQ;
+    END_REGION
+
+    REGION 05_CylinderAlarm 气缸位置报警 (R-CONV-06): 命令后 i_dCylTimeoutMs 位置未到
+    s_bBlkUp1In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp1);
+    s_bBlkUp2In := (NOT io_stLayer.bBlockDown) AND (NOT io_stLayer.bBlkUp2);
+    s_bBlkDn1In := io_stLayer.bBlockDown AND (NOT io_stLayer.bBlkDn1);
+    s_bBlkDn2In := io_stLayer.bBlockDown AND (NOT io_stLayer.bBlkDn2);
+    s_bSepUp1In := (NOT io_stLayer.bSepDown) AND (NOT io_stLayer.bSepUp1);
+    s_bSepUp2In := (NOT io_stLayer.bSepDown) AND (NOT io_stLayer.bSepUp2);
+    s_bSepDn1In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn1);
+    s_bSepDn2In := io_stLayer.bSepDown AND (NOT io_stLayer.bSepDn2);
+    io_stLayer.arrTrig[1] := s_bBlkUp1Q;
+    io_stLayer.arrTrig[2] := s_bBlkUp2Q;
+    io_stLayer.arrTrig[3] := s_bBlkDn1Q;
+    io_stLayer.arrTrig[4] := s_bBlkDn2Q;
+    io_stLayer.arrTrig[5] := s_bSepUp1Q;
+    io_stLayer.arrTrig[6] := s_bSepUp2Q;
+    io_stLayer.arrTrig[7] := s_bSepDn1Q;
+    io_stLayer.arrTrig[8] := s_bSepDn2Q;
+    END_REGION
+
+    REGION 06_StatusOutput 状态输出
+    io_stLayer.iStep := s_iStep;
+    io_stLayer.bAtRest := (s_iStep = STEP_IDLE);
+    END_REGION
+
+END_FUNCTION_BLOCK

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -200,10 +201,28 @@ def test_the_copy_for_dj_2026_009_has_only_the_referenced_syslib_blocks(fake_lsp
     assert copied < all_lib
 
 
-def test_the_copy_for_the_default_project_keeps_what_dj_2026_005_uses(fake_lsp: Path) -> None:
-    result = _run(fake_lsp)
+FROZEN_005 = (
+    REPO / "01_Project自动化项目管理" / "Python自动化项目总库" / "02_在研项目" / "SW-2026-008_auto-pm_自动化项目管理工具"
+    / "tests" / "fixtures" / "dj005_frozen"
+)
+
+
+def _frozen_005_project(tmp_path: Path) -> Path:
+    """按仓库里的项目布局摆一份 DJ-2026-005 冻结样本（main d04bd323，CHG-SCPT-2026-715），冻结目录本身不动。"""
+    project = tmp_path / "frozen" / "DJ-2026-005"
+    (project / "02_PLC程序").mkdir(parents=True)
+    (project / ".plc.json").write_bytes((FROZEN_005 / "plc.json.baseline").read_bytes())
+    shutil.copytree(FROZEN_005 / "PLC_ST", project / "02_PLC程序" / "PLC_ST")
+    return project
+
+
+def test_the_copy_for_the_default_project_keeps_what_dj_2026_005_uses(fake_lsp: Path, tmp_path: Path) -> None:
+    # 读 005 的冻结样本而不是现成目录：005 以后改程序不让这条变红（pr867 审计 §3 走法乙）。默认项目仍是 005 由
+    # test_the_default_project_is_unchanged 和 test_without_project_it_still_runs_dj_2026_005_in_a_copy_with_the_stub_timers 管。
+    result = _run(fake_lsp, "--project", str(_frozen_005_project(tmp_path)))
 
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "DJ-2026-005" in _report(fake_lsp)["cwd"]
     copied = set(_report(fake_lsp)["libscl"].strip(",").split(","))
     # CHG-PLC-2026-024 起 005 的边沿改用 TIA 原生 R_TRIG / F_TRIG，不再引用 SysLib 的 edge/*；
     # timer/FB_TON、FB_TONR 是脚本固定换成替身的两份，ST_ServoAxis 仍是 005 用到的 SysLib 类型。

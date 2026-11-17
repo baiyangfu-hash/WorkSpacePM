@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "说明": "驾驶舱测试用的 DJ-2026-005 冻结样本（CHG-SCPT-2026-715，pr867 审计 §3 走法乙）。从 main d04bd323（#873 合并，CHG-PLC-2026-026 之后）原样拷出 PLC_ST 下全部 .scl/.db 和项目 .plc.json，一个字节没改；以后 005 怎么改都不影响这里，驾驶舱测试只读这份。文件名命中仓库忽略规则的（*.db）和以点开头会被当成 PLC 项目标记的（.plc.json）存成“原名.baseline”/plc.json.baseline，哈希是原文件的。要换成 005 的新内容，另开变更单整份重拷，并在同一张单里改对应测试的期望值。",
+  "source_commit": "d04bd323e323fab526bcc9a6a76537dc4e699c07",
+  "source_dir": "0100_PLC自动化/DJ-2026-005",
+  "files": [
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_主程序/OB123.scl",
+      "stored_as": "PLC_ST/00_主程序/OB123.scl",
+      "sha256": "331c0591f995823ac0804d1b9b2d6eef73bfeeaed36cb307167c61ed5c0a452b"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
+      "stored_as": "PLC_ST/00_全局数据/GlobalVars.db.baseline",
+      "sha256": "6cc2b50d90fc1b1ecc55037afd5b8a25ac5a0a55e6b6f51f017610d9dcdc4ad9"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Alarm.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Alarm.scl",
+      "sha256": "90bacd17d4ea3ce7c4d5129e69ebb43d4b8a0e5912e61815785a335bca82619a"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Bridge.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Bridge.scl",
+      "sha256": "f0ea9c58781b6512a5baec777d636ab3f76f5c0c6db2cb5268a756fedc3d1841"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_ConveyorSystem.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_ConveyorSystem.scl",
+      "sha256": "c977a35a71d7f3d113f897af209a03af15205172a2813dba61d64508b1227fed"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_ExternalLink.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_ExternalLink.scl",
+      "sha256": "aff0ad79b4b37d467b5928c3b30e2cf4be4e487e0f48eb54214041d72410355b"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Feeder.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Feeder.scl",
+      "sha256": "942ca9e3a1fa9ddb677981ffef9736e164b40c3d74826194f5b4fbd6f6be3fdc"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Hmi.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Hmi.scl",
+      "sha256": "b81535ad33b3a98008719da749c163035a0b5c48e7b808ea2507e64acaeff0eb"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_HomePrepare.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_HomePrepare.scl",
+      "sha256": "755b9c30bfcf5e1a51d914c97156476dbd3e2366a49c6bdc58f5c24d7d3969ec"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Io.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Io.scl",
+      "sha256": "0b0124dc343c70995935740ae0e9ece68b699c21ecba9b3f1fc2d277436002d7"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Machine.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Machine.scl",
+      "sha256": "7a5b8137b545f21045951fcaa08a125dd9500b202ddb7704b804e9bba97802e1"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_Manual.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_Manual.scl",
+      "sha256": "8c62c3c8a353bc0d8fb795d06b8b97940fafb4130fc3af1bc1fe70fd2c3932db"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_PickGroup.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_PickGroup.scl",
+      "sha256": "1544dd37be85ec741b990e952b4fde79e7cf8f77f990fe5ad29fb06d05d21578"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_PickPlace.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_PickPlace.scl",
+      "sha256": "2b109e61a11cdfe078afeec82ff2b4b0d61aef8127b29dca74e7f2404028907f"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_公共类型/ST_SingleLayer.scl",
+      "stored_as": "PLC_ST/00_公共类型/ST_SingleLayer.scl",
+      "sha256": "6e2131cdfb9be6ee330f73d750dc7b9e5252d94f2ab876038782bac8dd9de8cf"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/01_外部设备交互/DB_3001_ExternalDevice_DJ005.scl",
+      "stored_as": "PLC_ST/01_外部设备交互/DB_3001_ExternalDevice_DJ005.scl",
+      "sha256": "8ad0de4482763c3c29f329429d2117d6a275fc342ae48e3a2bc8280f62976762"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/01_外部设备交互/FB_3001_ExternalDevice_DJ005.scl",
+      "stored_as": "PLC_ST/01_外部设备交互/FB_3001_ExternalDevice_DJ005.scl",
+      "sha256": "7aacd4bf39be274b44f8fc929d1d9ca2d3a115537be32327bde186a95415b2c7"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/DB_1003_PickPlace_DJ005.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/DB_1003_PickPlace_DJ005.scl",
+      "sha256": "699d735e488c22ed2fea902295c641365620140bd77c5b4ce3aaa1c7dd7bfb96"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/DB_1004_GlueMachineFeeder_DJ005.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/DB_1004_GlueMachineFeeder_DJ005.scl",
+      "sha256": "671eac8a74f09d36b6b94915d30898d2ee09f9bf84d498c09ef8d2b6172104cd"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/DB_1007_ConveyorSystem_DJ005.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/DB_1007_ConveyorSystem_DJ005.scl",
+      "sha256": "f4a8f364125b35fc5f086eecaf4288edf5e0cecbd877f75bd1aebca7b113e8ae"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/FB_1002_SingleLayerConveyor_BufferFraming.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/FB_1002_SingleLayerConveyor_BufferFraming.scl",
+      "sha256": "c8ab09f1c45f7f6e5828feac5bbb668b1c044f21dab503f7b00cf3ecd81c02d7"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/FB_1003_PickPlace_BufferFraming.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/FB_1003_PickPlace_BufferFraming.scl",
+      "sha256": "2477b507a1a584b0bb349d7027950da6cc85e3221d92c6435e6aa804c94397b1"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/FB_1004_GlueMachineFeeder_BufferFraming.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/FB_1004_GlueMachineFeeder_BufferFraming.scl",
+      "sha256": "31d15a519cfa830fd889d55264c0d5d52c650542c90296ba03d11816b503889d"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/02_工位_动作机构/FB_1007_ConveyorSystem_BufferFraming.scl",
+      "stored_as": "PLC_ST/02_工位_动作机构/FB_1007_ConveyorSystem_BufferFraming.scl",
+      "sha256": "86e796296a58ad230d9cbeccedee2026f5abab848c9adfc9e57ca42ce1507f23"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/DB_1001_MachineMode_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/DB_1001_MachineMode_DJ005.scl",
+      "sha256": "871644e7d23f7ce51ac6f852c8d7a42c64d5d11e22a8ad51822b68501ff82168"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/DB_1005_HomePrepare_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/DB_1005_HomePrepare_DJ005.scl",
+      "sha256": "fab2c174d2e71991b3a7703f073125c9395bf42242d321972a0044d545f2f615"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/DB_1006_ManualTeach_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/DB_1006_ManualTeach_DJ005.scl",
+      "sha256": "7922ced2cac79a4c41a7dec2f3232615e4992ba394e53ade6086072f5d404327"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/DB_2002_StationBridge_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/DB_2002_StationBridge_DJ005.scl",
+      "sha256": "bcbb68bf2deb06692548f0adfdb46fb143d92873bdecb97bfee1d4ae3cd32d07"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/FB_1001_MachineMode_BufferFraming_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/FB_1001_MachineMode_BufferFraming_DJ005.scl",
+      "sha256": "351e4188e5fa9247637cf53ec33bad53a11b26a8ff0e065404f6344834080329"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/FB_1005_HomePrepare_BufferFraming.scl",
+      "stored_as": "PLC_ST/03_模式与调度/FB_1005_HomePrepare_BufferFraming.scl",
+      "sha256": "6e0c35f7107f8926de4c667e8c49dc01e42750ed2eb760f23f591522fe474fee"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/FB_1006_ManualTeach_BufferFraming.scl",
+      "stored_as": "PLC_ST/03_模式与调度/FB_1006_ManualTeach_BufferFraming.scl",
+      "sha256": "8f2e7258654536f519baa1848b2d78ba83e42633cacb5a265cd20826de8ea5ab"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/03_模式与调度/FB_2002_StationBridge_DJ005.scl",
+      "stored_as": "PLC_ST/03_模式与调度/FB_2002_StationBridge_DJ005.scl",
+      "sha256": "4dddae2f45508d8e7291b51ca58609c021bc67adb0af250ce1db752132e49b09"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/DB_2001_CommonAlarm_DJ005.scl",
+      "stored_as": "PLC_ST/05_公共报警/DB_2001_CommonAlarm_DJ005.scl",
+      "sha256": "4dae5479d633c171705cabfdfcd3116fbfa66409d469d1218b67fb7d1e9a35d3"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation_DJ005.scl",
+      "stored_as": "PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation_DJ005.scl",
+      "sha256": "55b5a7b9adfa6f18e137f2ff257bc458837e06b0cae814a4dd7d9020d44107ba"
+    },
+    {
+      "source": "0100_PLC自动化/DJ-2026-005/.plc.json",
+      "stored_as": "plc.json.baseline",
+      "sha256": "814f6eb0a07118ce0d8d67919b51bf715ff56c6022f8f3ffd44ee434e8bc2d65"
+    }
+  ]
+}

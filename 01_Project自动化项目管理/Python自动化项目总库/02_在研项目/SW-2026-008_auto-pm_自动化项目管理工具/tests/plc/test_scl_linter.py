@@ -612,15 +612,18 @@ def test_the_twelve_existing_zero_based_arrays_in_db_files_are_only_warnings() -
     assert severities == ["WARNING"] * 12
 
 
-def test_005_global_vars_no_longer_holds_fb_instances() -> None:
+def test_005_global_vars_no_longer_holds_fb_instances(tmp_path: Path) -> None:
     """TD-SW008-596：005 原来 GlobalVars.db 第 43～51 行的 9 个 FB 实例，CHG-PLC-2026-024 已移进各自的背景 DB，
-    块名 GlobalVars_DJ005（CHG-PLC-2026-025），源文件照模板存 GlobalVars.db（CHG-PLC-2026-026）；按 LSP-905 §4.11 一个都不能剩。"""
-    from pathlib import Path
+    块名 GlobalVars_DJ005（CHG-PLC-2026-025），源文件照模板存 GlobalVars.db（CHG-PLC-2026-026）；按 LSP-905 §4.11 一个都不能剩。
 
-    repo = next(p for p in Path(__file__).resolve().parents if (p / "0100_PLC自动化").is_dir())
-    data = repo / "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据"
+    CHG-SCPT-2026-715：读 tests/fixtures/dj005_frozen 里 main d04bd323 的冻结副本（*.db 被仓库忽略，存成 GlobalVars.db.baseline），
+    不再读 005 现成文件；在临时目录按原路径名放一份再走 lint_file，.db 的读法和规则过滤与原来一样。"""
+    data = Path(__file__).resolve().parents[1] / "fixtures" / "dj005_frozen" / "PLC_ST" / "00_全局数据"
+    assert data.is_dir()
     assert not (data / "GlobalVars.scl").exists()
-    db = data / "GlobalVars.db"
+    db = tmp_path / "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes((data / "GlobalVars.db.baseline").read_bytes())
     assert "DATA_BLOCK GlobalVars_DJ005" in db.read_text(encoding="utf-8-sig")
     found = [v for v in SclLinter.lint_file(db).violations if v.rule_id == SclLinter.GLOBAL_DB_FB_INSTANCE_RULE]
     assert found == []
