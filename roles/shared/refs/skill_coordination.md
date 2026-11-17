@@ -4,9 +4,9 @@
 
 ## 1. 角色与真源
 
-- **PM 是治理角色，不是独占技能**：当前主 Agent 负责需求澄清、CHG、Decision、Work 授权、验收和关闭。
-- **执行技能不持有治理权**：只能在收到匹配的 `project_id`、`work_id`、`run_id`、`decision_id`、`owned_paths` 与 lease 后修改已授权范围。
-- **机器真源**：CHG/Decision 管授权；Continuity Store 中的 Work/Run/Checkpoint/lease 管执行状态；Git 管代码基线；发布 manifest 与 active/previous 指针管运行版本。
+- **PM 是治理角色，不是独占技能**：当前主 Agent 负责需求澄清、变更单（CHG）报批、验收和关闭；走 Run 的卡另管 Decision 和 Work 授权。
+- **执行技能不持有治理权**：只能在变更单已经用户批准、领卡占位已登记可改范围之后修改已授权范围；走 Run 的卡另需匹配的 `project_id`、`work_id`、`run_id`、`decision_id`、`owned_paths` 与 lease。
+- **机器真源**：CHG（变更单）和 Decision 管授权；领卡占位（远程分支 `claims/<卡号>`）管可改范围；走 Run 的卡由 Continuity Store 中的 Work/Run/Checkpoint/lease 管执行状态；Git 管代码基线；发布 manifest 与 active/previous 指针管运行版本。
 - **人工投影**：`PM_SESSION_*.md` 仅用于项目摘要，不是 Work/Run/审批真源；执行技能不得修改。
 - **适配层无状态**：Agent、IDE、技能和聊天上下文不得创建平行账本，不得写 `.auto-pm/ai_feedback.json` 或 handoff.v1 文件。
 
@@ -22,9 +22,9 @@
 
 ## 3. 四阶段流程
 
-1. **Grooming**：先运行 `pm resume <PID> --json`，再只读勘测源码、配置、接口和测试。无已授权 Work/Run 时只能返回事实，不得修改。
-2. **Approval**：PM 角色建立 CHG 和 Decision，并创建/授权 Work；User 明示批准前不得进入 Execution。
-3. **Execution**：执行技能核对 Work/Run/Decision、owned paths、Git baseline 与 lease，只修改 owned paths；dirty tree 未声明、lease 过期或 schema 未知时停止。
+1. **Grooming**：先运行 `pm resume <PID> --json`，再只读勘测源码、配置、接口和测试。变更单未经用户批准时只能返回事实，不得修改（快线例外，见 `AGENTS.md` FLOW-001）。
+2. **Approval**：PM 角色建立 CHG、出《需求分析与技术实施计划》报批（走 Run 的卡另建 Decision 并创建/授权 Work）；User 明示批准前不得进入 Execution。
+3. **Execution**：执行技能核对已批准的变更单、领卡占位的可改范围和 Git baseline（走 Run 的卡另核 Work/Run/Decision 与 lease），只修改可改范围内的文件；dirty tree 未声明、lease 过期或 schema 未知时停止。
 4. **Acceptance**：执行端运行领域门禁，创建 Checkpoint；需要换 Agent 时创建 checkpoint-bound handoff.v2。PM 角色核验代码、证据、状态和台账后关闭 Work/CHG。
 
 ## 4. 交接契约
@@ -35,4 +35,4 @@
 
 ## 5. 独立触发
 
-用户直接调用执行技能时，技能仍先执行 `pm resume <PID> --json`。若没有可执行的已授权 Work/Run，则降级为只读 Grooming，返回需要 PM 角色建立的授权对象；不得借用 PM_SESSION、旧 handoff 或聊天文字推定执行权。
+用户直接调用执行技能时，技能仍先执行 `pm resume <PID> --json`。若没有用户批准过的变更单（走 Run 的卡：没有可执行的已授权 Work/Run），则降级为只读 Grooming，返回需要 PM 角色建立的授权对象；不得借用 PM_SESSION、旧 handoff 或聊天文字推定执行权。

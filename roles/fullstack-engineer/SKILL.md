@@ -1,6 +1,6 @@
 ---
 name: fullstack-engineer
-description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；支持只读 Grooming 和带 Work/Run/lease 的 Execution。"
+description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；支持只读 Grooming 和按已批准变更单的 Execution（命令本身要求时另带 Work/Run/lease）。"
 ---
 
 # Fullstack Engineer

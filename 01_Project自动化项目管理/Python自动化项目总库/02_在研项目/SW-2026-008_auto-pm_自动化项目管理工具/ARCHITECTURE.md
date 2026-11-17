@@ -117,7 +117,7 @@ launcher/launch.py   指针 → 校验 manifest 登记 → 逐文件核 SHA-256 
 
 - 顺序的文字真源是 `AGENTS.md` 的“澄清-报批-执行-验收”四阶段；命令清单以 `main.py pm --help` 和 `main.py continuity --help` 为准（已核：pm 下有 accept、acceptance-scan、approve、close、confirm-start、handoff、inbox、missions、orient、park、pending、plan、recover、recover-status、resume、switch、takeover、unpark、verify 等）。
 - 一个项目可以开几张卡，但同一时刻只有一张“在干”；插急活用 `pm park / switch / unpark`（`application/core/mission_switch_service.py`、`mission_admission.py`，WS-002）。
-- 没有已授权的 Work、Run 和有效租约时，只允许只读命令（`CLAUDE.md` 第 2 条）。
+- 变更单被用户批准之前（快线除外），只做只读命令、建变更单和领卡占位（`CLAUDE.md` 第 2 条）；Work/Run/租约只在看板一键流和命令本身要求时才要（`AGENTS.md` 红线 2，CHG-SCPT-2026-717）。
 
 ## 6. 护栏分四层
 

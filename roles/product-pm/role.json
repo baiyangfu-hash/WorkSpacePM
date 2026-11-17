@@ -48,7 +48,7 @@
   "legacy": {
     "mode": "pointer",
     "source": ".trae/skills/cockpit-entry/SKILL.md",
-    "from_heading": "## 没有已授权的 Work 之前，只能用这些只读命令",
+    "from_heading": "## 变更单被批准之前，只能用这些只读命令",
     "note": "做法的正本只在 cockpit-entry；SKILL.md 只指路，不抄（682 合后两份手抄对不上，改成一份正本）"
   }
 }

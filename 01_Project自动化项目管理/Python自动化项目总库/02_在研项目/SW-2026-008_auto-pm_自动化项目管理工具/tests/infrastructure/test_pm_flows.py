@@ -689,7 +689,7 @@ _FAKE_MAIN = (
 )
 
 
-@pytest.mark.parametrize("flow", ["entry", "checkup", "closeout", "steps"])
+@pytest.mark.parametrize("flow", ["entry", "checkup", "closeout", "closeout-pr", "steps"])
 def test_output_piped_in_gbk_does_not_crash(flow: str, tmp_path: Path) -> None:
     """像中文 Windows 上把输出接到文件或管道：没设 PYTHONUTF8，管道编码是 GBK。四个子命令都要跑到最后、不崩，
     写出来的是 UTF-8（读的一方按 UTF-8 解得出“▶ 第 1 步”）。替身 main.py 只回一行字，不碰真账本。"""
@@ -704,6 +704,7 @@ def test_output_piped_in_gbk_does_not_crash(flow: str, tmp_path: Path) -> None:
         "entry": ["entry", "DJ-2026-005"],
         "checkup": ["checkup", "DJ-2026-005"],
         "closeout": ["closeout", "DJ-2026-005", "--mission-id", "MISSION-3E5ED659C44DE219"],
+        "closeout-pr": ["closeout-pr", "DJ-2026-005", "--chg", "CHG-SCPT-2026-717", "--card", "309"],
         "steps": ["steps", "entry"],
     }[flow]
     done = subprocess.run(
@@ -824,3 +825,120 @@ def test_checkup_gives_no_role_hint(flows: ModuleType, tmp_path: Path) -> None:
 
 def test_steps_of_entry_lists_the_role_hint(flows: ModuleType) -> None:
     assert "| 角色包提示 |" in _steps_text(flows, "entry")
+
+
+# ---- PR 线收口（CHG-SCPT-2026-717）：不走 Run 的全流程、标准线卡，PR 合进 main 后的收口 ----
+
+_PR_ARGS: dict[str, str] = {"chg": "CHG-SCPT-2026-717", "card": "309"}
+
+
+def test_every_state_changing_pr_closeout_step_is_a_stop(flows: ModuleType) -> None:
+    commands = _map()
+    for step in flows.CLOSEOUT_PR:
+        leaf = _leaf(step.args, commands)
+        if commands[leaf]["class"] != "read" and leaf not in flows.READ_BY_CODE:
+            assert step.kind == "stop", f"{leaf} 会改状态，必须是停点"
+            assert step.who, f"{leaf} 停点要写明谁来做"
+    transition = next(step for step in flows.CLOSEOUT_PR if step.key == "transition")
+    assert (
+        transition.kind == "stop"
+        and transition.args[:2] == ("change", "transition")
+        and "completed" in transition.args
+        and "只有用户本人" in transition.who
+        and "永远不执行" in transition.who
+    )
+    assert {"transition", "worktree"} <= {step.key for step in flows.CLOSEOUT_PR if step.kind == "stop"}
+
+
+def test_pr_closeout_never_runs_a_state_changing_command(flows: ModuleType, tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    runner = FakeRunner()
+    stops = [step.key for step in flows.CLOSEOUT_PR if step.kind == "stop"]
+    for done in ["", *stops]:
+        lines: list[str] = []
+        assert flows.run_flow(
+            "closeout-pr", "DJ-2026-005", root=root, done=done, runner=runner, out=lines.append, **_PR_ARGS
+        ) == (0 if done == stops[-1] else 3), done
+    ran = runner.ran()
+    for forbidden in ("change transition ", "claim release ", "worktree close ", "pm verify ", "pm accept "):
+        assert not [call for call in ran if call.startswith(forbidden)], forbidden
+    assert ran == [
+        "pm control-root-status DJ-2026-005",
+        "pr settle-scan DJ-2026-005",
+        "ledger reconcile DJ-2026-005",
+    ]
+
+
+def test_pr_closeout_stop_fills_in_the_change_order_and_the_card(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    root = _root(tmp_path)
+    lines: list[str] = []
+
+    assert (
+        flows.run_flow(
+            "closeout-pr", "DJ-2026-005", root=root, done="accepting", runner=FakeRunner(), out=lines.append, **_PR_ARGS
+        )
+        == 3
+    )
+    text = "\n".join(lines)
+    assert "change transition CHG-SCPT-2026-717 --to completed --pid DJ-2026-005" in text
+    assert "把 CHG-SCPT-2026-717 推到完成" in text
+    assert "只有用户本人" in text
+    record = json.loads(
+        next((root / ".auto-pm" / "reports" / "flows").glob("*.json")).read_text(encoding="utf-8")
+    )
+    assert (record["chg"], record["card"]) == ("CHG-SCPT-2026-717", "309")
+    assert record["stopped_at"]["key"] == "transition"
+
+    lines.clear()
+    assert (
+        flows.run_flow(
+            "closeout-pr", "DJ-2026-005", root=root, done="transition", runner=FakeRunner(), out=lines.append, **_PR_ARGS
+        )
+        == 3
+    )
+    assert any("claim release 309" in line for line in lines)
+
+
+@pytest.mark.parametrize(("chg", "card"), [("CHG-717", "309"), ("--fix", "309"), ("CHG-SCPT-2026-717", "--fix"), ("CHG-SCPT-2026-717", "")])
+def test_a_malformed_change_order_or_card_runs_nothing(
+    flows: ModuleType, tmp_path: Path, chg: str, card: str
+) -> None:
+    runner = FakeRunner()
+    lines: list[str] = []
+    assert (
+        flows.run_flow(
+            "closeout-pr", "DJ-2026-005", root=_root(tmp_path), chg=chg, card=card, runner=runner, out=lines.append
+        )
+        == 2
+    )
+    assert runner.calls == []
+    assert "格式不对" in lines[0] and "一条命令都没跑" in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("flow", "extra"),
+    [("closeout", {"mission": "MISSION-ABC123", "done": "close"}), ("closeout-pr", dict(_PR_ARGS))],
+)
+def test_settle_scan_saying_there_is_something_to_settle_is_not_red(
+    flows: ModuleType, tmp_path: Path, flow: str, extra: dict[str, str]
+) -> None:
+    """``pr settle-scan`` 退出 1＝“有等收口的卡”：收口时的常态，流程照常走到下一个停点；退出 2＝判断不了，照样算红。"""
+    lines: list[str] = []
+    runner = FakeRunner(fail={"pr settle-scan": 1})
+    assert flows.run_flow(flow, "DJ-2026-005", root=_root(tmp_path), runner=runner, out=lines.append, **extra) == 3
+    assert "pr settle-scan DJ-2026-005" in runner.ran()
+    assert not any("停在第" in line and "退出码 1" in line for line in lines)
+
+    lines.clear()
+    runner = FakeRunner(fail={"pr settle-scan": 2})
+    assert flows.run_flow(flow, "DJ-2026-005", root=_root(tmp_path / "again"), runner=runner, out=lines.append, **extra) == 1
+    assert any("「合并后收口清单」" in line and "退出码 2" in line for line in lines)
+
+
+def test_steps_of_the_pr_closeout_lists_the_user_only_step(flows: ModuleType) -> None:
+    text = _steps_text(flows, "closeout-pr")
+    assert "`main.py change transition <变更单号> --to completed --pid <项目编号>`" in text
+    assert "`main.py claim release <占位卡号>`" in text
+    assert "只有用户本人" in text and "退出码 1 只说明有等收口的卡" in text
