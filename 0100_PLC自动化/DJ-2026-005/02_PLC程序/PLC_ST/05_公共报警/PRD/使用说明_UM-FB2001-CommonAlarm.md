@@ -1,6 +1,6 @@
-# 使用说明 FB_2001_CommonAlarm_AllStation
+# 使用说明 FB_2001_CommonAlarm_AllStation_DJ005
 
-## 公共报警（FB_2001_CommonAlarm_AllStation）
+## 公共报警（FB_2001_CommonAlarm_AllStation_DJ005）
 
 F0~F127 报警自保持、分级（A 类进 M8，B 类按机构 Hold，提示类只显示）、最小报警号、复位键边沿清除和声光输出（杆灯绿 / 黄 / 红、蜂鸣、复位灯）。
 

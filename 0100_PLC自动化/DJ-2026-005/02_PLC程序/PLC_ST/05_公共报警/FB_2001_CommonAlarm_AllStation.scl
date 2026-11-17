@@ -1,5 +1,5 @@
 ﻿(* ================================================================= *)
-(*  功能块名称: FB_2001_CommonAlarm_AllStation                        *)
+(*  功能块名称: FB_2001_CommonAlarm_AllStation_DJ005                        *)
 (*  功能描述:   F0~F127 报警自保持、分级、汇总、复位、声光            *)
 (*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V4.x)       *)
 (*                                                                   *)
@@ -17,7 +17,7 @@
 (*       与"无报警"重名)                                             *)
 (* ================================================================= *)
 
-FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation
+FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation_DJ005
 
 VAR_IN_OUT
     io_stAlarm          : ST_Alarm;         // 报警触发 / 锁存 / 分级输出 / 声光

@@ -1,5 +1,5 @@
 ﻿(* ================================================================= *)
-(*  功能块名称: FB_ExternalDeviceInteraction (FB_3001)                *)
+(*  功能块名称: FB_3001_ExternalDevice_DJ005 (FB_3001)                *)
 (*  功能描述:   组框机链路: 联机 / 连续送框 / 单套送框许可,           *)
 (*              本机 -> 组框机安全异常与暂停 / 急停输出 Y45 / Y46,    *)
 (*              组框机安全异常 F104 (A 类)、通讯异常 F105 (提示)      *)
@@ -19,7 +19,7 @@
 (*       另行拆开                                                    *)
 (* ================================================================= *)
 
-FUNCTION_BLOCK FB_ExternalDeviceInteraction
+FUNCTION_BLOCK FB_3001_ExternalDevice_DJ005
 
 VAR_IN_OUT
     io_stExt            : ST_ExternalLink;      // 组框机链路 (本 FB 写)

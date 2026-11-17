@@ -1,12 +1,12 @@
 # 接口文档 - GlobalVars.scl (全局变量数据块)
 
-> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
 
 
 ## 文档信息
 | 项目 | 内容 |
 |------|------|
-| **数据块名称** | GlobalVars |
+| **数据块名称** | GlobalVars_DJ005 |
 | **功能描述** | 边框缓存机PLC控制系统全局变量数据交换中心 |
 | **当前版本** | V7.1.1 |
 | **编译日期** | 2026-05-20 |
@@ -27,8 +27,8 @@
 ## 数据结构概览
 
 ```
-DATA_BLOCK GlobalVars
-├── stExternal  : STRUCT (22变量)    ← FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction）V6.0.0
+DATA_BLOCK GlobalVars_DJ005
+├── stExternal  : STRUCT (22变量)    ← FB_3001_ExternalInteraction（DJ005实现名：FB_3001_ExternalDevice_DJ005）V6.0.0
 │   ├── 安全信号输入(4): EStop/SafetyDoor[8]/HmiStop/BusHealthy
 │   ├── 组框机(4输入): AutoRunning/AllowFeed/Fault/EStop
 │   ├── 打胶机(3输入): AutoRunning/Fault/EStop
@@ -87,14 +87,14 @@ DATA_BLOCK GlobalVars
 │   └── 输出(10): CurrentAlarmCode/GlobalAlarmWord/AlarmCount/MesQueue[10]/NewAlarmPulse/Lights/Buzzer
 │
 └── FB实例(7)
-    ├── fbExternalDevice  : FB_3001_ExternalInteraction（DJ005实现类型名：FB_ExternalDeviceInteraction）
+    ├── fbExternalDevice  : FB_3001_ExternalInteraction（DJ005实现类型名：FB_3001_ExternalDevice_DJ005）
     ├── fbConveyor_L1     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
     ├── fbConveyor_L2     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
     ├── fbConveyor_L3     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
     ├── fbConveyor_L4     : FB_1002_SingleLayerConveyor_BufferFraming  🆕 V7.0.0
     ├── fbPickPlace       : FB_1003_PickPlace_BufferFraming
     ├── fbGlueFeeder      : FB_1004_GlueMachineFeeder_BufferFraming
-    └── fbCommonAlarm     : FB_2001_CommonAlarm_AllStation
+    └── fbCommonAlarm     : FB_2001_CommonAlarm_AllStation_DJ005
 END_DATA_BLOCK
 ```
 
@@ -102,7 +102,7 @@ END_DATA_BLOCK
 
 ## 详细接口定义
 
-### 第一部分: stExternal结构 (22变量) - FB_3001_ExternalInteraction V6.0.0（DJ005实现名：FB_ExternalDeviceInteraction）
+### 第一部分: stExternal结构 (22变量) - FB_3001_ExternalInteraction V6.0.0（DJ005实现名：FB_3001_ExternalDevice_DJ005）
 
 #### 安全信号输入 (4个)
 | 变量名 | 类型 | 初始值 | 说明 | 物理地址 |

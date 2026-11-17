@@ -50,7 +50,7 @@ tags: ["技术方案", "PLC程序"]
 - 时间值（原程序 K × 100 ms）集中在各机构参数结构体，初值 = 原值。
 
 ### 4.3 轴与位置
-- Z / X1 / X2 三个 `ST_ServoAxis`（`astServoAxis[1..3]`，**沿用现有 GlobalVars 顺序**：1 = Z、2 = X1、3 = X2，避免打乱平台侧轴对象编号）。注意这与原程序的“轴 1 = X1、轴 2 = X2、轴 3 = Z”编号不同，物理输出按 IO 表：X1 = Y0 / Y4，X2 = Y1 / Y5，Z = Y2 / Y6。
+- Z / X1 / X2 三个 `ST_ServoAxis`（`astServoAxis[1..3]`，**沿用现有 GlobalVars_DJ005 顺序**：1 = Z、2 = X1、3 = X2，避免打乱平台侧轴对象编号）。注意这与原程序的“轴 1 = X1、轴 2 = X2、轴 3 = Z”编号不同，物理输出按 IO 表：X1 = Y0 / Y4，X2 = Y1 / Y5，Z = Y2 / Y6。
 - 位置单位：脉冲（`REAL`），与原程序 D 寄存器值一致；换算由平台轴对象负责，本程序不做 mm 换算。
 - 运动命令：绝对定位 = 设 `Abs.Position / Velocity`，`Abs.Execute` 保持直到 `Abs.Done`；暂停用 `Halt`，急停类用 `Stop`；回原点用 `Home`；点动用 `Jog`。
 - 极限开关：硬件接线由轴对象处理，同时程序读取 X3~X10 做报警（F20~F25）。
@@ -61,8 +61,8 @@ tags: ["技术方案", "PLC程序"]
 - `M500` 本机模拟保留为参数位，默认 FALSE，不得在自动生产中置位。
 
 ### 4.5 数据组织
-- `GlobalVars.scl` 为唯一全局数据块（2026-11-15 前为 `GlobalVars.db`），每个机构一个结构体（`ST_*`），FB 通过 `VAR_IN_OUT` 整块读写；FB 实例不放在 GlobalVars，每个 FB 一个背景数据块（LSP-905 §4.11）。
-- OB1 只做 FB 调用（≤ 10 行）；机构之间的信号中继放在专用 FB `FB_2002_StationBridge`，不写进 OB1（LSP-905 §4.5）。
+- `GlobalVars.scl` 为唯一全局数据块（2026-11-15 前为 `GlobalVars.db`），每个机构一个结构体（`ST_*`），FB 通过 `VAR_IN_OUT` 整块读写；FB 实例不放在 GlobalVars_DJ005，每个 FB 一个背景数据块（LSP-905 §4.11）。
+- OB1 只做 FB 调用（≤ 10 行）；机构之间的信号中继放在专用 FB `FB_2002_StationBridge_DJ005`，不写进 OB1（LSP-905 §4.5）。
 - 配置（点位、时间、模式开关）放在机构结构体的参数段，HMI 可写，掉电保持（平台侧设置）。**取料模式三个变量必须设掉电保持**：`stPP.iPickModeReq`、`stPP.iPickMode`、`stPP.iGripCount`；程序上电第一扫描把 `iPickModeReq` 同步成 `iPickMode`，即使请求值没保持也不会把保持的 4 根模式改回 2 根。平台适配（TIA / InoProShop）按字段名映射 `ST_Io`，不按偏移；新增预留输入输出对 005 未接线。
 
 ## 5. 目录与文件规划

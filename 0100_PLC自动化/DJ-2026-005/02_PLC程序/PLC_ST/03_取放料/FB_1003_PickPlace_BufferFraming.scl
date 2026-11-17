@@ -8,7 +8,7 @@
 (*    - 原程序 PDF 的取放料块 (S20 待料 ~ S25 松开)                  *)
 (*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
-(*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2] (沿用现有 GlobalVars    *)
+(*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2] (沿用现有 GlobalVars_DJ005    *)
 (*  轴编号, 与原程序的轴号不同, 以信号名为准)。                      *)
 (*  夹爪 / 升降缸的 Y40~Y43 由本 FB 统一写出, 回原点、准备、手动     *)
 (*  通过 stPP 的 *Req 字段提出要求 (FB_2002 汇入)。                  *)

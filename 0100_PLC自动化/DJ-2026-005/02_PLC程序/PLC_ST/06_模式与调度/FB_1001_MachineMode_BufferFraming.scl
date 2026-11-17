@@ -1,5 +1,5 @@
 ﻿(* ================================================================= *)
-(*  功能块名称: FB_1001_MachineMode_BufferFraming                     *)
+(*  功能块名称: FB_1001_MachineMode_BufferFraming_DJ005                     *)
 (*  功能描述:   机器模式 (手动 / 回原点 / 准备 / 自动)、暂停、停止收尾、*)
 (*              设备状态字 D116、机器级报警触发 F0~F25                *)
 (*  版本号:     V15.0.0 (2026-10-24, 新设计)                          *)
@@ -17,7 +17,7 @@
 (*       停止退出自动后保留, 再按自动键直接进自动 (PRC 2: M6 + SM8044) *)
 (* ================================================================= *)
 
-FUNCTION_BLOCK FB_1001_MachineMode_BufferFraming
+FUNCTION_BLOCK FB_1001_MachineMode_BufferFraming_DJ005
 
 VAR_IN_OUT
     io_stMachine        : ST_Machine;           // 模式与状态字 (本 FB 写)

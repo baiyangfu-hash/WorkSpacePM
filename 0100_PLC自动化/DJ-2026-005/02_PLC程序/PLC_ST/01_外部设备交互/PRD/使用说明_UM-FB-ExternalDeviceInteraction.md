@@ -1,6 +1,6 @@
-# 使用说明 FB_ExternalDeviceInteraction
+# 使用说明 FB_3001_ExternalDevice_DJ005
 
-## 组框机链路（FB_ExternalDeviceInteraction）
+## 组框机链路（FB_3001_ExternalDevice_DJ005）
 
 组框机链路（FB_3001）：联机 M501 / 连续送框 M502 / 单套送框许可 M510，本机安全异常输出 R5000.0 与 Y45 / Y46，组框机安全异常 F104（A 类）、通讯异常 F105（提示类）。
 

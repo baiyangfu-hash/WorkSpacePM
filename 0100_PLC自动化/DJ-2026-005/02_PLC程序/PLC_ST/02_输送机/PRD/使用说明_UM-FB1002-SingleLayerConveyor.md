@@ -6,7 +6,7 @@
 
 ## 2. 调用
 
-`fbL1(i_dInitRevMs := 10000, i_dPreBlockMs := 3000, i_dSlowFeedMs := 2000, i_dReleaseOkMs := 1000, i_dReleaseNgMs := 8000, i_dStarveMs := 10000, i_dCylTimeoutMs := 5000, io_stLayer := GlobalVars.stConv.astLayer[1]);`
+`fbL1(i_dInitRevMs := 10000, i_dPreBlockMs := 3000, i_dSlowFeedMs := 2000, i_dReleaseOkMs := 1000, i_dReleaseNgMs := 8000, i_dStarveMs := 10000, i_dCylTimeoutMs := 5000, io_stLayer := GlobalVars_DJ005.stConv.astLayer[1]);`
 
 ## 3. 调试要点
 
