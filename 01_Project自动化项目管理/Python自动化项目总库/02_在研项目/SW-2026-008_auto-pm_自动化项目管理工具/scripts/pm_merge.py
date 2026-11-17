@@ -266,6 +266,8 @@ def _commits(git: Git, base: str, tip: str) -> list[str]:
     return [message.strip() for message in raw.split("\x1e") if message.strip()]
 
 
+# 记录类文件：驾驶舱目录里的也不能随手删（变更单原件、台账、批准记录、WBS），删它们算“要你点头”。
+RECORD_PATTERNS = ("*CHG-*", "*台账*", "*DEC-*", "*WBS*")
 COCKPIT_PREFIX = (
     PROJECT_ROOT.relative_to(DEFAULT_ROOT).as_posix() + "/"
     if PROJECT_ROOT.is_relative_to(DEFAULT_ROOT)
@@ -274,14 +276,17 @@ COCKPIT_PREFIX = (
 
 
 def removed_outside_cockpit(git: Git, base: str, tip: str) -> list[str]:
-    """删除或改名掉的已入库文件里，不在驾驶舱项目目录（SW-2026-008）下的：这些算“要你点头”（删除或改名业务文件）。"""
+    """删除或改名掉的已入库文件里，不在驾驶舱项目目录（SW-2026-008）下的，以及驾驶舱里的记录类文件：这些算“要你点头”。"""
     raw = git.run(
         "diff", "--name-status", "-z", "--no-renames", "--diff-filter=D", base, tip, check=True
     ).stdout
     parts = [part for part in raw.split("\0") if part]
     deleted = [parts[index + 1] for index in range(0, len(parts) - 1, 2) if parts[index] == "D"]
     return sorted(
-        path for path in deleted if not (COCKPIT_PREFIX and path.startswith(COCKPIT_PREFIX))
+        path
+        for path in deleted
+        if not (COCKPIT_PREFIX and path.startswith(COCKPIT_PREFIX))
+        or any(fnmatch.fnmatchcase(path, pattern) for pattern in RECORD_PATTERNS)
     )
 
 

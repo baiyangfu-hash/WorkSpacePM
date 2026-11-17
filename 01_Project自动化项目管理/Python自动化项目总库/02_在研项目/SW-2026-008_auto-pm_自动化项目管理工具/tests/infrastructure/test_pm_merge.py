@@ -193,6 +193,18 @@ def test_deleting_files_outside_the_cockpit_needs_the_user(
     assert "README.md" in capsys.readouterr().out
 
 
+def test_deleting_cockpit_records_needs_the_user(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    record = pm.COCKPIT_PREFIX + "04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-001.md"
+    commit(repo.root, {record: "| 变更状态 | completed |\n"}, "一张旧变更单")
+    git(repo.wt, "merge", "--quiet", "main")
+    git(repo.wt, "rm", "--quiet", record)
+    git(repo.wt, "commit", "-m", f"删变更单原件\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "CHG-SCPT-2026-001.md" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "path",
     [
