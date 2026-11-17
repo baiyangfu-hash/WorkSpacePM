@@ -135,7 +135,7 @@ def test_the_button_is_grey_for_the_first_missing_condition_in_order() -> None:
     assert release_ship.blocked_reason(_check(), human_block="带 AI 标记") == "带 AI 标记"
     assert release_ship.blocked_reason(_check(), busy=True).startswith("上一次切换还在跑")
     assert release_ship.blocked_reason(None).startswith("还没读到")
-    cases = {
+    cases: dict[str, list[dict[str, Any]]] = {
         "已经是现在生效的版本": [{"deployed": True}, {"active_release": RELEASE_ID}],
         "门禁没有 PASS 判决：判决 FAIL": [{"gate": {"state": "fail"}}],
         "门禁没有 PASS 判决：没有判决": [{"gate": {"state": "missing"}}],
@@ -276,7 +276,8 @@ def _setup(qapp: QApplication, tmp_path: Path, markers: tuple[str, ...] | None =
 
 
 def _switch_button(page: ReleasePage) -> QPushButton:
-    return next(b for b in page.findChildren(QPushButton) if b.property("release_action") == "switch")
+    found: QPushButton = next(b for b in page.findChildren(QPushButton) if b.property("release_action") == "switch")
+    return found
 
 
 def _labels(page: Any) -> list[str]:
