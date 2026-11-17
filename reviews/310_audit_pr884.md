@@ -14,7 +14,7 @@
 
 放行判定: 0897bbca 过
 
-PR 评论：COMMENT_URL_PLACEHOLDER
+PR 评论：https://github.com/baiyangfu-hash/WorkSpacePM/pull/884#issuecomment-6962538773（15:15 发）
 
 ## 证据
 
