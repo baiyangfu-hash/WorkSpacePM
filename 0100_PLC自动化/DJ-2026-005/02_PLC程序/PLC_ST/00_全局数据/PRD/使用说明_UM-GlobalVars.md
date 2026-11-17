@@ -1,11 +1,11 @@
-# 使用说明 GlobalVars.scl
+# 使用说明 GlobalVars.db
 
-> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.db`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB123.scl` 为准，下文旧版本内容只作历史。
 
 
 ## 1. 功能
 
-边框缓存机全局变量数据块，OB1 与各 FB 的数据交换中心。所有功能块通过 VAR_IN_OUT 结构体整块传递，无需逐引脚接线。
+边框缓存机全局变量数据块，OB123 与各 FB 的数据交换中心。所有功能块通过 VAR_IN_OUT 结构体整块传递，无需逐引脚接线。
 
 ## 2. 结构体使用
 
@@ -17,7 +17,7 @@
 | stAlarm | FB_2001 | VAR_INPUT |
 | stExternal | FB_External | VAR_INPUT |
 
-## 3. OB1 调度示例
+## 3. OB123 调度示例
 
 ```scl
 // Step 1: 输送机

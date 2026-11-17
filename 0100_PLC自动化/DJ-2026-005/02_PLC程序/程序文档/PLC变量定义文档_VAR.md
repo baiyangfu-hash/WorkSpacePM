@@ -7,7 +7,7 @@
 
 ### GlobalVars_DJ005（数据块）
 
-> 2026-11-15（CHG-PLC-2026-022）：TIA 全局 DB 里不能放 FB 实例（LSP-905 §4.11），原第四部分 9 个功能块实例改为各自的背景数据块，表见 `PLC_ST/00_程序方案/接口文档_INT.md` 4.1“FB 实例表”；源文件由 `GlobalVars.db` 改为 `GlobalVars.scl`。
+> 2026-11-15（CHG-PLC-2026-022）：TIA 全局 DB 里不能放 FB 实例（LSP-905 §4.11），原第四部分 9 个功能块实例改为各自的背景数据块，表见 `PLC_ST/00_程序方案/接口文档_INT.md` 4.1“FB 实例表”；源文件由 `GlobalVars.db` 改为 `GlobalVars.db`。
 
 | 名称 | 类型 | 说明 |
 |---|---|---|

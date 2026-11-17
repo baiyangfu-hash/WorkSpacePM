@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_ExternalDeviceInteraction详细设计说明书 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 01_外部设备交互/FB_ExternalDeviceInteraction.scl |
+| **关联源码** | 01_外部设备交互/FB_3001_ExternalDevice_DJ005.scl |
 | **关联IFC** | 接口文档_IFC-FB3001-ExternalDeviceInteraction.md |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |

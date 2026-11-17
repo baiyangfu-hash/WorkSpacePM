@@ -42,7 +42,7 @@ tags: ["接口文档", "PLC程序"]
 |---|---|---|
 | `stMachine` | `ST_Machine` | 模式、暂停、停止、状态字（FB_1001 写） |
 | `stHmi` | `ST_Hmi` | HMI 命令与设定值（对应第 7 节） |
-| `stIo` | `ST_Io` | 全部物理输入 / 输出映射（IO 表）。输入在 OB1 之前由硬件映射写入，输出在最后读出 |
+| `stIo` | `ST_Io` | 全部物理输入 / 输出映射（IO 表）。输入在 OB123 之前由硬件映射写入，输出在最后读出 |
 | `stHome` | `ST_HomePrepare` | 回原点 / 准备序列状态 |
 | `stManual` | `ST_Manual` | 手动 / 示教状态 |
 | `stConv` | `ST_ConveyorSystem` | 4 层输送（含 `astLayer[1..4]`） |
@@ -53,7 +53,7 @@ tags: ["接口文档", "PLC程序"]
 | `stAlarm` | `ST_Alarm` | 报警触发、锁存、分级输出、声光 |
 | `astAxis` | `ARRAY[1..3] OF ST_ServoAxis` | 轴（沿用 SysLib；编号沿用现有 GlobalVars_DJ005：1 = Z、2 = X1、3 = X2） |
 
-FB 实例表（每个 FB 一个背景数据块，OB1 按下表顺序调用，报警最后；TIA 全局 DB 里不能放 FB 实例，见 LSP-905 §4.11，2026-11-15 CHG-PLC-2026-022 由 `GlobalVars.db` 第四部分改来）：
+FB 实例表（每个 FB 一个背景数据块，OB123 按下表顺序调用，报警最后；TIA 全局 DB 里不能放 FB 实例，见 LSP-905 §4.11，2026-11-15 CHG-PLC-2026-022 由 `GlobalVars.db` 第四部分改来）：
 
 | FB 类型名 | 实例名 | 说明 |
 |---|---|---|

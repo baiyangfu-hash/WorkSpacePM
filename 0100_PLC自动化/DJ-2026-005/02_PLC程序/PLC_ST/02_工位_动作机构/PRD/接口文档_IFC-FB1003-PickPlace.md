@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1003_PickPlace_BufferFraming 接口定义 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 03_取放料/FB_1003_PickPlace_BufferFraming.scl |
+| **关联源码** | 02_工位_动作机构/FB_1003_PickPlace_BufferFraming.scl |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
 | **遵循规范** | LSP-905_SCL编程规范 |
