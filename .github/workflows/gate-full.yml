@@ -6,12 +6,14 @@ on:
   push:
     branches: [main]
 
-# CHG-SCPT-2026-705: one run per branch at a time, and only the newest commit counts.  Two merges in a row: the run for the
-# older one is cancelled and the newer one runs.  A cancelled run leaves no verdict and no commit status (the verdict and
-# commit-status jobs below skip on cancel), so an older commit never shows a half-run result.
+# CHG-SCPT-2026-713: one run per branch at a time.  正在跑的一轮跑完；同组排队的只留最新一个。  A run that has started is
+# never cancelled by a newer merge, so several merges a day still each end with a verdict on some commit.  While it runs,
+# GitHub keeps at most one run waiting in this group: a newer merge replaces the waiting one, which never starts.  A run
+# that is cancelled (by hand, or replaced while waiting) leaves no verdict and no commit status (the verdict and
+# commit-status jobs below skip on cancel), so a commit never shows a half-run result.
 concurrency:
   group: gate-full-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -152,8 +154,8 @@ jobs:
 
   verdict:
     needs: group
-    # CHG-SCPT-2026-705: a red group still gets judged (FAIL with the reasons), but a run cancelled because a newer commit
-    # arrived does not: always() would also run on cancel and publish a "groups incomplete" verdict for the older commit.
+    # CHG-SCPT-2026-705: a red group still gets judged (FAIL with the reasons), but a cancelled run (CHG-SCPT-2026-713: only
+    # by hand now) does not: always() would also run on cancel and publish a "groups incomplete" verdict for that commit.
     if: ${{ !cancelled() }}
     # D-223: the judge imports the cockpit package (the same judging code the groups ran), so it needs the same locked
     # dependencies as the groups.  The lock file is the Windows one, hence the same runner image and the same install step.
