@@ -107,6 +107,54 @@ def release_deploy(
     click.echo(f"回退命令：main.py release rollback {result.backup}")
 
 
+@release_group.command(name="ship")
+@click.argument("commit")
+@click.option("--check-only/--no-check-only", default=True, help="只看（默认）：下载门禁判决、找审计签字、跑预检，不动发布和指针；真发版写 --no-check-only")
+@click.option("--confirm-ref", default="", help="真发版必填：user-confirmation:<用户那条消息的时间或编号，或看板点击记录>")
+@click.option("--approver", default="", help="真发版必填：写进变更单和 Decision 的批准人")
+@click.option("--json", "as_json", is_flag=True, help="机器可读输出（看板发版页用，格式见接口约定）")
+@click.pass_context
+def release_ship(ctx: click.Context, commit: str, check_only: bool, confirm_ref: str, approver: str, as_json: bool) -> None:
+    """一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本和预检卡跑预检；
+    --no-check-only 时再走 release deploy 同一套切换、自检、失败自动回退。退出码：0 能发或已发；2 预检没过；3 失败已回退；4 失败没能回退。"""
+
+    from auto_pm.application.core import release_ship as ship_mod
+
+    if not check_only:
+        missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver)) if not value]
+        if missing:
+            raise click.ClickException("真发版还缺：" + "、".join(missing))
+        if problem := user_evidence_problem(confirm_ref.strip()):
+            raise click.ClickException(f"--confirm-ref 不被接受：{problem}；没有用户原话或看板点击记录不批准、不发版")
+        require_runtime_identity_for_workspace(ctx)
+        arm_for_heavy_job("deploy-gate")
+    root = _root(ctx)
+    report = ship_mod.ship(
+        root, commit, github=ship_mod.GhCli(root), confirm_ref="" if check_only else confirm_ref.strip(), approver=approver,
+    )
+    data = report.to_dict()
+    if as_json:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        click.echo(f"发版：提交 {report.commit[:12] or '?'} → {report.release_id or '?'}（现役 {report.active_release or '?'}）")
+        click.echo(f"  门禁：{report.gate['state']} {report.gate.get('run_url', '')} {report.gate['detail']}")
+        click.echo(f"  审计签字：{report.audit['state']} {report.audit['detail']}")
+        for item in data["preflight"]["checks"]:
+            click.echo(f"  [{'PASS' if item['ok'] else 'FAIL'}] {item['name']}：{item['detail']}")
+        for change in report.changes:
+            click.echo(f"  改动：#{change['pr']} {change['title']}")
+        click.echo(f"  能切换：{'是' if report.can_switch else '否'}")
+        if report.result:
+            click.echo(f"  结果：{report.result['message']}")
+    if report.result is None:
+        ctx.exit(0 if report.can_switch else 2)
+    if report.result["ok"]:
+        ctx.exit(0)
+    if not report.deployed:
+        ctx.exit(2)
+    ctx.exit(3 if report.result["rolled_back"] else 4)
+
+
 @release_group.command(name="rollback")
 @click.argument("backup_dir", type=CallerPath(path_type=Path, exists=True, file_okay=False))
 @click.option(

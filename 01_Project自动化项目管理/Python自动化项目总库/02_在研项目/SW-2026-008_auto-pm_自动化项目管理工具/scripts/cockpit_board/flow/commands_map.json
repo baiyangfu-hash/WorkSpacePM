@@ -10,7 +10,7 @@
   "counts": {
     "never": 13,
     "read": 68,
-    "user_only": 21,
+    "user_only": 22,
     "write": 116
   },
   "commands": {
@@ -615,6 +615,10 @@
     "release rollback": {
       "class": "user_only",
       "note": "退回发布版本要用户同意"
+    },
+    "release ship": {
+      "class": "user_only",
+      "note": "发版只听用户：默认只看（下载门禁判决、找审计签字、跑预检），--no-check-only 真发版要用户原话或看板点击记录（CHG-SCPT-2026-706）"
     },
     "release status": {
       "class": "read",
