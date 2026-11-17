@@ -1,4 +1,4 @@
-# 接口文档 06_模式与调度（FB_1001 / FB_1005 / FB_1006 / FB_2002）
+# 接口文档 03_模式与调度（FB_1001 / FB_1005 / FB_1006 / FB_2002）
 
 ## 0. 文档基础信息
 
@@ -6,8 +6,8 @@
 |------|-----|
 | **文档标题** | 06 模式与调度接口定义 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 06_模式与调度/FB_1001_MachineMode_BufferFraming.scl |
-| **同文档涵盖** | 06_模式与调度/FB_1005_HomePrepare_BufferFraming.scl；06_模式与调度/FB_1006_ManualTeach_BufferFraming.scl；06_模式与调度/FB_2002_StationBridge.scl |
+| **关联源码** | 03_模式与调度/FB_1001_MachineMode_BufferFraming_DJ005.scl |
+| **同文档涵盖** | 03_模式与调度/FB_1005_HomePrepare_BufferFraming.scl；03_模式与调度/FB_1006_ManualTeach_BufferFraming.scl；03_模式与调度/FB_2002_StationBridge_DJ005.scl |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
 | **遵循规范** | LSP-905_SCL编程规范 |

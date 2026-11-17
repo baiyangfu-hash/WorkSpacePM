@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_2001_CommonAlarm_AllStation_DJ005 接口定义 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 05_公共报警/FB_2001_CommonAlarm_AllStation.scl |
+| **关联源码** | 05_公共报警/FB_2001_CommonAlarm_AllStation_DJ005.scl |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
 | **遵循规范** | LSP-905_SCL编程规范 |

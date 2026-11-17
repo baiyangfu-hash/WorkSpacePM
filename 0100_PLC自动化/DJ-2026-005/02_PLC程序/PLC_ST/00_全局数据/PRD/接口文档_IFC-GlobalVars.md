@@ -1,6 +1,6 @@
-# 接口文档 - GlobalVars.scl (全局变量数据块)
+# 接口文档 - GlobalVars.db (全局变量数据块)
 
-> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.db`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB123.scl` 为准，下文旧版本内容只作历史。
 
 
 ## 文档信息
@@ -15,7 +15,7 @@
 
 ### V7.1.1 变更 (2026-05-20) - TC11 Bug修复
 - 🆕 stPickPlace新增 `i_iPickLayer_Input`: INT (外部指定取料层号1~4, 独立输入)
-- 🔧 OB1接线修复: `i_iPickLayer` 从 `o_iCurrentPickLayer`(输出) 改为 `i_iPickLayer_Input`(独立输入)
+- 🔧 OB123接线修复: `i_iPickLayer` 从 `o_iCurrentPickLayer`(输出) 改为 `i_iPickLayer_Input`(独立输入)
 - 📝 断开输出→输入反馈回路, 解决FB_1003内部iPickLayer(=0)覆盖问题
 
 ### V7.1.0 变更 (2026-05-20)
@@ -202,7 +202,7 @@ END_DATA_BLOCK
 | `q_aLayerFeedDone` | ARRAY[1..4] OF BOOL | 各层放料完成 (脉冲) | →FB_1003 |
 | `q_aLayerSensorFault` | ARRAY[1..4] OF BOOL | 各层传感器故障 | →FB_2001 |
 
-#### 汇总变量 (OB1计算后回写, 3个)
+#### 汇总变量 (OB123计算后回写, 3个)
 
 | 变量名 | 类型 | 初始值 | 说明 | 逻辑 |
 |--------|------|--------|------|------|
@@ -462,7 +462,7 @@ END_DATA_BLOCK
 | V6.0.0 | ❌ 已废弃 | FB_1001容器架构, 42变量stConveyor, 不兼容 |
 | V3.0.0 | ❌ 已废弃 | o_前缀，INT类型报警码，接口不兼容 |
 
-**升级路径**: V6.0.0 → V7.0.0 (stConveyor完全重写, OB1/DB1需同步更新)
+**升级路径**: V6.0.0 → V7.0.0 (stConveyor完全重写, OB123/DB1需同步更新)
 
 ---
 

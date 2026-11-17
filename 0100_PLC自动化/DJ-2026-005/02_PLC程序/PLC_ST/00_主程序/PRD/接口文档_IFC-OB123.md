@@ -1,13 +1,13 @@
-# OB1 主程序组织块接口文档
+# OB123 主程序组织块接口文档
 
-> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.db`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB123.scl` 为准，下文旧版本内容只作历史。
 
 ## 1. 文档基础信息
 
 | 属性 | 值 |
 |------|-----|
-| **文档标题** | OB1主程序组织块接口文档 |
-| **适用组件** | OB1 (主程序组织块) |
+| **文档标题** | OB123主程序组织块接口文档 |
+| **适用组件** | OB123 (主程序组织块) |
 | **文档类型** | 接口文档 / Interface Document (IFC) |
 | **文档版本** | V9.1.0 |
 | **编制日期** | 2026-05-20 |
@@ -19,7 +19,7 @@
 
 ## 2. 功能概述
 
-OB1是边框缓存机的**主程序组织块**，负责：
+OB123是边框缓存机的**主程序组织块**，负责：
 - 各工站功能块实例化与调用调度（纯调度，不含业务逻辑）
 - GlobalVars数据块作为统一I/O映射中心
 - 工站间信号转发（PickPlace→Feeder）
@@ -32,7 +32,7 @@ OB1是边框缓存机的**主程序组织块**，负责：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      OB1 主程序组织块 (V7.1.1)                │
+│                      OB123 主程序组织块 (V7.1.1)                │
 ├─────────────────────────────────────────────────────────────┤
 │  Step 1: fbExternalDevice (FB_3001_ExternalInteraction；DJ005实现名: FB_3001_ExternalDevice_DJ005) │
 │          ← stExternal.i_* (27输入) → stExternal.o_* (20输出) │
@@ -101,7 +101,7 @@ i_iPickLayer := GlobalVars_DJ005.stPickPlace.i_iPickLayer_Input;      // ✅ HMI
 ### 5.3 PickPlace 后处理 — 双电磁阀松开输出
 
 ```
-(* OB1后处理: Release = NOT Action (双电磁阀互锁) *)
+(* OB123后处理: Release = NOT Action (双电磁阀互锁) *)
 GlobalVars_DJ005.stPickPlace.o_bFrontClamp_Release  := NOT GlobalVars_DJ005.stPickPlace.o_bFrontClamp_Action;
 GlobalVars_DJ005.stPickPlace.o_bRearClamp_Release   := NOT GlobalVars_DJ005.stPickPlace.o_bRearClamp_Action;
 GlobalVars_DJ005.stPickPlace.o_bFrontClamp2_Release := NOT GlobalVars_DJ005.stPickPlace.o_bFrontClamp2_Action;

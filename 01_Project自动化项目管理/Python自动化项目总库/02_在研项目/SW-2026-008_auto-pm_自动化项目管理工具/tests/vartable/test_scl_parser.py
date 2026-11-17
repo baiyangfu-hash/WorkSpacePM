@@ -25,26 +25,27 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
 _DJ_2026_005_ST_ROOT = (
     _WORKSPACE_ROOT / "0100_PLC自动化" / "DJ-2026-005" / "02_PLC程序" / "PLC_ST"
 )
-OB1_SCL = _DJ_2026_005_ST_ROOT / "00_主程序" / "OB1.scl"
+# CHG-PLC-2026-026 起主程序文件 OB123.scl，块名 "DJ005_Main"（导入 TIA 后改号成 OB123）
+OB1_SCL = _DJ_2026_005_ST_ROOT / "00_主程序" / "OB123.scl"
 FB_2001_SCL = (
-    _DJ_2026_005_ST_ROOT / "05_公共报警" / "FB_2001_CommonAlarm_AllStation.scl"
+    _DJ_2026_005_ST_ROOT / "05_公共报警" / "FB_2001_CommonAlarm_AllStation_DJ005.scl"
 )
 FB_1002_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "02_输送机"
+    / "02_工位_动作机构"
     / "FB_1002_SingleLayerConveyor_BufferFraming.scl"
 )
 FB_EXTERNAL_SCL = (
-    _DJ_2026_005_ST_ROOT / "01_外部设备交互" / "FB_ExternalDeviceInteraction.scl"
+    _DJ_2026_005_ST_ROOT / "01_外部设备交互" / "FB_3001_ExternalDevice_DJ005.scl"
 )
 FB_1004_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "04_打胶机送料"
+    / "02_工位_动作机构"
     / "FB_1004_GlueMachineFeeder_BufferFraming.scl"
 )
 FB_1003_SCL = (
     _DJ_2026_005_ST_ROOT
-    / "03_取放料"
+    / "02_工位_动作机构"
     / "FB_1003_PickPlace_BufferFraming.scl"
 )
 _REAL_SAMPLES = (
@@ -315,12 +316,12 @@ class TestSclParserRealSamples:
     """
 
     def test_real_ob1_no_var_blocks(self) -> None:
-        """OB1 主组织块: 无 VAR 块, fb_name=OB1, 提示 warning"""
+        """主组织块 DJ005_Main（原 OB1）: 无 VAR 块, fb_name=DJ005_Main, 提示 warning"""
         result = SclParser().parse(OB1_SCL)
         assert result.success
         assert result.var_table is not None
         assert result.var_table.total_count == 0
-        assert result.var_table.metadata["fb_name"] == "OB1"
+        assert result.var_table.metadata["fb_name"] == "DJ005_Main"
         assert result.var_table.metadata["var_block_count"] == 0
         assert result.warning_count >= 1
         # ORGANIZATION_BLOCK 也被 _FB_NAME_RE 识别
@@ -394,7 +395,7 @@ class TestSclParserRealSamples:
         )
 
     def test_real_fb_external_device_interaction(self) -> None:
-        """FB_3001_ExternalDevice_DJ005（文件 FB_ExternalDeviceInteraction.scl）: VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准"""
+        """FB_3001_ExternalDevice_DJ005: VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准"""
         result = SclParser().parse(FB_EXTERNAL_SCL)
         assert result.success
         vt = result.var_table
@@ -488,7 +489,7 @@ class TestSclParserRealSamples:
     def test_real_fb_name_metadata_extraction(self) -> None:
         """验证 6 个真实样例的 FB 名称元数据提取 (含 ORGANIZATION_BLOCK)"""
         expected = {
-            OB1_SCL: "OB1",
+            OB1_SCL: "DJ005_Main",
             FB_2001_SCL: "FB_2001_CommonAlarm_AllStation_DJ005",
             FB_1002_SCL: "FB_1002_SingleLayerConveyor_BufferFraming",
             FB_EXTERNAL_SCL: "FB_3001_ExternalDevice_DJ005",

@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1002 单层输送机详细设计说明书 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 02_输送机/FB_1002_SingleLayerConveyor_BufferFraming.scl |
+| **关联源码** | 02_工位_动作机构/FB_1002_SingleLayerConveyor_BufferFraming.scl |
 | **关联IFC** | 接口文档_IFC-FB1002-SingleLayerConveyor.md |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |

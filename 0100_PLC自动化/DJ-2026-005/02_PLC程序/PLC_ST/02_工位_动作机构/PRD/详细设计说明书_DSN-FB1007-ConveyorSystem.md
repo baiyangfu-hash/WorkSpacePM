@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1007_ConveyorSystem_BufferFraming详细设计说明书 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 02_输送机/FB_1007_ConveyorSystem_BufferFraming.scl |
+| **关联源码** | 02_工位_动作机构/FB_1007_ConveyorSystem_BufferFraming.scl |
 | **关联IFC** | 接口文档_IFC-FB1007-ConveyorSystem.md |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |

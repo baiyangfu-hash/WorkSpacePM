@@ -6,7 +6,7 @@
 |------|-----|
 | **文档标题** | FB_1002 单层输送机接口定义 |
 | **文档版本** | V15.0.0 |
-| **关联源码** | 02_输送机/FB_1002_SingleLayerConveyor_BufferFraming.scl |
+| **关联源码** | 02_工位_动作机构/FB_1002_SingleLayerConveyor_BufferFraming.scl |
 | **编制日期** | 2026-10-24 |
 | **编制人** | Claude（用户待审） |
 | **遵循规范** | LSP-905_SCL编程规范 |
@@ -49,7 +49,7 @@
 |---|---|---|
 | io_stLayer | ST_SingleLayer | 本层全部数据 |
 
-结构体 `ST_SingleLayer` 的字段（传感器、命令、状态、报警触发）见 `02_输送机/ST_SingleLayer.scl` 与全局 `接口文档_INT.md` 4.5；接口字段只在这两处维护。
+结构体 `ST_SingleLayer` 的字段（传感器、命令、状态、报警触发）见 `00_公共类型/ST_SingleLayer.scl` 与全局 `接口文档_INT.md` 4.5；接口字段只在这两处维护。
 
 ## 5. 报警触发（`arrTrig`，由 FB_1007 映射到 F 号）
 
