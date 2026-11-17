@@ -30,6 +30,7 @@ tests/e2e/test_release_pycache_drill.py
 tests/e2e/test_trial_run_drill.py
 tests/infrastructure/test_claude_settings_deny_rules.py
 tests/infrastructure/test_env_check.py
+tests/infrastructure/test_gate_full_concurrency.py
 tests/infrastructure/test_memory_gate_in_cockpit.py
 tests/infrastructure/test_ps1_native_stderr.py
 tests/infrastructure/test_ps1_venv_missing.py
