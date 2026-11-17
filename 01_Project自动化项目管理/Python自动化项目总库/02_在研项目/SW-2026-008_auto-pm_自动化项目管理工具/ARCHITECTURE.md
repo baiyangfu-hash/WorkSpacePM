@@ -37,7 +37,7 @@
 
 - 工位规矩（上限、前缀、谁能收）的文字真源是 `AGENTS.md` 的 WS-001，实现在 `application/core/agent_worktree_service.py`（`worktree open/list/close/sweep`）。
 - 根入口 `main.py` 发现自己在 `.auto-pm/worktrees/` 或 `.codex/worktrees/` 下面会直接退出（退出码 2，提示 `managed candidate is execution-only; invoke the canonical control root instead`）：**已核**，见根目录 `main.py`。
-- **账本只在账本主机上有一本**。跨电脑只通过 GitHub 交换代码，不交换账本。
+- **账本只在账本主机上有一本**。跨电脑在需要时经 GitHub 交换代码（`AGENTS.md` GH-001），不交换账本。
 
 ## 2. 代码怎么变成“现场运行的版本”
 
@@ -117,7 +117,7 @@ launcher/launch.py   指针 → 校验 manifest 登记 → 逐文件核 SHA-256 
 
 - 顺序的文字真源是 `AGENTS.md` 的“澄清-报批-执行-验收”四阶段；命令清单以 `main.py pm --help` 和 `main.py continuity --help` 为准（已核：pm 下有 accept、acceptance-scan、approve、close、confirm-start、handoff、inbox、missions、orient、park、pending、plan、recover、recover-status、resume、switch、takeover、unpark、verify 等）。
 - 一个项目可以开几张卡，但同一时刻只有一张“在干”；插急活用 `pm park / switch / unpark`（`application/core/mission_switch_service.py`、`mission_admission.py`，WS-002）。
-- 变更单被用户批准之前（快线除外），只做只读命令、建变更单和领卡占位（`CLAUDE.md` 第 2 条）；Work/Run/租约只在看板一键流和命令本身要求时才要（`AGENTS.md` 红线 2，CHG-SCPT-2026-717）。
+- “要你点头”那一类（`AGENTS.md` FLOW-001）在变更单被用户批准之前，只做只读命令、建变更单和领卡号（`CLAUDE.md` 第 2 条）；其余改动直接做、事后告诉用户；控制根的 `main` 只由 `scripts/pm_merge.py merge` 改，GitHub 按需使用（`AGENTS.md` GH-001，CHG-SCPT-2026-718）；Work/Run/租约只在看板一键流和命令本身要求时才要（`AGENTS.md` 红线 2，CHG-SCPT-2026-717）。
 
 ## 6. 护栏分四层
 
