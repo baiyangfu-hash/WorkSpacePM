@@ -200,6 +200,36 @@ def test_a_rolled_back_deploy_is_reported_as_rolled_back(root: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("moved", [False, True], ids=["stopped-before-the-switch", "pointers-moved"])
+def test_a_failed_deploy_says_whether_the_pointers_moved(root: Path, moved: bool) -> None:
+    """CHG-SCPT-2026-709: the board reads this result; a stop in the books must not read as "could not roll back"."""
+
+    _signoff(root)
+
+    def failing_deploy(*args: Any, **kwargs: Any) -> DeployResult:
+        raise DeployError("建账没完成", rolled_back=False, pointers_moved=moved)
+
+    github = FakeGitHub([{"id": 7, "status": "completed", "url": "u"}], PASS_VERDICT)
+    report = ship_mod.ship(root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a", deploy=failing_deploy)
+
+    assert report.result is not None and report.result["ok"] is False
+    assert report.result["pointers_moved"] is moved and report.result["rolled_back"] is False
+    assert report.to_dict()["result"]["pointers_moved"] is moved
+
+
+def test_a_refused_and_a_green_ship_say_whether_the_pointers_moved(root: Path) -> None:
+    github = FakeGitHub([{"id": 7, "status": "completed", "url": "u"}], PASS_VERDICT)  # no signoff: refused before the deploy
+    refused = ship_mod.ship(root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a", deploy=lambda *a, **k: None)
+    assert refused.result is not None and refused.result["pointers_moved"] is False
+
+    _signoff(root)
+    done = ship_mod.ship(
+        root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a",
+        deploy=lambda *a, **k: DeployResult(release_id=RID, change_id="CHG-SCPT-2026-999", backup="bk", receipt="rc"),
+    )
+    assert done.result is not None and done.result["ok"] is True and done.result["pointers_moved"] is True
+
+
 def test_the_repo_has_the_drill_script() -> None:
     project = (
         Path(__file__).resolve().parents[2]

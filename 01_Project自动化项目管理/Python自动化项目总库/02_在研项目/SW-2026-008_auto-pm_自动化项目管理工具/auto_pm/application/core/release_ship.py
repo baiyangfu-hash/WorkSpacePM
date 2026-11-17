@@ -260,6 +260,7 @@ def ship(
         ship_report.result = {
             "ok": False,
             "rolled_back": False,
+            "pointers_moved": False,
             "receipt": "",
             "backup": "",
             "change_id": "",
@@ -284,6 +285,8 @@ def ship(
         ship_report.result = {
             "ok": False,
             "rolled_back": error.rolled_back,
+            # CHG-SCPT-2026-709: whether the pointers may have moved, the same rule ``release deploy`` exits by (2 / 3 / 4)
+            "pointers_moved": error.pointers_moved,
             "receipt": "",
             "backup": "",
             "change_id": "",
@@ -293,6 +296,7 @@ def ship(
     ship_report.result = {
         "ok": True,
         "rolled_back": False,
+        "pointers_moved": True,
         "receipt": str(done.receipt),
         "backup": str(done.backup),
         "change_id": done.change_id,

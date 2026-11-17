@@ -292,3 +292,63 @@ def test_the_real_adapter_reports_an_unreadable_manifest_entry_as_pointers_moved
         adapter.manifest_entry_sha256(NEW)
 
     assert caught.value.pointers_moved is True
+
+
+def test_a_resume_after_an_earlier_switch_that_stops_in_the_books_says_the_pointers_moved(tmp_path: Path) -> None:
+    """Audit M5: an earlier attempt already switched; this run stops in the books, but the live pointers are the new release."""
+
+    ops, ledger = FakeOps(built=True, switched=True), FakeLedger()
+    plan = DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None})
+
+    with pytest.raises(rd.DeployError, match="建账没完成") as caught:
+        _run(tmp_path, ops, ledger, plan=plan)
+
+    assert caught.value.pointers_moved is True and ops.calls == []
+
+
+def test_unreadable_pointers_during_a_stop_in_the_books_count_as_moved(tmp_path: Path) -> None:
+    """Audit M6: when the active pointer cannot be read, nobody can say it did not move."""
+
+    class Unreadable(FakeOps):
+        def active_release(self) -> str:
+            raise OSError("active_release.json unreadable")
+
+    plan = DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None})
+    with pytest.raises(rd.DeployError, match="建账没完成") as caught:
+        _run(tmp_path, Unreadable(), FakeLedger(), plan=plan)
+
+    assert caught.value.pointers_moved is True
+
+
+def test_a_rollback_that_fails_says_the_pointers_moved(tmp_path: Path) -> None:
+    """Audit M8, the most dangerous one: the pointers sit on the new release and could not be put back."""
+
+    ops, ledger = FakeOps(), FakeLedger()
+    ops.fail_switch = ops.fail_rollback = True
+
+    with pytest.raises(rd.DeployError, match="回退也没成功") as caught:
+        _run(tmp_path, ops, ledger)
+
+    assert caught.value.pointers_moved is True and caught.value.rolled_back is False
+
+
+def test_books_that_do_not_close_after_the_switch_say_the_pointers_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit M9: switched and self-checked, but the books did not close."""
+
+    from auto_pm.application.core.release_ledger import LedgerError
+
+    def refuse_close(*_args: Any, **_kwargs: Any) -> None:
+        raise LedgerError("books did not close")
+
+    monkeypatch.setattr(rd, "close_books", refuse_close)
+    ops = FakeOps()
+    with pytest.raises(rd.DeployError, match="收口没完成") as caught:
+        _run(tmp_path, ops, FakeLedger())
+
+    assert caught.value.pointers_moved is True and ops.active == NEW
+
+
+def test_a_deploy_error_without_the_flag_counts_as_moved() -> None:
+    """A new raise that forgets ``pointers_moved`` errs towards "look at the pointers" (audit §3.2 item 3)."""
+
+    assert rd.DeployError("anything").pointers_moved is True

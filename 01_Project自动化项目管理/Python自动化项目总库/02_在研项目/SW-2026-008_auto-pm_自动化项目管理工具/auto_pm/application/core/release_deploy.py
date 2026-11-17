@@ -55,10 +55,12 @@ class DeployError(RuntimeError):
 
     CHG-SCPT-2026-709: a deploy that stopped before the switch (preflight, books, build) never touched a pointer, and must not be
     reported like one that switched and could not finish (the CLI's exit code 4 means "a person has to look at the live pointers").
+    ``pointers_moved`` defaults to True: only a stop that is known to be before the switch says False, so a new raise that forgets
+    the flag errs towards "look at the pointers", never towards "nothing happened".
     """
 
     def __init__(
-        self, message: str, *, rolled_back: bool = False, failed: tuple[str, ...] = (), pointers_moved: bool = False,
+        self, message: str, *, rolled_back: bool = False, failed: tuple[str, ...] = (), pointers_moved: bool = True,
     ) -> None:
         super().__init__(message)
         self.rolled_back = rolled_back
@@ -88,7 +90,7 @@ class DeployResult:
 def _ensure_complete(checks: Mapping[str, SelfCheck]) -> None:
     missing = [name for name in REQUIRED_SELF_CHECKS if name not in checks]
     if missing:
-        raise DeployError(f"自检清单缺 {len(missing)} 项，不能部署：{'；'.join(missing[:5])}{'…' if len(missing) > 5 else ''}")
+        raise DeployError(f"自检清单缺 {len(missing)} 项，不能部署：{'；'.join(missing[:5])}{'…' if len(missing) > 5 else ''}", pointers_moved=False)
 
 
 def _refuse_reused_confirmation(plan: DeployPlan) -> None:
@@ -97,7 +99,7 @@ def _refuse_reused_confirmation(plan: DeployPlan) -> None:
     except (OSError, ValueError):
         failed = ""
     if failed and failed == plan.confirm_ref:
-        raise DeployError("上一次部署已经回退过；重试需要用户给一个新的确认引用（不能沿用回退那次的）")
+        raise DeployError("上一次部署已经回退过；重试需要用户给一个新的确认引用（不能沿用回退那次的）", pointers_moved=False)
 
 
 def _read_state(plan: DeployPlan) -> dict[str, Any]:
@@ -153,7 +155,7 @@ def deploy(
     """Run the whole deploy; returns on success, raises ``DeployError`` otherwise (and says whether it rolled back)."""
 
     if not preflight.ok:
-        raise DeployError("预检没通过，什么都没写：" + "；".join(f"{c.name}={c.status}" for c in preflight.checks if c.status != "PASS"))
+        raise DeployError("预检没通过，什么都没写：" + "；".join(f"{c.name}={c.status}" for c in preflight.checks if c.status != "PASS"), pointers_moved=False)
     _ensure_complete(checks)
     _refuse_reused_confirmation(plan)
     backup = _first_backup(plan, backup)

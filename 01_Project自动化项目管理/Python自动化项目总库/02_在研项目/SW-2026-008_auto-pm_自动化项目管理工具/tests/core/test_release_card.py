@@ -13,10 +13,11 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from auto_pm.application.core import release_card
+from auto_pm.application.core import release_card, release_deploy
 from auto_pm.application.core import release_deploy_check as check
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core import release_wiring as wiring
@@ -123,6 +124,45 @@ def test_a_real_deploy_without_a_card_file_that_cannot_write_the_card_stops_befo
     assert {name: (tmp_path / CONTAINER / name).read_bytes() for name in POINTERS} == pointers
     assert not (tmp_path / ".auto-pm" / "decisions").exists() or not any((tmp_path / ".auto-pm" / "decisions").iterdir())
     assert json.loads((tmp_path / CONTAINER / "active_release.json").read_text(encoding="utf-8"))["release_id"] == OLD
+
+
+def test_a_real_deploy_without_a_card_file_books_with_the_card_it_generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit M16: the generated card must reach the plan (the books) and the post-switch card precheck, not just the disk."""
+
+    _control_root(tmp_path)  # writes the 1.3.3-dad7036 card; this deploy is another release, so its card is generated here
+    release = "1.3.3-abcdef0"
+    monkeypatch.setattr(release_card, "payload_files", lambda _repo, _commit: list(PAYLOAD))
+    seen: dict[str, Any] = {}
+
+    def capture(plan: Any, **kwargs: Any) -> Any:
+        seen["plan"], seen["checks"] = plan, kwargs["checks"]
+        raise DeployError("captured", pointers_moved=False)
+
+    monkeypatch.setattr(release_deploy, "deploy", capture)  # release_wiring calls it as rd.deploy
+    drill = tmp_path / "drill.py"
+    drill.write_text("print('drill')\n", encoding="utf-8")
+
+    with pytest.raises(DeployError, match="captured"):
+        wiring.real_deploy(tmp_path, SimpleNamespace(release_id=release, commit="abcdef0" + "1" * 33), approver="baiyang",
+                           confirm_ref="user-confirmation:2026-11-17T03:26:28Z", card_file=None, drill_script=drill)
+
+    card = release_card.card_path(tmp_path, release)
+    assert card.is_file() and seen["plan"].card_file == card
+    assert f"{CONTAINER}/releases/{release}/release_meta.json" in _rows(card)
+
+
+def test_a_full_size_card_from_this_repositorys_payload_passes_the_real_precheck(tmp_path: Path) -> None:
+    """The card as the deploy writes it, with every payload file of this repository's HEAD (hundreds of rows), not a handful."""
+
+    repo = Path(_git(Path(__file__).parent, "rev-parse", "--show-toplevel"))
+    files = release_card.payload_files(repo, _git(repo, "rev-parse", "HEAD"))
+    _control_root(tmp_path)
+    card = release_card.ensure_card(tmp_path, release_id="1.3.3-abcdef0", old_release=OLD, commit="abcdef0" + "1" * 33, files=files)
+
+    code, output = _runner(tmp_path)(["implementation-card", "precheck", "--card-file", str(card)])
+
+    assert len(files) > 100 and len(_rows(card)) == len(POINTERS) + 1 + len(files)
+    assert code == 0, output[-2000:]
 
 
 def _git(root: Path, *args: str) -> str:

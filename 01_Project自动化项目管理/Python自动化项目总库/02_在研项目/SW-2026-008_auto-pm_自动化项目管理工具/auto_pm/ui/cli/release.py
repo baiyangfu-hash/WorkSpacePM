@@ -118,8 +118,10 @@ def release_deploy(
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出（看板发版页用，格式见接口约定）")
 @click.pass_context
 def release_ship(ctx: click.Context, commit: str, check_only: bool, confirm_ref: str, approver: str, as_json: bool) -> None:
-    """一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本和预检卡跑预检；
-    --no-check-only 时再走 release deploy 同一套切换、自检、失败自动回退。退出码：0 能发或已发；2 预检没过；3 失败已回退；4 失败没能回退。"""
+    """一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本跑预检；
+    --no-check-only 时再走 release deploy 同一套建账（入账卡现场生成）、切换、自检、失败自动回退。
+    退出码和 release deploy 同一条规则（CHG-SCPT-2026-709）：0 能发或已发；2 没部署、指针没动（预检没过，或停在切换之前）；
+    3 失败已回退；4 指针动过（没能回退，或已切换但收口没完成）。"""
 
     from auto_pm.application.core import release_ship as ship_mod
 
@@ -155,7 +157,8 @@ def release_ship(ctx: click.Context, commit: str, check_only: bool, confirm_ref:
         ctx.exit(0)
     if not report.deployed:
         ctx.exit(2)
-    ctx.exit(3 if report.result["rolled_back"] else 4)
+    # CHG-SCPT-2026-709: a result without the flag (an older deploy) counts as moved, so it is never reported as "nothing happened"
+    ctx.exit(3 if report.result["rolled_back"] else 4 if report.result.get("pointers_moved", True) else 2)
 
 
 @release_group.command(name="rollback")

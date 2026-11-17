@@ -203,7 +203,7 @@ class ReleaseOpsAdapter:
         try:
             return ops.build(self._root, self._repo, self._commit)
         except Exception as error:  # noqa: BLE001 - whatever build raised, the deploy stops with its own error type
-            raise DeployError(f"构建发布失败，什么都没留下：{error}") from error
+            raise DeployError(f"构建发布失败，什么都没留下：{error}", pointers_moved=False) from error
 
     def switch(self, backup: Path) -> dict[str, Any]:
         disarm_this_process()  # D-174: from here until the process exits the memory gate must not be able to freeze a half-verified switch
@@ -397,7 +397,7 @@ def real_deploy(
                 base, release_id=report.release_id, old_release=ops.pointer_release(ops.container_of(base), "active_release.json"), commit=report.commit,
             )
         except release_card.ReleaseCardError as error:
-            raise rd.DeployError(f"入账卡没生成，什么都没写、指针没动：{error}") from error
+            raise rd.DeployError(f"入账卡没生成，什么都没写、指针没动：{error}", pointers_moved=False) from error
     plan, backup = plan_for(base, report, approver=approver, confirm_ref=confirm_ref, card_file=card_file)
     container = ops.container_of(base)
     older = ops.pointer_release(container, "previous_release.json")
