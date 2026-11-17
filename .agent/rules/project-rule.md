@@ -1,35 +1,23 @@
 ---
-description: "跨 AI 协作统一入口（Antigravity / Codex / Trae / Cursor）— 指向 .trae 单一真源"
+description: "跨 AI 协作薄入口（Antigravity / Codex 等）— 规则真源是根目录 AGENTS.md"
 alwaysApply: true
 ---
 
-# 工作空间 AI 统一协作准则（引用入口）
+# 工作空间 AI 协作入口（薄入口）
 
-> **退役隔离**：`pm-workflow` 为 `QUARANTINED / DECOMMISSIONED`，未注册为可用技能，不得读取或调用。PM 作为治理角色通过 CHG、Decision 与 Continuity v2 工作；旧计划、PM_SESSION 与 handoff.v1 仅作证据输入。
+本文件只指路，不含规则；规则真源是根目录 `AGENTS.md`（细则在 `roles/shared/refs/agents_附录/`）。冲突时以 `AGENTS.md` 为准。
 
-本工作空间由多个 AI 协作开发（Antigravity、Codex、Trae、Cursor）。**所有 AI 严格遵循同一套真源，禁止重复维护规则内容**。
+1. **新会话第一件事**：照 `AGENTS.md`“进门”一节做：在控制根跑 `pm_flows.py entry <项目编号>`，读完它列出的文件，再用中文向用户报告当前焦点、下一步合法动作和冲突；确认控制根、脚本用不了时怎么手敲，见 `.trae/skills/cockpit-entry/SKILL.md`。
+2. **没有已授权的 Work、Run 与有效租约之前，只允许只读命令**；命令输出里建议的修复命令（如 `--fix`、`doc sync`）不要运行。
+3. **工位与身份**：基名、分支前缀、工位目录名照 `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”；表外的 AI 先由用户登记。没有自带身份标记的 agent 跑 `main.py` 一律用 `00_Infrastructure/bin/pm-as-agent.ps1 <基名> <命令参数>`（只在单条命令内设置 `AUTO_PM_AGENT`），否则会被当成用户本人；只能用户本人做的命令见 `AGENTS.md` FLOW-002 名单，不要用它运行。
+4. **不得使用**已隔离的 `pm-workflow`；`PM_SESSION` 和聊天文字都不是授权。
 
-## 单一真源索引
+## 按卡类型读角色包
 
-| 用途 | 绝对路径 |
+| 角色 | 路径 |
 |:---|:---|
-| **全局开发规则** | `.trae/rules/project-rule.md` |
-| **跨技能公共契约** | `roles/shared/refs/skill_coordination.md` |
-| **治理基线** | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
-| **当前计划与状态投影** | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md`（以其“当前排序”一节为准；39 号计划是历史依据） |
-| **PLC 电气工程** | `roles/plc-electrical-engineer/SKILL.md` |
-| **全栈高级语言** | `roles/fullstack-engineer/SKILL.md` |
-| **产品型项目经理（需求、计划、派活、验收）** | `roles/product-pm/SKILL.md` |
-| **测试审计（测试验证与独立审计）** | `roles/test-engineer/SKILL.md` |
-| **UI 画面（HTML 原型、HMI、QML 视图）** | `roles/ui-designer/SKILL.md` |
-| **Obsidian 规范注册表** | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
-| **全局协作入口** | `AGENTS.md` |
-| **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个对话一个工位 `.auto-pm/worktrees/<基名>-<会话ID前6位>`（名字规则见该节） |
-| **运行驾驶舱命令的身份声明** | 没有自带身份标记的 agent 一律用 `00_Infrastructure/bin/pm-as-agent.ps1 <基名> <命令参数>`（只在单条命令内设置 `AUTO_PM_AGENT`），否则会被当成用户本人；口令类命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用它运行 |
-| **独立审计（审 PR 时）** | `AGENTS.md`“独立审计 (AUD-001)” |
-
-## 规则优先级
-
-冲突时：项目级 > 技术栈规则 > 全局规则。
-
-> 本文件是**引用入口**。退役隔离条款优先于旧 PM 路由；执行技能只消费已授权 Work/Run，不拥有治理状态。
+| PLC 电气工程 | `roles/plc-electrical-engineer/SKILL.md` |
+| 全栈高级语言 | `roles/fullstack-engineer/SKILL.md` |
+| 产品型项目经理（需求、计划、派活、验收） | `roles/product-pm/SKILL.md` |
+| 测试审计（测试验证与独立审计） | `roles/test-engineer/SKILL.md` |
+| UI 画面（HTML 原型、HMI、QML 视图） | `roles/ui-designer/SKILL.md` |
