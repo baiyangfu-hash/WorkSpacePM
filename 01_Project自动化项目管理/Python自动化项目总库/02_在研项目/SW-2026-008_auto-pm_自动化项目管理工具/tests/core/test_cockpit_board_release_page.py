@@ -71,7 +71,8 @@ def _check(**changes: Any) -> Check:
 
 def test_candidates_are_release_id_folders_newest_first(tmp_path: Path) -> None:
     folder = tmp_path / release_ship.CANDIDATE_DIR
-    for index, name in enumerate(("1.3.3-1234567", "1.3.3-abcdef0", "notes", "1.3.3-ABCDEF0", "1.3.3-abc")):
+    # 大写的那个换了末位：Windows 上文件夹名不分大小写，和 1.3.3-abcdef0 同名会建不出来（CI windows-cli-core 实测）
+    for index, name in enumerate(("1.3.3-1234567", "1.3.3-abcdef0", "notes", "1.3.3-ABCDEF9", "1.3.3-abc")):
         (folder / name).mkdir(parents=True)
         stamp = NOW.timestamp() + index
         os.utime(folder / name, (stamp, stamp))
