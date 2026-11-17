@@ -34,7 +34,7 @@ tags: ["接口文档", "PLC程序"]
 - 命名：`i_` 输入、`q_`/`o_` 输出、`io_` 进出、`s_` FB 内部静态、`st`/`ast`/`arr` 为结构体/结构体数组/数组、`b` BOOL、`i` INT、`d` DINT、`r` REAL。
 - 步序用 `INT` + 具名常量（目标平台 TIA V19 无枚举，TEC 4.1；将来 V20+ 可原样换枚举，数值不变）。
 
-## 4. 全局数据（GlobalVars）
+## 4. 全局数据（GlobalVars_DJ005）
 
 ### 4.1 总体结构
 
@@ -51,24 +51,23 @@ tags: ["接口文档", "PLC程序"]
 | `stExt` | `ST_ExternalLink` | 组框机链路 / 打胶机握手 |
 | `stBridge` | `ST_Bridge` | 站间中继信号（第 6 节） |
 | `stAlarm` | `ST_Alarm` | 报警触发、锁存、分级输出、声光 |
-| `astAxis` | `ARRAY[1..3] OF ST_ServoAxis` | 轴（沿用 SysLib；编号沿用现有 GlobalVars：1 = Z、2 = X1、3 = X2） |
-| `fbMode … fbAlarm` | 各 FB 实例 | 见 OB1 |
+| `astAxis` | `ARRAY[1..3] OF ST_ServoAxis` | 轴（沿用 SysLib；编号沿用现有 GlobalVars_DJ005：1 = Z、2 = X1、3 = X2） |
 
-FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警最后）：
+FB 实例表（每个 FB 一个背景数据块，OB1 按下表顺序调用，报警最后；TIA 全局 DB 里不能放 FB 实例，见 LSP-905 §4.11，2026-11-15 CHG-PLC-2026-022 由 `GlobalVars.db` 第四部分改来）：
 
 | FB 类型名 | 实例名 | 说明 |
 |---|---|---|
-| FB_1001_MachineMode_BufferFraming | fbMode | 模式 |
-| FB_1005_HomePrepare_BufferFraming | fbHome | 回原点 / 准备 |
-| FB_1006_ManualTeach_BufferFraming | fbManual | 手动 / 示教 |
-| FB_ExternalDeviceInteraction | fbExternal | 组框机链路（FB_3001） |
-| FB_2002_StationBridge | fbBridge | 站间中继 |
-| FB_1007_ConveyorSystem_BufferFraming | fbConv | 4 层输送（内含 4 个 FB_1002） |
-| FB_1003_PickPlace_BufferFraming | fbPickPlace | 取放料 |
-| FB_1004_GlueMachineFeeder_BufferFraming | fbFeeder | 小车 |
-| FB_2001_CommonAlarm_AllStation | fbAlarm | 报警（最后调用） |
+| FB_1001_MachineMode_BufferFraming_DJ005 | DB_1001_MachineMode_DJ005 | 模式 |
+| FB_1005_HomePrepare_BufferFraming | DB_1005_HomePrepare_DJ005 | 回原点 / 准备 |
+| FB_1006_ManualTeach_BufferFraming | DB_1006_ManualTeach_DJ005 | 手动 / 示教 |
+| FB_3001_ExternalDevice_DJ005 | DB_3001_ExternalDevice_DJ005 | 组框机链路（FB_3001） |
+| FB_2002_StationBridge_DJ005 | DB_2002_StationBridge_DJ005 | 站间中继 |
+| FB_1007_ConveyorSystem_BufferFraming | DB_1007_ConveyorSystem_DJ005 | 4 层输送（内含 4 个 FB_1002） |
+| FB_1003_PickPlace_BufferFraming | DB_1003_PickPlace_DJ005 | 取放料 |
+| FB_1004_GlueMachineFeeder_BufferFraming | DB_1004_GlueMachineFeeder_DJ005 | 小车 |
+| FB_2001_CommonAlarm_AllStation_DJ005 | DB_2001_CommonAlarm_DJ005 | 报警（最后调用） |
 
-> 轴编号沿用现有 GlobalVars（见 TEC），与原程序“轴 1 = X1、轴 2 = X2、轴 3 = Z”不同；IO 表里以信号名（`X1_*`、`X2_*`、`Z_*`）为准，**写代码时以名为准，不以编号为准**。
+> 轴编号沿用现有 GlobalVars_DJ005（见 TEC），与原程序“轴 1 = X1、轴 2 = X2、轴 3 = Z”不同；IO 表里以信号名（`X1_*`、`X2_*`、`Z_*`）为准，**写代码时以名为准，不以编号为准**。
 
 ### 4.2 `ST_Machine`
 
@@ -222,16 +221,16 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 
 | FB | VAR_IN_OUT | 说明 |
 |---|---|---|
-| FB_1001_MachineMode_BufferFraming | `io_stMachine : ST_Machine`, `io_stHmi : ST_Hmi`, `io_stIo : ST_Io`, `io_stAlarm : ST_Alarm`, `io_stHome : ST_HomePrepare` | 模式 / D116 / 机器级报警触发 |
+| FB_1001_MachineMode_BufferFraming_DJ005 | `io_stMachine : ST_Machine`, `io_stHmi : ST_Hmi`, `io_stIo : ST_Io`, `io_stAlarm : ST_Alarm`, `io_stHome : ST_HomePrepare` | 模式 / D116 / 机器级报警触发 |
 | FB_1005_HomePrepare_BufferFraming | `io_stHome : ST_HomePrepare`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis : ARRAY[1..3] OF ST_ServoAxis`, `io_stBridge`, `io_stPP`, `io_stFeed`, `io_stConv` | 回原点 + 准备 |
 | FB_1006_ManualTeach_BufferFraming | `io_stManual : ST_Manual`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stPP : ST_PickPlace`, `io_stFeed : ST_Feeder`, `io_stExt`, `io_stBridge`, `io_arrAxis` | 手动与示教 |
-| FB_3001（`FB_ExternalDeviceInteraction`） | `io_stExt : ST_ExternalLink`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stFeed`, `io_stAlarm` | 组框机链路 |
-| FB_2002_StationBridge | `io_stBridge : ST_Bridge`, `io_stConv`, `io_stPP`, `io_stFeed`, `io_stHome`, `io_stManual`, `io_stExt`, `io_stMachine`, `io_stAlarm` | 中继（纯赋值）；另把取放料 / 小车的 `arrTrig` 搬入 `stAlarm` |
+| FB_3001（`FB_3001_ExternalDevice_DJ005`） | `io_stExt : ST_ExternalLink`, `io_stMachine`, `io_stHmi`, `io_stIo`, `io_stFeed`, `io_stAlarm` | 组框机链路 |
+| FB_2002_StationBridge_DJ005 | `io_stBridge : ST_Bridge`, `io_stConv`, `io_stPP`, `io_stFeed`, `io_stHome`, `io_stManual`, `io_stExt`, `io_stMachine`, `io_stAlarm` | 中继（纯赋值）；另把取放料 / 小车的 `arrTrig` 搬入 `stAlarm` |
 | FB_1007_ConveyorSystem_BufferFraming | `io_stConv : ST_ConveyorSystem`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_stHmi`, `io_stManual` | 内含 fb_L1~fb_L4 |
 | FB_1002_SingleLayerConveyor_BufferFraming | `io_stLayer : ST_SingleLayer` | 单层状态机；参数 `VAR_INPUT`：`i_dInitRevMs, i_dPreBlockMs, i_dSlowFeedMs, i_dReleaseOkMs, i_dReleaseNgMs, i_dStarveMs, i_dCylTimeoutMs : DINT` |
 | FB_1003_PickPlace_BufferFraming | `io_stPP : ST_PickPlace`, `io_stBridge`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis` | S20~S25 |
 | FB_1004_GlueMachineFeeder_BufferFraming | `io_stFeed : ST_Feeder`, `io_stBridge`, `io_stExt`, `io_stMachine`, `io_stIo`, `io_stAlarm`, `io_arrAxis` | 小车 |
-| FB_2001_CommonAlarm_AllStation | `io_stAlarm : ST_Alarm`, `io_stMachine`, `io_stIo`, `io_stHmi` | 锁存 / 分级 / 声光 |
+| FB_2001_CommonAlarm_AllStation_DJ005 | `io_stAlarm : ST_Alarm`, `io_stMachine`, `io_stIo`, `io_stHmi` | 锁存 / 分级 / 声光 |
 
 所有时间参数 `DINT` 毫秒；所有位置 / 速度 `REAL`。
 
@@ -318,7 +317,7 @@ FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警
 | D544 | Z 后位取 | `astGroup[2].rZPick` |
 | D512 / D522 | X2 取 / 送 | `rPosPick / rPosFeed` |
 
-> 现场点位值是 PDF 快照；示教会覆盖。点位断电保持：放在 `GlobalVars` 的 `VAR RETAIN`（TEC 7）；取料模式三个变量同理（见 4.6）。
+> 现场点位值是 PDF 快照；示教会覆盖。点位断电保持：放在 `GlobalVars_DJ005` 的 `VAR RETAIN`（TEC 7）；取料模式三个变量同理（见 4.6）。
 
 ## 8. 步序常量
 

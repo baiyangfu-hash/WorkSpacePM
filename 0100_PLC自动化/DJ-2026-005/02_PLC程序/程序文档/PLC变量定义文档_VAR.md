@@ -5,7 +5,9 @@
 
 ## 变量表
 
-### GlobalVars（数据块）
+### GlobalVars_DJ005（数据块）
+
+> 2026-11-15（CHG-PLC-2026-022）：TIA 全局 DB 里不能放 FB 实例（LSP-905 §4.11），原第四部分 9 个功能块实例改为各自的背景数据块，表见 `PLC_ST/00_程序方案/接口文档_INT.md` 4.1“FB 实例表”；源文件由 `GlobalVars.db` 改为 `GlobalVars.scl`。
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -21,15 +23,6 @@
 | stFeed | ST_Feeder | X2 送料小车 |
 | stExt | ST_ExternalLink | 组框机链路 / 打胶机握手 |
 | astAxis | ARRAY[1..3] OF ST_ServoAxis | 伺服轴: [1] Z, [2] X1, [3] X2 |
-| fbMode | FB_1001_MachineMode_BufferFraming | 模式 |
-| fbHome | FB_1005_HomePrepare_BufferFraming | 回原点 / 准备 |
-| fbManual | FB_1006_ManualTeach_BufferFraming | 手动 / 示教 |
-| fbExternal | FB_ExternalDeviceInteraction | 组框机链路 (FB_3001) |
-| fbBridge | FB_2002_StationBridge | 站间中继 |
-| fbConv | FB_1007_ConveyorSystem_BufferFraming | 4 层输送 (内含 4 个 FB_1002) |
-| fbPickPlace | FB_1003_PickPlace_BufferFraming | 取放料 |
-| fbFeeder | FB_1004_GlueMachineFeeder_BufferFraming | 小车 |
-| fbAlarm | FB_2001_CommonAlarm_AllStation | 报警 (最后调用) |
 
 ### ST_Bridge（结构体）
 

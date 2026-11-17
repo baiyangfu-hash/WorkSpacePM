@@ -1,6 +1,6 @@
-# 使用说明 FB_ExternalDeviceInteraction
+# 使用说明 FB_3001_ExternalDevice_DJ005
 
-## 组框机链路（FB_ExternalDeviceInteraction）
+## 组框机链路（FB_3001_ExternalDevice_DJ005）
 
 组框机链路（FB_3001）：联机 M501 / 连续送框 M502 / 单套送框许可 M510，本机安全异常输出 R5000.0 与 Y45 / Y46，组框机安全异常 F104（A 类）、通讯异常 F105（提示类）。
 
@@ -13,4 +13,4 @@
 
 ## 调用
 
-OB1 的调用行见 `00_主程序/OB1.scl`，实例声明见 `00_全局数据/GlobalVars.db`。
+OB1 的调用行见 `00_主程序/OB1.scl`，实例在背景数据块 `01_外部设备交互/DB_3001_ExternalDevice_DJ005.scl`（TIA 全局 DB 里不能放 FB 实例，LSP-905 §4.11）。

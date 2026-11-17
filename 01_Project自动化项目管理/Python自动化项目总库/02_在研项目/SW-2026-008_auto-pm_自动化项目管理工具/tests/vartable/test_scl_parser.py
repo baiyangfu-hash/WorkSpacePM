@@ -311,7 +311,7 @@ class TestSclParserRealSamples:
         assert result.success
         vt = result.var_table
         assert vt is not None
-        assert vt.metadata["fb_name"] == "FB_2001_CommonAlarm_AllStation"
+        assert vt.metadata["fb_name"] == "FB_2001_CommonAlarm_AllStation_DJ005"
         declared = _declared_per_block(FB_2001_SCL)
         assert vt.metadata["var_block_count"] == len(declared) == 3
         assert vt.total_count == _declared_total(FB_2001_SCL)
@@ -350,15 +350,15 @@ class TestSclParserRealSamples:
             for e in vt.entries
             if e.station == "VAR_CONSTANT"
         )
-        # FB_ 定时器实例类型提取 (FB_TON / FB_R_TRIG)
+        # 定时器 / 边沿多重实例类型提取 (CHG-PLC-2026-024 起是 TIA 原生 TON_TIME / R_TRIG)
         fb_types = {
             e.tag: e.signal_type
             for e in vt.entries
-            if e.signal_type.startswith("FB_")
+            if e.signal_type in ("TON_TIME", "R_TRIG")
         }
-        assert fb_types["fb_tInitRev"] == "FB_TON"
-        assert fb_types["fb_tSlowFeed"] == "FB_TON"
-        assert fb_types["fb_trUnload"] == "FB_R_TRIG"
+        assert fb_types["fb_tInitRev"] == "TON_TIME"
+        assert fb_types["fb_tSlowFeed"] == "TON_TIME"
+        assert fb_types["fb_trUnload"] == "R_TRIG"
         # ST_ 结构体类型提取: 只有一个 VAR_IN_OUT 全量结构体
         st_types = {
             e.tag: e.signal_type
@@ -373,12 +373,12 @@ class TestSclParserRealSamples:
         )
 
     def test_real_fb_external_device_interaction(self) -> None:
-        """FB_ExternalDeviceInteraction: VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准"""
+        """FB_3001_ExternalDevice_DJ005（文件 FB_ExternalDeviceInteraction.scl）: VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准"""
         result = SclParser().parse(FB_EXTERNAL_SCL)
         assert result.success
         vt = result.var_table
         assert vt is not None
-        assert vt.metadata["fb_name"] == "FB_ExternalDeviceInteraction"
+        assert vt.metadata["fb_name"] == "FB_3001_ExternalDevice_DJ005"
         declared = _declared_per_block(FB_EXTERNAL_SCL)
         assert vt.metadata["var_block_count"] == len(declared) == 3
         assert vt.total_count == _declared_total(FB_EXTERNAL_SCL)
@@ -394,11 +394,11 @@ class TestSclParserRealSamples:
         # 首个 VAR 变量是上升沿触发器, 含中文注释
         first_var = next(e for e in vt.entries if e.station == "VAR")
         assert first_var.tag == "fb_trPermitUp"
-        assert first_var.signal_type == "FB_R_TRIG"
+        assert first_var.signal_type == "R_TRIG"
         assert first_var.comment == "组框机允许送料 上升沿"
 
     def test_real_fb_1004_feeder_fb_tonr_and_real(self) -> None:
-        """FB_1004: 验证 FB_TON 实例 + REAL 类型 (初值 := 被剥离) + // 行注释"""
+        """FB_1004: 验证 TON_TIME 实例 + REAL 类型 (初值 := 被剥离) + // 行注释"""
         result = SclParser().parse(FB_1004_SCL)
         assert result.success
         vt = result.var_table
@@ -407,8 +407,8 @@ class TestSclParserRealSamples:
         # VAR_IN_OUT + VAR + VAR CONSTANT(常量类)，个数以样例文件逐行数出的为准
         assert vt.total_count == _declared_total(FB_1004_SCL)
         assert _parsed_per_station(vt) == _declared_per_block(FB_1004_SCL)
-        # FB_TON 实例 (SysLib 共享库定时器)
-        ton_entries = {e.tag: e for e in vt.entries if e.signal_type == "FB_TON"}
+        # TON_TIME 实例 (TIA 原生定时器多重实例，CHG-PLC-2026-024 起替换 SysLib FB_TON)
+        ton_entries = {e.tag: e for e in vt.entries if e.signal_type == "TON_TIME"}
         assert set(ton_entries) == {
             "fb_tSettle",
             "fb_tFull",
@@ -468,9 +468,9 @@ class TestSclParserRealSamples:
         """验证 6 个真实样例的 FB 名称元数据提取 (含 ORGANIZATION_BLOCK)"""
         expected = {
             OB1_SCL: "OB1",
-            FB_2001_SCL: "FB_2001_CommonAlarm_AllStation",
+            FB_2001_SCL: "FB_2001_CommonAlarm_AllStation_DJ005",
             FB_1002_SCL: "FB_1002_SingleLayerConveyor_BufferFraming",
-            FB_EXTERNAL_SCL: "FB_ExternalDeviceInteraction",
+            FB_EXTERNAL_SCL: "FB_3001_ExternalDevice_DJ005",
             FB_1004_SCL: "FB_1004_GlueMachineFeeder_BufferFraming",
             FB_1003_SCL: "FB_1003_PickPlace_BufferFraming",
         }

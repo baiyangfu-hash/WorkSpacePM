@@ -1,9 +1,9 @@
-﻿# 变更记录 - GlobalVars.db (全局变量数据块)
+﻿# 变更记录 - GlobalVars.scl (全局变量数据块)
 
 ## 文档信息
 | 项目 | 内容 |
 |------|------|
-| **文件名** | GlobalVars.db |
+| **文件名** | GlobalVars.scl（2026-11-15 前为 GlobalVars.db） |
 | **功能描述** | 边框缓存机全局变量数据块 (OB1与各FB的数据交换中心) |
 | **当前版本** | V7.0.0 |
 | **最后更新** | 2026-05-18 |
@@ -12,6 +12,11 @@
 ---
 
 ## 版本历史
+
+### V15.1.0 (2026-11-15) - **TIA 实测整改（CHG-PLC-2026-022）**
+- 删除第四部分 9 个 FB 实例（TIA 全局 DB 里不能放 FB 实例，LSP-905 §4.11），改为每个 FB 一个背景数据块 `DB_<编号>_<名>_DJ005.scl`，放在各 FB 目录
+- 文件由 `GlobalVars.db` 改名为 `GlobalVars.scl`，补 `{ S7_Optimized_Block := 'TRUE' }`、`VERSION`、`BEGIN`，存 UTF-8 带 BOM（LSP-905 §4.10）
+- 其余成员与类型不变
 
 ### V7.0.0 (2026-05-18) - **Conveyor子系统V7.0.0重构对齐**
 **变更类型**: REFACTOR | **影响范围**: stConveyor结构 + FB实例 | **优先级**: P0-Critical

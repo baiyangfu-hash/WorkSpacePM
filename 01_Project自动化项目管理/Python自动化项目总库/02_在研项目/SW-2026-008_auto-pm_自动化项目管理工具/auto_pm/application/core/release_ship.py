@@ -7,7 +7,8 @@ and the precheck card live.  ``ship`` gathers all of that for one commit and han
 * the gate verdict is downloaded from the cloud ``gate-full`` run of that exact commit (artifact ``gate-verdict-<sha12>``, or the older
   ``gate-verdict``) into ``.auto-pm/release-candidates/<release id>/gate_verdict.json``;
 * the audit signoff is read from ``.auto-pm/release-candidates/<release id>/audit_signoff.md`` (the audit puts it there);
-* the drill script and the precheck card are fixed files in the repository.
+* the drill script is a fixed file in the repository; the intake card is generated for this release by the real deploy
+  (``release_card``: ``.auto-pm/release-candidates/<release id>/release_card.md``, CHG-SCPT-2026-709).
 
 Without ``confirm_ref`` the releases, pointers and ledger are not touched (only the verdict is cached in the candidate folder): a look
 the dashboard's release page can show.  The output dictionary is the contract in ``.auto-pm/reports/release_ship_接口约定_20261117.md``.
@@ -30,7 +31,6 @@ from auto_pm.application.core import release_ops as ops
 
 CANDIDATES_DIR = Path(".auto-pm") / "release-candidates"
 DRILL_SCRIPT = Path(check.PROJECT_DIR) / "scripts" / "release_event_chain_drill.py"
-PRECHECK_CARD = Path(check.PROJECT_DIR) / "02_规划" / "274_RELEASE-368c1af入账卡_PM.md"
 GATE_WORKFLOW = "gate-full.yml"
 _MERGE_PR = re.compile(r"^Merge pull request #(\d+) from \S+\s*(.*)$")
 
@@ -260,6 +260,7 @@ def ship(
         ship_report.result = {
             "ok": False,
             "rolled_back": False,
+            "pointers_moved": False,
             "receipt": "",
             "backup": "",
             "change_id": "",
@@ -277,13 +278,15 @@ def ship(
             report,
             approver=approver,
             confirm_ref=confirm_ref,
-            card_file=root / PRECHECK_CARD,
+            card_file=None,  # the deploy writes this release's own intake card (CHG-SCPT-2026-709)
             drill_script=root / DRILL_SCRIPT,
         )
     except DeployError as error:
         ship_report.result = {
             "ok": False,
             "rolled_back": error.rolled_back,
+            # CHG-SCPT-2026-709: whether the pointers may have moved, the same rule ``release deploy`` exits by (2 / 3 / 4)
+            "pointers_moved": error.pointers_moved,
             "receipt": "",
             "backup": "",
             "change_id": "",
@@ -293,6 +296,7 @@ def ship(
     ship_report.result = {
         "ok": True,
         "rolled_back": False,
+        "pointers_moved": True,
         "receipt": str(done.receipt),
         "backup": str(done.backup),
         "change_id": done.change_id,

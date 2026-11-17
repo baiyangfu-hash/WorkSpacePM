@@ -1,10 +1,10 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1004_GlueMachineFeeder_BufferFraming               *)
 (*  功能描述:   X2 送料小车 4 步 (D760) + 打胶机握手 (Y44 / Y47 / X102) *)
 (*  版本号:     V15.1.0 (2026-10-24, 返回二选一, 取料组数)            *)
 (*                                                                   *)
 (*  依据: 详细设计说明书_DSN.md 7; 接口文档_INT.md 4.7 / 5 / 8       *)
-(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*  轴: X2 = io_arrAxis[3]; Z = io_arrAxis[1] 只读位置。             *)
 (*                                                                   *)
 (*  与 DSN 的差异 (评审请确认):                                      *)
@@ -27,29 +27,29 @@ END_VAR
 
 VAR
     (* 过程定时器 *)
-    fb_tSettle          : FB_TON;       // 步 0 / 步 2 入口窗口
+    fb_tSettle          : TON_TIME;       // 步 0 / 步 2 入口窗口
     s_bSettleIn         : BOOL := FALSE;
     s_bSettleQ          : BOOL := FALSE;
     s_dSettleEt         : DINT := 0;
-    fb_tFull            : FB_TON;       // 步 1: 4 光电全亮 10 s
+    fb_tFull            : TON_TIME;       // 步 1: 4 光电全亮 10 s
     s_bFullIn           : BOOL := FALSE;
     s_bFullQ            : BOOL := FALSE;
     s_dFullEt           : DINT := 0;
-    fb_tEmpty           : FB_TON;       // 步 3: 光电全灭持续超时, 与 X102 二选一返回
+    fb_tEmpty           : TON_TIME;       // 步 3: 光电全灭持续超时, 与 X102 二选一返回
     s_bEmptyIn          : BOOL := FALSE;
     s_bEmptyQ           : BOOL := FALSE;
     s_dEmptyEt          : DINT := 0;
-    fb_tF90             : FB_TON;       // F90 前光电异常
+    fb_tF90             : TON_TIME;       // F90 前光电异常
     s_bF90In            : BOOL := FALSE;
     s_bF90Q             : BOOL := FALSE;
     s_dF90Et            : DINT := 0;
-    fb_tF91             : FB_TON;       // F91 后光电异常
+    fb_tF91             : TON_TIME;       // F91 后光电异常
     s_bF91In            : BOOL := FALSE;
     s_bF91Q             : BOOL := FALSE;
     s_dF91Et            : DINT := 0;
 
     (* 边沿 *)
-    fb_trPickDone       : FB_R_TRIG;    // X102 上升沿
+    fb_trPickDone       : R_TRIG;    // X102 上升沿
     s_bPickDoneEdge     : BOOL := FALSE;
     s_bPickDoneLatch    : BOOL := FALSE;    // 步 3 内锁存的 X102 上升沿
 
@@ -85,12 +85,23 @@ END_VAR
 
 BEGIN
     REGION 00_Timers 定时器统一调用
-    fb_tSettle(IN := s_bSettleIn, PT := io_stFeed.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
-    fb_tFull(IN := s_bFullIn, PT := io_stFeed.dFeedFullMs, Q => s_bFullQ, ET => s_dFullEt);
-    fb_tEmpty(IN := s_bEmptyIn, PT := io_stFeed.dFeedEmptyMs, Q => s_bEmptyQ, ET => s_dEmptyEt);
-    fb_tF90(IN := s_bF90In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF90Q, ET => s_dF90Et);
-    fb_tF91(IN := s_bF91In, PT := io_stFeed.dEyeAlarmMs, Q => s_bF91Q, ET => s_dF91Et);
-    fb_trPickDone(IN := io_stIo.bGluePickDone, Q => s_bPickDoneEdge);
+    fb_tSettle(IN := s_bSettleIn, PT := DINT_TO_TIME(io_stFeed.dSettleMs));
+    s_bSettleQ := fb_tSettle.Q;
+    s_dSettleEt := TIME_TO_DINT(fb_tSettle.ET);
+    fb_tFull(IN := s_bFullIn, PT := DINT_TO_TIME(io_stFeed.dFeedFullMs));
+    s_bFullQ := fb_tFull.Q;
+    s_dFullEt := TIME_TO_DINT(fb_tFull.ET);
+    fb_tEmpty(IN := s_bEmptyIn, PT := DINT_TO_TIME(io_stFeed.dFeedEmptyMs));
+    s_bEmptyQ := fb_tEmpty.Q;
+    s_dEmptyEt := TIME_TO_DINT(fb_tEmpty.ET);
+    fb_tF90(IN := s_bF90In, PT := DINT_TO_TIME(io_stFeed.dEyeAlarmMs));
+    s_bF90Q := fb_tF90.Q;
+    s_dF90Et := TIME_TO_DINT(fb_tF90.ET);
+    fb_tF91(IN := s_bF91In, PT := DINT_TO_TIME(io_stFeed.dEyeAlarmMs));
+    s_bF91Q := fb_tF91.Q;
+    s_dF91Et := TIME_TO_DINT(fb_tF91.ET);
+    fb_trPickDone(CLK := io_stIo.bGluePickDone);
+    s_bPickDoneEdge := fb_trPickDone.Q;
     END_REGION
 
     REGION 01_Derived 派生量

@@ -15,11 +15,11 @@
 
 ## 1. 功能概述与接口
 
-## 机器模式（FB_1001_MachineMode_BufferFraming）
+## 机器模式（FB_1001_MachineMode_BufferFraming_DJ005）
 
 机器模式（手动 / 回原点 / 准备 / 自动）、暂停、停止收尾、设备状态字 D116，机器级报警触发 F0~F25（急停、8 扇门、伺服、变频器、HMI 停止、三轴极限）。
 
-### FB_1001_MachineMode_BufferFraming：VAR_IN_OUT
+### FB_1001_MachineMode_BufferFraming_DJ005：VAR_IN_OUT
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
@@ -65,11 +65,11 @@
 | io_stBridge | ST_Bridge | 站间中继 (读安全区) |
 | io_arrAxis | ARRAY[1..3] OF ST_ServoAxis | 轴: 1 = Z, 2 = X1, 3 = X2 |
 
-## 站间中继（FB_2002_StationBridge）
+## 站间中继（FB_2002_StationBridge_DJ005）
 
 站间信号中继：只做赋值（安全区、层请求、层取料完成、A / B 请求、X1 送料完成、Hold、回原点要求），外加三处最简组合（Hold = 报警 Hold 或暂停；送框许可；收到清除脉冲后清送料完成位），并把取放料 / 小车的报警触发搬入 `stAlarm`。
 
-### FB_2002_StationBridge：VAR_IN_OUT
+### FB_2002_StationBridge_DJ005：VAR_IN_OUT
 
 | 名称 | 类型 | 说明 |
 |---|---|---|

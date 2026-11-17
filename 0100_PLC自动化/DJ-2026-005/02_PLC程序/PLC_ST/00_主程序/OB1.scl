@@ -1,19 +1,20 @@
-// ============================================================================
-// OB1.scl - 边框缓存机主组织块 (V15.0.0, 2026-10-24 新设计)
+﻿// ============================================================================
+// OB1.scl - 边框缓存机主组织块 (V15.1.0, 2026-11-15 TIA 实测整改)
 // ============================================================================
 // 只做调用, 不含逻辑 (REQ R-NFR-05); 调用顺序见详细设计说明书 DSN 3.2。
+// V15.1.0: 各功能块经自己的背景 DB 调用 (LSP-905 §4.11), 顺序不变; 编号与名字不变。
 // 站间信号经 FB_2002 中继, 一拍延迟; 报警最后汇总, 本扫描的 Hold / M8 下一扫描生效。
 // ============================================================================
 ORGANIZATION_BLOCK OB1
 
 BEGIN
-    GlobalVars.fbMode(io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_stHome := GlobalVars.stHome);
-    GlobalVars.fbHome(io_stHome := GlobalVars.stHome, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis, io_stBridge := GlobalVars.stBridge, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stConv := GlobalVars.stConv);
-    GlobalVars.fbManual(io_stManual := GlobalVars.stManual, io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stExt := GlobalVars.stExt, io_stBridge := GlobalVars.stBridge, io_arrAxis := GlobalVars.astAxis);
-    GlobalVars.fbExternal(io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stHmi := GlobalVars.stHmi, io_stIo := GlobalVars.stIo, io_stFeed := GlobalVars.stFeed, io_stAlarm := GlobalVars.stAlarm);
-    GlobalVars.fbBridge(io_stBridge := GlobalVars.stBridge, io_stConv := GlobalVars.stConv, io_stPP := GlobalVars.stPP, io_stFeed := GlobalVars.stFeed, io_stHome := GlobalVars.stHome, io_stManual := GlobalVars.stManual, io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stAlarm := GlobalVars.stAlarm);
-    GlobalVars.fbConv(io_stConv := GlobalVars.stConv, io_stBridge := GlobalVars.stBridge, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_stHmi := GlobalVars.stHmi, io_stManual := GlobalVars.stManual);
-    GlobalVars.fbPickPlace(io_stPP := GlobalVars.stPP, io_stBridge := GlobalVars.stBridge, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis);
-    GlobalVars.fbFeeder(io_stFeed := GlobalVars.stFeed, io_stBridge := GlobalVars.stBridge, io_stExt := GlobalVars.stExt, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stAlarm := GlobalVars.stAlarm, io_arrAxis := GlobalVars.astAxis);
-    GlobalVars.fbAlarm(io_stAlarm := GlobalVars.stAlarm, io_stMachine := GlobalVars.stMachine, io_stIo := GlobalVars.stIo, io_stHmi := GlobalVars.stHmi);
+    "DB_1001_MachineMode_DJ005"(io_stMachine := GlobalVars_DJ005.stMachine, io_stHmi := GlobalVars_DJ005.stHmi, io_stIo := GlobalVars_DJ005.stIo, io_stAlarm := GlobalVars_DJ005.stAlarm, io_stHome := GlobalVars_DJ005.stHome);
+    "DB_1005_HomePrepare_DJ005"(io_stHome := GlobalVars_DJ005.stHome, io_stMachine := GlobalVars_DJ005.stMachine, io_stIo := GlobalVars_DJ005.stIo, io_stAlarm := GlobalVars_DJ005.stAlarm, io_arrAxis := GlobalVars_DJ005.astAxis, io_stBridge := GlobalVars_DJ005.stBridge, io_stPP := GlobalVars_DJ005.stPP, io_stFeed := GlobalVars_DJ005.stFeed, io_stConv := GlobalVars_DJ005.stConv);
+    "DB_1006_ManualTeach_DJ005"(io_stManual := GlobalVars_DJ005.stManual, io_stMachine := GlobalVars_DJ005.stMachine, io_stHmi := GlobalVars_DJ005.stHmi, io_stIo := GlobalVars_DJ005.stIo, io_stPP := GlobalVars_DJ005.stPP, io_stFeed := GlobalVars_DJ005.stFeed, io_stExt := GlobalVars_DJ005.stExt, io_stBridge := GlobalVars_DJ005.stBridge, io_arrAxis := GlobalVars_DJ005.astAxis);
+    "DB_3001_ExternalDevice_DJ005"(io_stExt := GlobalVars_DJ005.stExt, io_stMachine := GlobalVars_DJ005.stMachine, io_stHmi := GlobalVars_DJ005.stHmi, io_stIo := GlobalVars_DJ005.stIo, io_stFeed := GlobalVars_DJ005.stFeed, io_stAlarm := GlobalVars_DJ005.stAlarm);
+    "DB_2002_StationBridge_DJ005"(io_stBridge := GlobalVars_DJ005.stBridge, io_stConv := GlobalVars_DJ005.stConv, io_stPP := GlobalVars_DJ005.stPP, io_stFeed := GlobalVars_DJ005.stFeed, io_stHome := GlobalVars_DJ005.stHome, io_stManual := GlobalVars_DJ005.stManual, io_stExt := GlobalVars_DJ005.stExt, io_stMachine := GlobalVars_DJ005.stMachine, io_stAlarm := GlobalVars_DJ005.stAlarm);
+    "DB_1007_ConveyorSystem_DJ005"(io_stConv := GlobalVars_DJ005.stConv, io_stBridge := GlobalVars_DJ005.stBridge, io_stMachine := GlobalVars_DJ005.stMachine, io_stIo := GlobalVars_DJ005.stIo, io_stAlarm := GlobalVars_DJ005.stAlarm, io_stHmi := GlobalVars_DJ005.stHmi, io_stManual := GlobalVars_DJ005.stManual);
+    "DB_1003_PickPlace_DJ005"(io_stPP := GlobalVars_DJ005.stPP, io_stBridge := GlobalVars_DJ005.stBridge, io_stMachine := GlobalVars_DJ005.stMachine, io_stIo := GlobalVars_DJ005.stIo, io_stAlarm := GlobalVars_DJ005.stAlarm, io_arrAxis := GlobalVars_DJ005.astAxis);
+    "DB_1004_GlueMachineFeeder_DJ005"(io_stFeed := GlobalVars_DJ005.stFeed, io_stBridge := GlobalVars_DJ005.stBridge, io_stExt := GlobalVars_DJ005.stExt, io_stMachine := GlobalVars_DJ005.stMachine, io_stIo := GlobalVars_DJ005.stIo, io_stAlarm := GlobalVars_DJ005.stAlarm, io_arrAxis := GlobalVars_DJ005.astAxis);
+    "DB_2001_CommonAlarm_DJ005"(io_stAlarm := GlobalVars_DJ005.stAlarm, io_stMachine := GlobalVars_DJ005.stMachine, io_stIo := GlobalVars_DJ005.stIo, io_stHmi := GlobalVars_DJ005.stHmi);
 END_ORGANIZATION_BLOCK

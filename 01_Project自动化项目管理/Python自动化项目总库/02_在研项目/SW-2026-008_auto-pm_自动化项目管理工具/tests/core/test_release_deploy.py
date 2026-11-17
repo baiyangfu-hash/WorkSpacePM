@@ -57,8 +57,11 @@ class FakeOps:
 
 
 def _plan(tmp_path: Path, confirm: str = CONFIRM) -> DeployPlan:
+    card = tmp_path / "card.md"  # the books need an implementation card (CHG-SCPT-2026-709); the fake ledger never reads it
+    tmp_path.mkdir(parents=True, exist_ok=True)  # callers also pass sub-folders of their tmp_path
+    card.write_text("# card\n", encoding="utf-8")
     return DeployPlan(release_id=NEW, old_release=OLD, commit="a" * 40, confirm_ref=confirm, approver="fubai", paths=PATHS,
-                      station=tmp_path / "station", evidence_dir=tmp_path / "evidence")
+                      station=tmp_path / "station", evidence_dir=tmp_path / "evidence", card_file=card)
 
 
 def _green() -> Preflight:
@@ -248,3 +251,104 @@ def test_after_a_successful_rollback_the_recorded_backup_is_cleared_so_the_next_
 
     state = json.loads((tmp_path / "evidence" / "state.json").read_text(encoding="utf-8"))
     assert state["backup"] == "" and state["rolled_back_with"] == CONFIRM
+
+
+def test_a_stop_in_the_books_says_the_pointers_did_not_move(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-709: the 11-17 deploy stopped twice in the books and exited 4 ("pointers may have moved") although nothing moved."""
+
+    ops, ledger = FakeOps(), FakeLedger()
+    plan = DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None})
+
+    with pytest.raises(rd.DeployError, match="指针没动") as caught:
+        _run(tmp_path, ops, ledger, plan=plan)
+
+    assert caught.value.pointers_moved is False and caught.value.rolled_back is False and ops.calls == []
+
+
+def test_every_stop_after_the_switch_says_the_pointers_moved(tmp_path: Path) -> None:
+    ops, ledger = FakeOps(), FakeLedger()
+    with pytest.raises(rd.DeployError) as rolled:
+        _run(tmp_path, ops, ledger, checks=_checks(bad={"identity"}))
+    assert rolled.value.pointers_moved and rolled.value.rolled_back
+
+    ops, ledger = FakeOps(built=True), FakeLedger()
+    ops.entry_sha = ""
+    with pytest.raises(rd.DeployError, match="哈希") as unreadable:
+        _run(tmp_path / "b", ops, ledger)
+    assert unreadable.value.pointers_moved and not unreadable.value.rolled_back
+
+
+def test_the_real_adapter_reports_an_unreadable_manifest_entry_as_pointers_moved(tmp_path: Path) -> None:
+    """``deploy`` asks for the entry hash only after the switch and the self-checks, so its failure must not read as "nothing moved"."""
+
+    from auto_pm.application.core import release_wiring
+
+    container = tmp_path / "00_Infrastructure" / "auto_pm"
+    container.mkdir(parents=True)
+    (container / "deployment_manifest.json").write_text(json.dumps({"releases": {}}), encoding="utf-8")
+    adapter = release_wiring.ReleaseOpsAdapter(tmp_path, tmp_path, "a" * 40, NEW, lambda _root: {})
+
+    with pytest.raises(rd.DeployError, match="读不出清单") as caught:
+        adapter.manifest_entry_sha256(NEW)
+
+    assert caught.value.pointers_moved is True
+
+
+def test_a_resume_after_an_earlier_switch_that_stops_in_the_books_says_the_pointers_moved(tmp_path: Path) -> None:
+    """Audit M5: an earlier attempt already switched; this run stops in the books, but the live pointers are the new release."""
+
+    ops, ledger = FakeOps(built=True, switched=True), FakeLedger()
+    plan = DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None})
+
+    with pytest.raises(rd.DeployError, match="建账没完成") as caught:
+        _run(tmp_path, ops, ledger, plan=plan)
+
+    assert caught.value.pointers_moved is True and ops.calls == []
+
+
+def test_unreadable_pointers_during_a_stop_in_the_books_count_as_moved(tmp_path: Path) -> None:
+    """Audit M6: when the active pointer cannot be read, nobody can say it did not move."""
+
+    class Unreadable(FakeOps):
+        def active_release(self) -> str:
+            raise OSError("active_release.json unreadable")
+
+    plan = DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None})
+    with pytest.raises(rd.DeployError, match="建账没完成") as caught:
+        _run(tmp_path, Unreadable(), FakeLedger(), plan=plan)
+
+    assert caught.value.pointers_moved is True
+
+
+def test_a_rollback_that_fails_says_the_pointers_moved(tmp_path: Path) -> None:
+    """Audit M8, the most dangerous one: the pointers sit on the new release and could not be put back."""
+
+    ops, ledger = FakeOps(), FakeLedger()
+    ops.fail_switch = ops.fail_rollback = True
+
+    with pytest.raises(rd.DeployError, match="回退也没成功") as caught:
+        _run(tmp_path, ops, ledger)
+
+    assert caught.value.pointers_moved is True and caught.value.rolled_back is False
+
+
+def test_books_that_do_not_close_after_the_switch_say_the_pointers_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit M9: switched and self-checked, but the books did not close."""
+
+    from auto_pm.application.core.release_ledger import LedgerError
+
+    def refuse_close(*_args: Any, **_kwargs: Any) -> None:
+        raise LedgerError("books did not close")
+
+    monkeypatch.setattr(rd, "close_books", refuse_close)
+    ops = FakeOps()
+    with pytest.raises(rd.DeployError, match="收口没完成") as caught:
+        _run(tmp_path, ops, FakeLedger())
+
+    assert caught.value.pointers_moved is True and ops.active == NEW
+
+
+def test_a_deploy_error_without_the_flag_counts_as_moved() -> None:
+    """A new raise that forgets ``pointers_moved`` errs towards "look at the pointers" (audit §3.2 item 3)."""
+
+    assert rd.DeployError("anything").pointers_moved is True

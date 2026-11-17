@@ -83,10 +83,17 @@ class FakeLedger:
         return [" ".join(c[:3]) for c in self.commands]
 
 
+def _card(tmp_path: Path) -> Path:
+    card = tmp_path / "card.md"
+    if tmp_path.is_dir():
+        card.write_text("# deploy card\n", encoding="utf-8")
+    return card
+
+
 def _plan(tmp_path: Path, confirm: str = CONFIRM) -> rl.DeployPlan:
     return rl.DeployPlan(
         release_id="1.3.3-abcdef0", old_release="1.3.3-1234567", commit="a" * 40, confirm_ref=confirm, approver="fubai",
-        paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence",
+        paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence", card_file=_card(tmp_path),
     )
 
 
@@ -269,7 +276,7 @@ def test_another_releases_change_order_is_never_adopted(tmp_path: Path) -> None:
     port = FakeLedger()
     other = rl.DeployPlan(
         release_id="1.3.3-abcdef012", old_release="1.3.3-1234567", commit="b" * 40, confirm_ref=CONFIRM, approver="fubai",
-        paths=PATHS, station=tmp_path / "s2", evidence_dir=tmp_path / "e2",
+        paths=PATHS, station=tmp_path / "s2", evidence_dir=tmp_path / "e2", card_file=_card(tmp_path),
     )
     first = _open(other, port).change_id  # a change order for a release whose id merely starts like ours
 
@@ -291,6 +298,7 @@ def test_an_explicit_decision_id_is_used_and_kept(tmp_path: Path) -> None:
     plan = rl.DeployPlan(
         release_id="1.3.3-abcdef0", old_release="1.3.3-1234567", commit="a" * 40, confirm_ref=CONFIRM, approver="fubai",
         paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence", decision_id="DEC-20260101-CUSTOM01",
+        card_file=_card(tmp_path),
     )
 
     _open(plan, port)
@@ -306,3 +314,51 @@ def test_a_finished_change_order_for_this_release_is_reported_as_such(tmp_path: 
 
     with pytest.raises(rl.LedgerError, match="已有一张走完"):
         _open(plan, port)
+
+
+# ---- CHG-SCPT-2026-709: the ids and options the real commands take (the real commands themselves: test_release_ledger_real_cli.py)
+
+
+def test_the_minted_decision_id_is_the_one_form_decision_create_takes(tmp_path: Path) -> None:
+    from auto_pm.contracts.decision_package import is_canonical_decision_id
+
+    plan = rl.DeployPlan(
+        release_id="1.3.3-dad7036", old_release="1.3.3-84d4729", commit="dad70364ec87424216f5b7c256bda47cbde25aa6", confirm_ref=CONFIRM,
+        approver="fubai", paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence", card_file=_card(tmp_path),
+    )
+    assert is_canonical_decision_id(plan.decision_id), plan.decision_id
+    assert plan.decision_id.endswith("-DDAD7036") and "DEPLOY" not in plan.decision_id
+
+
+def test_a_saved_decision_id_that_decision_create_refused_is_replaced_not_reused(tmp_path: Path) -> None:
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "evidence" / "state.json").write_text(json.dumps({"decision_id": "DEC-20261117-DEPLOY-DAD7036"}), encoding="utf-8")
+
+    plan = _plan(tmp_path)
+
+    assert plan.decision_id != "DEC-20261117-DEPLOY-DAD7036" and plan.decision_id.endswith("-DAAAAAAA")
+
+
+def test_an_explicit_decision_id_in_the_wrong_form_is_refused_before_anything_is_written(tmp_path: Path) -> None:
+    with pytest.raises(rl.LedgerError, match="不合 decision create 的格式"):
+        rl.DeployPlan(
+            release_id="1.3.3-abcdef0", old_release="1.3.3-1234567", commit="a" * 40, confirm_ref=CONFIRM, approver="fubai",
+            paths=PATHS, station=tmp_path / "station", evidence_dir=tmp_path / "evidence", decision_id="DEC-20261117-DEPLOY-ABCDEF0",
+        )
+
+
+def test_the_write_work_is_created_with_the_card_the_deploy_was_given(tmp_path: Path) -> None:
+    port, plan = FakeLedger(), _plan(tmp_path)
+    _open(plan, port)
+    (create,) = [c for c in port.commands if c[:3] == ["continuity", "work", "create"]]
+    assert create[create.index("--card-file") + 1] == str(plan.card_file)
+
+
+@pytest.mark.parametrize("card", [None, "missing.md"])
+def test_without_a_card_no_command_is_sent(tmp_path: Path, card: str | None) -> None:
+    port = FakeLedger()
+    plan = rl.DeployPlan(**{**_plan(tmp_path).__dict__, "card_file": None if card is None else tmp_path / card})
+    with pytest.raises(rl.LedgerError, match="实施卡"):
+        _open(plan, port)
+    assert port.commands == []
+

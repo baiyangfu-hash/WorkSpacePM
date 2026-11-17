@@ -203,7 +203,7 @@ class ReleaseOpsAdapter:
         try:
             return ops.build(self._root, self._repo, self._commit)
         except Exception as error:  # noqa: BLE001 - whatever build raised, the deploy stops with its own error type
-            raise DeployError(f"构建发布失败，什么都没留下：{error}") from error
+            raise DeployError(f"构建发布失败，什么都没留下：{error}", pointers_moved=False) from error
 
     def switch(self, backup: Path) -> dict[str, Any]:
         disarm_this_process()  # D-174: from here until the process exits the memory gate must not be able to freeze a half-verified switch
@@ -219,7 +219,8 @@ class ReleaseOpsAdapter:
             manifest = json.loads((ops.container_of(self._root) / "deployment_manifest.json").read_text(encoding="utf-8"))
             entry = json.dumps(manifest["releases"][release_id], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise DeployError(f"读不出清单里 {release_id} 的条目：{error}") from error
+            # deploy reads this only after the switch and the self-checks, so the pointers have moved (CHG-SCPT-2026-709: exit 4, not 2)
+            raise DeployError(f"读不出清单里 {release_id} 的条目：{error}", pointers_moved=True) from error
         return hashlib.sha256(entry.encode("utf-8")).hexdigest()
 
 
@@ -352,7 +353,9 @@ def cockpit_identity(root: Path, *, python: str = sys.executable, run: Exec = ru
     return result
 
 
-def plan_for(root: Path, report: Any, *, approver: str, confirm_ref: str, now: datetime | None = None) -> tuple[DeployPlan, Path]:
+def plan_for(
+    root: Path, report: Any, *, approver: str, confirm_ref: str, card_file: Path | None = None, now: datetime | None = None,
+) -> tuple[DeployPlan, Path]:
     """The ledger plan and the pointer-backup folder of a deploy of ``report.release_id`` from the control root ``root``.
 
     The old release is the active pointer *now*; the evidence folder is per release, and the backup folder name carries the time of the
@@ -370,21 +373,32 @@ def plan_for(root: Path, report: Any, *, approver: str, confirm_ref: str, now: d
     )
     plan = DeployPlan(
         release_id=report.release_id, old_release=old, commit=report.commit, confirm_ref=confirm_ref, approver=approver, paths=paths,
-        station=base / ".auto-pm" / "worktrees" / f"deploy-{report.release_id}", evidence_dir=evidence,
+        station=base / ".auto-pm" / "worktrees" / f"deploy-{report.release_id}", evidence_dir=evidence, card_file=card_file,
     )
     return plan, evidence / f"pointer_backup_{stamp}"
 
 
 def real_deploy(
-    root: Path, report: Any, *, approver: str, confirm_ref: str, card_file: Path, drill_script: Path,
+    root: Path, report: Any, *, approver: str, confirm_ref: str, card_file: Path | None, drill_script: Path,
 ) -> rd.DeployResult:
-    """Assemble the real ports and run the whole deploy.  Reached only from ``release deploy --no-check-only`` after a green preflight."""
+    """Assemble the real ports and run the whole deploy.  Reached only from ``release deploy --no-check-only`` after a green preflight.
 
+    Without ``card_file`` the cockpit writes this release's intake card (``release_card``, CHG-SCPT-2026-709) and books the Work with it.
+    """
+
+    from auto_pm.application.core import release_card
     from auto_pm.domain.change.change_service import ChangeService
     from auto_pm.infrastructure.continuity_store import ContinuityStore
 
     base = Path(root)
-    plan, backup = plan_for(base, report, approver=approver, confirm_ref=confirm_ref)
+    if card_file is None:
+        try:
+            card_file = release_card.ensure_card(
+                base, release_id=report.release_id, old_release=ops.pointer_release(ops.container_of(base), "active_release.json"), commit=report.commit,
+            )
+        except release_card.ReleaseCardError as error:
+            raise rd.DeployError(f"入账卡没生成，什么都没写、指针没动：{error}", pointers_moved=False) from error
+    plan, backup = plan_for(base, report, approver=approver, confirm_ref=confirm_ref, card_file=card_file)
     container = ops.container_of(base)
     older = ops.pointer_release(container, "previous_release.json")
     identity: ops.Identity = cockpit_identity

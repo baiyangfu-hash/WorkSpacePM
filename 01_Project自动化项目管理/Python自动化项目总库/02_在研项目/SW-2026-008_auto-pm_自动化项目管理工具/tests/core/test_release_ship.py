@@ -133,7 +133,7 @@ def test_everything_present_can_switch_but_a_look_never_deploys(root: Path) -> N
     }
 
 
-def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_card(root: Path) -> None:
+def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_a_card_generated_for_this_release(root: Path) -> None:
     _signoff(root)
     seen: dict[str, Any] = {}
 
@@ -157,7 +157,9 @@ def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_card(root: Path)
         seen["confirm_ref"] == "user-confirmation:board-click:x" and seen["approver"] == "baiyang"
     )
     assert seen["drill_script"] == root / ship_mod.DRILL_SCRIPT
-    assert seen["card_file"] == root / ship_mod.PRECHECK_CARD
+    # CHG-SCPT-2026-709: no fixed repository card (274 only covered releases/1.3.3-368c1af); the deploy writes this release's own card
+    assert "card_file" in seen and seen["card_file"] is None
+    assert not hasattr(ship_mod, "PRECHECK_CARD")
 
 
 def test_confirmation_without_a_green_preflight_never_deploys(root: Path) -> None:
@@ -198,13 +200,42 @@ def test_a_rolled_back_deploy_is_reported_as_rolled_back(root: Path) -> None:
     )
 
 
-def test_the_repo_has_the_drill_script_and_the_precheck_card() -> None:
+@pytest.mark.parametrize("moved", [False, True], ids=["stopped-before-the-switch", "pointers-moved"])
+def test_a_failed_deploy_says_whether_the_pointers_moved(root: Path, moved: bool) -> None:
+    """CHG-SCPT-2026-709: the board reads this result; a stop in the books must not read as "could not roll back"."""
+
+    _signoff(root)
+
+    def failing_deploy(*args: Any, **kwargs: Any) -> DeployResult:
+        raise DeployError("建账没完成", rolled_back=False, pointers_moved=moved)
+
+    github = FakeGitHub([{"id": 7, "status": "completed", "url": "u"}], PASS_VERDICT)
+    report = ship_mod.ship(root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a", deploy=failing_deploy)
+
+    assert report.result is not None and report.result["ok"] is False
+    assert report.result["pointers_moved"] is moved and report.result["rolled_back"] is False
+    assert report.to_dict()["result"]["pointers_moved"] is moved
+
+
+def test_a_refused_and_a_green_ship_say_whether_the_pointers_moved(root: Path) -> None:
+    github = FakeGitHub([{"id": 7, "status": "completed", "url": "u"}], PASS_VERDICT)  # no signoff: refused before the deploy
+    refused = ship_mod.ship(root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a", deploy=lambda *a, **k: None)
+    assert refused.result is not None and refused.result["pointers_moved"] is False
+
+    _signoff(root)
+    done = ship_mod.ship(
+        root, "c0e5bbc", github=github, confirm_ref="user-confirmation:x", approver="a",
+        deploy=lambda *a, **k: DeployResult(release_id=RID, change_id="CHG-SCPT-2026-999", backup="bk", receipt="rc"),
+    )
+    assert done.result is not None and done.result["ok"] is True and done.result["pointers_moved"] is True
+
+
+def test_the_repo_has_the_drill_script() -> None:
     project = (
         Path(__file__).resolve().parents[2]
-    )  # 两个文件都在本项目目录里，按项目内相对路径找，不读项目外
+    )  # 在本项目目录里，按项目内相对路径找，不读项目外
     prefix = len(Path(check.PROJECT_DIR).parts)
     assert (project / Path(*ship_mod.DRILL_SCRIPT.parts[prefix:])).is_file()
-    assert (project / Path(*ship_mod.PRECHECK_CARD.parts[prefix:])).is_file()
 
 
 def test_gh_cli_prefers_the_artifact_named_after_the_commit(tmp_path: Path) -> None:

@@ -1,0 +1,12 @@
+---
+description: UI 设计师规则（对齐 ui-designer 角色包）：按已批准点表做 HTML 原型、HMI 画面、QML 视图
+globs: **/*.html,**/*.css,**/*.js,**/*.qml
+alwaysApply: false
+---
+
+# UI Designer（Cursor）
+
+做画面（HTML 原型、HMI 画面、QML 视图）前，读取 `roles/ui-designer/SKILL.md` 与 `roles/shared/refs/skill_coordination.md`。
+
+- 画面做法只在 `roles/ui-designer/SKILL.md`；本文件只指路，不抄。
+- 要守的规范、能用的命令、门禁和回执栏目：`roles/ui-designer/role.json`。

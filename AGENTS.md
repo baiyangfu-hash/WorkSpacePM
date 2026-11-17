@@ -8,7 +8,7 @@
 
 ## 进门（新对话、换班接手都照做，全程只读）
 
-1. 在控制根用控制根 `.venv` 里的 Python 跑 `SW8/scripts/pm_flows.py entry <项目编号>`：一次跑完项目体检、占位表、本项目每张卡交接记录的最后三行，最后列出“先读这些文件”。
+1. 在控制根用控制根 `.venv` 里的 Python 跑 `SW8/scripts/pm_flows.py entry <项目编号>`：一次跑完项目体检、占位表、本项目每张卡交接记录的最后三行，最后列出“先读这些文件”和按卡类型该读哪个角色包。
 2. 先读完它列出的文件，再用中文向用户报告当前焦点、下一步合法动作和冲突；有冲突原样报告并停下，不直接动手。
 3. 不知道项目编号就 `main.py project list` 列出来问用户，不猜。确认控制根、身份标记、脚本用不了时怎么手敲，见 `.trae/skills/cockpit-entry/SKILL.md`。
 4. 命令报 `No such command '…'`，说明本机生效的发布版本还没有这条命令：照实告诉用户，不绕过，不为此切换版本。
@@ -152,8 +152,11 @@
 | 当前计划与状态 | `SW8/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md`（以“当前排序”为准；需求见同目录 `01_驾驶舱需求文档.md`；技术债见 `SW8/04_监控/02_整改项/活动技术债台账.md`；26 号总计划、39 号计划、M3 后路线是历史依据） |
 | 日常迭代操作手册 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/36_驾驶舱与双技术栈日常迭代操作手册_PM.md` |
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
-| 角色：PM 治理（事实核验、CHG、Decision、Work 授权与验收） | 本文件红线 1、2；跨技能契约 `roles/shared/refs/skill_coordination.md` |
+| 角色包总览（进门按卡类型提示读哪个；每个包的规范、命令、门禁在同目录 `role.json`） | `roles/`；跨技能契约 `roles/shared/refs/skill_coordination.md` |
+| 角色：PM 治理（需求、计划、事实核验、CHG、Decision、Work 授权与验收） | `roles/product-pm/SKILL.md`；本文件红线 1、2 |
 | 角色：PLC 执行（LSP-903～908、STD-830/840/850/860；定时器以 LSP-903 为准） | `roles/plc-electrical-engineer/SKILL.md` |
 | 角色：全栈执行（DEV-300 SRE、DEV-210/216/218 PySide6+QML） | `roles/fullstack-engineer/SKILL.md` |
+| 角色：测试审计（测试验证与独立审计 AUD-001；DEV-031/032、STD-816/817） | `roles/test-engineer/SKILL.md` |
+| 角色：UI 画面（HTML 原型、HMI 画面、QML 视图；STD-909～911、DEV-301） | `roles/ui-designer/SKILL.md` |
 | 全局开发规则、技能注册表、跨 AI 共存 | `.trae/rules/project-rule.md`、`.agents/skills.json`、`.cursor/rules/workspace-ai-coexistence.mdc`、`.agent/rules/project-rule.md`、`CLAUDE.md` |
 | 规范注册表、跨语言 SRE 规范 | `00_Obsidian_Base全局规范文件仓库/spec_registry.json`、`00_Obsidian_Base全局规范文件仓库/04_驾驶舱与全栈域/300_高级语言与工业上位机系统_Google_SRE工程可靠性规范_DEV.md` |

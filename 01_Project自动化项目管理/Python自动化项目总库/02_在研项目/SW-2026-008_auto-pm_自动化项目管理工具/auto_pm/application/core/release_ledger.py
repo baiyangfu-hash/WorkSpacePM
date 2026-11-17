@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from auto_pm.contracts.decision_package import is_canonical_decision_id
 from auto_pm.contracts.user_evidence import user_evidence_problem
 
 PROJECT_ID = "SW-2026-008"
@@ -55,6 +56,9 @@ class DeployPlan:
     station: Path
     evidence_dir: Path
     decision_id: str = ""
+    # CHG-SCPT-2026-709: the implementation card ``continuity work create`` prechecks for this write Work; its path table must cover
+    # ``paths`` (the three pointer files exist, ``releases/<id>`` is new).  The deploy passes on the card it was given.
+    card_file: Path | None = None
 
     def __post_init__(self) -> None:
         # K6: the one definition of the user's words (contracts.user_evidence), the same one ``change transition`` applies to
@@ -62,9 +66,24 @@ class DeployPlan:
         if problem := user_evidence_problem(self.confirm_ref):
             raise LedgerError(f"缺少用户确认引用：{problem}（--confirm-ref）；没有它不批准、不部署")
         if not self.decision_id:
-            # The id carries a date; a resume after UTC midnight must reuse the first run's id, not mint a second Decision.
+            # The id carries a date; a resume after UTC midnight must reuse the first run's id, not mint a second Decision.  A saved id
+            # that is not canonical was refused by ``decision create`` (so no Decision carries it) and is replaced, not reused.
             saved = _load_state_file(self.state_file).get("decision_id", "")
-            object.__setattr__(self, "decision_id", saved or f"DEC-{datetime.now(UTC):%Y%m%d}-DEPLOY{self.slug[-8:]}")
+            object.__setattr__(self, "decision_id", saved if is_canonical_decision_id(saved) else self.minted_decision_id())
+        if not is_canonical_decision_id(self.decision_id):
+            raise LedgerError(
+                f"Decision 编号 {self.decision_id} 不合 decision create 的格式（DEC-<8 位日期>-<8 位大写字母或数字>）；"
+                "请检查 --decision-id 或提交号"
+            )
+
+    def minted_decision_id(self) -> str:
+        """``DEC-<UTC date>-D<first 7 of the commit, upper case>``: the one form ``decision create`` takes (``DECISION_ID_PATTERN``).
+
+        CHG-SCPT-2026-709: it used to be ``DEC-<date>-DEPLOY<last 8 of the release slug>`` (``DEC-20261117-DEPLOY-DAD7036``), which
+        ``decision create`` refuses, so the first real deploy stopped in the books.
+        """
+
+        return f"DEC-{datetime.now(UTC):%Y%m%d}-D{self.commit[:7].upper()}"
 
     @property
     def slug(self) -> str:
@@ -155,6 +174,10 @@ def open_books(plan: DeployPlan, port: LedgerPort, *, background: str, necessity
     """Change order -> approved/implementing, Decision, Work (authorized), station, Run (RUNNING), Work IN_PROGRESS.  Resumable."""
 
     books = Books()
+    if plan.card_file is None or not Path(plan.card_file).is_file():
+        # Checked before the first write: ``continuity work create`` refuses a write Work without a card, and stopping there would
+        # leave a change order and a Decision behind for nothing.
+        raise LedgerError(f"建账要一张实施卡（写入型 Work 必须带 --card-file，卡要过开工前预检）：{plan.card_file or '没给'}")
     state = _load_state(plan)
     if state.get("decision_id") != plan.decision_id:
         state["decision_id"] = plan.decision_id
@@ -193,7 +216,8 @@ def open_books(plan: DeployPlan, port: LedgerPort, *, background: str, necessity
 
     if port.work_state(plan.work_id) is None:
         args = ["continuity", "work", "create", "--work-id", plan.work_id, "--pid", PROJECT_ID, "--kind", "WBS",
-                "--title", f"发布 {plan.release_id}", "--owner", plan.owner, "--idempotency-key", f"{plan.slug}-work-create"]
+                "--title", f"发布 {plan.release_id}", "--owner", plan.owner, "--idempotency-key", f"{plan.slug}-work-create",
+                "--card-file", str(plan.card_file)]
         for path in plan.paths:
             args += ["--scope", path]
         port.cli(*args)

@@ -19,6 +19,7 @@ tests/core/test_pr_ready_service.py
 tests/core/test_protected_files.py
 tests/core/test_release_consistency.py
 tests/core/test_role_pack_service.py
+tests/core/test_role_pack_wiring.py
 tests/core/test_toolchain_lock_matches_pyproject.py
 tests/core/test_trae_agent_marker.py
 tests/domain/test_secret_patterns.py
