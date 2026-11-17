@@ -2,7 +2,8 @@
 (* ==============================================================================
  * FB_3001_ExternalInteraction_{{ project_tag }} - 通用外部设备交握与心跳监视功能块
  * 项目: {{ project_id }} {{ project_name }}
- * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳)
+ * 遵循规范: STD-820 (8步握手 + 4s ON / 4s OFF 心跳 + 12s 心跳不变判通讯中断)
+ * 定时器: TIA 原生 TON_TIME, FB 静态区多重实例, 顶部无条件调用 (LSP-903; 2026-11-16 用户 TIA V19 实测编译 0 错误)
  * ============================================================================== *)
 VAR_INPUT
     i_bEnable           : BOOL;         (* 功能块总使能 *)
@@ -28,13 +29,15 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    // --- 4s ON / 4s OFF 心跳发生器与监视定时器 ---
-    s_dHeartbeatPulse   : DINT := 4000;
-    s_dHeartbeatTimer   : DINT := 0;
+    // --- 4s ON / 4s OFF 心跳发生器与 12s 超时监视 (TIA 原生 TON_TIME 多重实例) ---
+    fb_tHeartbeat       : TON_TIME;     // 本机心跳翻转定时 (4s)
+    fb_tUpTimeout       : TON_TIME;     // 上游心跳 12s 不变 = 上游通讯中断
+    fb_tDownTimeout     : TON_TIME;     // 下游心跳 12s 不变 = 下游通讯中断
     s_bHeartbeatState   : BOOL := FALSE;
+    s_bHeartbeatTick    : BOOL := FALSE;  // 4s 到点的那一个周期
+    s_bUpChanged        : BOOL := FALSE;  // 本周期上游心跳有翻转
+    s_bDownChanged      : BOOL := FALSE;  // 本周期下游心跳有翻转
 
-    s_dUpTimeout        : DINT := 0;
-    s_dDownTimeout      : DINT := 0;
     s_bLastUpHeartbeat  : BOOL := FALSE;
     s_bLastDownHeartbeat: BOOL := FALSE;
 
@@ -43,14 +46,25 @@ VAR
 END_VAR
 
 BEGIN
-    (* 0. 复位处理 *)
+    (* 0. 心跳边沿与定时器调用区 (无条件, 每周期一次, 全参数; 放在下面的 RETURN 之前) *)
+    s_bUpChanged := io_stExternal.stUpstream.bUpstream_HeartbeatFromUp <> s_bLastUpHeartbeat;
+    s_bDownChanged := io_stExternal.stDownstream.bDownstream_HeartbeatFromDown <> s_bLastDownHeartbeat;
+    s_bLastUpHeartbeat := io_stExternal.stUpstream.bUpstream_HeartbeatFromUp;
+    s_bLastDownHeartbeat := io_stExternal.stDownstream.bDownstream_HeartbeatFromDown;
+
+    // 心跳发生: 计满 4s 出一个周期的 Q, 下一周期 IN 断开清零后重新计时
+    #fb_tHeartbeat(IN := i_bEnable AND NOT s_bHeartbeatTick, PT := DINT_TO_TIME(4000));
+    s_bHeartbeatTick := #fb_tHeartbeat.Q;
+    // 超时监视: 对方心跳一翻转 IN 断开一个周期即清零; 12s 不翻转 Q 为 TRUE
+    #fb_tUpTimeout(IN := i_bEnable AND NOT s_bUpChanged, PT := DINT_TO_TIME(12000));
+    #fb_tDownTimeout(IN := i_bEnable AND NOT s_bDownChanged, PT := DINT_TO_TIME(12000));
+
+    (* 1. 复位处理 *)
     IF i_bResetCmd THEN
         io_stExternal.stUpstream.bUpstreamComFault := FALSE;
         io_stExternal.stDownstream.bDownstreamComFault := FALSE;
         io_stExternal.bAnyComFault := FALSE;
         q_wErrorCode := 16#0000;
-        s_dUpTimeout := 0;
-        s_dDownTimeout := 0;
     END_IF;
 
     IF NOT i_bEnable THEN
@@ -63,30 +77,31 @@ BEGIN
         RETURN;
     END_IF;
 
-    (* 1. 心跳生成 (4s ON / 4s OFF) 与 12s 超时监视 *)
-    // (此处在PLC周期中执行4s翻转与超时累加)
-    s_bHeartbeatState := NOT s_bHeartbeatState; // 简化展示，实际配合定时器4s翻转
+    (* 2. 心跳生成 (4s ON / 4s OFF) 与 12s 超时监视 *)
+    IF s_bHeartbeatTick THEN
+        s_bHeartbeatState := NOT s_bHeartbeatState;
+    END_IF;
     io_stExternal.stUpstream.bMachine_HeartbeatToUp := s_bHeartbeatState;
     io_stExternal.stDownstream.bMachine_HeartbeatToDown := s_bHeartbeatState;
 
-    // 上游心跳边沿检测
-    IF io_stExternal.stUpstream.bUpstream_HeartbeatFromUp <> s_bLastUpHeartbeat THEN
-        s_bLastUpHeartbeat := io_stExternal.stUpstream.bUpstream_HeartbeatFromUp;
-        s_dUpTimeout := 0;
+    // 上游: 心跳一翻转就清通讯故障; 12s 不翻转置通讯故障
+    IF s_bUpChanged THEN
         io_stExternal.stUpstream.bUpstreamComFault := FALSE;
+    ELSIF #fb_tUpTimeout.Q THEN
+        io_stExternal.stUpstream.bUpstreamComFault := TRUE;
     END_IF;
 
-    // 下游心跳边沿检测
-    IF io_stExternal.stDownstream.bDownstream_HeartbeatFromDown <> s_bLastDownHeartbeat THEN
-        s_bLastDownHeartbeat := io_stExternal.stDownstream.bDownstream_HeartbeatFromDown;
-        s_dDownTimeout := 0;
+    // 下游: 同上
+    IF s_bDownChanged THEN
         io_stExternal.stDownstream.bDownstreamComFault := FALSE;
+    ELSIF #fb_tDownTimeout.Q THEN
+        io_stExternal.stDownstream.bDownstreamComFault := TRUE;
     END_IF;
 
     io_stExternal.bAnyComFault := io_stExternal.stUpstream.bUpstreamComFault OR io_stExternal.stDownstream.bDownstreamComFault;
     q_bComAlarm := io_stExternal.bAnyComFault;
 
-    (* 2. 上游进料 8 步闭环状态机 (STD-820) *)
+    (* 3. 上游进料 8 步闭环状态机 (STD-820) *)
     CASE s_iInfeedStep OF
         0: (* 待机态: 广播本机准备好进料 (1) *)
             io_stExternal.stUpstream.bMachine_ReadyIn := i_bMachineReadyIn AND NOT io_stExternal.bAnyComFault;
@@ -129,7 +144,7 @@ BEGIN
     END_CASE;
     io_stExternal.stUpstream.iInfeedStep := s_iInfeedStep;
 
-    (* 3. 下游出料 8 步闭环状态机 (STD-820) *)
+    (* 4. 下游出料 8 步闭环状态机 (STD-820) *)
     CASE s_iOutfeedStep OF
         0: (* 待机态: 等待下游准备好 (1) 并广播本机准备好出料 (2) *)
             io_stExternal.stDownstream.bMachine_ReadyOut := i_bMachineReadyOut AND NOT io_stExternal.bAnyComFault;
