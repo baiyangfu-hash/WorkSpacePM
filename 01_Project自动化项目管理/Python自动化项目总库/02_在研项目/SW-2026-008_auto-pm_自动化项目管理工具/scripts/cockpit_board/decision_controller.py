@@ -82,6 +82,7 @@ class DecisionController(QObject):
         self.runner = runner  # 测试注入；None 用 actions 里的默认运行器
         self.pin_mode = "unknown"
         self._reading = False
+        self._reread = False  # 读的过程中又要求重读（比如刚批完一张）：读完马上再读一次
         self.missions: Sequence[Any] = ()
         self.project_ids: Sequence[str] = ()
         self.changes: Sequence[tuple[str, Any]] = ()
@@ -107,7 +108,8 @@ class DecisionController(QObject):
         self.project_ids, self.missions = tuple(project_ids), tuple(missions)
         if changes is not None:  # 不给就用 self.changes 里记着的
             self.changes = tuple(changes)
-        if self._reading:  # 上一轮还没读完：不叠起新的一批命令，读完后页面用的就是上一轮读到的
+        if self._reading:  # 上一轮还没读完：不叠起新的一批命令，记下来，读完马上按最新的再读一次
+            self._reread = True
             return
         self._reading = True
         self._spawn(self._read_all, self._read_done)
@@ -141,6 +143,10 @@ class DecisionController(QObject):
 
     def _read_done(self, result: Any) -> None:
         self._reading = False
+        if self._reread:  # 这一轮读的可能是动作之前的样子：不画它，直接再读一次
+            self._reread = False
+            self.refresh(self.project_ids, self.missions)
+            return
         if isinstance(result, Exception):
             self._failed("读决定页数据", result)
             return

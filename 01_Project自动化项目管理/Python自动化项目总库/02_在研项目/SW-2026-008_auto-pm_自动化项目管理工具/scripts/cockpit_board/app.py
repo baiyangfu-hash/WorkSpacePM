@@ -296,6 +296,7 @@ class CockpitWindow(QMainWindow):
         self.read_pages: dict[str, c.ReadPage] = {p.key: p for p in (self.attention, self.tasks, self.worktrees, self.release)}
         self.page_reads = shell.page_reads()
         self._reading_pages: set[str] = set()
+        self._reread_pages: set[str] = set()  # 读的过程中又要求重读（比如刚收掉一个工位）：这一轮读完马上再读一次
         self.current = "home"
         for key, page in (("home", self.home), ("issues", self.issues), ("projects", self.projects), ("project", self.project),
                           ("decisions", self.decisions.page), ("flow", self.flow), ("tools", self.tools),
@@ -365,7 +366,10 @@ class CockpitWindow(QMainWindow):
     def _refresh_reads(self, key: str) -> None:
         """骨架页：把 flow/pages.json 里这一页的只读命令放到后台线程读；上一轮没读完就不叠新的一轮。"""
         reads = self.page_reads.get(key, ())
-        if key in self._reading_pages or not reads:
+        if not reads:
+            return
+        if key in self._reading_pages:  # 上一轮还在读：记下来，读完马上再读，不能丢（丢了页面就停在动作之前的样子）
+            self._reread_pages.add(key)
             return
         self._reading_pages.add(key)
         pid = self.options.station_project
@@ -381,6 +385,10 @@ class CockpitWindow(QMainWindow):
     def _on_reads(self, payload: tuple[str, str, list[c.ReadResult]]) -> None:
         key, scope, results = payload
         self._reading_pages.discard(key)
+        if key in self._reread_pages:  # 这一轮读的可能是动作之前的样子：不画它，直接按最新的再读一次
+            self._reread_pages.discard(key)
+            self._refresh_reads(key)
+            return
         if key == "attention":  # 只重画明细并写明读取时间；“计入”块只跟首页走（_render），这里不碰（D-342）
             self.attention.show_results(scope, results, (self.options.now or datetime.now(UTC)).astimezone(self.offset))
             return
