@@ -51,12 +51,19 @@ SelfCheck = Callable[[], tuple[bool, str]]
 
 
 class DeployError(RuntimeError):
-    """The deploy stopped; ``rolled_back`` says whether the pointers were put back."""
+    """The deploy stopped; ``rolled_back`` says whether the pointers were put back, ``pointers_moved`` whether they may have moved at all.
 
-    def __init__(self, message: str, *, rolled_back: bool = False, failed: tuple[str, ...] = ()) -> None:
+    CHG-SCPT-2026-709: a deploy that stopped before the switch (preflight, books, build) never touched a pointer, and must not be
+    reported like one that switched and could not finish (the CLI's exit code 4 means "a person has to look at the live pointers").
+    """
+
+    def __init__(
+        self, message: str, *, rolled_back: bool = False, failed: tuple[str, ...] = (), pointers_moved: bool = False,
+    ) -> None:
         super().__init__(message)
         self.rolled_back = rolled_back
         self.failed = failed
+        self.pointers_moved = pointers_moved
 
 
 class ReleaseOpsPort(Protocol):
@@ -154,7 +161,10 @@ def deploy(
     try:
         books: Books = open_books(plan, ledger, background=background, necessity=necessity)
     except LedgerError as error:
-        raise DeployError(f"建账没完成（重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做）：{error}") from error
+        raise DeployError(
+            f"建账没完成，指针没动（重跑同一条 `main.py release deploy <提交> --no-check-only …`（带同一个确认引用）接着做）：{error}",
+            pointers_moved=_switched_earlier(ops, plan),
+        ) from error
     steps.extend(books.steps)
 
     already_switched = ops.active_release() == plan.release_id
@@ -176,7 +186,7 @@ def deploy(
     checks_sha = hashlib.sha256(summary.encode("utf-8")).hexdigest()
     entry_sha = str(entry.get("entry_sha256", "")) or ops.manifest_entry_sha256(plan.release_id)  # a resumed or already-built deploy has no build result
     if not entry_sha:
-        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，但命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝）：请先修好清单、人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/")
+        raise DeployError("读不出清单条目的哈希，回执不能留空；已切换且自检通过，但命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝）：请先修好清单、人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/", pointers_moved=True)
     try:
         closed = close_books(
             plan, ledger, change_id=books.change_id,
@@ -184,7 +194,7 @@ def deploy(
             conclusion=f"验收通过：有效版本 active={plan.release_id}，previous={plan.old_release}；自检 {len(results)} 项全过；确认引用 {plan.confirm_ref}",
         )
     except LedgerError as error:
-        raise DeployError(f"已切换且自检通过，但收口没完成；命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝），请人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/：{error}") from error
+        raise DeployError(f"已切换且自检通过，但收口没完成；命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝），请人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/：{error}", pointers_moved=True) from error
     steps.extend(closed.steps)
     receipt = write_receipt(plan, change_id=books.change_id, backup=str(backup), entry_sha256=entry_sha, checks_sha256=checks_sha, rollback_command=rollback_command)
     return DeployResult(plan.release_id, books.change_id, str(backup), str(receipt), {n: d for n, (_g, d) in results.items()}, steps)
@@ -196,6 +206,18 @@ def _undo(plan: DeployPlan, ops: ReleaseOpsPort, backup: Path, steps: list[str],
     try:
         ops.rollback(backup)
     except Exception as error:  # noqa: BLE001
-        raise DeployError(f"{reason}；回退也没成功：{error}。手工回退命令见回执或备份目录 {backup}", rolled_back=False, failed=failed) from error
+        raise DeployError(f"{reason}；回退也没成功：{error}。手工回退命令见回执或备份目录 {backup}", rolled_back=False, failed=failed, pointers_moved=True) from error
     _update_state(plan, rolled_back_with=plan.confirm_ref, backup="")  # the pointers are back: the next attempt takes a fresh backup
-    raise DeployError(f"{reason}；已回退到 {plan.old_release}，账目保持打开。重试需要新的用户确认引用", rolled_back=True, failed=failed)
+    raise DeployError(f"{reason}；已回退到 {plan.old_release}，账目保持打开。重试需要新的用户确认引用", rolled_back=True, failed=failed, pointers_moved=True)
+
+
+def _switched_earlier(ops: ReleaseOpsPort, plan: DeployPlan) -> bool:
+    """Whether an earlier attempt already switched to this release (a resume): then the pointers did move, only not in this run.
+
+    Unreadable pointers count as moved, so the caller is told to look rather than told that nothing happened.
+    """
+
+    try:
+        return ops.active_release() == plan.release_id
+    except Exception:  # noqa: BLE001 - any failure to read the pointer is "cannot say it did not move"
+        return True

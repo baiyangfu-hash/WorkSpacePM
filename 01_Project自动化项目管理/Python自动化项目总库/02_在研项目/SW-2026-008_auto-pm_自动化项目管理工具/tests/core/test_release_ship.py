@@ -133,7 +133,7 @@ def test_everything_present_can_switch_but_a_look_never_deploys(root: Path) -> N
     }
 
 
-def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_card(root: Path) -> None:
+def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_a_card_generated_for_this_release(root: Path) -> None:
     _signoff(root)
     seen: dict[str, Any] = {}
 
@@ -157,7 +157,9 @@ def test_confirmed_ship_runs_the_deploy_with_the_repo_drill_and_card(root: Path)
         seen["confirm_ref"] == "user-confirmation:board-click:x" and seen["approver"] == "baiyang"
     )
     assert seen["drill_script"] == root / ship_mod.DRILL_SCRIPT
-    assert seen["card_file"] == root / ship_mod.PRECHECK_CARD
+    # CHG-SCPT-2026-709: no fixed repository card (274 only covered releases/1.3.3-368c1af); the deploy writes this release's own card
+    assert "card_file" in seen and seen["card_file"] is None
+    assert not hasattr(ship_mod, "PRECHECK_CARD")
 
 
 def test_confirmation_without_a_green_preflight_never_deploys(root: Path) -> None:
@@ -198,13 +200,12 @@ def test_a_rolled_back_deploy_is_reported_as_rolled_back(root: Path) -> None:
     )
 
 
-def test_the_repo_has_the_drill_script_and_the_precheck_card() -> None:
+def test_the_repo_has_the_drill_script() -> None:
     project = (
         Path(__file__).resolve().parents[2]
-    )  # 两个文件都在本项目目录里，按项目内相对路径找，不读项目外
+    )  # 在本项目目录里，按项目内相对路径找，不读项目外
     prefix = len(Path(check.PROJECT_DIR).parts)
     assert (project / Path(*ship_mod.DRILL_SCRIPT.parts[prefix:])).is_file()
-    assert (project / Path(*ship_mod.PRECHECK_CARD.parts[prefix:])).is_file()
 
 
 def test_gh_cli_prefers_the_artifact_named_after_the_commit(tmp_path: Path) -> None:
