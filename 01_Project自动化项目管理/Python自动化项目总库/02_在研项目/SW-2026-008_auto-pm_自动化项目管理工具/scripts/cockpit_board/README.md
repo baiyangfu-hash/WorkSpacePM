@@ -25,7 +25,7 @@
 | 文件 | 管什么 | 改它的规矩 |
 |---|---|---|
 | `theme.py` | 唯一的颜色、字体、间距 | 想改外观**只改这里**，别处不许写颜色字面量（有测试扫） |
-| `policy.py` | 按钮白名单、永不加的词、禁用词 | **加按钮先改这里**，再改页面；永远不加：合并、删除、切换发布、代签、绕过钩子、启动 agent |
+| `policy.py` | 按钮白名单、永不加的词、禁用词 | **加按钮先改这里**，再改页面；永远不加：合并、删除、切换发布、代签、绕过钩子、启动 agent（例外各一处，写在 policy.py：工位页收工位、发版页用户本人点“同意切换到 <发布号>”） |
 | `viewmodel.py` | 纯判定：把账本和文件夹读出的 `pm_dashboard.Board` 变成各页要显示的数据 | 无界面代码，可以直接单测 |
 | `actions.py` | **整个包里唯一允许起子进程、写文件的地方** | 新动作加在这里，回执（命令 + 退出码）统一用 `Receipt` |
 | `widgets/` | 各页的控件：`decisions` 决定页、`home` 今天、`issues` 问题、`projects` 全部项目、`project_page` 项目页六页签、`station` 工程工位、`delivery` GitHub 块、`common` 小零件；骨架 D 的 7 个新页见第 7 节 | 只画，不判定；长文字行用 `common.fill`，行里不要再放弹簧 |
@@ -93,7 +93,7 @@
 | 看批准口令是否生效 | `pm approver-pin status --json` | JSON `approver-pin-status.v1`：`state` 为 `enforced` / `not_enabled` / `suspended`，只含批准人名和口令编号，不含口令或校验值 | 只读；设置口令（`pm approver-pin init`）只能用户本人在终端做，界面永远不放这个按钮 |
 | 安全区签字 | 现在在 GitHub PR 上写“安全签字 + 提交号” | — | 界面只提醒，不代签 |
 
-界面永远不加的按钮：合并、删除、切换发布、代签、绕过钩子、启动 agent、设置/重置批准口令。
+界面永远不加的按钮：合并、删除、切换发布、代签、绕过钩子、启动 agent、设置/重置批准口令。例外各只有一处（来由和护栏写在 `policy.py`）：“工作树与分支”页收工位；“发版”页用户本人点“同意切换到 <发布号>”，看板在点击那一刻生成凭据 `user-confirmation:board-click:<UTC 时间>:<看板会话号>`、先写进 `.auto-pm/reports/board_approvals/release_ship.jsonl`，再调 `release ship <提交> --no-check-only --confirm-ref <凭据> --approver <批准人> --json`（CHG-SCPT-2026-707）。
 
 ## 6. 给下一个接手的 agent 的提醒
 
