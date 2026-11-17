@@ -141,12 +141,17 @@ def test_a_green_real_deploy_passes_everything_on_and_prints_the_receipt_and_the
     assert real.order == ["arm:deploy-gate", "preflight"], "the memory gate is armed (D-168) before the first heavy step"
 
 
-@pytest.mark.parametrize(("rolled_back", "code"), [(True, 3), (False, 4)])
-def test_a_failed_deploy_exits_three_when_rolled_back_and_four_when_a_person_must_step_in(
-    tmp_path: Path, real: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, rolled_back: bool, code: int,
+@pytest.mark.parametrize(
+    ("rolled_back", "moved", "code"), [(True, True, 3), (False, True, 4), (False, False, 2)],
+    ids=["rolled-back", "moved-not-rolled-back", "stopped-before-the-switch"],
+)
+def test_a_failed_deploy_exits_three_when_rolled_back_four_when_a_person_must_step_in_and_two_when_nothing_moved(
+    tmp_path: Path, real: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, rolled_back: bool, moved: bool, code: int,
 ) -> None:
+    """CHG-SCPT-2026-709: 4 means the pointers may have moved; a deploy that stopped before the switch (books, build) is 2."""
+
     def failing(*_a: object, **_k: object) -> DeployResult:
-        raise DeployError("自检没过", rolled_back=rolled_back)
+        raise DeployError("自检没过", rolled_back=rolled_back, pointers_moved=moved)
 
     monkeypatch.setattr(release_wiring, "real_deploy", failing)
 

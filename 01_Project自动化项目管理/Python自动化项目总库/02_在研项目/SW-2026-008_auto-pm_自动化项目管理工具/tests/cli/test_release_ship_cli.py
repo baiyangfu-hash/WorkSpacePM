@@ -174,16 +174,22 @@ def test_a_green_real_ship_passes_the_confirmation_on_and_exits_zero(
     assert env.deploy[0]["approver"] == "baiyang"
 
 
-@pytest.mark.parametrize(("rolled_back", "code"), [(True, 3), (False, 4)])
-def test_a_failed_real_ship_exits_three_when_rolled_back_and_four_otherwise(
+@pytest.mark.parametrize(
+    ("rolled_back", "moved", "code"), [(True, True, 3), (False, True, 4), (False, False, 2)],
+    ids=["rolled-back", "moved-not-rolled-back", "stopped-before-the-switch"],
+)
+def test_a_failed_real_ship_exits_like_the_real_deploy_three_four_or_two(
     tmp_path: Path,
     env: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     rolled_back: bool,
+    moved: bool,
     code: int,
 ) -> None:
+    """CHG-SCPT-2026-709: the board's release button runs ``ship``; a stop in the books (pointers never moved) is 2, not 4."""
+
     def failing(*args: object, **kwargs: object) -> DeployResult:
-        raise DeployError("自检没过", rolled_back=rolled_back)
+        raise DeployError("自检没过", rolled_back=rolled_back, pointers_moved=moved)
 
     monkeypatch.setattr(release_wiring, "real_deploy", failing)
     result = _invoke(tmp_path, "ship", "HEAD", *REAL)

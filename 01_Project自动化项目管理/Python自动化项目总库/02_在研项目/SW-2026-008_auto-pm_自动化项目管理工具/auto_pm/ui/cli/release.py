@@ -1,8 +1,10 @@
 """Release CLI (D-146, card 1): ``release status`` and ``release deploy <commit> --check-only``.  Read-only; the real deploy comes in a later card.
 
-退出码：0 可以部署／状态已打印／部署完成；1 用法错误；2 预检没通过（有失败或没法核实的项）；
-3 部署中途失败，指针已回退（账目保持打开，重试要新的用户确认引用）；4 部署失败且没能自动回退，或已切换但收口没完成（要人工，信息里有回退命令）。
+退出码：0 可以部署／状态已打印／部署完成；1 用法错误；2 没部署、指针没动：预检没通过（有失败或没法核实的项），或真部署停在切换之前
+（建账、构建中途停了，照信息重跑同一条命令接着做）；3 部署中途失败，指针已回退（账目保持打开，重试要新的用户确认引用）；
+4 指针动过：部署失败且没能自动回退，或已切换但收口没完成（要人工，信息里有回退命令）。
 真部署（``--no-check-only``）每次都要 ``--confirm-ref user-confirmation:<用户那条消息的时间或编号>``；没有它永远拒绝，没有默认同意。
+``--card-file`` 不填时，驾驶舱按本次发布号现场生成入账卡 ``.auto-pm/release-candidates/<发布号>/release_card.md``（CHG-SCPT-2026-709）。
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ def release_status(ctx: click.Context, as_json: bool) -> None:
 @click.option("--audit-signoff", type=CallerPath(path_type=Path, dir_okay=False), help="独立审计的放行记录")
 @click.option("--confirm-ref", default="", help="真部署必填：user-confirmation:<用户那条消息的时间或编号>；没有它不批准、不部署")
 @click.option("--approver", default="", help="真部署必填：写进变更单和 Decision 的批准人")
-@click.option("--card-file", type=CallerPath(path_type=Path, dir_okay=False), help="真部署必填：切换后跑卡预检用的实施卡文件")
+@click.option("--card-file", type=CallerPath(path_type=Path, dir_okay=False), help="真部署可选：建账和切换后卡预检用的实施卡；不填就按本次发布号现场生成入账卡")
 @click.option("--drill-script", type=CallerPath(path_type=Path, dir_okay=False), help="真部署必填：事件链演练脚本（本机文件）")
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出")
 @click.pass_context
@@ -76,7 +78,7 @@ def release_deploy(
     """部署前预检；加 --no-check-only 才真部署：预检全绿 → 建账 → 构建 → 切换 → 自检 → 失败自动回退，成功才收口并写回执。"""
 
     if not check_only:
-        missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--card-file", card_file), ("--drill-script", drill_script)) if not value]
+        missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--drill-script", drill_script)) if not value]
         if missing:
             raise click.ClickException("真部署还缺：" + "、".join(missing))
         # K6: the same check every approval uses (8 characters or more, not written by an agent), first and before anything is
@@ -95,14 +97,15 @@ def release_deploy(
         ctx.exit(2)
     if check_only:
         ctx.exit(0)
-    assert card_file is not None and drill_script is not None  # narrowed by the missing-options check above
+    assert drill_script is not None  # narrowed by the missing-options check above
     try:
         result = wiring.real_deploy(_root(ctx), report, approver=approver, confirm_ref=confirm_ref, card_file=card_file, drill_script=drill_script)
     except LedgerError as error:  # a malformed confirmation reference stops before the books are touched
         raise click.ClickException(str(error)) from error
     except DeployError as error:
         click.echo(f"部署没有完成：{error}")
-        ctx.exit(3 if error.rolled_back else 4)
+        # CHG-SCPT-2026-709: 4 only when the pointers may have moved; a stop before the switch is 2 (nothing deployed).
+        ctx.exit(3 if error.rolled_back else 4 if error.pointers_moved else 2)
     click.echo(f"已部署 {result.release_id}，变更单 {result.change_id} 已完成，回执 {result.receipt}")
     click.echo(f"回退命令：main.py release rollback {result.backup}")
 
@@ -115,8 +118,10 @@ def release_deploy(
 @click.option("--json", "as_json", is_flag=True, help="机器可读输出（看板发版页用，格式见接口约定）")
 @click.pass_context
 def release_ship(ctx: click.Context, commit: str, check_only: bool, confirm_ref: str, approver: str, as_json: bool) -> None:
-    """一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本和预检卡跑预检；
-    --no-check-only 时再走 release deploy 同一套切换、自检、失败自动回退。退出码：0 能发或已发；2 预检没过；3 失败已回退；4 失败没能回退。"""
+    """一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本跑预检；
+    --no-check-only 时再走 release deploy 同一套建账（入账卡现场生成）、切换、自检、失败自动回退。
+    退出码和 release deploy 同一条规则（CHG-SCPT-2026-709）：0 能发或已发；2 没部署、指针没动（预检没过，或停在切换之前）；
+    3 失败已回退；4 指针动过（没能回退，或已切换但收口没完成）。"""
 
     from auto_pm.application.core import release_ship as ship_mod
 
@@ -152,7 +157,8 @@ def release_ship(ctx: click.Context, commit: str, check_only: bool, confirm_ref:
         ctx.exit(0)
     if not report.deployed:
         ctx.exit(2)
-    ctx.exit(3 if report.result["rolled_back"] else 4)
+    # CHG-SCPT-2026-709: a result without the flag (an older deploy) counts as moved, so it is never reported as "nothing happened"
+    ctx.exit(3 if report.result["rolled_back"] else 4 if report.result.get("pointers_moved", True) else 2)
 
 
 @release_group.command(name="rollback")
