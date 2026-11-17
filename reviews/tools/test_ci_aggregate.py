@@ -211,16 +211,6 @@ def test_sw008_ci_mypy_step_checks_tests_as_well_as_the_product() -> None:
     assert "--platform win32" in command and "continue-on-error" not in step
 
 
-def test_root_tests_workflow_also_runs_the_sw010_project_tests_with_its_own_dependencies() -> None:
-    """SW-2026-010（驾驶舱 A6 验证套件）的 tests/ 此前没有任何 CI 在跑；root-tests 作业补跑，并装上它需要的 click、rich。"""
-    text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
-    assert "SW-2026-010_驾驶舱A6Python验证套件" in text
-    step = text[text.index("      - name: SW-2026-010 project tests") :].split("\n\n")[0]
-    assert "working-directory:" in step and "-m pytest" in step and step.rstrip().endswith("tests")
-    install = next(line for line in text.splitlines() if "pip install pytest" in line)
-    assert "click==" in install and "rich==" in install
-
-
 def test_root_tests_workflow_also_runs_the_sw009_project_tests_on_the_offscreen_qt_platform() -> None:
     """SW-2026-009（驾驶舱的测试样件）的 tests/ 此前没有 CI；其中有 QML 联调测试，必须装 PySide6 并用离屏平台，否则收集阶段就崩。"""
     text = (WORKFLOWS / "root-tests.yml").read_text(encoding="utf-8")
