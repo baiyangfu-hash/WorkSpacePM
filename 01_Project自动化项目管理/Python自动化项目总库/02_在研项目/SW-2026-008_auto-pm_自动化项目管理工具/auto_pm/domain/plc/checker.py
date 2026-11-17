@@ -66,7 +66,8 @@ TIA_RESERVED_BLOCK_NAMES = ("Main", "Startup", "Cyclic")
 # DJ-2026-011 在研块和测试用 DB（已在用户 TIA 里测过）。
 TIA_NAME_EXCEPTIONS = re.compile(
     r"^(FB_1001_Station1|FB_100[2-7]_\w+_BufferFraming|FB_101[2-4]_\w+|FB_1020_EquipmentHandshake|FB_1030_SafetyManager"
-    r"|DB_TwoHandStartTest|DB_AlarmSummaryTest|DB_BatchCounterTest|DB_TestBench)$"
+    r"|DB_TwoHandStartTest|DB_AlarmSummaryTest|DB_BatchCounterTest|DB_TestBench"
+    r"|" + "|".join(TIA_WRAPPER_TYPES) + r")$"
 )
 # 同一条登记的“005/009/000 的 OB1 主程序”：只在这三个项目里放过 OB1
 TIA_OB1_EXCEPTION_PROJECTS = ("DJ-2026-005", "DJ-2026-009", "DJ-2026-000")
@@ -75,7 +76,9 @@ _TIA_WRAPPER_DECL = re.compile(
     r'^\s*[A-Za-z_]\w*\s*:\s*(?:ARRAY\s*\[[^\]]*\]\s*OF\s+)?"?(' + "|".join(TIA_WRAPPER_TYPES) + r')"?\s*[;:=]',
     re.IGNORECASE,
 )
-_TIA_BLOCK_DECL = re.compile(r'^\s*(FUNCTION_BLOCK|DATA_BLOCK|ORGANIZATION_BLOCK)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE)
+_TIA_BLOCK_DECL = re.compile(r'^\s*(FUNCTION_BLOCK|DATA_BLOCK|ORGANIZATION_BLOCK|FUNCTION)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE)
+# 背景 DB 的 DATA_BLOCK 和 FB 名之间可以有的表头行（属性、版本、保持性）
+_TIA_DB_HEADER_WORDS = frozenset({"NON_RETAIN", "RETAIN"})
 _TIA_INSTANCE_OF = re.compile(r'^\s*"?([A-Za-z_]\w*)"?\s*$')
 _TIA_OB_CALL = re.compile(r'^\s*"([A-Za-z_]\w*)"\s*\(')
 _TIA_PROJECT_TAG = re.compile(r"DJ\d{3,}")
@@ -113,6 +116,28 @@ def _tia_sources(project_path: str) -> list[tuple[str, list[str]]]:
                 text = Path(path).read_text(encoding="utf-8-sig", errors="replace")  # lenient-decode: 只做规则匹配，坏字节不影响块名和声明的判断
                 found.append((os.path.relpath(path, project_path).replace(os.sep, "/"), text.splitlines()))
     return found
+
+
+def _strip_scl_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    """去掉一行里的 ``//`` 行注释和 ``(* … *)`` 块注释（块注释可跨行，``in_comment`` 是上一行带过来的状态）。"""
+    out: list[str] = []
+    i = 0
+    while i < len(line):
+        if in_comment:
+            end = line.find("*)", i)
+            if end < 0:
+                return "".join(out), True
+            i, in_comment = end + 2, False
+            continue
+        if line.startswith("(*", i):
+            in_comment = True
+            i += 2
+            continue
+        if line.startswith("//", i):
+            break
+        out.append(line[i])
+        i += 1
+    return "".join(out), in_comment
 
 
 def _is_tia_project(project_path: str) -> bool:
@@ -395,8 +420,9 @@ class _LegacyPlcCheckerCore:
         for rel, lines in _tia_sources(project_path):
             kind = ""
             pending_db = ""
+            in_comment = False
             for number, line in enumerate(lines, start=1):
-                code = line.split("//", 1)[0]
+                code, in_comment = _strip_scl_comments(line, in_comment)
                 hit = _TIA_WRAPPER_DECL.match(code)
                 if hit:
                     wrappers.append(
@@ -410,11 +436,11 @@ class _LegacyPlcCheckerCore:
                     pending_db = name if kind == "DATA_BLOCK" else ""
                     continue
                 if pending_db:
-                    stripped = line.strip()
-                    if not stripped or stripped.upper().startswith(_TIA_DB_HEADER_PREFIXES):
+                    stripped = code.strip()
+                    if not stripped or stripped.upper().startswith(_TIA_DB_HEADER_PREFIXES) or stripped.upper() in _TIA_DB_HEADER_WORDS:
                         continue
                     inst = _TIA_INSTANCE_OF.match(code)
-                    if inst and inst.group(1).upper() not in {"VAR", "STRUCT", "BEGIN", "NON_RETAIN", "VAR_RETAIN"}:
+                    if inst and inst.group(1).upper() not in {"VAR", "STRUCT", "BEGIN", "VAR_RETAIN"}:
                         instance_of[pending_db] = inst.group(1)
                     pending_db = ""
                 if kind == "ORGANIZATION_BLOCK":
@@ -430,6 +456,8 @@ class _LegacyPlcCheckerCore:
         ob_problems: list[str] = []
         seen: dict[str, str] = {}
         for name, where in ob_calls:
+            if blocks.get(name, ("", ""))[0] == "FUNCTION":
+                continue  # 调的是 FC，不需要背景 DB
             if name in seen:
                 ob_problems.append(
                     f"{where} 背景 DB {name} 被调用了两次（第一次在 {seen[name]}）："
@@ -465,6 +493,8 @@ class _LegacyPlcCheckerCore:
         name_problems: list[str] = []
         legacy_ob1 = Path(project_path).name.startswith(TIA_OB1_EXCEPTION_PROJECTS)
         for name, (kind, rel) in sorted(blocks.items()):
+            if kind == "FUNCTION":
+                continue  # FC 不要求带项目标记（模板的 FC_4001 已实测过）
             if TIA_NAME_EXCEPTIONS.match(name) or (legacy_ob1 and kind == "ORGANIZATION_BLOCK" and name.upper() == "OB1"):
                 continue
             if name in TIA_RESERVED_BLOCK_NAMES or (kind == "ORGANIZATION_BLOCK" and re.fullmatch(r"OB\d+", name, re.IGNORECASE)):

@@ -157,3 +157,41 @@ def test_a_project_without_bom_is_not_a_tia_project(project: Path) -> None:
     status = _status(project)
     for item in (TIA_WRAPPER_ITEM, TIA_OB_DB_ITEM, TIA_DB_FOLDER_ITEM, TIA_BLOCK_NAME_ITEM):
         assert item not in status, f"不带 BOM 的老工程不该出 {item}"
+
+
+def test_a_background_db_with_a_non_retain_header_still_counts(project: Path) -> None:
+    """审计 #855：DATA_BLOCK 和 FB 名之间有 NON_RETAIN 行时，FB 名照样认得出，不误报缺背景 DB。"""
+    db = _plc_st(project) / "02_工位_动作机构" / "DB_1001_Station1.scl"
+    text = db.read_bytes().decode("utf-8")
+    head, sep, rest = text.partition('DATA_BLOCK "DB_1001_Station1_DJ2026901"')
+    assert sep
+    db.write_bytes((head + sep + "\nNON_RETAIN" + rest).encode("utf-8"))
+    status = _status(project)
+    assert status[TIA_OB_DB_ITEM][0] == "pass", status[TIA_OB_DB_ITEM]
+    assert status[TIA_DB_FOLDER_ITEM][0] == "pass", status[TIA_DB_FOLDER_ITEM]
+    # 认出的必须是真正的 FB：把这个 DB 挪走，文件夹一项要红，并且点名它的 FB
+    db.rename(_plc_st(project) / "05_公共报警" / db.name)
+    status, details = _status(project)[TIA_DB_FOLDER_ITEM]
+    assert status == "fail"
+    assert any("FB_1001_Station1_DJ2026901" in d for d in details), details
+
+
+def test_an_ob_calling_a_function_needs_no_background_db(project: Path) -> None:
+    """审计 #855：OB 里调 FC 不需要背景 DB，不误报。"""
+    ob = _plc_st(project) / "00_主程序" / "OB123.scl"
+    _edit(
+        ob,
+        "END_ORGANIZATION_BLOCK",
+        '    "FC_4001_ScaleAnalog"(i_iRaw := 0);\nEND_ORGANIZATION_BLOCK',
+    )
+    assert _status(project)[TIA_OB_DB_ITEM][0] == "pass"
+
+
+def test_a_wrapper_type_inside_a_block_comment_is_not_reported(project: Path) -> None:
+    fb = _plc_st(project) / "02_工位_动作机构" / "FB_1001_Station1.scl"
+    _edit(
+        fb,
+        "    fb_tProcess     : TON_TIME;",
+        "    (* 旧写法:\n    fb_tOld : FB_TON;\n    *)\n    fb_tProcess     : TON_TIME;",
+    )
+    assert _status(project)[TIA_WRAPPER_ITEM][0] == "pass"
