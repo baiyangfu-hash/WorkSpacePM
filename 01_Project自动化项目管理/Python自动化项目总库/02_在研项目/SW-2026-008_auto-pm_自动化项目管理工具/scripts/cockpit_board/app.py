@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from cockpit_board import actions, flowgraph, readers, shell, snapshot, theme  # noqa: E402
 from cockpit_board import viewmodel as vm
 from cockpit_board.decision_controller import DecisionController  # noqa: E402
+from cockpit_board.release_controller import ReleaseController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.attention import AttentionPage  # noqa: E402
 from cockpit_board.widgets.commands import CommandsPage  # noqa: E402
@@ -287,7 +288,11 @@ class CockpitWindow(QMainWindow):
         self.decisions.lifecycle_listeners.append(lambda: self.tools.set_register_kind(*self.decisions.register_kind()))
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
         # 骨架 D：4 个读命令的页 + PR 与审计（用窗口的 GitHub 采集）+ 两个只读数据文件的页
-        self.attention, self.tasks, self.release = AttentionPage(), TasksPage(), ReleasePage()
+        self.attention, self.tasks = AttentionPage(), TasksPage()
+        # 发版页（CHG-SCPT-2026-707）：候选版本各跑一遍只看的 release ship，用户本人点“同意切换到 <发布号>”才真换；
+        # 规矩见 policy.RELEASE_BUTTONS，命令在后台跑（release_controller），批准人默认取“决定”页填的名字。
+        self.release = ReleasePage(options.root, actions.board_agent_markers, self.copy_text, self.decisions.page.approver)
+        self.release_actions = ReleaseController(self.release, options.root, getattr(options, "read_runner", None))
         # 工作树与分支页（看板工位管理单）：每行“收工位”“清理”，另有“清残留持有记录”“清理全部可清项”；按钮背后的命令见 stations.py，
         # 规矩见 policy.WORKTREE_BUTTONS。命令在后台跑（worktree_controller），跑成了这一页自己重读一遍。
         self.worktrees = WorktreesPage(options.root, actions.board_agent_markers, self.copy_text)
@@ -362,6 +367,8 @@ class CockpitWindow(QMainWindow):
             self._refresh_decisions()
         if key in self.read_pages:
             self._refresh_reads(key)
+        if key == "release":
+            self.release_actions.refresh()
 
     def _refresh_reads(self, key: str) -> None:
         """骨架页：把 flow/pages.json 里这一页的只读命令放到后台线程读；上一轮没读完就不叠新的一轮。"""
