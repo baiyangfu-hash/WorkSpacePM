@@ -171,8 +171,8 @@ def test_a_background_db_with_a_non_retain_header_still_counts(project: Path) ->
     assert status[TIA_DB_FOLDER_ITEM][0] == "pass", status[TIA_DB_FOLDER_ITEM]
     # 认出的必须是真正的 FB：把这个 DB 挪走，文件夹一项要红，并且点名它的 FB
     db.rename(_plc_st(project) / "05_公共报警" / db.name)
-    status, details = _status(project)[TIA_DB_FOLDER_ITEM]
-    assert status == "fail"
+    folder_status, details = _status(project)[TIA_DB_FOLDER_ITEM]
+    assert folder_status == "fail"
     assert any("FB_1001_Station1_DJ2026901" in d for d in details), details
 
 
@@ -195,3 +195,15 @@ def test_a_wrapper_type_inside_a_block_comment_is_not_reported(project: Path) ->
         "    (* 旧写法:\n    fb_tOld : FB_TON;\n    *)\n    fb_tProcess     : TON_TIME;",
     )
     assert _status(project)[TIA_WRAPPER_ITEM][0] == "pass"
+
+
+def test_a_project_defining_a_wrapper_block_is_reported_by_the_wrapper_rule_not_the_name_rule(
+    project: Path,
+) -> None:
+    """规范 §3.4 第 6 条把不带编号的 FB_TON 一类包装列为历史例外：名字一项放过，由使用它的地方在“自写包装”一项报。"""
+    (_plc_st(project) / "06_公共函数" / "FB_TON.scl").write_bytes(
+        BOM
+        + b"FUNCTION_BLOCK FB_TON\nVAR_INPUT\n    IN : BOOL;\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n"
+    )
+    status = _status(project)
+    assert status[TIA_BLOCK_NAME_ITEM][0] == "pass", status[TIA_BLOCK_NAME_ITEM]
