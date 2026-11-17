@@ -7,10 +7,10 @@ title: "auto-pm 报警代码表（脚本生成）"
 # 报警代码表
 
 > 本页由 `scripts/command_catalog.py` 生成，不要手改。
-> 生成于提交 `68a6402fe4e9`。**本页可能落后**：之后改过命令或代码而没人重跑脚本，页上就是旧的；要最新的，运行 `python scripts/command_catalog.py --print`，以它的输出为准。
+> 生成于提交 `771ddd26dc1d`。**本页可能落后**：之后改过命令或代码而没人重跑脚本，页上就是旧的；要最新的，运行 `python scripts/command_catalog.py --print`，以它的输出为准。
 > 只收源码里真会报出来的代码（作为参数、字典值或返回值出现）；注释和文档字符串里提到的不算。“提示语”取自报出这个代码的同一处，看不懂时按“出在哪”去读源码。
 
-## 检查代码（41 个）
+## 检查代码（42 个）
 
 | 代码 | 出在哪 | 提示语 |
 |---|---|---|
@@ -35,8 +35,9 @@ title: "auto-pm 报警代码表（脚本生成）"
 | `RP-005` | `auto_pm/application/core/role_pack_service.py` | 旧名 … 已被 … 认领 |
 | `RP-006` | `auto_pm/application/core/role_pack_service.py` | 找不到 spec_registry.json，规范编号未核对；规范 … 不在 spec_registry.json 里 |
 | `RP-007` | `auto_pm/application/core/role_pack_service.py` | … 里的指针 … 找不到 |
-| `RP-008` | `auto_pm/application/core/role_pack_service.py` | legacy.mode … 不认识，只认 …；refs/… 缺失（旧技能里有）；role.json 的 legacy 必须是对象；… 与旧技能不一致；找不到旧技能目录 .trae/skills，与旧技能的一致性未核对；旧技能 … 不存在；路径写错请改正，已退役请在 role.json 的 legacy 里写 "retired": true；旧技能的 refs 目录 … 不存在；路径写错请改正，已退役请写 retired；旧技能里找不到章节 …；正文与旧技能 … 不逐字一致；正文没有逐字包含旧技能从 … 起的内容 |
+| `RP-008` | `auto_pm/application/core/role_pack_service.py` | SKILL.md 抄了正本 … 的 … 行（如 …）：只指路，不抄；SKILL.md 没有写出指路的正本 …；legacy.mode … 不认识，只认 …；legacy.mode … 已停用：不再在角色包里抄一份正本、再靠检查比对；本页改成指路，role.json 写 "mode": "…"；role.json 的 legacy 必须是对象；找不到 .trae/skills，指路是否有效未核对；指路的正本 … 不存在；路径写错请改正，没有正本了请在 role.json 的 legacy 里写 "retired": true；正本 … 里找不到章节 …；正本改了标题请同步改 role.json 的 from_heading |
 | `RP-009` | `auto_pm/application/core/role_pack_service.py` | … 不是合法 UTF-8（第 … 字节处），文件已损坏；… 第 … 行有乱码特征 …（UTF-8 被当成别的编码存过） |
+| `RP-010` | `auto_pm/application/core/role_pack_service.py` | … 里抄了同样的话 … 处（如 …）：正本只留一处，共用的写在 roles/shared/refs，各岗位指路 |
 | `SHC-000` | `auto_pm/domain/spec/services/check_svc.py` | 注册表文件不存在或格式错误: … |
 | `SHC-001` | `auto_pm/domain/spec/core/checker_base.py` | 规范 … 存在重复文件 |
 | `SHC-002` | `auto_pm/domain/spec/core/checker_base.py` | 规范 … 版本不一致 |
@@ -56,19 +57,13 @@ title: "auto-pm 报警代码表（脚本生成）"
 | `SHC-016` | `auto_pm/domain/spec/core/checker_base.py` | … 存在规范漂移警告 |
 | `SHC-017` | `auto_pm/domain/spec/core/checker_base.py` | … … 漂移：文档缺失真源值 … |
 
-## 约束编号（10 个）
+## 约束编号（4 个）
 
 `constraint check` 报的编号，取自每条约束定义文件的 id 和 name。哪几条机器真查、哪几条跳过，不在本页判断。
 
 | 编号 | 定义文件 | 名字 |
 |---|---|---|
-| `CST-CHG-001` | `auto_pm/domain/constraint/definitions/change_cli_only.yaml` | 变更单必须通过 CLI 创建 |
-| `CST-CHG-002` | `auto_pm/domain/constraint/definitions/change_dual_track.yaml` | 双轨变更通道分类规范 |
-| `CST-EDIT-001` | `auto_pm/domain/constraint/definitions/edit_tool_protocol.yaml` | 遵循 Edit 工具微操协议 |
 | `CST-ENV-001` | `auto_pm/domain/constraint/definitions/venv_activated.yaml` | 命令执行需激活虚拟环境 |
 | `CST-FILE-001` | `auto_pm/domain/constraint/definitions/file_no_python_write.yaml` | 禁止 Python 脚本直接写磁盘 |
 | `CST-FILE-002` | `auto_pm/domain/constraint/definitions/file_encoding_integrity.yaml` | 文件编码完整性 |
 | `CST-NAME-001` | `auto_pm/domain/constraint/definitions/naming_no_version_suffix.yaml` | 文件命名禁止版本号后缀 |
-| `CST-QUAL-001` | `auto_pm/domain/constraint/definitions/pre_commit_hooks.yaml` | 提交前强制通过静态门禁 |
-| `CST-SKILL-001` | `auto_pm/domain/constraint/definitions/skill_change_requires_chg.yaml` | 技能变更必须通过 CHG 流程 |
-| `CST-TEST-001` | `auto_pm/domain/constraint/definitions/gui_visible_mode.yaml` | GUI 测试强制默认可见模式 |

@@ -83,6 +83,7 @@ GUARDS: dict[str, Guard] = {
     "project restore": Guard(ALWAYS, "ui/cli/project.py::cmd_restore", "agent_markers"),
     "release deploy": Guard(WORDS, "ui/cli/release.py::release_deploy", "user_evidence_problem"),
     "release rollback": Guard(MARKER, "ui/cli/release.py::release_rollback", "refuse_agent_approval"),
+    "release ship": Guard(WORDS, "ui/cli/release.py::release_ship", "user_evidence_problem"),
     # 分类表里是 write（别的几步由 agent 推），只有这三个目标只听用户；分类表还没有按参数分的字段，先写在这里。
     "change transition": Guard(MARKER, "ui/cli/change.py::cmd_transition", "refuse_agent_approval"),
 }
@@ -238,13 +239,15 @@ PROBES: dict[str, Probe] = {
     "release deploy": Probe(("release", "deploy", "abc1234", "--no-check-only", "--approver", "baiyang",
                              "--card-file", "{tmp}/card.md", "--drill-script", "{tmp}/drill.py"),
                             "--confirm-ref", "--confirm-ref", (release_cli, "require_runtime_identity_for_workspace"), bare_user_passes=False),
+    "release ship": Probe(("release", "ship", "abc1234", "--no-check-only", "--approver", "baiyang"),
+                          "--confirm-ref", "--confirm-ref", (release_cli, "require_runtime_identity_for_workspace"), bare_user_passes=False),
 }
 
 
 def test_every_command_this_card_guards_is_probed() -> None:
     probed = {key.split(" --to ")[0] for key in PROBES}
     assert probed == {
-        "pm accept", "pm confirm-start", "release rollback", "continuity restore-backup", "claim reclaim", "release deploy",
+        "pm accept", "pm confirm-start", "release rollback", "continuity restore-backup", "claim reclaim", "release deploy", "release ship",
         "implementation-card approve", "change transition",
     }
     targets = {key.split(" --to ")[1] for key in PROBES if " --to " in key}
