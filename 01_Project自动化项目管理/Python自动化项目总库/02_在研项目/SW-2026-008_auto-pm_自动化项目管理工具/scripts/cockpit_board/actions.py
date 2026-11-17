@@ -12,13 +12,17 @@
     open_console()     批准口令已生效时，同一条命令在新的终端窗口里跑，口令由用户在那个窗口里输入。
     run_read()         骨架页的只读命令：控制根跑 `main.py <只读命令>`，读 30 秒超时，结果按 classify_read() 归类。
     write_snapshot()   把一次读取的原文存成“上次读取”快照（.auto-pm/cache/cockpit_board/，已被忽略）。
+    record_board_approval()  看板批准记录：只往末尾追加一行 JSON，写后核对前面的字节没变（发版页“同意切换”，CHG-SCPT-2026-707）。
 
 永远没有：合并、删除、切换发布、代签、绕过提交钩子、启动任何 agent。
+例外各只有一处，来由和护栏写在 policy.py：“工作树与分支”页收工位（WORKTREE_BUTTONS）；发版页用户本人点“同意切换到 <发布号>”
+（RELEASE_BUTTONS，命令是 release ship，凭据和批准记录由看板在点击那一刻生成）。
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -479,13 +483,37 @@ def bc_append(record: Path, line: str, expected_digest: str | None = None) -> Re
         before = record.read_bytes()
         if expected_digest is not None and hashlib.sha256(before).hexdigest() != expected_digest:
             return Receipt(_now_text(), "写入 BC 行", f"拒写 {record.name}：预览后文件变了，请重新预览", 1)
-        sep = b"" if before.endswith(b"\n") or not before else b"\n"
-        with open(record, "ab") as stream:
-            stream.write(sep + (line + "\n").encode("utf-8"))
-        after = record.read_bytes()
-    if not after.startswith(before) or after[len(before):] != sep + (line + "\n").encode("utf-8"):
+        appended = _append_line(record, before, (line + "\n").encode("utf-8"))
+    if not appended:
         return Receipt(_now_text(), "写入 BC 行", f"追加写校验失败：{record.name} 写入期间被别人改了，请人工核对", 1)
     return Receipt(_now_text(), "写入 BC 行", f"append {record.name} ← {line.split('|')[1].strip()}", 0)
+
+
+def _append_line(path: Path, before: bytes, line: bytes) -> bool:
+    """追加模式打开、只往末尾写一行（原文件不以换行结尾时先补一个）；写后核对原有字节不变、末尾正好是这一行。调用方持锁。"""
+    sep = b"" if before.endswith(b"\n") or not before else b"\n"
+    with open(path, "ab") as stream:
+        stream.write(sep + line)
+    after = path.read_bytes()
+    return after.startswith(before) and after[len(before):] == sep + line
+
+
+_APPROVAL_LOCK = threading.Lock()
+
+
+def record_board_approval(root: Path, relative: Path, record: Mapping[str, Any]) -> Path:
+    """看板批准记录：往 ``root/relative`` 末尾追加一行 JSON（只追加，不重写；发版页“同意切换”用，CHG-SCPT-2026-707）。
+
+    先写记录、写成了才运行命令：记录没写成就抛 OSError，调用方不运行。写后核对：原有字节不变、末尾正好是这一行。
+    """
+    path = root / relative
+    line = (json.dumps(dict(record), ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+    with _APPROVAL_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        appended = _append_line(path, path.read_bytes() if path.is_file() else b"", line)
+    if not appended:
+        raise OSError(f"批准记录追加写校验失败：{path.name} 写入期间被别人改了")
+    return path
 
 
 # ---------------------------------------------------------------- “决定”页：同一条命令行，换一层皮

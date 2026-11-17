@@ -48,6 +48,28 @@ WORKTREE_COMMANDS = (
     ("worktree", "reclaim", "--stale", "--apply"),
 )
 
+# “发版”页（CHG-SCPT-2026-707，用户 2026-11-17T01:54:27Z 批准）：“同意切换到 <发布号>”是 PM_FORBIDDEN_WORDS 里“同意”“切换”的
+# 唯一例外，只在这一页、只限这一种按钮。为什么放开：发版切换只有用户本人做（红线 1），以前没有按钮，只能让用户在终端敲命令，
+# 用户不再开终端；按钮就是“用户本人点的”这件事本身，点的那一刻留下谁、何时。拿什么护住（每条有测试，见 test_cockpit_board_release_page.py）：
+# 1. 只在你本人打开的看板能点：看板进程带 AI 标记、或认不出带没带时，按钮灰着写原因，确认框的“确认并运行”也灰着，
+#    运行入口（release_controller）再查一次标记，查到就只留一张“未运行”回执；
+# 2. 点之前看得见检查结果：发布号、提交、现在生效的版本、门禁判决、审计放行记录、预检、改了哪些 PR，都来自
+#    ``release ship <提交> --json``（只看，不写）；没有 PASS 判决、没有审计放行记录、预检没过、命令说不能切、已经是生效版本，按钮灰着，旁边写差哪一条；
+# 3. 只跑 RELEASE_COMMANDS 里登记的两种形状（release_ship.allowed_command 逐格核），别的参数一律不运行；
+#    凭据 ``user-confirmation:board-click:<UTC 时间>:<看板会话号>`` 只在点“确认并运行”那一刻生成，先写进看板批准记录，写成了才运行；
+#    命令自己的护栏（再判一遍门禁和审计、演练、失败自动退回）一条不少，页上的判断只是让人先看明白；
+# 4. 每次点击都留回执：命令、退出码、原文输出和“切换成了 / 已自动退回 / 没能退回”留在页上。
+# release ship 在 flow/commands_map.json 里是 user_only（同 release deploy，项目经理 2026-11-17 定，CHG-SCPT-2026-706）：
+# 只看那条也只在你本人打开的看板跑（带 AI 标记就不跑，写原因）；整个看板只有 RELEASE_COMMANDS 第二种形状带 --no-check-only、
+# 凭据和批准人，而且只从“同意切换”按钮走（test_cockpit_board_release_page.py 逐文件查）。
+RELEASE_BUTTONS = frozenset({"重新检查候选版本", "复制命令", "取消", "确认并运行"})
+RELEASE_BUTTON_PREFIX = "同意切换到 "  # 后面只跟发布号（release_ship.RELEASE_ID）
+# 这一页能起的命令形状（main.py 后面的参数）；"<提交>" 只认 7～40 位十六进制，"<凭据>" 只认上面那种格式，"<批准人>" 是确认框里填的名字。
+RELEASE_COMMANDS = (
+    ("release", "ship", "<提交>", "--json"),
+    ("release", "ship", "<提交>", "--no-check-only", "--confirm-ref", "<凭据>", "--approver", "<批准人>", "--json"),
+)
+
 # 按钮文字和提示里不许出现的词（项目经理看板）。
 PM_FORBIDDEN_WORDS = ("codex", "执行", "开始", "开工", "合并", "删除", "切换", "批准", "同意", "退回", "签字")
 # 工程工位允许“批准范围”“开工”“提交”三个灰按钮存在，其余禁用词同上。
