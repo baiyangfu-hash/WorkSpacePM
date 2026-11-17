@@ -51,6 +51,39 @@ SCL_OUTPUT_READBACK_ITEM = "SCL 读自己的输出引脚"
 # 全局 DB 里放 FB 实例（TD-SW008-596，LSP-905 §4.11）：第一阶段只报警告，不改退出码
 SCL_GLOBAL_DB_FB_ITEM = "SCL 全局 DB 里的 FB 实例"
 
+# 导入 TIA 的工程（PLC_ST 下有 .scl 带 UTF-8 BOM，判法同 reviews/tools/plc_ci.py）按用户 2026-11-16 TIA V19 实测补的规矩
+# （CHG-SCPT-2026-704，LSP-905 §4.9、§4.11、§3.4）：命中算失败。全局 DB 里放 FB 实例对这类工程也从警告升为失败。
+# 不带 BOM 的老工程、SysLib、汇川工程不查这几条。
+TIA_WRAPPER_ITEM = "TIA 不认的自写包装类型"
+TIA_OB_DB_ITEM = "TIA OB 调用的背景 DB"
+TIA_DB_FOLDER_ITEM = "TIA 背景 DB 和 FB 同文件夹"
+TIA_BLOCK_NAME_ITEM = "TIA 块名带项目标记"
+# SysLib 的自写包装：TIA 工程里没有这些类型，导入报“类型不存在”（2026-11-04 实测）；改用 TON_TIME 等（LSP-903、LSP-905 §4.9）
+TIA_WRAPPER_TYPES = ("FB_TON", "FB_TONR", "FB_TOF", "FB_TP", "FB_R_TRIG", "FB_F_TRIG", "FB_CTU", "FB_CTD", "FB_CTUD")
+# 用户项目里常见的块名，导入时会按名字覆盖用户的块（LSP-905 §4.11 第 4 条）
+TIA_RESERVED_BLOCK_NAMES = ("Main", "Startup", "Cyclic")
+# LSP-905 §3.4 第 6 条登记的历史例外（不迁移、不改名），块名和文件夹两条都不查它们：SysLib 与老项目的老块、
+# DJ-2026-011 在研块和测试用 DB（已在用户 TIA 里测过）。
+TIA_NAME_EXCEPTIONS = re.compile(
+    r"^(FB_1001_Station1|FB_100[2-7]_\w+_BufferFraming|FB_101[2-4]_\w+|FB_1020_EquipmentHandshake|FB_1030_SafetyManager"
+    r"|DB_TwoHandStartTest|DB_AlarmSummaryTest|DB_BatchCounterTest|DB_TestBench"
+    r"|" + "|".join(TIA_WRAPPER_TYPES) + r")$"
+)
+# 同一条登记的“005/009/000 的 OB1 主程序”：只在这三个项目里放过 OB1
+TIA_OB1_EXCEPTION_PROJECTS = ("DJ-2026-005", "DJ-2026-009", "DJ-2026-000")
+_TIA_SKIP_DIRS = (".plc-out", "Test", "test", "PRD")
+_TIA_WRAPPER_DECL = re.compile(
+    r'^\s*[A-Za-z_]\w*\s*:\s*(?:ARRAY\s*\[[^\]]*\]\s*OF\s+)?"?(' + "|".join(TIA_WRAPPER_TYPES) + r')"?\s*[;:=]',
+    re.IGNORECASE,
+)
+_TIA_BLOCK_DECL = re.compile(r'^\s*(FUNCTION_BLOCK|DATA_BLOCK|ORGANIZATION_BLOCK|FUNCTION)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE)
+# 背景 DB 的 DATA_BLOCK 和 FB 名之间可以有的表头行（属性、版本、保持性）
+_TIA_DB_HEADER_WORDS = frozenset({"NON_RETAIN", "RETAIN"})
+_TIA_INSTANCE_OF = re.compile(r'^\s*"?([A-Za-z_]\w*)"?\s*$')
+_TIA_OB_CALL = re.compile(r'^\s*"([A-Za-z_]\w*)"\s*\(')
+_TIA_PROJECT_TAG = re.compile(r"DJ\d{3,}")
+_TIA_DB_HEADER_PREFIXES = ("{", "(*", "VERSION", "TITLE", "AUTHOR", "FAMILY", "NAME", "//")
+
 # SysLib 关键文件清单（相对路径），用于 libraries 路径深度校验
 _KEY_FILES = [
     "timer/FB_TON.scl",
@@ -70,6 +103,53 @@ _LEGACY_PRD_DIRS = [
     "02_PLC程序/程序文档",
 ]
 
+
+
+def _tia_sources(project_path: str) -> list[tuple[str, list[str]]]:
+    """工程里交给 TIA 的源文件（.scl、.db），跳过生成目录、测试目录和文档目录。"""
+    found: list[tuple[str, list[str]]] = []
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = sorted(d for d in dirs if d not in _TIA_SKIP_DIRS and not d.startswith("."))
+        for file in sorted(files):
+            if file.lower().endswith((".scl", ".db")):
+                path = os.path.join(root, file)
+                text = Path(path).read_text(encoding="utf-8-sig", errors="replace")  # lenient-decode: 只做规则匹配，坏字节不影响块名和声明的判断
+                found.append((os.path.relpath(path, project_path).replace(os.sep, "/"), text.splitlines()))
+    return found
+
+
+def _strip_scl_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    """去掉一行里的 ``//`` 行注释和 ``(* … *)`` 块注释（块注释可跨行，``in_comment`` 是上一行带过来的状态）。"""
+    out: list[str] = []
+    i = 0
+    while i < len(line):
+        if in_comment:
+            end = line.find("*)", i)
+            if end < 0:
+                return "".join(out), True
+            i, in_comment = end + 2, False
+            continue
+        if line.startswith("(*", i):
+            in_comment = True
+            i += 2
+            continue
+        if line.startswith("//", i):
+            break
+        out.append(line[i])
+        i += 1
+    return "".join(out), in_comment
+
+
+def _is_tia_project(project_path: str) -> bool:
+    """工程里有一个 .scl 带 UTF-8 BOM 就算导入 TIA 的工程（同 reviews/tools/plc_ci.py 的判法，LSP-906 规则 7.1）。"""
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [d for d in dirs if d not in _TIA_SKIP_DIRS and not d.startswith(".")]
+        for file in files:
+            if file.lower().endswith(".scl"):
+                with open(os.path.join(root, file), "rb") as handle:
+                    if handle.read(3) == b"\xef\xbb\xbf":
+                        return True
+    return False
 
 class _LegacyPlcCheckerCore:
     """PLC 项目结构检查器遗留核心实现。"""
@@ -219,6 +299,7 @@ class _LegacyPlcCheckerCore:
 
         # 6. 检查 SCL 代码语法与命名规范 (LSP-905)
         self._check_scl_code_compliance(project_path, result)
+        self._check_tia_rules(project_path, result)
 
         # 7. 检查接口文档/变量定义文档与 SCL 代码一致（REQ-SW008-M2-DOCSYNC，V01B）
         self._check_doc_code_consistency(project_path, result)
@@ -290,7 +371,14 @@ class _LegacyPlcCheckerCore:
         else:
             result.add("SCL 代码规范", "pass", f"全量 {len(scl_files)} 个 .scl/.db/.udt 文件 100% 遵从 LSP-905 命名与安全闭环规范")
 
-        if db_fb_hits:
+        if db_fb_hits and _is_tia_project(project_path):
+            result.add(
+                SCL_GLOBAL_DB_FB_ITEM, "fail",
+                f"全局 DB 里放了 FB 实例 {len(db_fb_hits)} 处：这是导入 TIA 的工程，TIA 生成不出这类 DB"
+                "（用户 TIA V19 实测，LSP-905 §4.11 第 1 条；逐条见明细）",
+                db_fb_hits,
+            )
+        elif db_fb_hits:
             result.add(
                 SCL_GLOBAL_DB_FB_ITEM, "warn",
                 f"全局 DB 里放了 FB 实例 {len(db_fb_hits)} 处（导入 TIA 时这类 DB 生成不出；第一阶段只报警告，逐条见明细）",
@@ -320,6 +408,103 @@ class _LegacyPlcCheckerCore:
                 )
             else:
                 result.add(SCL_OUTPUT_READBACK_ITEM, "pass", "块里没有读自己的输出引脚")
+
+    def _check_tia_rules(self, project_path: str, result: CheckResult) -> None:
+        """导入 TIA 的工程按用户实测补的 4 条规矩（CHG-SCPT-2026-704）；不是 TIA 工程就不出这几项。"""
+        if not _is_tia_project(project_path):
+            return
+        wrappers: list[str] = []
+        blocks: dict[str, tuple[str, str]] = {}  # 块名 -> (类型, 相对路径)
+        instance_of: dict[str, str] = {}  # 背景 DB 名 -> FB 名
+        ob_calls: list[tuple[str, str]] = []  # (被调用的 DB 名, "文件:行")
+        for rel, lines in _tia_sources(project_path):
+            kind = ""
+            pending_db = ""
+            in_comment = False
+            for number, line in enumerate(lines, start=1):
+                code, in_comment = _strip_scl_comments(line, in_comment)
+                hit = _TIA_WRAPPER_DECL.match(code)
+                if hit:
+                    wrappers.append(
+                        f"{rel}:{number} 用了 {hit.group(1)}：TIA 里没有这个类型，"
+                        "改用 TON_TIME/R_TRIG/CTU_INT 等原生多重实例（LSP-903、LSP-905 §4.9）"
+                    )
+                decl = _TIA_BLOCK_DECL.match(code)
+                if decl:
+                    kind, name = decl.group(1).upper(), decl.group(2)
+                    blocks.setdefault(name, (kind, rel))
+                    pending_db = name if kind == "DATA_BLOCK" else ""
+                    continue
+                if pending_db:
+                    stripped = code.strip()
+                    if not stripped or stripped.upper().startswith(_TIA_DB_HEADER_PREFIXES) or stripped.upper() in _TIA_DB_HEADER_WORDS:
+                        continue
+                    inst = _TIA_INSTANCE_OF.match(code)
+                    if inst and inst.group(1).upper() not in {"VAR", "STRUCT", "BEGIN", "VAR_RETAIN"}:
+                        instance_of[pending_db] = inst.group(1)
+                    pending_db = ""
+                if kind == "ORGANIZATION_BLOCK":
+                    call = _TIA_OB_CALL.match(code)
+                    if call:
+                        ob_calls.append((call.group(1), f"{rel}:{number}"))
+
+        if wrappers:
+            result.add(TIA_WRAPPER_ITEM, "fail", f"用了 TIA 里没有的自写包装类型 {len(wrappers)} 处（逐条见明细）", wrappers)
+        else:
+            result.add(TIA_WRAPPER_ITEM, "pass", "没有用 FB_TON、FB_R_TRIG、FB_CTU 一类自写包装类型")
+
+        ob_problems: list[str] = []
+        seen: dict[str, str] = {}
+        for name, where in ob_calls:
+            if blocks.get(name, ("", ""))[0] == "FUNCTION":
+                continue  # 调的是 FC，不需要背景 DB
+            if name in seen:
+                ob_problems.append(
+                    f"{where} 背景 DB {name} 被调用了两次（第一次在 {seen[name]}）："
+                    "同一个 FB 调用几次就要建几个背景 DB（LSP-905 §4.11 第 1 条）"
+                )
+                continue
+            seen[name] = where
+            if name not in instance_of:
+                ob_problems.append(
+                    f"{where} 调用的 {name} 没有对应的背景 DB 源文件（DATA_BLOCK {name} 下一行写 FB 名）："
+                    "外部源文件导入时背景 DB 要事先建好（LSP-905 §4.11 第 1 条）"
+                )
+        if ob_problems:
+            result.add(TIA_OB_DB_ITEM, "fail", f"OB 里的 FB 调用和背景 DB 对不上 {len(ob_problems)} 处（逐条见明细）", ob_problems)
+        else:
+            result.add(TIA_OB_DB_ITEM, "pass", f"OB 里 {len(ob_calls)} 处 FB 调用都有自己的背景 DB 源文件")
+
+        folder_problems: list[str] = []
+        for db, fb in sorted(instance_of.items()):
+            if TIA_NAME_EXCEPTIONS.match(db) or TIA_NAME_EXCEPTIONS.match(fb):
+                continue
+            db_rel = blocks[db][1]
+            fb_rel = blocks.get(fb, ("", ""))[1]
+            if fb_rel and Path(db_rel).parent != Path(fb_rel).parent:
+                folder_problems.append(
+                    f"{db_rel}：背景 DB {db} 和它的 FB {fb}（{fb_rel}）不在同一个文件夹（LSP-905 §4.11 第 6 条）"
+                )
+        if folder_problems:
+            result.add(TIA_DB_FOLDER_ITEM, "fail", f"背景 DB 和 FB 不在同一文件夹 {len(folder_problems)} 处（逐条见明细）", folder_problems)
+        else:
+            result.add(TIA_DB_FOLDER_ITEM, "pass", f"{len(instance_of)} 个背景 DB 都和它的 FB 在同一个文件夹")
+
+        name_problems: list[str] = []
+        legacy_ob1 = Path(project_path).name.startswith(TIA_OB1_EXCEPTION_PROJECTS)
+        for name, (kind, rel) in sorted(blocks.items()):
+            if kind == "FUNCTION":
+                continue  # FC 不要求带项目标记（模板的 FC_4001 已实测过）
+            if TIA_NAME_EXCEPTIONS.match(name) or (legacy_ob1 and kind == "ORGANIZATION_BLOCK" and name.upper() == "OB1"):
+                continue
+            if name in TIA_RESERVED_BLOCK_NAMES or (kind == "ORGANIZATION_BLOCK" and re.fullmatch(r"OB\d+", name, re.IGNORECASE)):
+                name_problems.append(f"{rel}：块名 {name} 会和用户项目里的块撞名，导入时覆盖用户的块（LSP-905 §4.11 第 4 条）")
+            elif not _TIA_PROJECT_TAG.search(name):
+                name_problems.append(f"{rel}：{kind} {name} 没带项目标记 DJ<项目号>（LSP-905 §3.4、§4.11 第 4 条）")
+        if name_problems:
+            result.add(TIA_BLOCK_NAME_ITEM, "fail", f"块名不合规 {len(name_problems)} 处（逐条见明细）", name_problems)
+        else:
+            result.add(TIA_BLOCK_NAME_ITEM, "pass", f"{len(blocks)} 个 FB/DB/OB 的块名都带项目标记、没有用户常用块名")
 
     def _check_language_service(self, project_path: str, result: CheckResult) -> None:
         """运行插件命令行的 ``check``（以及有 ``.scltest`` 时的 ``test``）。
