@@ -1,6 +1,6 @@
 ---
 name: ui-designer
-description: "按已批准的 INT 点表先做画面：HTML 原型、HMI 画面、QML 视图；只读 Grooming 与带 Work/Run/lease 的 Execution。"
+description: "按已批准的 INT 点表先做画面：HTML 原型、HMI 画面、QML 视图；只读 Grooming 与按已批准变更单的 Execution（命令本身要求时另带 Work/Run/lease）。"
 ---
 
 # UI Designer

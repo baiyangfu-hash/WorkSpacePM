@@ -1,10 +1,15 @@
-"""自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”和“进门”，只按顺序调现有的驾驶舱命令。
+"""自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”“PR 线收口”和“进门”，只按顺序调现有的驾驶舱命令。
 
 用法（在控制根，用控制根 .venv 里的 Python；Windows 是 .venv\\Scripts\\python.exe）：
   python <本项目>/scripts/pm_flows.py entry <项目号>
   python <本项目>/scripts/pm_flows.py checkup <项目号>
   python <本项目>/scripts/pm_flows.py closeout <项目号> --mission-id <卡号> [--done <已做完的一步>]
-  python <本项目>/scripts/pm_flows.py steps <entry|checkup|closeout>
+  python <本项目>/scripts/pm_flows.py closeout-pr <项目号> --chg <变更单号> --card <占位卡号> [--done <已做完的一步>]
+  python <本项目>/scripts/pm_flows.py steps <entry|checkup|closeout|closeout-pr>
+
+“交卷到收口”给走 Run 的卡（看板“确认开工”一键流开出来的）；“PR 线收口”给不走 Run 的全流程、标准线卡
+（凭已批准的变更单、领卡占位和 PR 干活，CHG-SCPT-2026-717）：PR 合进 main 后把变更单推到验收中、请用户推到完成、
+对账、放下占位、收工位。
 
 “进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``claim list`` 看占位表，再对登记路径落在
 本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件，再按卡类型提示该读哪个角色包
@@ -63,6 +68,9 @@ PLC_ONLY = "plc"
 # 不合格就报用法错、一条命令都不跑：防止把 ``--fix`` 这类开关当项目号带进只读命令。
 PID_PATTERN = re.compile(r"^[A-Z]{2,4}-\d{4}-\d{3}$")
 MISSION_PATTERN = re.compile(r"^MISSION-[A-Z0-9-]+$")
+# 变更单号同 implementation_card_basis 的 CHG-<领域>-<年>-<序号>；占位卡号是 claims/<卡号> 分支名的那一段（如 309、716-rules-thin-entries）。
+CHG_PATTERN = re.compile(r"^CHG-[A-Z]+-\d{4}-\d{3,}$")
+CARD_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # 一步红了还接着跑的流程：体检和进门全只读，是一张报警一览，红了也要看到后面几步（协调者 03:55Z 裁定）。
 KEEP_GOING = frozenset({"checkup", "entry"})
@@ -93,8 +101,10 @@ class Step:
     """流程里的一步。
 
     kind 为 ``run``：脚本运行这条只读命令。kind 为 ``stop``：脚本停下，只打印这条命令和要用户本人说的话。
-    args 里的 ``{pid}``、``{mission}`` 运行时换成项目号和卡号；``{catalog}`` 表示运行命令目录脚本而不是 main.py；
+    args 里的 ``{pid}``、``{mission}``、``{chg}``、``{card}`` 运行时换成项目号、Mission 号、变更单号和占位卡号；
+    ``{catalog}`` 表示运行命令目录脚本而不是 main.py；
     ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）。
+    ``ok`` 是这条命令算“通过”的退出码：默认只有 0；``pr settle-scan`` 用 1 表示“有等收口的卡”，那是收口时的常态，不是红。
     """
 
     key: str
@@ -105,6 +115,7 @@ class Step:
     say: str = ""
     only: str = ""
     note: str = ""
+    ok: tuple[int, ...] = (0,)
 
 
 CHECKUP: tuple[Step, ...] = (
@@ -147,6 +158,11 @@ CLAIM_LIST = Step(
 )
 ENTRY: tuple[Step, ...] = (*CHECKUP, CLAIM_LIST)
 
+# pr settle-scan：0＝没有等收口的；1＝有（说明里写了下一步）；2＝判断不了（没有账本、没有基线分支）。
+# 收口时正好就是“有等收口的”，所以 1 不算红；2 照样算红。
+SETTLE_OK: tuple[int, ...] = (0, 1)
+SETTLE_NOTE = "退出码 1 只说明有等收口的卡（收口时的常态，接着走）；2 是判断不了，算红"
+
 CLOSEOUT: tuple[Step, ...] = (
     Step("acceptance_scan", "验收命令预检", ("pm", "acceptance-scan", "--pid", "{pid}")),
     Step("control_root", "控制根状态", ("pm", "control-root-status", "{pid}")),
@@ -176,7 +192,13 @@ CLOSEOUT: tuple[Step, ...] = (
         who="经用户同意后由 agent 运行",
         say="同意 {mission} 收口",
     ),
-    Step("settle_scan", "合并后收口清单", ("pr", "settle-scan", "{pid}")),
+    Step(
+        "settle_scan",
+        "合并后收口清单",
+        ("pr", "settle-scan", "{pid}"),
+        ok=SETTLE_OK,
+        note=SETTLE_NOTE,
+    ),
     Step(
         "transition",
         "变更单推到完成",
@@ -199,8 +221,66 @@ CLOSEOUT: tuple[Step, ...] = (
     ),
 )
 
-FLOWS: Mapping[str, tuple[Step, ...]] = {"entry": ENTRY, "checkup": CHECKUP, "closeout": CLOSEOUT}
-FLOW_NAMES = {"entry": "进门", "checkup": "项目体检", "closeout": "交卷到收口"}
+# PR 线收口（CHG-SCPT-2026-717）：全流程、标准线里不走 Run 的卡，凭已批准的变更单、领卡占位和 PR 干活。
+# PR 合进 main 之后跑；会改状态的步骤全是停点，推到完成永远不由脚本执行。
+CLOSEOUT_PR: tuple[Step, ...] = (
+    Step("control_root", "控制根状态", ("pm", "control-root-status", "{pid}")),
+    Step(
+        "settle_scan",
+        "合并后收口清单",
+        ("pr", "settle-scan", "{pid}"),
+        ok=SETTLE_OK,
+        note=SETTLE_NOTE,
+    ),
+    Step(
+        "accepting",
+        "变更单推到验收中",
+        ("change", "transition", "{chg}", "--to", "accepting", "--pid", "{pid}"),
+        kind="stop",
+        who="PR 合进 main 后由 agent 运行，不需要用户批：同一条命令依次 --to implementing、"
+        "--to pending_acceptance、--to accepting（这里列的是最后一条）",
+    ),
+    Step(
+        "transition",
+        "变更单推到完成",
+        ("change", "transition", "{chg}", "--to", "completed", "--pid", "{pid}"),
+        kind="stop",
+        who="只有用户本人；本脚本永远不执行这一步",
+        say="（用户本人在看板“决定”页点“推到完成”；或在本机主对话里说“把 {chg} 推到完成”，"
+        "agent 带上那句话的位置再跑）",
+    ),
+    Step(
+        "reconcile", "对账", ("ledger", "reconcile", "{pid}"), note="不带 --fix，只报差异，不写台账"
+    ),
+    Step(
+        "claim_release",
+        "放下占位",
+        ("claim", "release", "{card}"),
+        kind="stop",
+        who="PR 已合并后由 agent 运行（PR 没合不放）",
+    ),
+    Step(
+        "worktree",
+        "收工位",
+        ("worktree", "close", "<agent 名>"),
+        kind="stop",
+        who="经用户同意后由 agent 运行",
+        say="同意收工位",
+    ),
+)
+
+FLOWS: Mapping[str, tuple[Step, ...]] = {
+    "entry": ENTRY,
+    "checkup": CHECKUP,
+    "closeout": CLOSEOUT,
+    "closeout-pr": CLOSEOUT_PR,
+}
+FLOW_NAMES = {
+    "entry": "进门",
+    "checkup": "项目体检",
+    "closeout": "交卷到收口",
+    "closeout-pr": "PR 线收口",
+}
 
 # 分类表里归“写”、但读码确认不带写开关时只读的命令。每条写明依据；测试核它们在流程里不带写开关。
 READ_BY_CODE: Mapping[str, str] = {
@@ -380,13 +460,21 @@ def handover_lines(text: str) -> dict[str, str]:
     return found
 
 
-def _fill(args: Sequence[str], pid: str, mission: str) -> list[str]:
-    return [arg.replace("{pid}", pid).replace("{mission}", mission) for arg in args]
+def _fill(args: Sequence[str], pid: str, mission: str, chg: str = "", card: str = "") -> list[str]:
+    return [
+        arg.replace("{pid}", pid)
+        .replace("{mission}", mission)
+        .replace("{chg}", chg)
+        .replace("{card}", card)
+        for arg in args
+    ]
 
 
-def command_of(step: Step, python: Path, root: Path, pid: str, mission: str) -> list[str]:
+def command_of(
+    step: Step, python: Path, root: Path, pid: str, mission: str, chg: str = "", card: str = ""
+) -> list[str]:
     """一步对应的整条命令（列表，不经过 shell）。"""
-    args = _fill(step.args, pid, mission)
+    args = _fill(step.args, pid, mission, chg, card)
     if args and args[0] == "{plan}":
         return [str(python), "-B", str(PLAN_SCRIPT), *args[1:], "--root", str(root)]
     if args and args[0] == "{catalog}":
@@ -458,9 +546,7 @@ def print_steps(flow: str, out: Callable[[str], None] = print) -> int:
     out("|---|---|---|---|---|")
     rows = list(FLOWS[flow])
     for number, step in enumerate(rows, start=1):
-        args = [
-            arg.replace("{pid}", "<项目编号>").replace("{mission}", "<卡号>") for arg in step.args
-        ]
+        args = _fill(step.args, "<项目编号>", "<卡号>", "<变更单号>", "<占位卡号>")
         if args[0] == "{plan}":
             command = f"scripts/plan_status.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
         elif args[0] == "{catalog}":
@@ -494,14 +580,16 @@ def run_flow(
     *,
     root: Path,
     mission: str = "",
+    chg: str = "",
+    card: str = "",
     done: str = "",
     runner: Runner = subprocess.run,
     out: Callable[[str], None] = print,
 ) -> int:
     """按顺序跑一个流程。返回 0＝走完；1＝有一步红了；2＝用法或环境不对（一条命令都没跑）；3＝停在停点。
 
-    “项目体检”和“进门”每一步都跑完，最后出小结表，任一步红就退出 1；“交卷到收口”一步红就停在那一步。
-    根目录清洁只提醒，不算红。
+    “项目体检”和“进门”每一步都跑完，最后出小结表，任一步红就退出 1；“交卷到收口”“PR 线收口”一步红就停在那一步。
+    根目录清洁只提醒，不算红。一步算不算红看它的 ``ok`` 退出码（默认只有 0）。
     """
     steps = FLOWS[flow]
     if not PID_PATTERN.match(pid):
@@ -509,6 +597,12 @@ def run_flow(
         return EXIT_USAGE
     if flow == "closeout" and not MISSION_PATTERN.match(mission):
         out(f"卡号格式不对：{mission!r}（应像 MISSION-3E5ED659C44DE219），一条命令都没跑")
+        return EXIT_USAGE
+    if flow == "closeout-pr" and not CHG_PATTERN.match(chg):
+        out(f"变更单号格式不对：{chg!r}（应像 CHG-SCPT-2026-717），一条命令都没跑")
+        return EXIT_USAGE
+    if flow == "closeout-pr" and not CARD_PATTERN.match(card):
+        out(f"占位卡号格式不对：{card!r}（应像 309，即 claims/<卡号> 的那一段），一条命令都没跑")
         return EXIT_USAGE
     if not (root / "main.py").is_file():
         out(f"控制根里没有 main.py：{root}（请在控制根运行，或用 --root 指过去）")
@@ -525,6 +619,8 @@ def run_flow(
         "flow_name": FLOW_NAMES[flow],
         "pid": pid,
         "mission": mission,
+        "chg": chg,
+        "card": card,
         "done": done,
         "started": _now(),
         "root": str(root),
@@ -540,6 +636,8 @@ def run_flow(
     out(
         f"【{FLOW_NAMES[flow]}】项目 {pid}"
         + (f"，卡 {mission}" if mission else "")
+        + (f"，变更单 {chg}" if chg else "")
+        + (f"，占位 {card}" if card else "")
         + f"；解释器 {python}"
     )
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
@@ -566,7 +664,7 @@ def run_flow(
             for line in result.output_tail:
                 out(f"  {line}")
             continue
-        command = command_of(step, python, root, pid, mission)
+        command = command_of(step, python, root, pid, mission, chg, card)
         result = StepResult(number, step.key, step.label, shown(command))
         if step.kind == "stop":
             result.status = "停点"
@@ -577,7 +675,7 @@ def run_flow(
                 "label": step.label,
                 "next_command": result.command,
                 "who": step.who,
-                "say": _fill((step.say,), pid, mission)[0],
+                "say": _fill((step.say,), pid, mission, chg, card)[0],
                 "resume": f"做完后带 --done {step.key} 再运行本流程",
             }
             record["result"] = "停在停点"
@@ -680,14 +778,15 @@ def run_flow(
             record["_catalog_text"] = text
             if quiet:
                 out(f"  命令目录全文存在 {catalog_path}（{len(lines)} 行）")
-        if result.rc != 0 and flow in KEEP_GOING:
+        step_red = result.rc is None or result.rc not in step.ok
+        if step_red and flow in KEEP_GOING:
             result.status = "红"
             record["steps"].append(result.__dict__)
             shown_rc = "读不懂输出" if result.rc is None else f"退出码 {result.rc}"
             out(f"  ✗ 第 {number} 步「{step.label}」红：{shown_rc}（接着跑下一步）")
             code = EXIT_RED
             continue
-        if result.rc != 0:
+        if step_red:
             result.status = "失败"
             record["steps"].append(result.__dict__)
             record["stopped_at"] = {
@@ -788,17 +887,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     entry.add_argument("pid")
     steps = sub.add_parser("steps", help="只列出一个流程的每一步和整条命令，一条都不跑")
     steps.add_argument(
-        "name", choices=sorted(FLOWS), metavar="流程名", help="entry、checkup 或 closeout"
+        "name",
+        choices=sorted(FLOWS),
+        metavar="流程名",
+        help="entry、checkup、closeout 或 closeout-pr",
     )
     checkup = sub.add_parser("checkup", help="项目体检：全程只读，每步都跑完，最后出小结表")
     checkup.add_argument("pid")
-    closeout = sub.add_parser("closeout", help="交卷到收口：只跑只读检查，改状态的步骤前停下")
+    closeout = sub.add_parser(
+        "closeout", help="交卷到收口（走 Run 的卡）：只跑只读检查，改状态的步骤前停下"
+    )
     closeout.add_argument("pid")
     closeout.add_argument("--mission-id", required=True)
     closeout.add_argument(
         "--done",
         default="",
         help="上次停在哪一步、那一步已经做完（verify、accept、close、transition、worktree）",
+    )
+    closeout_pr = sub.add_parser(
+        "closeout-pr",
+        help="PR 线收口（不走 Run 的全流程、标准线卡，PR 合进 main 后跑）：只跑只读检查，改状态的步骤前停下",
+    )
+    closeout_pr.add_argument("pid")
+    closeout_pr.add_argument("--chg", required=True, help="这张卡的变更单号，如 CHG-SCPT-2026-717")
+    closeout_pr.add_argument("--card", required=True, help="领卡占位的卡号，如 309")
+    closeout_pr.add_argument(
+        "--done",
+        default="",
+        help="上次停在哪一步、那一步已经做完（accepting、transition、claim_release、worktree）",
     )
     options = parser.parse_args(argv)
     if options.flow == "steps":
@@ -808,6 +924,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         options.pid,
         root=options.root.resolve(),
         mission=getattr(options, "mission_id", ""),
+        chg=getattr(options, "chg", ""),
+        card=getattr(options, "card", ""),
         done=getattr(options, "done", ""),
     )
 

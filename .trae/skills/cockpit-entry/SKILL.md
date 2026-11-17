@@ -47,9 +47,9 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 4. **先读完交接记录列出的文件，再用中文向用户报告**：当前焦点、正在做的 Work/Run、下一步合法动作（`next_legal_action`）。`conflicts` 不为空时，把原文告诉用户并停下，等用户决定。`work_candidates` 里每个 Work 的编号和状态原样报告，不要自己判断哪个是历史遗留、哪个在做。
 
-## 没有已授权的 Work 之前，只能用这些只读命令
+## 变更单被批准之前，只能用这些只读命令
 
-`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`、`claim list`、`claim log`，AGENTS.md FLOW-002 的 `pm_flows.py entry`、`checkup`、`steps`（脚本只串命令分类表里归“读”的命令），以及 `git status`、`git log`、`git diff`。
+`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`、`claim list`、`claim log`，AGENTS.md FLOW-002 的 `pm_flows.py entry`、`checkup`、`steps`（脚本只串命令分类表里归“读”的命令），以及 `git status`、`git log`、`git diff`。全流程、标准线在批准前另可做两样写：建变更单（`change create`）和领卡占位（`claim number`、`claim open`），除此之外不写。
 
 这些命令出错或报差异时，输出里可能建议你运行修复命令（例如 `ledger reconcile --fix`、`doc sync`）。这些修复命令会写文件，不在清单里：不要运行，把输出原文报告给用户并停下。
 
@@ -63,6 +63,37 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 1. **先读后问**：读项目代码、`.plc.json`/`pyproject.toml`、接口文档和规范库，能查到的不问用户。
 2. **先跑一次基线门禁**（只读）：PLC 项目 `main.py plc check <项目编号>`，Python 项目跑该项目的 pytest。基线就有失败的文件，要么列进可改范围一起修，要么写进“不做什么”并告诉用户。不要等收口时才发现门禁过不去。
+3. **建单**：全流程、标准线先在控制根用 `main.py change create --pid <项目编号> …` 建变更单。快线不先建单，合并后用 `--retrofit` 补。
+4. **出计划给用户看**：用中文列出这几项：
+   - 需求原文（照抄用户原话）、目标、可改范围（具体文件路径）、本次预计改动的文件；
+   - 是否涉及安全回路：碰到急停、安全门、光栅、联锁、安全继电器、双手启动中的任何一样，就写“是”，否则写“否”；
+   - 验收标准，每条配上对应的命令和期望退出码；
+   - 风险、回退办法、不做什么、需要用户决定的点。
+
+   验收标准必须是机器能判的，比如某条命令退出码 0、某个测试通过、某个输出含某行；“能用”“正常”这类不算。安全回路填“是”的按安全区走：先仿真，再请用户在 PR 上写“安全签字 + 提交号”，然后才能合并。列完停下，问“请确认是否批准开工？”，等用户亲口说“同意”。
+5. **用户同意后**，才把变更单推到已批准：
+   - 先跑 `change transition <变更单号> --to submitted`，再跑 `--to under_review`；
+   - 最后跑 `--to approved --approver <用户> --approval-evidence-ref user-confirmation:<用户那条消息的时间或编号>`。
+
+   用户在看板“决定”页点了“批准变更单”的，不用做这一步。用户没说过的同意，绝不要自己编。
+6. **领卡、开工位、动手**：
+   - 先跑 `main.py claim list` 看占位表，和别人不重叠才 `main.py claim open <卡号或 auto> --paths … --goal …`；
+   - 再用 `main.py worktree open <agent> <卡号>` 开工位，只在工位里改，只改占位登记的路径；
+   - 所有 `change` 命令都带 `--pid <项目编号>`；
+   - 界面的“批准范围并开始”、`pm execute`、`run_approved_planning` 都会启动已挂起的 Codex 执行器，不要点，也不要调。
+7. **自检、提交、开 PR**：
+   - 计划里的每条验收标准都要跑过，把命令和退出码原样报告；有没跑的，明说没跑；
+   - 提交说明里单独写一行 `领卡占位: <卡号>`；
+   - 任务卡先入库，入库前 `main.py implementation-card precheck` 要退出 0；入库后用 `main.py pr open <agent> <卡号> --task-card <卡的路径>` 开 PR，PR 描述写 `流程线:`、`领卡占位:` 和可改范围；
+   - 改规则文件的 PR，要用户在 GitHub 点“规则批准”。
+8. **审计、合并与收口**：
+   - 由另一个会话按 `AGENTS.md` AUD-001 审计；CI 全绿、审计通过后，用 Merge commit 合并；
+   - 合并后在控制根跑 `pm_flows.py closeout-pr <项目编号> --chg <变更单号> --card <卡号>`：推到验收中由 agent 跑；推到完成要用户本人在看板点“推到完成”，或在本机主对话里亲口说（`AGENTS.md` 红线 1）；最后对账、放下占位、收工位。
+
+### 走 Run 的卡
+
+看板“确认开工”一键流开出来的卡，以及命令本身要求 Run 或租约的卡，第 3～8 步照下面做，收口用 `pm_flows.py closeout`（`AGENTS.md` 红线 2、FLOW-002）：
+
 3. **入箱**：`pm inbox add`，`--original-words` 一字不改填用户原话；分诊单里影响、查重、取证都写你实际查到的东西。
 4. **出计划给用户看**：用中文列出 需求原文（照抄用户原话）/ 目标 / 可改范围（具体文件路径）/ 本次预计改动的文件 / 是否涉及安全回路 / 验收标准及每条对应的命令和期望退出码 / 风险 / 回退办法 / 不做什么 / 需要用户决定的点。验收标准必须是机器能判的（某条命令退出码 0、某个测试通过、某个输出含某行），“能用”“正常”这类不算。**是否碰安全回路（急停、安全门、光栅、联锁、安全继电器、双手启动）必须写明“是”或“否”**；填“是”按安全区走，先仿真、再请用户在 PR 上写“安全签字 + 提交号”后才能合并。然后停下，等用户亲口说“确认开工”。
 5. **用户确认后**才运行 `pm inbox confirm`、`pm plan`、`pm approve`。批准人填用户，证据引用写成 `user-confirmation:` 加用户确认消息的时间或编号；用户没说过的确认，绝不要自己编。

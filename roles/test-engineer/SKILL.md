@@ -17,7 +17,7 @@ description: "测试验证与独立审计合一：跑门禁与测试、审 PR；
 
 照 `../shared/refs/start_and_handoff.md` 的“开工门禁”做。
 
-测试验证需要匹配的 Work/Run 与有效 lease；单 PR 审计不占 Run，但只写 `reviews/`。
+用 `pm verify` 做的交付验证需要匹配的 Work/Run 与有效 lease；单 PR 审计和云端门禁不占 Run，审计只写 `reviews/`。
 
 ## 测试验证
 
