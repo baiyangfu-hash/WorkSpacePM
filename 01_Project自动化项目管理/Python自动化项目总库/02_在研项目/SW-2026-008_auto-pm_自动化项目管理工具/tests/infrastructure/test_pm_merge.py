@@ -155,19 +155,42 @@ def _change_order(root: Path, number: str, state: str) -> None:
     (folder / f"{number}.md").write_text(f"| 变更状态 | {state} |\n", encoding="utf-8")
 
 
-def test_rule_files_need_a_change_order_the_user_approved(
+def test_rule_files_need_an_approved_change_order_named_in_this_card(
     pm: ModuleType, repo: SimpleNamespace, capsys: Any
 ) -> None:
     commit(repo.wt, {"AGENTS.md": "rules\n"}, f"docs(rules)：[CHG-SCPT-2026-999] 改规则\n\n{CARD}")
+    _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
     assert run(pm, repo.root, "merge", "w1") == 1
-    assert "没有一张用户批准过的变更单" in capsys.readouterr().out
-    _change_order(repo.root, "CHG-SCPT-2026-999", "draft")
-    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "没有本卡的实施卡" in capsys.readouterr().out
+    card = "P/02_规划/311_别的单_PM.md"
+    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-111\n"}, f"docs(card)\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1, "提交说明引用的单没写在本卡里（拿别的旧单顶）"
+    assert "写在本卡实施卡里" in capsys.readouterr().out
+    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-999\n"}, f"docs(card)\n\n{CARD}")
+    for state in ("draft", "completed"):
+        _change_order(repo.root, "CHG-SCPT-2026-999", state)
+        assert run(pm, repo.root, "merge", "w1") == 1, state
     _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
     assert run(pm, repo.root, "merge", "w1") == 0
     entry = pm.read_log(repo.root)[-1]
     assert entry["user_paths"] == ["AGENTS.md"] and entry["chgs"] == ["CHG-SCPT-2026-999"]
     assert repo.gates[-1] is True, "要用户点头的那一类要跑全量门禁"
+
+
+def test_deleting_files_outside_the_cockpit_needs_the_user(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    inside = pm.COCKPIT_PREFIX + "scripts/old_tool.py"
+    commit(repo.root, {inside: "x\n"}, "驾驶舱里的一个旧脚本")
+    git(repo.wt, "merge", "--quiet", "main")
+    git(repo.wt, "rm", "--quiet", inside)
+    git(repo.wt, "commit", "-m", f"删驾驶舱里不用的脚本\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0, "删驾驶舱自己的文件是“直接做”"
+    git(repo.wt, "merge", "--quiet", "main")
+    git(repo.wt, "rm", "--quiet", "README.md")
+    git(repo.wt, "commit", "-m", f"删业务文件\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "README.md" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

@@ -11,8 +11,9 @@
 ``merge`` 按顺序查，任何一条不过就拒绝，什么都不改：
 1. 控制根停在 main；工位 ``.auto-pm/worktrees/<工位名>`` 已全部提交，main 是工位分支的祖先，
    分支上至少一个提交带 ``领卡占位: <卡号>`` 这一行。
-2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己），提交说明里引用的变更单
-   至少一张已被用户批准（变更单原件里的状态是已批准或之后的状态）。
+2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己，以及删除或改名驾驶舱项目目录以外
+   的已入库文件），提交说明里引用、又写在分支里本卡实施卡（``02_规划/<卡号>_*.md``）里的变更单，至少一张已被用户
+   批准、还没推到完成（变更单原件里的状态是已批准到验收中之间）。
 3. GitHub 不是“关”档、而且连得上时，``origin/main`` 必须已在本机 main 里；连不上就跳过这一条并说明。
 4. 控制根里和分支改到的路径重叠的未提交文件，只允许是和分支内容一样的副本（只差行尾）；合并前先备份再换掉，
    合并失败就放回去。别的未提交改动一律拒绝。
@@ -65,14 +66,7 @@ CHG_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
 APPROVED_STATES = frozenset(
-    {
-        "approved",
-        "conditionally_approved",
-        "implementing",
-        "pending_acceptance",
-        "accepting",
-        "completed",
-    }
+    {"approved", "conditionally_approved", "implementing", "pending_acceptance", "accepting"}
 )
 HOOK_NAME = "reference-transaction"
 HOOK_MARK = "pm_merge.py install-hook"
@@ -272,6 +266,35 @@ def _commits(git: Git, base: str, tip: str) -> list[str]:
     return [message.strip() for message in raw.split("\x1e") if message.strip()]
 
 
+COCKPIT_PREFIX = (
+    PROJECT_ROOT.relative_to(DEFAULT_ROOT).as_posix() + "/"
+    if PROJECT_ROOT.is_relative_to(DEFAULT_ROOT)
+    else ""
+)
+
+
+def removed_outside_cockpit(git: Git, base: str, tip: str) -> list[str]:
+    """删除或改名掉的已入库文件里，不在驾驶舱项目目录（SW-2026-008）下的：这些算“要你点头”（删除或改名业务文件）。"""
+    raw = git.run(
+        "diff", "--name-status", "-z", "--no-renames", "--diff-filter=D", base, tip, check=True
+    ).stdout
+    parts = [part for part in raw.split("\0") if part]
+    deleted = [parts[index + 1] for index in range(0, len(parts) - 1, 2) if parts[index] == "D"]
+    return sorted(
+        path for path in deleted if not (COCKPIT_PREFIX and path.startswith(COCKPIT_PREFIX))
+    )
+
+
+def card_files(git: Git, tip: str, card: str) -> list[str]:
+    """分支里本卡的实施卡文件（``02_规划/<卡号>_*.md``）。"""
+    raw = git.run("ls-tree", "-r", "-z", "--name-only", tip, check=True).stdout
+    return [
+        path
+        for path in raw.split("\0")
+        if re.search(rf"/02_规划/{re.escape(card)}_[^/]*\.md$", path)
+    ]
+
+
 def _changed_paths(git: Git, base: str, tip: str) -> list[str]:
     raw = git.run("diff", "--name-only", "-z", "--no-renames", base, tip, check=True).stdout
     return sorted({path for path in raw.split("\0") if path})
@@ -345,9 +368,24 @@ def plan_merge(root: Path, name: str, pid: str = "") -> Plan:
     chgs = sorted({number for message in messages for number in CHG_RE.findall(message)})
     paths = _changed_paths(root_git, "main", sha)
     user_paths = [path for path in paths if needs_user(path)]
+    user_paths += [
+        path for path in removed_outside_cockpit(root_git, "main", sha) if path not in user_paths
+    ]
     if user_paths:
+        card = cards[0]
+        cards_text = "".join(
+            root_git.run("show", f"{sha}:{path}").stdout for path in card_files(root_git, sha, card)
+        )
+        if not cards_text:
+            raise RefusedError(
+                "改到了要用户点头的文件（"
+                + "、".join(user_paths[:5])
+                + f"），分支里却没有本卡的实施卡（02_规划/{card}_*.md），变更单和卡对不上"
+            )
         approved = []
         for number in chgs:
+            if number not in cards_text:
+                continue
             orders = find_change_orders(root, number, pid)
             if len(orders) > 1:
                 raise RefusedError(f"找到 {len(orders)} 份 {number}，带 --pid 指明是哪个项目的")
@@ -357,8 +395,9 @@ def plan_merge(root: Path, name: str, pid: str = "") -> Plan:
             raise RefusedError(
                 "改到了要用户点头的文件（"
                 + "、".join(user_paths[:5])
-                + "），提交说明里却没有一张用户批准过的变更单"
-                + (f"（引用了 {'、'.join(chgs)}，都不是已批准或之后的状态）" if chgs else "")
+                + "），却没有一张用户批准过、又写在本卡实施卡里的变更单"
+                + (f"（提交说明引用了 {'、'.join(chgs)}）" if chgs else "")
+                + "；已推到完成的单不能再用来开新活"
             )
     notes: list[str] = []
     replace = _control_root_copies(root_git, root, sha, paths)
