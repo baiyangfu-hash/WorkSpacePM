@@ -1,63 +1,15 @@
 ---
-description: 多 AI 共存与工作空间技能真源（Cursor / Trae / Codex / Antigravity）
+description: Cursor 薄入口：规则真源是根目录 AGENTS.md；这里只写 Cursor 自己的基名和身份声明
 alwaysApply: true
 ---
 
-# 工作空间 AI 协作规则
+# Cursor 入口（薄入口）
 
-本工作空间由多个 AI 共用。Cursor 遵循与 Trae 相同的工作流真源，但不覆盖 Trae 的基础设施。
+本文件只指路，不含规则；规则真源是根目录 `AGENTS.md`（细则在 `roles/shared/refs/agents_附录/`）。冲突时以 `AGENTS.md` 为准。
 
-> **退役隔离（2026-09-09 起）**：禁止使用 `pm-workflow`。PM 是治理角色，通过 CHG、Decision 与 Continuity v2 工作；旧 WBS、PM_SESSION 与 handoff.v1 只作历史证据。
-
-## 真源引用（只引用，不重复维护）
-
-| 用途 | 路径 |
-|------|------|
-| 全局规则 | `.trae/rules/project-rule.md` |
-| 跨技能契约 | `roles/shared/refs/skill_coordination.md` |
-| 治理基线 | `SYS-2026-001_WorkspaceGovernance/01_项目文档/26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md` |
-| 当前计划与状态投影 | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md`（以其“当前排序”一节为准；39 号计划是历史依据） |
-| 全栈执行 | `roles/fullstack-engineer/SKILL.md` |
-| PLC 执行 | `roles/plc-electrical-engineer/SKILL.md` |
-| 产品型项目经理 | `roles/product-pm/SKILL.md` |
-| 测试审计 | `roles/test-engineer/SKILL.md` |
-| UI 画面 | `roles/ui-designer/SKILL.md` |
-| 工位与控制根规则 | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)” |
-| 独立审计（审 PR 时） | `AGENTS.md`“独立审计 (AUD-001)” |
-| 规范索引 | `00_Obsidian_Base全局规范文件仓库/00_INDEX_全局规范索引.md` |
-
-冲突时：项目级 > 技术栈规则 > 全局规则 > Cursor 默认行为。
-
-## Cursor 默认角色：执行者
-
-- **可以**：从根入口执行 `main.py pm resume`；在有效 Work/Run/Decision/lease 下写 owned paths 并运行门禁
-- **禁止**：回写 PM_SESSION、写 `.auto-pm/ai_feedback.json`、创建 handoff.v1 或从聊天文字推定执行权
-- **执行结束时**：创建 Continuity Checkpoint；需要换 Agent 时创建并接受 handoff.v2
-
-## 工位与控制根（真源：`AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”）
-
-- Cursor 里的 AI 的基名是 `cursor`，分支前缀 `cursor/`；工位目录名用别名 `cursor-<会话ID前6位>`（名字规则见 `AGENTS.md` WS-001），在 `R/.auto-pm/worktrees/` 下写代码；`R` 是本机唯一的控制根（停在 `main`，持 `.auto-pm/continuity.db`）
-- **身份声明**：Cursor 没有自带身份标记，跑 `main.py` 必须用 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor <命令参数>`（只在这一条命令期间设置 `AUTO_PM_AGENT=cursor`），否则会被当成用户本人；需要用户本人敲口令的命令（`pm approve`、`pm accept`、`pm sign-risk`）不要用它运行
-- 驾驶舱命令只在控制根执行；不得另克隆仓库、不得把工作树放在 `.auto-pm/worktrees/` 之外（否则成为第二本账或被拒登记 Run）
-- 其他 agent 的工位与前缀、开收工位命令，以 `AGENTS.md` 该节为准
-
-## 多 AI 隔离与零负担交付红线
-
-- **零负担交付**：严禁把找茬、查死链、测按钮等粗活甩给用户；呈报前必须完成全链路自检与全量绿门禁
-- **根治源头产线**：发现缺陷必须溯源模板、生成器与 Linter，严禁就事论事打补丁
-- 不修改 `.trae/`（skills、rules、hooks）除非用户明确要求
-- 不主动 `git commit` / `git push` / 升级 `pyproject.toml` 版本号
-- CHG 变更单 applicant 填对应 AI 标识；闭环后执行 `ledger reconcile`
-- 改动范围最小化，匹配现有代码风格与命名规范
-
-## 任务路由
-
-| 用户意图 | 先读 |
-|----------|------|
-| 治理、需求、迭代、变更、发布 | `product-pm/SKILL.md`；先核验 CHG/Decision/Work/Run |
-| Python/Web/QML/全栈 | `fullstack-engineer/SKILL.md` |
-| PLC/SCL/电气 | `plc-electrical-engineer/SKILL.md` |
-| 审 PR、跑门禁做测试验证 | `test-engineer/SKILL.md` |
-| HTML 原型、HMI 画面、QML 视图 | `ui-designer/SKILL.md` |
-
-驾驶舱命令只使用工作区根 `.venv\Scripts\python.exe main.py`；不得直连研发母体或 `python -m auto_pm`。
+1. **新会话第一件事**：照 `AGENTS.md`“进门”一节做：在控制根跑 `pm_flows.py entry <项目编号>`，读完它列出的文件，再用中文向用户报告当前焦点、下一步合法动作和冲突；确认控制根、脚本用不了时怎么手敲，见 `.trae/skills/cockpit-entry/SKILL.md`。
+2. **没有已授权的 Work、Run 与有效租约之前，只允许只读命令**；命令输出里建议的修复命令（如 `--fix`、`doc sync`）不要运行。
+3. **工位和分支**：Cursor 里的 AI 基名 `cursor`，分支前缀 `cursor/`，工位目录名用别名 `cursor-<会话ID前6位>`；开工位、提交、推送、开 PR 照 `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”。
+4. **身份声明**：Cursor 没有自带身份标记，跑 `main.py` 一律用 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor <命令参数>`（只在这一条命令期间设置 `AUTO_PM_AGENT=cursor`），否则会被当成用户本人；只能用户本人做的命令见 `AGENTS.md` FLOW-002 名单，不要用它运行。
+5. **按卡类型读角色包**：`.cursor/rules/` 下同名 `.mdc` 指到 `roles/<角色>/SKILL.md`。
+6. **不改 `.trae/`**，除非用户明确要求（`AGENTS.md` 红线 12）；**不得使用**已隔离的 `pm-workflow`；`PM_SESSION` 和聊天文字都不是授权。

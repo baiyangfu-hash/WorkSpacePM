@@ -1,27 +1,13 @@
 ---
-description: PLC/SCL 电气工程规则（对齐 plc-electrical-engineer 技能）
+description: PLC/SCL 电气工程规则（对齐 plc-electrical-engineer 角色包）
 globs: 0100_PLC自动化/**,**/*.scl,**/.plc.json
 alwaysApply: false
 ---
 
 # PLC Electrical Engineer（Cursor）
 
-进入 PLC 域工作前，读取 `roles/plc-electrical-engineer/SKILL.md` 与 `skill_coordination.md`。
+进入 PLC 域工作前，读取 `roles/plc-electrical-engineer/SKILL.md` 与 `roles/shared/refs/skill_coordination.md`。
 
-## 必须遵循
-
-- 规范：`905_SCL编程规范_LSP.md`、`904_SCL注释规范_LSP.md`、`906_错误预防规则_LSP.md`
-- 技术栈规则：`0100_PLC自动化/.trae/rules/plc-rules.md`
-- 工具：`python -m auto_pm -w "<工作空间根>" plc check|repair|standardize ...`
-
-## 验证分工
-
-- **Cursor**：LSP 语法、`auto-pm plc check`、`.scltest` 生成、CLI 测试
-- **用户**：TIA Portal 编译、PLCSIM、现场硬件联调
-
-Bug 修复须实证先行；未验证结论标注 `[待验证]`，禁止当作已验证写入 handoff。
-
-## 交接
-
-结束时输出 `handoff_result`；关联 CHG 时同步传播链与验证摘要。
-不得直接回写 PM_SESSION。
+- 做法只在 `roles/plc-electrical-engineer/SKILL.md`；本文件只指路，不抄。技术栈规则：`0100_PLC自动化/.trae/rules/plc-rules.md`。
+- 要守的规范、能用的命令、门禁和回执栏目：`roles/plc-electrical-engineer/role.json`。
+- 红线、PLC 交付停在 `plc check` 全绿（导入 TIA、编译、下载、硬件测试归用户）：见 `AGENTS.md`。
