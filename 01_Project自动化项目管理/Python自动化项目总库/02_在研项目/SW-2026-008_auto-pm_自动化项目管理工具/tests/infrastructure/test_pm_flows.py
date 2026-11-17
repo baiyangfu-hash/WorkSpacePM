@@ -736,3 +736,91 @@ def test_utf8_output_writes_utf8_when_piped_and_escapes_on_a_gbk_terminal(flows:
         stream.flush()
     assert piped_bytes.getvalue().decode("utf-8") == "▶ 第 1 步"
     assert tty_bytes.getvalue().decode("gbk") == "\\u25b6 第 1 步"  # 终端自己的编码，写不出的字转义成看得见的样子
+
+
+# 进门最后按卡类型提示该读哪个角色包（CHG-SCPT-2026-711）：包从控制根 roles/*/role.json 现读，卡按登记路径对模式。
+def _pack(root: Path, role: str, title: str, patterns: list[str]) -> None:
+    folder = root / "roles" / role
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text(f"---\nname: {role}\n---\n", encoding="utf-8")
+    (folder / "role.json").write_text(
+        json.dumps({"id": role, "title": title, "owned_paths_patterns": patterns}), encoding="utf-8"
+    )
+
+
+def _packs_root(tmp_path: Path) -> Path:
+    root = _root(tmp_path)
+    _pack(root, "ui-designer", "UI 设计师", ["**/*.html"])
+    _pack(root, "plc-electrical-engineer", "编程工程师（PLC）", ["**/*.scl"])
+    _pack(root, "product-pm", "产品型项目经理", [])
+    (root / "roles" / "shared").mkdir()  # 共用参考没有 role.json，不算包
+    (root / "roles" / "broken").mkdir()
+    (root / "roles" / "broken" / "SKILL.md").write_text("x", encoding="utf-8")
+    (root / "roles" / "broken" / "role.json").write_text("not json", encoding="utf-8")
+    return root
+
+
+def test_role_packs_reads_the_control_root_in_card_type_order(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    packs = flows.role_packs(_packs_root(tmp_path))
+
+    assert [pack["id"] for pack in packs] == ["plc-electrical-engineer", "ui-designer", "product-pm"]
+    assert packs[0]["skill"] == "roles/plc-electrical-engineer/SKILL.md"
+    assert packs[0]["card_type"] == flows.ROLE_CARD_TYPES["plc-electrical-engineer"]
+    assert flows.role_packs(tmp_path / "nowhere") == []
+
+
+def test_packs_for_paths_matches_the_owned_path_patterns(flows: ModuleType, tmp_path: Path) -> None:
+    packs = flows.role_packs(_packs_root(tmp_path))
+
+    assert flows.packs_for_paths(packs, ["a/FB_1.scl", "b\\index.html"]) == [
+        "plc-electrical-engineer",
+        "ui-designer",
+    ]
+    assert flows.packs_for_paths(packs, ["top.scl"]) == ["plc-electrical-engineer"], "**/ 也认仓库根"
+    assert flows.packs_for_paths(packs, ["0100_PLC自动化/DJ-2026-005"]) == []
+
+
+def test_entry_ends_with_the_role_pack_hint_per_card(flows: ModuleType, tmp_path: Path) -> None:
+    root = _packs_root(tmp_path)
+    claims = [
+        {"card": "scl-a", "owner": "x", "paths": ["0100_PLC自动化/DJ-2026-005/FB_1.scl"], "free": False},
+        {"card": "doc-b", "owner": "x", "paths": ["0100_PLC自动化/DJ-2026-005/018.md"], "free": False},
+    ]
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=EntryRunner(claims), out=lines.append) == 0
+    text = "\n".join(lines)
+    hint = text[text.index("【该读哪个角色包】") :]
+    assert text.index("【交接记录】") < text.index("【该读哪个角色包】"), "先交接记录，后角色包"
+    assert f"- {flows.ROLE_CARD_TYPES['ui-designer']}：roles/ui-designer/SKILL.md（UI 设计师）" in hint
+    assert "  scl-a：roles/plc-electrical-engineer/SKILL.md" in hint
+    assert "  doc-b：登记路径认不出卡类型" in hint
+    record = json.loads(
+        next((root / ".auto-pm" / "reports" / "flows").glob("*_entry_DJ-2026-005.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["role_hints"] == [
+        {"card": "doc-b", "roles": []},
+        {"card": "scl-a", "roles": ["plc-electrical-engineer"]},
+    ]
+
+
+def test_entry_without_roles_says_it_cannot_hint(flows: ModuleType, tmp_path: Path) -> None:
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=_root(tmp_path), runner=EntryRunner([]), out=lines.append) == 0
+    assert "控制根里没有 roles/ 角色包，没法提示；先跑 main.py role check 看看。" in lines
+
+
+def test_checkup_gives_no_role_hint(flows: ModuleType, tmp_path: Path) -> None:
+    lines: list[str] = []
+
+    flows.run_flow("checkup", "DJ-2026-005", root=_packs_root(tmp_path), runner=FakeRunner(), out=lines.append)
+    assert not any("【该读哪个角色包】" in line for line in lines)
+
+
+def test_steps_of_entry_lists_the_role_hint(flows: ModuleType) -> None:
+    assert "| 角色包提示 |" in _steps_text(flows, "entry")

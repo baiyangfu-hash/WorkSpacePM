@@ -1,0 +1,13 @@
+---
+description: 测试审计员规则（对齐 test-engineer 角色包）：跑门禁做测试验证、独立审计 PR
+globs: reviews/**
+alwaysApply: false
+---
+
+# Test Engineer（Cursor）
+
+做测试验证或审 PR 前，读取 `roles/test-engineer/SKILL.md` 与 `roles/shared/refs/skill_coordination.md`。
+
+- 审计红线和步骤只在 `roles/test-engineer/SKILL.md` 与 `AGENTS.md`“独立审计 (AUD-001)”；本文件只指路，不抄。
+- 要守的规范、能用的命令、门禁和回执栏目：`roles/test-engineer/role.json`。
+- 逐项核对清单：`reviews/21_audit_checklist.md`。
