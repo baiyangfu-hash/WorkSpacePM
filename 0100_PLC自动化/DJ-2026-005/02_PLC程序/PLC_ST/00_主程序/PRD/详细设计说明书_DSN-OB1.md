@@ -1,5 +1,7 @@
 # OB1 主程序组织块详细设计说明书
 
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+
 ## 1. 文档基础信息
 
 | 属性 | 值 |
@@ -34,7 +36,7 @@ OB1作为主控程序，实现以下核心目标：
   - PickPlace: 1×FB_1003
   - Feeder: 1×FB_1004
   - Alarm: 1×FB_2001
-- **数据层**：GlobalVars.db存储全局状态
+- **数据层**：GlobalVars_DJ005.db存储全局状态
 
 ---
 
@@ -69,7 +71,7 @@ flowchart TD
 | 1 | IO输入映射 | 将X地址映射到M/D区 | X→M/D |
 | 2 | HMI数据读取 | 读取HMI设定的参数 | M/D→内部变量 |
 | 3 | 安全系统判断 | 检查急停/安全门/安全继电器 | AND逻辑判断 |
-| 4 | 外部设备交互 | 调用FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction） | 机器人/打胶机通信 |
+| 4 | 外部设备交互 | 调用FB_3001_ExternalInteraction（DJ005实现名：FB_3001_ExternalDevice_DJ005） | 机器人/打胶机通信 |
 | 5 | 四层输送机 | 展开调用4×FB_1002 + 汇总 | L1→L2→L3→L4 顺序调用, 然后OR/MIN汇总 |
 | 6 | 取放料机构 | 调用FB_1003_PickPlace | Z/X1轴+双夹爪控制 |
 | 7 | 打胶机送料 | 调用FB_1004_GlueMachineFeeder | X2轴+打胶机协作 |
@@ -84,18 +86,18 @@ flowchart TD
 ### 4.1 调用顺序与依赖
 
 ```
-FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction）→ 4×FB_1002(L1→L4) + 汇总 → FB_1003_PickPlace → FB_1004_GlueMachineFeeder → FB_2001_CommonAlarm
+FB_3001_ExternalInteraction（DJ005实现名：FB_3001_ExternalDevice_DJ005）→ 4×FB_1002(L1→L4) + 汇总 → FB_1003_PickPlace → FB_1004_GlueMachineFeeder → FB_2001_CommonAlarm
 ```
 
 ### 4.2 调用参数映射
 
 | FB名称 | 输入来源 | 输出去向 |
 |--------|----------|----------|
-| FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction） | GlobalVars.stExternal | GlobalVars.stExternal |
-| FB_1002_L1~L4 (展开) | GlobalVars.stConveyor (逐层索引[1]~[4]) | GlobalVars.stConveyor (逐层索引) |
-| FB_1003_PickPlace | GlobalVars.stPickPlace | GlobalVars.stPickPlace |
-| FB_1004_GlueMachineFeeder | GlobalVars.stFeeder | GlobalVars.stFeeder |
-| FB_2001_CommonAlarm | 各工站报警输出 | GlobalVars.stAlarm |
+| FB_3001_ExternalInteraction（DJ005实现名：FB_3001_ExternalDevice_DJ005） | GlobalVars_DJ005.stExternal | GlobalVars_DJ005.stExternal |
+| FB_1002_L1~L4 (展开) | GlobalVars_DJ005.stConveyor (逐层索引[1]~[4]) | GlobalVars_DJ005.stConveyor (逐层索引) |
+| FB_1003_PickPlace | GlobalVars_DJ005.stPickPlace | GlobalVars_DJ005.stPickPlace |
+| FB_1004_GlueMachineFeeder | GlobalVars_DJ005.stFeeder | GlobalVars_DJ005.stFeeder |
+| FB_2001_CommonAlarm | 各工站报警输出 | GlobalVars_DJ005.stAlarm |
 
 ### 4.3 输送机展开调用与汇总设计 (V7.0.0新增)
 

@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1006_ManualTeach_BufferFraming                     *)
 (*  功能描述:   手动: 速度加减、三轴点动、X1/X2 手动定位、示教、      *)
 (*              夹爪松开 / 升降缸、输送强制位放行                      *)
@@ -6,7 +6,7 @@
 (*                                                                   *)
 (*  依据: 详细设计说明书_DSN.md 4.3; 接口文档_INT.md 4.10 / 5 / 7;   *)
 (*        需求 R-MAN-01~08; 原程序工艺说明 PRC 3                     *)
-(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
 (*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2], X2 = io_arrAxis[3];    *)
 (*  HMI 数组的轴序: [1] = X1, [2] = X2, [3] = Z (沿用原 M150~M161)。 *)
@@ -39,7 +39,7 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fb_tRep             : FB_TON;       // 速度加减 100 ms 重复
+    fb_tRep             : TON_TIME;       // 速度加减 100 ms 重复
     s_bRepIn            : BOOL := FALSE;
     s_bRepQ             : BOOL := FALSE;
     s_dRepEt            : DINT := 0;
@@ -90,7 +90,9 @@ END_VAR
 
 BEGIN
     REGION 00_Timers 定时器统一调用 (顶部)
-    fb_tRep(IN := s_bRepIn, PT := REPEAT_MS, Q => s_bRepQ, ET => s_dRepEt);
+    fb_tRep(IN := s_bRepIn, PT := DINT_TO_TIME(REPEAT_MS));
+    s_bRepQ := fb_tRep.Q;
+    s_dRepEt := TIME_TO_DINT(fb_tRep.ET);
     s_bTick := s_bRepQ;
     END_REGION
 

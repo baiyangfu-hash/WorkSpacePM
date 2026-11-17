@@ -2,6 +2,7 @@
 
 | 版本号 | 变更日期 | 变更类型 | 变更内容 | 变更人 |
 |--------|----------|----------|----------|--------|
+| V15.1.1 | 2026-11-15 | 整改 | TIA 实测整改（CHG-PLC-2026-022）：17 个 `FB_TON` 改 TIA 原生 `TON_TIME`（`PT := DINT_TO_TIME(...)`，读 `.Q`、`TIME_TO_DINT(.ET)`）；实例移到背景数据块 `DB_1003_PickPlace_DJ005`；文件存 UTF-8 带 BOM；逻辑不变 | Claude |
 | V15.1.0 | 2026-10-24 | 新增 | 取料模式 2 根 / 4 根（R-PP-13）：取料组表（`ST_PairPoint` 改名 `ST_PickGroup`，`astPair` 改 `astGroup`，`iPair` 改 `iGroup`），新增 `iPickModeReq / iGripCount / iPickMode / iGroupCount / bModeInvalid`，预留夹爪 3、4 命令与输入输出；2 根模式行为不变 | Claude |
 | V15.0.0 | 2026-10-24 | 重写 | 按新设计整体重写（取代 V7.x）：S20~S25 子相结构、成对取料、夹爪 / 升降缸统一输出、夹紧超时 F106、轴命令占有标志，接口改为 `io_stPP / io_stBridge / io_stMachine / io_stIo / io_stAlarm / io_arrAxis` | Claude |
 | V7.1.1 | 2026-05-20 | Bug修复 | 修复TC11自动模式Z轴定位测试失效: i_iPickLayer接线从o_iCurrentPickLayer(输出)改为i_iPickLayer_Input(独立输入), 断开FB内部iPickLayer(=0)覆盖导致S20→S21转换条件永远FALSE的反馈回路; GlobalVars.db新增i_iPickLayer_Input: INT字段; OB1.scl第331行接线更新 | Trae |

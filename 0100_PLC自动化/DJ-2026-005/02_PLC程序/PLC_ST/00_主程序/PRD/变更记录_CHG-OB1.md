@@ -18,6 +18,7 @@
 
 | 版本号 | 发布日期 | 变更类型 | 业务性质 | 影响范围 | 变更内容摘要 |
 |:------:|:--------:|:--------:|:--------:|:--------:|-------------|
+| **V15.1.0** | 2026-11-15 | CHG-PLC | DEBT | INTERFACE | TIA 实测整改（CHG-PLC-2026-022）：9 个调用由 `GlobalVars.fbXxx(...)` 改为经各自背景数据块 `"DB_<编号>_<名>_DJ005"(...)`，顺序、参数、OB 编号与名字不变；文件存 UTF-8 带 BOM |
 | **V7.1.1** | 2026-05-20 | CHG-PLC | FIX | INTERFACE | TC11 Bug修复: FB_1003 i_iPickLayer输入源从o_iCurrentPickLayer(输出)改为i_iPickLayer_Input(独立输入), 断开反馈回路 |
 | **V7.1.0** | 2026-05-20 | CHG-PLC | FEAT | INTERFACE | FB_1003 V7.0.0集成ST_ServoAxis V3.0, OB1新增VAR_IN_OUT接线(io_stZAxis/io_stX1Axis) |
 | **V7.0.0** | 2026-05-18 | CHG-PLC | REQ | MODULE | Conveyor重构: 取消FB_1001, 展开调用4×FB_1002(L1~L4), 新增汇总逻辑(OR/MIN), 下游引用对齐stConveyor新变量名 |

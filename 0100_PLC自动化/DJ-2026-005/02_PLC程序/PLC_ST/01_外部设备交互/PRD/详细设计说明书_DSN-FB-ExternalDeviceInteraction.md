@@ -1,4 +1,4 @@
-# 详细设计说明书 FB_ExternalDeviceInteraction
+# 详细设计说明书 FB_3001_ExternalDevice_DJ005
 
 ## 0. 文档基础信息
 
@@ -17,7 +17,7 @@
 
 工艺步序、转移条件、定时和报警表以全局 `00_程序方案/详细设计说明书_DSN.md` 为准，本文只记录**编码层面的实现选择**，以及与全局文档的差异（待评审确认）。
 
-## 2. 实现结构：组框机链路（FB_ExternalDeviceInteraction）
+## 2. 实现结构：组框机链路（FB_3001_ExternalDevice_DJ005）
 
 1. `FB_R_TRIG / FB_F_TRIG` 取允许送料的上升 / 下降沿。
 2. 本机安全异常 = F0~F8 任一锁存；Y45 与 Y46 目前同一条件（本机安全异常 或 组框机安全异常）。

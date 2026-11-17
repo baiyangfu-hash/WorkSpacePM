@@ -205,7 +205,10 @@ def test_the_copy_for_the_default_project_keeps_what_dj_2026_005_uses(fake_lsp: 
 
     assert result.returncode == 0, result.stdout + result.stderr
     copied = set(_report(fake_lsp)["libscl"].strip(",").split(","))
-    assert {"timer/FB_TON.scl", "timer/FB_TONR.scl", "edge/FB_R_TRIG.scl", "edge/FB_F_TRIG.scl", "types/ST_ServoAxis.scl"} <= copied
+    # CHG-PLC-2026-024 起 005 的边沿改用 TIA 原生 R_TRIG / F_TRIG，不再引用 SysLib 的 edge/*；
+    # timer/FB_TON、FB_TONR 是脚本固定换成替身的两份，ST_ServoAxis 仍是 005 用到的 SysLib 类型。
+    assert {"timer/FB_TON.scl", "timer/FB_TONR.scl", "types/ST_ServoAxis.scl"} <= copied
+    assert not {"edge/FB_R_TRIG.scl", "edge/FB_F_TRIG.scl"} & copied
 
 
 # 三份真实插件输出 (主执行笔记本, 2026-10-26): 失败 / 全过 / 005 全过

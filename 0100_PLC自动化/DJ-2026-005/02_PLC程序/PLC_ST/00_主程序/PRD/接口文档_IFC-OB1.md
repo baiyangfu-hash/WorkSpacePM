@@ -1,5 +1,7 @@
 # OB1 主程序组织块接口文档
 
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars_DJ005 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+
 ## 1. 文档基础信息
 
 | 属性 | 值 |
@@ -32,7 +34,7 @@ OB1是边框缓存机的**主程序组织块**，负责：
 ┌─────────────────────────────────────────────────────────────┐
 │                      OB1 主程序组织块 (V7.1.1)                │
 ├─────────────────────────────────────────────────────────────┤
-│  Step 1: fbExternalDevice (FB_3001_ExternalInteraction；DJ005实现名: FB_ExternalDeviceInteraction) │
+│  Step 1: fbExternalDevice (FB_3001_ExternalInteraction；DJ005实现名: FB_3001_ExternalDevice_DJ005) │
 │          ← stExternal.i_* (27输入) → stExternal.o_* (20输出) │
 │                                                                 │
 │  Step 2: fbConveyor_L1~L4 (4×FB_1002 展开)                   │
@@ -62,11 +64,11 @@ OB1是边框缓存机的**主程序组织块**，负责：
 
 | 调用顺序 | FB名称 | 版本 | 功能描述 | 输入来源 | 输出去向 |
 |:-------:|--------|:----:|----------|----------|----------|
-| 1 | FB_3001_ExternalInteraction（DJ005实现名：FB_ExternalDeviceInteraction） | V4.1.0 | 外部设备交互(组框机/打胶机/机器人/安全) | GlobalVars.stExternal (27in) | GlobalVars.stExternal (20out) |
-| 2 | FB_1002 ×4 (L1~L4展开) | V7.0.0 | 四层输送机控制(每层独立Step_S状态机) | GlobalVars.stConveyor (逐层ARRAY索引, 22in/11out per layer) | GlobalVars.stConveyor (逐层ARRAY + 3个汇总标量) |
-| 3 | FB_1003_PickPlace | V7.0.0 | 取放料机构(6步S20~S25状态机+PLCopen MC) | GlobalVars.stPickPlace (38in) + VAR_IN_OUT轴引用(2) | GlobalVars.stPickPlace (16out) |
-| 4 | FB_1004_GlueMachineFeeder | V6.0.0 | 打胶机送料(4步D760状态机) | GlobalVars.stFeeder (14in含工站间信号) | GlobalVars.stFeeder (14out) |
-| 5 | FB_2001_CommonAlarm | V6.0.0 | 公共报警管理(49类报警+指示灯+MES队列) | Conveyor/PickPlace/Feeder报警 + Reset | GlobalVars.stGlobal (16out) |
+| 1 | FB_3001_ExternalInteraction（DJ005实现名：FB_3001_ExternalDevice_DJ005） | V4.1.0 | 外部设备交互(组框机/打胶机/机器人/安全) | GlobalVars_DJ005.stExternal (27in) | GlobalVars_DJ005.stExternal (20out) |
+| 2 | FB_1002 ×4 (L1~L4展开) | V7.0.0 | 四层输送机控制(每层独立Step_S状态机) | GlobalVars_DJ005.stConveyor (逐层ARRAY索引, 22in/11out per layer) | GlobalVars_DJ005.stConveyor (逐层ARRAY + 3个汇总标量) |
+| 3 | FB_1003_PickPlace | V7.0.0 | 取放料机构(6步S20~S25状态机+PLCopen MC) | GlobalVars_DJ005.stPickPlace (38in) + VAR_IN_OUT轴引用(2) | GlobalVars_DJ005.stPickPlace (16out) |
+| 4 | FB_1004_GlueMachineFeeder | V6.0.0 | 打胶机送料(4步D760状态机) | GlobalVars_DJ005.stFeeder (14in含工站间信号) | GlobalVars_DJ005.stFeeder (14out) |
+| 5 | FB_2001_CommonAlarm | V6.0.0 | 公共报警管理(49类报警+指示灯+MES队列) | Conveyor/PickPlace/Feeder报警 + Reset | GlobalVars_DJ005.stGlobal (16out) |
 
 ---
 
@@ -78,10 +80,10 @@ OB1是边框缓存机的**主程序组织块**，负责：
 fbPickPlace(
     ...
     (* V7.0.0: VAR_IN_OUT 必须在VAR_OUTPUT之前声明 *)
-    io_stZAxis   => GlobalVars.astServoAxis[1],    // Z轴(升降)
-    io_stX1Axis  => GlobalVars.astServoAxis[2],     // X1轴(取放料横移)
+    io_stZAxis   => GlobalVars_DJ005.astServoAxis[1],    // Z轴(升降)
+    io_stX1Axis  => GlobalVars_DJ005.astServoAxis[2],     // X1轴(取放料横移)
 
-    q_bFrontClamp   => GlobalVars.stPickPlace.o_bFrontClamp_Action,
+    q_bFrontClamp   => GlobalVars_DJ005.stPickPlace.o_bFrontClamp_Action,
     ...
 );
 ```
@@ -90,20 +92,20 @@ fbPickPlace(
 
 ```
 (* V7.1.1前 - 反馈回路(有Bug): *)
-i_iPickLayer := GlobalVars.stPickPlace.o_iCurrentPickLayer;  // ❌ 输出→输入
+i_iPickLayer := GlobalVars_DJ005.stPickPlace.o_iCurrentPickLayer;  // ❌ 输出→输入
 
 (* V7.1.1后 - 独立输入(已修复): *)
-i_iPickLayer := GlobalVars.stPickPlace.i_iPickLayer_Input;      // ✅ HMI独立指定
+i_iPickLayer := GlobalVars_DJ005.stPickPlace.i_iPickLayer_Input;      // ✅ HMI独立指定
 ```
 
 ### 5.3 PickPlace 后处理 — 双电磁阀松开输出
 
 ```
 (* OB1后处理: Release = NOT Action (双电磁阀互锁) *)
-GlobalVars.stPickPlace.o_bFrontClamp_Release  := NOT GlobalVars.stPickPlace.o_bFrontClamp_Action;
-GlobalVars.stPickPlace.o_bRearClamp_Release   := NOT GlobalVars.stPickPlace.o_bRearClamp_Action;
-GlobalVars.stPickPlace.o_bFrontClamp2_Release := NOT GlobalVars.stPickPlace.o_bFrontClamp2_Action;
-GlobalVars.stPickPlace.o_bRearClamp2_Release   := NOT GlobalVars.stPickPlace.o_bRearClamp2_Action;
+GlobalVars_DJ005.stPickPlace.o_bFrontClamp_Release  := NOT GlobalVars_DJ005.stPickPlace.o_bFrontClamp_Action;
+GlobalVars_DJ005.stPickPlace.o_bRearClamp_Release   := NOT GlobalVars_DJ005.stPickPlace.o_bRearClamp_Action;
+GlobalVars_DJ005.stPickPlace.o_bFrontClamp2_Release := NOT GlobalVars_DJ005.stPickPlace.o_bFrontClamp2_Action;
+GlobalVars_DJ005.stPickPlace.o_bRearClamp2_Release   := NOT GlobalVars_DJ005.stPickPlace.o_bRearClamp2_Action;
 ```
 
 ### 5.4 Conveyor 汇总逻辑
@@ -171,7 +173,7 @@ PickPlace ──o_bPlaceComplete_ToFeeder──→ Feeder.i_bPickPlace_FeedCompl
 | 版本号 | 日期 | 变更内容 |
 |--------|------|----------|
 | **V7.1.1** | **2026-05-20** | **Bug修复**: TC11 i_iPickLayer输入源从o_iCurrentPickLayer(输出反馈回路)改为i_iPickLayer_Input(独立输入), 断开FB内部覆盖问题 |
-| **V7.1.0** | **2026-05-20** | **FB_1003 V7.0.0集成**: 新增VAR_IN_OUT io_stZAxis/io_stX1Axis=>astServoAxis[1..2]; GlobalVars.db新增astServoAxis[1..3]数组 |
+| **V7.1.0** | **2026-05-20** | **FB_1003 V7.0.0集成**: 新增VAR_IN_OUT io_stZAxis/io_stX1Axis=>astServoAxis[1..2]; GlobalVars_DJ005.db新增astServoAxis[1..3]数组 |
 | **V7.0.0** | **2026-05-18** | **Conveyor重构**: FB_1001容器取消, 展开调用4×FB_1002(L1~L4); 新增汇总逻辑(q_bRunning/q_bFault/q_iAlarmCode); 下游引用更新(PickPlace取q_aLayerFeedDone) |
 | V6.0.1 | 2026-05-18 | 修复: 所有GlobalVars成员引用对齐DB实际定义(stExternal 27in/20out, stConveyor 34in/30out, stPickPlace 51in/20out等) |
 | V6.0.0 | 2026-05-18 | Phase 3全部重写: 同步所有FB到V6.0.0新接口, 变量名100%英文 |

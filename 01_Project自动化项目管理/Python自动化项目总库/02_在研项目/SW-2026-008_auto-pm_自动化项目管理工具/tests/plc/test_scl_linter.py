@@ -612,14 +612,18 @@ def test_the_twelve_existing_zero_based_arrays_in_db_files_are_only_warnings() -
     assert severities == ["WARNING"] * 12
 
 
-def test_005_global_vars_has_the_nine_fb_instances_and_they_are_only_warnings() -> None:
-    """TD-SW008-596：005 的 GlobalVars.db 第 43～51 行 9 个 FB 实例，按 LSP-905 §4.11 报警告（第一阶段不拦）。"""
+def test_005_global_vars_no_longer_holds_fb_instances() -> None:
+    """TD-SW008-596：005 原来 GlobalVars.db 第 43～51 行的 9 个 FB 实例，CHG-PLC-2026-024 已移进各自的背景 DB，
+    全局 DB 改存 GlobalVars.scl（块名 GlobalVars_DJ005，CHG-PLC-2026-025）；按 LSP-905 §4.11 一个都不能剩。"""
     from pathlib import Path
 
     repo = next(p for p in Path(__file__).resolve().parents if (p / "0100_PLC自动化").is_dir())
-    db = repo / "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db"
+    data = repo / "0100_PLC自动化/DJ-2026-005/02_PLC程序/PLC_ST/00_全局数据"
+    assert not (data / "GlobalVars.db").exists()
+    db = data / "GlobalVars.scl"
+    assert "DATA_BLOCK GlobalVars_DJ005" in db.read_text(encoding="utf-8-sig")
     found = [v for v in SclLinter.lint_file(db).violations if v.rule_id == SclLinter.GLOBAL_DB_FB_INSTANCE_RULE]
-    assert [(v.line_number, v.severity) for v in found] == [(n, "WARNING") for n in range(43, 52)]
+    assert found == []
 
 
 def test_a_listed_declaration_in_another_db_is_still_an_error() -> None:

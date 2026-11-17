@@ -14,4 +14,4 @@
 
 ## 调用
 
-OB1 的调用行见 `00_主程序/OB1.scl`，实例声明见 `00_全局数据/GlobalVars.db`。
+OB1 的调用行见 `00_主程序/OB1.scl`，实例在背景数据块 `02_输送机/DB_1007_ConveyorSystem_DJ005.scl`（TIA 全局 DB 里不能放 FB 实例，LSP-905 §4.11）。
