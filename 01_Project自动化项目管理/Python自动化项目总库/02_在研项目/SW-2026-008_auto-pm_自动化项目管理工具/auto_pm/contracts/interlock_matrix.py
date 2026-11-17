@@ -136,6 +136,11 @@ COMMANDS: dict[str, CommandSpec] = {
         CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL"),
         "real deploy only with --no-check-only and a user-confirmation ref; the pre-flight alone writes nothing",
     ),
+    # CHG-SCPT-2026-706: ``release ship`` gathers the verdict and the signoff, then the same real deploy as ``release deploy``.
+    "release ship": CommandSpec(
+        CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE", "G-AGENT-APPROVAL"),
+        "the look (default) caches the gate verdict and writes nothing else; --no-check-only with a user-confirmation ref deploys",
+    ),
     "release rollback": CommandSpec(
         CommandKind.NORMAL, ("workspace=control_root", "operator=user"), ("G-MUTATION-ROOT", "G-AGENT-APPROVAL"),
         "puts the pointers back from a verified backup; warns about a broken identity, never refuses on it; "

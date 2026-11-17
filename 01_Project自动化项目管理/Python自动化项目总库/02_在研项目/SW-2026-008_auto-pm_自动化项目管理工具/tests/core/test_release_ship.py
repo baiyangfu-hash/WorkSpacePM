@@ -199,9 +199,12 @@ def test_a_rolled_back_deploy_is_reported_as_rolled_back(root: Path) -> None:
 
 
 def test_the_repo_has_the_drill_script_and_the_precheck_card() -> None:
-    workspace = Path(__file__).resolve().parents[6]
-    assert (workspace / ship_mod.DRILL_SCRIPT).is_file()
-    assert (workspace / ship_mod.PRECHECK_CARD).is_file()
+    project = (
+        Path(__file__).resolve().parents[2]
+    )  # 两个文件都在本项目目录里，按项目内相对路径找，不读项目外
+    prefix = len(Path(check.PROJECT_DIR).parts)
+    assert (project / Path(*ship_mod.DRILL_SCRIPT.parts[prefix:])).is_file()
+    assert (project / Path(*ship_mod.PRECHECK_CARD.parts[prefix:])).is_file()
 
 
 def test_gh_cli_prefers_the_artifact_named_after_the_commit(tmp_path: Path) -> None:
@@ -222,3 +225,17 @@ def test_gh_cli_prefers_the_artifact_named_after_the_commit(tmp_path: Path) -> N
         and json.loads(target.read_text(encoding="utf-8"))["verdict"] == "PASS"
     )
     assert [a[5] for a in asked] == [f"gate-verdict-{COMMIT[:12]}"]
+
+
+def test_a_newer_gate_run_replaces_the_cached_verdict(root: Path) -> None:
+    """审计 #857：同一提交第 1 轮 PASS 已缓存，第 2 轮 FAIL 时必须重下，不能拿旧的 PASS 配新的运行号。"""
+    _signoff(root)
+    first = FakeGitHub([{"id": 7, "status": "completed", "url": "u7"}], PASS_VERDICT)
+    assert ship_mod.ship(root, "c0e5bbc", github=first).can_switch is True
+    second = FakeGitHub(
+        [{"id": 8, "status": "completed", "url": "u8"}], {**PASS_VERDICT, "verdict": "FAIL"}
+    )
+    report = ship_mod.ship(root, "c0e5bbc", github=second)
+    assert second.downloads == [8]
+    assert report.gate["state"] == "fail" and report.gate["run_id"] == 8
+    assert report.can_switch is False

@@ -88,8 +88,13 @@ def _gate(
         runs = github.gate_runs(commit)
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         if target.is_file():
+            note = target.with_name("gate_verdict.run")
+            cached = note.read_text(encoding="utf-8").strip() if note.is_file() else ""
             return _verdict_info(
-                target, None, "", "拿不到 GitHub 上的运行记录，用的是上次下载的判决"
+                target,
+                int(cached) if cached.isdigit() else None,
+                "",
+                "拿不到 GitHub 上的运行记录，用的是上次下载的判决（可能不是最新一轮）",
             ), target
         return {
             "state": "error",
@@ -119,6 +124,10 @@ def _gate(
             "verdict_sha256": "",
             "detail": "云端 gate-full 还在跑",
         }, None
+    run_note = target.with_name("gate_verdict.run")
+    cached_run = run_note.read_text(encoding="utf-8").strip() if run_note.is_file() else ""
+    if target.is_file() and cached_run != str(run_id):
+        target.unlink()  # a newer gate run of the same commit: the cached verdict belongs to another run
     if not target.is_file():
         downloaded = github.download_verdict(run_id, commit, target.parent)
         if downloaded is None:
@@ -132,6 +141,7 @@ def _gate(
             }, None
         if downloaded != target:
             shutil.copyfile(downloaded, target)
+        run_note.write_text(str(run_id), encoding="utf-8")
     return _verdict_info(target, run_id, url, ""), target
 
 
