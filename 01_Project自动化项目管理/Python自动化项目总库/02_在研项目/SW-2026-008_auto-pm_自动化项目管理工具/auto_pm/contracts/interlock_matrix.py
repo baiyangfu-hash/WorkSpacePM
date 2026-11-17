@@ -80,6 +80,20 @@ COMMANDS: dict[str, CommandSpec] = {
     "change create": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",)),
     "pm inbox note": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "记一条待整理记录（一句话和原话）；不改当前焦点"),
     "worktree release": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "收自己对话的别名工位，先存救援引用"),
+    # CHG-SCPT-2026-712: the AI registry of this machine's ledger; register / unregister refuse any agent marker (user only).
+    "agent list": CommandSpec(CommandKind.READ_ONLY, (), (), "lists the built-in roster and the AIs registered in this ledger"),
+    "agent register": CommandSpec(
+        CommandKind.NORMAL,
+        ("identity=clean", "operator=user"),
+        ("G-IDENTITY-WRITE",),
+        "user only: any agent marker is refused; writes the agent_registry table and one event",
+    ),
+    "agent unregister": CommandSpec(
+        CommandKind.NORMAL,
+        ("identity=clean", "operator=user"),
+        ("G-IDENTITY-WRITE",),
+        "user only; refused while the name still has a station or a live claim; keeps the row",
+    ),
     "worktree heartbeat": CommandSpec(CommandKind.NORMAL, (), (), "只刷新自己工位的心跳记录，不写账本"),
     "worktree who": CommandSpec(CommandKind.NORMAL, (), (), "列出本机在场会话；只读，唯一的写入是本会话自己的在场记录（.auto-pm/presence），不写账本"),
     "worktree reclaim": CommandSpec(CommandKind.NORMAL, ("identity=clean",), ("G-IDENTITY-WRITE",), "只列；--apply 才回收，且只由用户终端执行"),

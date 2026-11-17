@@ -39,14 +39,93 @@ from auto_pm.infrastructure.control_root_guard import (
 )
 from auto_pm.infrastructure.git_timeout import run_git_bounded_text
 
-# WS-001 station and branch prefix table.  An agent not listed here is registered by the user first.
-AGENT_ROSTER: dict[str, str] = {
+# WS-001 station and branch prefix table: the five agents built in.  Any other AI is registered by the user on this machine
+# (CHG-SCPT-2026-712, the board's "登记新 AI" button or ``main.py agent register <名字>``) and lives in the ledger table
+# ``agent_registry``; ``agent_registry.py`` reads it.  No code change, no release, no rule approval for a new AI.
+BUILTIN_ROSTER: dict[str, str] = {
     "claude": "claude/",
     "trae": "trae/",
     "cursor": "cursor/",
     "vscode": "vscode/",
     "codex": "codex/",
 }
+RegisteredSource = Callable[[], Mapping[str, str]]
+
+
+class _Roster(Mapping[str, str]):
+    """The roster every check reads: the built-in five plus the AIs the user registered in this control root's ledger.
+
+    The registered part is read lazily, at most once per source, and only when a name off the built-in list is looked up or
+    the whole roster is listed: the user's own terminal and the built-in agents never pay for a ledger read.  No source
+    (a process that never told us its control root), or a source that cannot read the ledger, means built-ins only: an
+    unregistered marker is then refused as before (fail-closed), never let through.
+    """
+
+    def __init__(self, builtin: Mapping[str, str]) -> None:
+        self._builtin = dict(builtin)
+        self._source: RegisteredSource | None = None
+        self._registered: dict[str, str] | None = None
+        self._failed = False
+        self._lock = threading.Lock()
+
+    def use(self, source: RegisteredSource | None) -> None:
+        """Read registered AIs from ``source`` from now on (``None``: built-ins only); forgets what was read before."""
+
+        with self._lock:
+            self._source = source
+            self._registered = None
+            self._failed = False
+
+    def registered(self) -> dict[str, str]:
+        """The registered AIs (name -> branch prefix) that are not built in."""
+
+        with self._lock:
+            if self._registered is None:
+                loaded: Mapping[str, str] = {}
+                self._failed = False
+                if self._source is not None:
+                    try:
+                        loaded = self._source()
+                    except Exception:  # noqa: BLE001 - a roster that cannot be read is the built-in roster (fail-closed)
+                        loaded = {}
+                        self._failed = True
+                self._registered = {
+                    name: prefix for name, prefix in loaded.items() if name not in self._builtin and prefix == f"{name}/"
+                }
+            return dict(self._registered)
+
+    @property
+    def read_failed(self) -> bool:
+        """The registered part could not be read (only the built-in five are known): checks that need it must fail closed."""
+
+        self.registered()
+        with self._lock:
+            return self._failed
+
+    def _all(self) -> dict[str, str]:
+        return {**self._builtin, **self.registered()}
+
+    def __contains__(self, name: object) -> bool:
+        if name in self._builtin:
+            return True
+        return isinstance(name, str) and name in self.registered()
+
+    def __getitem__(self, name: str) -> str:
+        if name in self._builtin:
+            return self._builtin[name]
+        return self.registered()[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._all())
+
+    def __len__(self) -> int:
+        return len(self._all())
+
+    def __repr__(self) -> str:
+        return f"AgentRoster({self._all()!r})"
+
+
+AGENT_ROSTER = _Roster(BUILTIN_ROSTER)
 # Names the cockpit itself uses under the codex/ prefix; a card may not take them over.
 RESERVED_CARD_PREFIXES = ("control-root", "run-plan")
 RUN_PLAN_NAME = re.compile(r"^run-plan-[0-9a-f]{16}$")
@@ -81,7 +160,18 @@ LeaseProbe = Callable[[Path], str]
 _UNKNOWN_CALLER = "?"
 
 # 每个对话一个工位名：<名册里的基名>-<会话 ID 前 6 位十六进制>（设计稿：动态 agent 名）。分支前缀沿用基名。
+# ``_ALIAS`` 是内置五个的写法（看板照抄的那份和它逐字对照）；登记的 AI 用同一个形状，``is_alias`` 两种都认。
 _ALIAS = re.compile(r"^(claude|codex|cursor|trae|vscode)-[0-9a-f]{6}$")
+_ALIAS_SHAPE = re.compile(r"^([a-z][a-z0-9]{1,19})-[0-9a-f]{6}$")
+
+
+def is_alias(name: str) -> bool:
+    """``name`` 是不是名册里某个基名的会话别名（``claude-b89bc8``；登记过的 ``antigravity-1a2b3c`` 也算）。"""
+
+    if _ALIAS.match(name):
+        return True
+    match = _ALIAS_SHAPE.match(name)
+    return match is not None and match.group(1) in AGENT_ROSTER
 
 
 def base_agent(name: str) -> str:
@@ -89,8 +179,15 @@ def base_agent(name: str) -> str:
 
     if name in AGENT_ROSTER:
         return name
-    match = _ALIAS.match(name)
-    return match.group(1) if match else ""
+    match = _ALIAS_SHAPE.match(name)
+    return match.group(1) if match and is_alias(name) else ""
+
+
+def roster_names() -> str:
+    """名册里的名字，顿号隔开（内置的在前，登记的按名字排），拒绝提示里现取现列。"""
+
+    registered = sorted(AGENT_ROSTER.registered())
+    return "、".join([*BUILTIN_ROSTER, *registered])
 
 
 def session_id(environ: Mapping[str, str] | None = None) -> str:
@@ -443,6 +540,10 @@ class AgentWorktreeService:
                 f"工位命令只能在控制根执行（本机唯一那份仓库克隆的根目录）: {error}"
             ) from error
         self._stations_dir = self._root / ".auto-pm" / "worktrees"
+        # CHG-SCPT-2026-712: the roster of this control root includes the AIs the user registered in its ledger.
+        from auto_pm.application.core.agent_registry import use_ledger_roster
+
+        use_ledger_roster(self._root)
         self._run_state = run_state or _ledger_run_state(self._root)
         self._lease_probe = lease_probe or _ledger_lease_probe(self._root)
         self._measure_size = measure_size
@@ -604,7 +705,7 @@ class AgentWorktreeService:
     def _write_holder_note(self, agent: str) -> None:
         """记下谁开的这个别名工位（会话 ID、进程号、对话标题），兜底回收靠它判断持有者还在不在。只给别名工位记。"""
 
-        if not _ALIAS.match(agent):
+        if not is_alias(agent):
             return
         try:
             self._notes_dir.mkdir(parents=True, exist_ok=True)
@@ -671,7 +772,7 @@ class AgentWorktreeService:
             return
 
     def _release_checked(self, agent: str, record: dict[str, object]) -> ReleaseResult:
-        if not _ALIAS.match(agent):
+        if not is_alias(agent):
             raise AgentWorktreeError(f"`{agent}` 不是会话别名（<基名>-<6位十六进制>）；基名工位用 `worktree close`")
         caller = caller_agent()
         if not acts_for(caller, agent):
@@ -788,7 +889,7 @@ class AgentWorktreeService:
         if not self._stations_dir.is_dir():
             return found
         for child in sorted(self._stations_dir.iterdir()):
-            if not child.is_dir() or not _ALIAS.match(child.name):
+            if not child.is_dir() or not is_alias(child.name):
                 continue
             note = self._read_holder_note(child.name)
             pid = note.get("pid")
@@ -816,7 +917,7 @@ class AgentWorktreeService:
         registered = {_same_path_key(path) for path in self._worktrees()}
         for entry in sorted(self._notes_dir.glob("*.json")):
             name = entry.stem
-            if not _ALIAS.match(name):
+            if not is_alias(name):
                 continue
             station = self._stations_dir / name
             if station.exists() or _same_path_key(station) in registered:
@@ -1578,8 +1679,8 @@ class AgentWorktreeService:
         base = base_agent(agent)
         if not base:
             raise AgentWorktreeError(
-                f"agent `{agent}` 不在名册里（{'、'.join(AGENT_ROSTER)}，或 <基名>-<6位十六进制> 的会话别名）；"
-                "表外的 AI 先由用户登记名字和前缀"
+                f"agent `{agent}` 不在名册里（{roster_names()}，或 <基名>-<6位十六进制> 的会话别名）；"
+                "表外的 AI 先由用户本人在看板“工作树与分支”页点“登记新 AI”（或在自己的终端跑 main.py agent register <名字>）"
             )
         return AGENT_ROSTER[base]
 

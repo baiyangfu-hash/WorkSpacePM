@@ -509,6 +509,24 @@ CREATE TABLE IF NOT EXISTS intake_notes (
 """
 _DDL += INTAKE_NOTES_DDL + ";\n"
 
+# CHG-SCPT-2026-712: the AIs the user registered on this machine beyond the five built into the code (``agent register``).
+# Created lazily by the first registration, never by ``initialize``: an existing ledger keeps its exact table set until the
+# user registers an AI, and an older release opens the ledger and simply does not read this table.  One row per name;
+# unregistering keeps the row (status ``retired``) so who registered it and when stays readable, and every change also goes
+# into ``events``.
+AGENT_REGISTRY_DDL = """
+CREATE TABLE IF NOT EXISTS agent_registry (
+    name TEXT PRIMARY KEY,
+    branch_prefix TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'retired')),
+    registered_by TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    retired_by TEXT NOT NULL DEFAULT '',
+    retired_at TEXT NOT NULL DEFAULT ''
+)
+"""
+
 _LEGACY_SCHEMA_VERSION = "continuity-store.v2"
 _V3_SCHEMA_VERSION = "continuity-store.v3"
 _V4_SCHEMA_VERSION = "continuity-store.v4"
