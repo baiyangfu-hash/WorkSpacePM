@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "说明": "用户本人在 TIA Portal 里实测过的 PLC 源文件。驾驶舱 PLC 标准模板按 template_data 生成的 .scl/.db，每个文件的 sha256 必须等于这里某个“已实测”文件，或登记在 pending（待实测）里；对不上 tests/core/test_tia_baseline.py 就报红。改了模板就出包请用户在 TIA 里重测，测完把结果和证据记进 samples，再从 pending 里删掉。只有用户回传的 TIA 结果才能写进 samples（CHG-SCPT-2026-702，规范 LSP-905 §4.11 第 6 条）。 文件名命中仓库忽略规则的（如 *.db 被当成运行时 SQLite 库挡掉）存成“原名.baseline”，manifest 用 stored_as 记存放名，哈希是原文件的。",
+  "template": "plc-standard-project",
+  "template_data": {
+    "project_id": "DJ-2026-901",
+    "project_name": "TIA导入样例",
+    "station_instances": [
+      "Station1",
+      "Station2",
+      "Station3"
+    ]
+  },
+  "samples": [
+    {
+      "id": "DJ-2026-901_3工位TIA导入样例_4fe21ff7",
+      "dir": "DJ-2026-901_3工位TIA导入样例_4fe21ff7",
+      "来源": "驾驶舱 PLC 标准模板 main 4fe21ff7（含 CHG-SCPT-2026-635、636）按 template_data 生成，未手改；交用户的包 DJ-2026-901_3工位TIA导入样例_4fe21ff7_utf8.zip（sha256 a888bed0209e0337015d451a7e82177f58dc356d454d362679ff7bedfbb68af4），包内按导入顺序分 1～6 组文件夹",
+      "tia": "TIA Portal V19",
+      "导入方式": "外部源文件 → 从源生成块，按包内 1～6 顺序；导入后主程序手工改成 OB123",
+      "实测日期": "2026-11-11",
+      "结果": "全部重建 错误 0",
+      "证据": "用户回传，记在规范 TOOL-908 第 82 行（CHG-DOCU-2026-115）；用户 2026-11-16 在项目线程确认三工位样例导入正常，结构、块命名、文件夹命名是他定的",
+      "files": [
+        {
+          "package_path": "1_公共函数/FC_4001_ScaleAnalog.scl",
+          "template_path": "02_PLC程序/PLC_ST/06_公共函数/FC_4001_ScaleAnalog.scl",
+          "sha256": "e8dfedfc069953419cc188a08098e9ad85ba7169bb3ca9f4da4d66152a5d8370"
+        },
+        {
+          "package_path": "2_工位/DB_1001_Station1.scl",
+          "template_path": "02_PLC程序/PLC_ST/02_工位_动作机构/DB_1001_Station1.scl",
+          "sha256": "7955715270fd25e4f1927319b32096e0b4d0778bbe58dc37ebf938e3f36b08bd"
+        },
+        {
+          "package_path": "2_工位/DB_1001_Station2.scl",
+          "template_path": "02_PLC程序/PLC_ST/02_工位_动作机构/DB_1001_Station2.scl",
+          "sha256": "eafc937178fc308df6fa9b299580cf96654f17c120d56bbc848a6127aabd23b8"
+        },
+        {
+          "package_path": "2_工位/DB_1001_Station3.scl",
+          "template_path": "02_PLC程序/PLC_ST/02_工位_动作机构/DB_1001_Station3.scl",
+          "sha256": "3f489f3663b76a06b9e5a1750ac9636029b4df9a503f7f35912593bee90371c0"
+        },
+        {
+          "package_path": "2_工位/FB_1001_Station1.scl",
+          "template_path": "02_PLC程序/PLC_ST/02_工位_动作机构/FB_1001_Station1.scl",
+          "sha256": "ce1564382fa2f52aad8e544b2fc0b07fde4af7f166bf66159655e6c8a02285dc"
+        },
+        {
+          "package_path": "2_工位/ST_1001_Station1.scl",
+          "template_path": "02_PLC程序/PLC_ST/02_工位_动作机构/ST_1001_Station1.scl",
+          "sha256": "8bc8ac4396f65d27a4783622a96f5b17b341fe7f0c5dcf28210658ec7bd6e0f8"
+        },
+        {
+          "package_path": "3_外部设备交互/DB_3001_ExternalInteraction.scl",
+          "template_path": "02_PLC程序/PLC_ST/01_外部设备交互/DB_3001_ExternalInteraction.scl",
+          "sha256": "74d45151b9930ac2f1ecf5e8f6e3bc7aab4ab3dfe833ce47664880909826f6f8"
+        },
+        {
+          "package_path": "3_外部设备交互/FB_3001_ExternalInteraction.scl",
+          "template_path": "02_PLC程序/PLC_ST/01_外部设备交互/FB_3001_ExternalInteraction.scl",
+          "sha256": "b78153f86a37121b20b0029d2ec7b6fab9716edfb0b5020cb9b920b2924d13a9"
+        },
+        {
+          "package_path": "3_外部设备交互/ST_3001_ExternalDevice.scl",
+          "template_path": "02_PLC程序/PLC_ST/01_外部设备交互/ST_3001_ExternalDevice.scl",
+          "sha256": "66b7e6e27383dfe073d9498dd6026a03741452538c901f565391445bdfbf5ab0"
+        },
+        {
+          "package_path": "4_公共报警/DB_2001_CommonAlarm.scl",
+          "template_path": "02_PLC程序/PLC_ST/05_公共报警/DB_2001_CommonAlarm.scl",
+          "sha256": "8a52c4e9a032355aaa3b41213d4468015dffc2ab42fad628ade3e66c080e2590"
+        },
+        {
+          "package_path": "4_公共报警/FB_2001_CommonAlarm_AllStation.scl",
+          "template_path": "02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl",
+          "sha256": "2ef5bb231fe123277c79c063b374f2deffec70bc41a14f01b36243044f319fc9"
+        },
+        {
+          "package_path": "4_公共报警/ST_2001_CommonAlarm.scl",
+          "template_path": "02_PLC程序/PLC_ST/05_公共报警/ST_2001_CommonAlarm.scl",
+          "sha256": "dd3663c50e8cecc78dbbba4350ce6f307b5b9db41d7f51adcf01a808c191e85f"
+        },
+        {
+          "package_path": "5_全局数据/GlobalVars.db",
+          "template_path": "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
+          "sha256": "85413f3980a1de486ba16c567dedcae0db81dbe93f1068c64ff928b7610472f0",
+          "stored_as": "5_全局数据/GlobalVars.db.baseline"
+        },
+        {
+          "package_path": "6_主程序/OB123.scl",
+          "template_path": "02_PLC程序/PLC_ST/00_主程序/OB123.scl",
+          "sha256": "738a2df8132284f40389226d9efe54754351256e2be9fd00431d92b7a4b16bf4"
+        }
+      ]
+    },
+    {
+      "id": "DJ-2026-011_TIA实测_20261116",
+      "dir": "DJ-2026-011_TIA实测_20261116",
+      "来源": "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件/FB_0001 的源文件（main 上 e8a9bc5f 版本，PR #539、#566）。截图里的变量名、调用写法和这两个文件一致；用户 TIA 里那份文件和这里逐字节一致未核实",
+      "tia": "TIA Portal V19，CPU 1217C DC/DC/DC",
+      "导入方式": "外部源文件 → 从源生成块",
+      "实测日期": "2026-11-16",
+      "结果": "FB_1091（TON_TIME 多重实例、DINT_TO_TIME）编译 错误 0（1 个警告是硬件未设保护等级）；FB_2001（R_TRIG 多重实例）编译 错误 0 警告 0；在编辑器里写的 OB123 调用 FB_1091 时 TIA 自动建背景 DB",
+      "证据": "用户截图 7 张，原样存在本目录 证据截图_20261116/（*.png 被仓库忽略规则挡住，存成“原名.baseline”，改回 .png 就能看）（evidence_files 记哈希）；用户原话在项目线程 2026-11-16T22:03Z～22:31Z；变更单 CHG-SPEC-2026-023",
+      "files": [
+        {
+          "package_path": "FB_1091_TwoHandStart_DJ2026011.scl",
+          "sha256": "4900190554717b86fc05617497c707955639695bc0d46de795bdc9f5c30fe7cc"
+        },
+        {
+          "package_path": "FB_2001_AlarmSummary_DJ2026011.scl",
+          "sha256": "dcf73e4b43ab4ad411003b5c66acb1710c540198b340d72e3f4ec90f3f29c813"
+        }
+      ],
+      "evidence_files": [
+        {
+          "path": "证据截图_20261116/FB_1091_TIA_V19_TON_TIME_用户截图_20261116T221104Z.png.baseline",
+          "sha256": "9c77c48b04498052c881cbe54d78e6d34ba958839e329205b221be79005aded2"
+        },
+        {
+          "path": "证据截图_20261116/FB_1091_TIA_V19_编译0错误_自动生成背景DB_用户截图_20261116T221937Z.png.baseline",
+          "sha256": "94d34f0e8feb89059a7552398391fa09d1d30086f31e5e425137db1d201da882"
+        },
+        {
+          "path": "证据截图_20261116/FB_1091_源文件_BOM_用户截图_20261116T220315Z.png.baseline",
+          "sha256": "3dd1b4a3ba091c6938e40e113e6ee8c8ee0df31fa89e42f3f7288231b87aade5"
+        },
+        {
+          "path": "证据截图_20261116/FB_2001_R_TRIG_声明与调用_用户截图_20261116T222255Z.png.baseline",
+          "sha256": "0caa996e7a61551d1f19443f0aa4ba92c25c15236eef3cf3591f57e1f4e5048a"
+        },
+        {
+          "path": "证据截图_20261116/FB_2001_R_TRIG_编译0错误0警告_用户截图_20261116T222255Z.png.baseline",
+          "sha256": "ab2164a7d7abc0304d453674b1f6e2e967e9bf6561f5fc89fa45262b42bc4042"
+        },
+        {
+          "path": "证据截图_20261116/OB123_SCL调用FB_自动建背景DB4_用户截图_20261116T222440Z.png.baseline",
+          "sha256": "19114463d66ec41291f568894736a0978fb2618c5914bb8ee9f11f057c46d0cd"
+        },
+        {
+          "path": "证据截图_20261116/外部源文件_FB1091_FB2001_用户截图_20261116T222545Z.png.baseline",
+          "sha256": "d10a8cc2fa9a6c8ab471678692cc1e6b739cba3a63b93c90bca8012067c3dea0"
+        }
+      ]
+    }
+  ],
+  "pending": [
+    {
+      "template_path": "02_PLC程序/PLC_ST/05_公共报警/FB_2001_CommonAlarm_AllStation.scl",
+      "sha256": "60733f2ad4ca1d825b8d58eacca064bd50f506794a7f64716a49ead770a9f334",
+      "原因": "用户测完以后 72fa94c8（TD-SW008-574，2026-11-12）把内部变量 i_/q_ 改名成 s_In/s_Out，约 160 行，没在 TIA 里重测",
+      "下一步": "随 CHG-SCPT-2026-703 的新三工位样例一起请用户测"
+    },
+    {
+      "template_path": "02_PLC程序/PLC_ST/00_全局数据/GlobalVars.db",
+      "sha256": "14a8f2ba91c465e93ccceddafcb182d93457cfb42a01d842edfdff7b8985bda1",
+      "原因": "只差一行注释里的文件夹名（02_工位1_动作机构 → 02_工位_动作机构，3548993b），代码没变",
+      "下一步": "随 CHG-SCPT-2026-703 的新三工位样例一起请用户测"
+    }
+  ]
+}
