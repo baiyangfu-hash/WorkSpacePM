@@ -30,6 +30,8 @@ FILES_THAT_MAY_USE_THE_REAL_GUARD = frozenset(
         "cli/test_continuity_recovery_run.py",
         # CHG-SCPT-2026-476: the exit drills walk the recovery chain with the production control-root rule on.
         "e2e/test_exit_drill.py",
+        # CHG-SCPT-2026-709: the deploy bookkeeping runs against the real commands with the production control-root rule on.
+        "core/test_release_ledger_real_cli.py",
     }
 )
 # The one module that implements ``create_run`` itself (it is the storage layer; the service in front of it owns the rule).
