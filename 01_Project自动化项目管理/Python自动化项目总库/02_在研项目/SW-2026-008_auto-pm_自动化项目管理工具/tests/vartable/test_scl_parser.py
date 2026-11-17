@@ -5,10 +5,15 @@
 V0.5.x Week1 W1-S04: 扩展真实样例测试覆盖, 对 DJ-2026-005 项目的 6 个
 真实 .scl 文件进行端到端解析验证 (OB1/FB_2001/FB_1002/FB_External/
 FB_1004/FB_1003)。
+
+CHG-SCPT-2026-715: 样例改读 tests/fixtures/dj005_frozen/ 里从 main d04bd323 冻结的副本,
+DJ-2026-005 以后改程序不再让驾驶舱 CI 变红 (pr867 审计 §3 走法乙)。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -18,13 +23,9 @@ from auto_pm.domain.vartable.parsers.scl_parser import SclParser
 
 pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
 
-# 工作空间根目录（从 tests/vartable 推导：7 级父目录）
-_WORKSPACE_ROOT = Path(__file__).resolve().parents[6]
-
-# DJ-2026-005 真实 SCL 样例根路径 (引用而非拷贝)
-_DJ_2026_005_ST_ROOT = (
-    _WORKSPACE_ROOT / "0100_PLC自动化" / "DJ-2026-005" / "02_PLC程序" / "PLC_ST"
-)
+# DJ-2026-005 真实 SCL 样例: main d04bd323 的 PLC_ST 原样冻结在本项目 tests/fixtures 下 (CHG-SCPT-2026-715)
+_FROZEN_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "dj005_frozen"
+_DJ_2026_005_ST_ROOT = _FROZEN_ROOT / "PLC_ST"
 # CHG-PLC-2026-026 起主程序文件 OB123.scl，块名 "DJ005_Main"（导入 TIA 后改号成 OB123）
 OB1_SCL = _DJ_2026_005_ST_ROOT / "00_主程序" / "OB123.scl"
 FB_2001_SCL = (
@@ -66,7 +67,7 @@ _DECLARATION_RE = re.compile(r"^[A-Za-z_]\w*\s*:(?!=)")
 def _declared_per_block(path: Path) -> dict[str, int]:
     """不经过 SclParser，直接数样例文件里每类 VAR 块声明了几个变量。
 
-    真实样例会随 DJ-2026-005 的程序修改增减变量，期望值不能手写；这里用一套和解析器无关的
+    冻结样例整份重拷成 DJ-2026-005 新内容时会增减变量，期望值不能手写；这里用一套和解析器无关的
     逐行扫描（去掉 (* *) 与 // 注释，块内每条 `名字 : 类型` 算一个）当判卷依据。
     键与解析结果的 station 一致：VAR_INPUT / VAR_IN_OUT / VAR / VAR_CONSTANT。
     """
@@ -104,16 +105,27 @@ def _parsed_per_station(vt: object) -> dict[str, int]:
 
 @pytest.fixture
 def _real_samples_present() -> None:
-    """真实样例随工作空间检出提交：检出里缺任何一个即失败，不跳过。
+    """冻结样例随本项目测试提交：缺任何一个即失败，不跳过。
 
-    路径写旧曾让整类测试在所有机器上静默跳过；只有不在工作空间 Git 检出里运行时才允许跳过。
+    路径写旧曾让整类测试在所有机器上静默跳过；样例冻结进 tests/fixtures 后任何检出里都在，不再有跳过的理由。
     """
-    missing = [str(p.relative_to(_WORKSPACE_ROOT)) for p in _REAL_SAMPLES if not p.is_file()]
-    if not missing:
-        return
-    if not (_WORKSPACE_ROOT / ".git").exists():
-        pytest.skip("不在工作空间 Git 检出中，DJ-2026-005 真实样例不可用")
-    pytest.fail(f"DJ-2026-005 真实样例缺失（路径写旧或文件被移动）: {missing}")
+    missing = [str(p.relative_to(_FROZEN_ROOT)) for p in _REAL_SAMPLES if not p.is_file()]
+    if missing:
+        pytest.fail(f"DJ-2026-005 冻结样例缺失（路径写旧或文件被移动）: {missing}")
+
+
+def test_frozen_samples_match_the_manifest_byte_for_byte() -> None:
+    """冻结目录里的每个文件都和 manifest 记的 sha256 一致，目录里也没有清单外的文件：样本被手改就报红。"""
+    manifest = json.loads((_FROZEN_ROOT / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["source_commit"] == "d04bd323e323fab526bcc9a6a76537dc4e699c07"
+    recorded = {entry["stored_as"]: entry["sha256"] for entry in manifest["files"]}
+    on_disk = {
+        p.relative_to(_FROZEN_ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in _FROZEN_ROOT.rglob("*")
+        if p.is_file() and p.name != "manifest.json"
+    }
+    assert on_disk == recorded
+    assert {p.relative_to(_FROZEN_ROOT).as_posix() for p in _REAL_SAMPLES} <= set(recorded)
 
 
 require_real_samples = pytest.mark.usefixtures("_real_samples_present")
@@ -309,7 +321,7 @@ class TestSclParserVarConstant:
 
 @require_real_samples
 class TestSclParserRealSamples:
-    """DJ-2026-005 真实 .scl 样例端到端解析验证
+    """DJ-2026-005 真实 .scl 样例（d04bd323 冻结副本）端到端解析验证
 
     覆盖 6 个真实 .scl 文件: OB1/FB_2001/FB_1002/FB_External/FB_1004/FB_1003,
     验证 FB 名提取、VAR 块识别、复杂类型字段提取、中文注释处理。
