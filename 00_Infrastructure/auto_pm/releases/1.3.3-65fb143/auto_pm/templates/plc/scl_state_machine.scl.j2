@@ -1,0 +1,147 @@
+// ==============================================================================
+// 模块名称: {{ fb_number }}_{{ fb_name }}_{{ station_name }}
+// 遵守规范: Siemens LSP 编程规范 (LSP-905 V1.1.0 / DJ-2026-005 标杆)
+// 自动生成: 008 驾驶舱离线工艺矩阵代码生成器
+// 生成时间: {{ generated_at }}
+// ==============================================================================
+
+FUNCTION_BLOCK "{{ fb_number }}_{{ fb_name }}_{{ station_name }}"
+{ S7_Optimized_Block := 'TRUE' }
+VERSION : 1.0
+
+VAR_IN_OUT
+    io_stStation : ST_{{ station_name }}; // 工站全局结构体交互 (结构体整块传递)
+END_VAR
+
+VAR
+    s_iStep          : DINT := 0;      // 内部当前状态机步序
+    s_bRunning       : BOOL := FALSE;  // 运行中状态
+    s_bDone          : BOOL := FALSE;  // 本周期动作完成脉冲
+    s_bAlarm         : BOOL := FALSE;  // 站级异常报警标志
+    s_iAlarmCode     : DINT := 0;      // 异常报警代码
+    s_dStepTimer     : DINT := 0;      // 工步计时累加器 (ms, DINT三段式)
+    s_dDebounceTimer : DINT := 0;      // 光电消抖计时器 (ms)
+END_VAR
+
+VAR_TEMP
+    t_bAutoEnable    : BOOL;
+    t_bReset         : BOOL;
+    t_bInPos         : BOOL;
+    t_bWorkPos       : BOOL;
+    t_bCylRetracted  : BOOL;
+    t_bCylExtended   : BOOL;
+    t_dCylTimeout    : DINT;
+    t_dProcessTime   : DINT;
+END_VAR
+
+CONST
+    STEP_IDLE        : DINT := 0;      // 0: 准备/待命状态
+    STEP_FAULT       : DINT := 99;     // 99: 故障保护状态
+END_CONST
+
+BEGIN
+    // --------------------------------------------------------------------------
+    // 1. 结构体解包至局部临时变量
+    // --------------------------------------------------------------------------
+    t_bAutoEnable   := io_stStation.stControl.bAutoEnable;
+    t_bReset        := io_stStation.stControl.bReset;
+    t_bInPos        := io_stStation.stSensors.bInPosSensor;
+    t_bWorkPos      := io_stStation.stSensors.bWorkPosSensor;
+    t_bCylRetracted := io_stStation.stSensors.bCylRetracted;
+    t_bCylExtended  := io_stStation.stSensors.bCylExtended;
+
+    t_dCylTimeout   := io_stStation.stConfig.dCylTimeoutMs;
+    IF t_dCylTimeout <= 0 THEN
+        t_dCylTimeout := 5000;
+    END_IF;
+
+    t_dProcessTime  := io_stStation.stConfig.dProcessTimeMs;
+    IF t_dProcessTime <= 0 THEN
+        t_dProcessTime := 2000;
+    END_IF;
+
+    // --------------------------------------------------------------------------
+    // 2. 基础复位与使能检查 (单点出口原则)
+    // --------------------------------------------------------------------------
+    IF t_bReset THEN
+        s_bAlarm := FALSE;
+        s_iAlarmCode := 0;
+        IF s_iStep <> STEP_IDLE AND NOT t_bAutoEnable THEN
+            s_iStep := STEP_IDLE;
+        END_IF;
+    END_IF;
+
+    IF NOT t_bAutoEnable OR s_bAlarm THEN
+        s_bRunning := FALSE;
+        s_bDone := FALSE;
+        // 安全保持
+        io_stStation.stActuators.bMotorFwd  := FALSE;
+        io_stStation.stActuators.bCylExtend := FALSE;
+        io_stStation.stActuators.bCylRetract:= TRUE;
+    ELSE
+        s_bRunning := TRUE;
+
+        // ----------------------------------------------------------------------
+        // 3. 核心状态机逻辑 (按工艺矩阵展开)
+        // ----------------------------------------------------------------------
+        CASE s_iStep OF
+            STEP_IDLE: // 0: 待命准备状态
+                s_bDone := FALSE;
+                s_dStepTimer := 0;
+                IF t_bAutoEnable THEN
+                    s_iStep := 10;
+                END_IF;
+
+            {% for step in steps %}
+            {{ step.step_id }}: // {{ step.name }}
+                s_dStepTimer := s_dStepTimer + 10;
+                // 动作输出
+                {% for act in step.actions %}
+                {{ act }};
+                {% endfor %}
+                
+                // 转移条件判定
+                IF {{ step.trigger }} THEN
+                    {% if step.interlock %}
+                    IF {{ step.interlock }} THEN
+                        s_iStep := {{ step.next_step }};
+                        s_dStepTimer := 0;
+                    ELSE
+                        s_bAlarm := TRUE;
+                        s_iAlarmCode := {{ step.step_id }}01; // 联锁违规报警
+                        s_iStep := STEP_FAULT;
+                    END_IF;
+                    {% else %}
+                    s_iStep := {{ step.next_step }};
+                    s_dStepTimer := 0;
+                    {% endif %}
+                ELSIF s_dStepTimer > {% if step.timeout_ms > 0 %}{{ step.timeout_ms }}{% else %}t_dCylTimeout{% endif %} THEN
+                    s_bAlarm := TRUE;
+                    s_iAlarmCode := {{ step.step_id }}02; // 超时报警
+                    s_iStep := STEP_FAULT;
+                END_IF;
+
+            {% endfor %}
+
+            STEP_FAULT: // 99: 故障保护状态
+                s_bRunning := FALSE;
+                s_bAlarm := TRUE;
+
+            ELSE // 安全防死锁分支
+                s_bAlarm := TRUE;
+                s_iAlarmCode := 9999;
+                s_iStep := STEP_IDLE;
+                s_dStepTimer := 0;
+        END_CASE;
+    END_IF;
+
+    // --------------------------------------------------------------------------
+    // 4. 统一末尾状态封包回写
+    // --------------------------------------------------------------------------
+    io_stStation.stStatus.iStep       := s_iStep;
+    io_stStation.stStatus.bRunning     := s_bRunning;
+    io_stStation.stStatus.bDone        := s_bDone;
+    io_stStation.stStatus.bAlarm       := s_bAlarm;
+    io_stStation.stStatus.iAlarmCode   := s_iAlarmCode;
+
+END_FUNCTION_BLOCK

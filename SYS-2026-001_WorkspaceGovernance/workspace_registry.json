@@ -7,7 +7,9 @@
       "development_root": "SYS-2026-001_WorkspaceGovernance",
       "control_project_id": "",
       "control_pm_session": "",
-      "runtime_root": ""
+      "runtime_root": "",
+      "kind": "tool",
+      "status": "active"
     },
     {
       "project_id": "SW-2026-008",
@@ -15,7 +17,9 @@
       "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "tool",
+      "status": "active"
     },
     {
       "project_id": "SW-2026-009",
@@ -23,7 +27,9 @@
       "development_root": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-009_英语学习助手",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "test",
+      "status": "active"
     },
     {
       "project_id": "DJ-2026-005",
@@ -31,7 +37,9 @@
       "development_root": "0100_PLC自动化/DJ-2026-005",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "equipment",
+      "status": "active"
     },
     {
       "project_id": "DJ-2026-011",
@@ -39,7 +47,9 @@
       "development_root": "0100_PLC自动化/DJ-2026-011_驾驶舱A6PLC续作验证套件",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "test",
+      "status": "active"
     },
     {
       "project_id": "DJ-2026-009",
@@ -47,7 +57,9 @@
       "development_root": "0100_PLC自动化/DJ-2026-009_汇川换型改造",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "equipment",
+      "status": "active"
     },
     {
       "project_id": "DJ-2026-000",
@@ -55,7 +67,9 @@
       "development_root": "0100_PLC自动化/DJ-2026-000",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "test",
+      "status": "active"
     },
     {
       "project_id": "SysLib",
@@ -63,7 +77,9 @@
       "development_root": "0100_PLC自动化/01_SharedLibraries/SysLib",
       "control_project_id": "SYS-2026-001",
       "control_pm_session": "SYS-2026-001_WorkspaceGovernance/PM_SESSION_SYS-2026-001.md",
-      "runtime_root": "00_Infrastructure/auto_pm"
+      "runtime_root": "00_Infrastructure/auto_pm",
+      "kind": "library",
+      "status": "active"
     }
   ]
 }
