@@ -60,10 +60,11 @@ _VAR_DECL_RE = re.compile(
     r"\b"
 )
 
-# FB 名称（用于 station 元数据）
+# FB 名称（用于 station 元数据）；TIA 源文件的块名可以带双引号，如 ORGANIZATION_BLOCK "DJ005_Main"
+# （模板和用户 TIA 实测过的样例都这样写；plc/checker.py 的 _TIA_BLOCK_DECL 同一写法）
 _FB_NAME_RE = re.compile(
     r"^\s*(?:FUNCTION_BLOCK|PROGRAM|ORGANIZATION_BLOCK)\s+"
-    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    r'"?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"?',
     re.IGNORECASE,
 )
 

@@ -224,6 +224,27 @@ class TestSclParserEdgeCases:
         # 元数据：var_block_count=0
         assert result.var_table.metadata["var_block_count"] == 0
 
+    @pytest.mark.parametrize(
+        ("header", "expected"),
+        [
+            ('ORGANIZATION_BLOCK "DJ005_Main"', "DJ005_Main"),
+            ('FUNCTION_BLOCK "FB_1001_Station1_DJ2026901"', "FB_1001_Station1_DJ2026901"),
+            ("ORGANIZATION_BLOCK OB1", "OB1"),
+            ("FUNCTION_BLOCK FB_2001_CommonAlarm_AllStation_DJ005", "FB_2001_CommonAlarm_AllStation_DJ005"),
+        ],
+    )
+    def test_scl_parse_block_name_with_or_without_quotes(self, tmp_path: Path, header: str, expected: str) -> None:
+        """CHG-SCPT-2026-714：TIA 源文件的块名可带双引号（模板 OB123 和用户实测的样例都这样写），
+        带不带引号都要取到不带引号的名字，device 字段跟着用同一个名字"""
+        end = "END_ORGANIZATION_BLOCK" if header.startswith("ORGANIZATION_BLOCK") else "END_FUNCTION_BLOCK"
+        f = tmp_path / "block.scl"
+        f.write_text(f"{header}\nVAR\n    s_iStep : INT;\nEND_VAR\nBEGIN\n{end}\n", encoding="utf-8")
+        result = SclParser().parse(f)
+        assert result.success
+        assert result.var_table is not None
+        assert result.var_table.metadata["fb_name"] == expected
+        assert [e.device for e in result.var_table.entries] == [expected]
+
 
 
 class TestSclParserVarConstant:
