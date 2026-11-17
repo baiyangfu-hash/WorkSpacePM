@@ -2,6 +2,16 @@ name: gate-full
 
 on:
   workflow_dispatch:
+  # CHG-SCPT-2026-705: every merge into main runs the full gate on that commit by itself; nobody has to press "Run".
+  push:
+    branches: [main]
+
+# CHG-SCPT-2026-705: one run per branch at a time, and only the newest commit counts.  Two merges in a row: the run for the
+# older one is cancelled and the newer one runs.  A cancelled run leaves no verdict and no commit status (the verdict and
+# commit-status jobs below skip on cancel), so an older commit never shows a half-run result.
+concurrency:
+  group: gate-full-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -142,15 +152,24 @@ jobs:
 
   verdict:
     needs: group
-    if: always()
+    # CHG-SCPT-2026-705: a red group still gets judged (FAIL with the reasons), but a run cancelled because a newer commit
+    # arrived does not: always() would also run on cancel and publish a "groups incomplete" verdict for the older commit.
+    if: ${{ !cancelled() }}
     # D-223: the judge imports the cockpit package (the same judging code the groups ran), so it needs the same locked
     # dependencies as the groups.  The lock file is the Windows one, hence the same runner image and the same install step.
     runs-on: windows-latest
     timeout-minutes: 15
+    outputs:
+      verdict: ${{ steps.record.outputs.verdict }}
+      digest: ${{ steps.record.outputs.digest }}
     defaults:
       run:
         shell: bash
     steps:
+      - name: Name the verdict after the commit
+        id: name
+        run: echo "artifact=gate-verdict-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
       - name: Long paths
         run: git config --system core.longpaths true
 
@@ -177,12 +196,73 @@ jobs:
       - name: Merge and judge
         working-directory: ${{ env.PROJ }}
         run: |
+          # gate-* also matches a verdict an earlier attempt of this run uploaded (re-run): it is not a group record
+          rm -rf "$RUNNER_TEMP"/parts/gate-verdict*
           "$RUNNER_TEMP/venv/Scripts/python.exe" tests/tools/sw008_ci/gate_run_ci.py merge \
             --in "$RUNNER_TEMP"/parts/gate-* --out "$RUNNER_TEMP/gate-final" --worktree "$GITHUB_WORKSPACE"
 
+      # CHG-SCPT-2026-705: the commit number and the verdict file's SHA-256 always go into the job summary and the job's
+      # outputs (the commit-status job reads them), also when the merge step above failed or left no verdict file.
+      - name: Record the commit and the verdict hash
+        id: record
+        if: ${{ !cancelled() }}
+        env:
+          ARTIFACT: ${{ steps.name.outputs.artifact }}
+        run: |
+          summary="$RUNNER_TEMP/gate-final/gate_summary.json"
+          if [ -f "$summary" ]; then
+            verdict=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c "import json, sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('verdict') or 'MISSING')" "$summary" | tr -d '\r')
+            digest=$("$RUNNER_TEMP/venv/Scripts/python.exe" -c "import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())" "$summary" | tr -d '\r')
+          else
+            verdict=MISSING
+            digest=none
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "## gate-full 判决记录"
+            echo "- 提交号: $GITHUB_SHA"
+            echo "- 判决: $verdict"
+            echo "- gate_summary.json SHA-256: $digest"
+            echo "- 判决产物: $ARTIFACT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the verdict and the failure list
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: gate-verdict
+          name: ${{ steps.name.outputs.artifact }}
           path: ${{ runner.temp }}/gate-final
+          overwrite: true
+
+  # CHG-SCPT-2026-705: leave the conclusion on the commit itself (commit status, context "gate-full"), so a merge shows PASS or
+  # FAIL next to it without anyone opening the run.  PASS needs both halves of this workflow: the merged verdict of the eleven
+  # groups is PASS and the plugin job succeeded.  Only this job may write statuses; it checks nothing out and runs no repo code.
+  commit-status:
+    needs: [verdict, plugin]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Post the gate-full status on the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERDICT: ${{ needs.verdict.outputs.verdict }}
+          DIGEST: ${{ needs.verdict.outputs.digest }}
+          PLUGIN: ${{ needs.plugin.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$VERDICT" = "PASS" ] && [ "$PLUGIN" = "success" ]; then
+            state=success
+            word=PASS
+          else
+            state=failure
+            word=FAIL
+          fi
+          description="$word: verdict ${VERDICT:-MISSING} sha256 ${DIGEST:0:12}, plugin $PLUGIN"
+          echo "$GITHUB_SHA -> $state ($description)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state="$state" -f context=gate-full -f description="$description" -f target_url="$RUN_URL"
