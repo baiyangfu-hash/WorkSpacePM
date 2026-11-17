@@ -3,7 +3,8 @@
 // ============================================================================
 // 描述:
 //   实现 {{ project_id }} {{ project_name }} 工位1 进料、定位、夹紧、加工与出料控制.
-//   严格遵循 LSP-905 语法白名单、DINT 毫秒定时器三段式、CASE 防死锁 ELSE 与结构体整块传递.
+//   严格遵循 LSP-905 语法白名单、TIA 原生 TON_TIME 定时器 (FB 静态区多重实例, 顶部无条件调用, LSP-903)、
+//   CASE 防死锁 ELSE 与结构体整块传递. 定时器写法已经用户 TIA V19 实测编译 0 错误 (见 LSP-903 §7).
 // ============================================================================
 
 FUNCTION_BLOCK FB_1001_Station1_{{ project_tag }}
@@ -27,9 +28,10 @@ VAR
     s_bCyl2Extend   : BOOL;             // 顶升伸出
     s_bCyl2Retract  : BOOL;             // 顶升缩回
 
-    // 定时器实例 (DINT 毫秒三段式)
-    s_dStepTimer    : DINT;             // 工步计时累加器 (ms)
-    s_dDebounceTimer: DINT;             // 光电消抖计时器 (ms)
+    // 定时器实例 (TIA 原生 IEC 定时器, 多重实例, 数据随本块背景 DB 存放)
+    fb_tFeedTimeout : TON_TIME;         // 进料超时 (进料输送步计时, 10s 报警)
+    fb_tCylTimeout  : TON_TIME;         // 夹紧/松开气缸超时 (夹紧顶升步、松开出料步计时)
+    fb_tProcess     : TON_TIME;         // 工艺加工时间
 END_VAR
 
 VAR_TEMP
@@ -75,7 +77,17 @@ BEGIN
         t_dProcessTime := 2000; // 默认 2000ms
     END_IF;
 
-    // 2. 故障复位
+    // 2. 定时器调用区 (无条件, 每周期一次, 全参数; 只在对应工步且运行中计时, 离开该步自动清零)
+    //    夹紧顶升与松开出料之间隔着工艺加工步, 两步共用一个气缸超时定时器也会先清零再重新计时.
+    #fb_tFeedTimeout(IN := t_bAutoEnable AND NOT s_bAlarm AND (s_iStep = STEP_FEEDING),
+                     PT := DINT_TO_TIME(10000));
+    #fb_tCylTimeout(IN := t_bAutoEnable AND NOT s_bAlarm
+                          AND ((s_iStep = STEP_CLAMP) OR (s_iStep = STEP_RELEASE_UNLOAD)),
+                    PT := DINT_TO_TIME(t_dCylTimeout));
+    #fb_tProcess(IN := t_bAutoEnable AND NOT s_bAlarm AND (s_iStep = STEP_PROCESS),
+                 PT := DINT_TO_TIME(t_dProcessTime));
+
+    // 3. 故障复位
     IF t_bReset THEN
         s_bAlarm := FALSE;
         s_iAlarmCode := 0;
@@ -84,7 +96,7 @@ BEGIN
         END_IF;
     END_IF;
 
-    // 3. 主工步状态机
+    // 4. 主工步状态机
     IF NOT t_bAutoEnable OR s_bAlarm THEN
         // 非使能或报警模式下，安全保持
         s_bMotorFwd    := FALSE;
@@ -107,23 +119,19 @@ BEGIN
                 s_bCyl2Retract := TRUE;
                 IF t_bCyl1Ret AND t_bCyl2Ret THEN
                     s_iStep := STEP_WAIT_MATERIAL;
-                    s_dStepTimer := 0;
                 END_IF;
 
             STEP_WAIT_MATERIAL:
                 IF t_bInPos THEN
                     s_iStep := STEP_FEEDING;
-                    s_dStepTimer := 0;
                 END_IF;
 
             STEP_FEEDING:
                 s_bMotorFwd := TRUE;
-                s_dStepTimer := s_dStepTimer + 10;
                 IF t_bWorkPos THEN
                     s_bMotorFwd := FALSE;
                     s_iStep := STEP_CLAMP;
-                    s_dStepTimer := 0;
-                ELSIF s_dStepTimer > 10000 THEN
+                ELSIF #fb_tFeedTimeout.Q THEN
                     // 进料超时报警
                     s_bAlarm := TRUE;
                     s_iAlarmCode := 101;
@@ -135,21 +143,17 @@ BEGIN
                 s_bCyl1Retract := FALSE;
                 s_bCyl2Extend := TRUE;
                 s_bCyl2Retract := FALSE;
-                s_dStepTimer := s_dStepTimer + 10;
                 IF t_bCyl1Ext AND t_bCyl2Ext THEN
                     s_iStep := STEP_PROCESS;
-                    s_dStepTimer := 0;
-                ELSIF s_dStepTimer > t_dCylTimeout THEN
+                ELSIF #fb_tCylTimeout.Q THEN
                     // 夹紧/顶升超时报警
                     s_bAlarm := TRUE;
                     s_iAlarmCode := 102;
                 END_IF;
 
             STEP_PROCESS:
-                s_dStepTimer := s_dStepTimer + 10;
-                IF s_dStepTimer >= t_dProcessTime THEN
+                IF #fb_tProcess.Q THEN
                     s_iStep := STEP_RELEASE_UNLOAD;
-                    s_dStepTimer := 0;
                 END_IF;
 
             STEP_RELEASE_UNLOAD:
@@ -157,16 +161,14 @@ BEGIN
                 s_bCyl1Retract := TRUE;
                 s_bCyl2Extend := FALSE;
                 s_bCyl2Retract := TRUE;
-                s_dStepTimer := s_dStepTimer + 10;
                 IF t_bCyl1Ret AND t_bCyl2Ret THEN
                     s_bMotorFwd := TRUE;
                     IF NOT t_bWorkPos THEN
                         s_bMotorFwd := FALSE;
                         s_bDone := TRUE;
                         s_iStep := STEP_IDLE;
-                        s_dStepTimer := 0;
                     END_IF;
-                ELSIF s_dStepTimer > t_dCylTimeout THEN
+                ELSIF #fb_tCylTimeout.Q THEN
                     // 松开/下降超时报警
                     s_bAlarm := TRUE;
                     s_iAlarmCode := 103;
@@ -175,11 +177,10 @@ BEGIN
             ELSE
                 // 防死锁安全分支
                 s_iStep := STEP_IDLE;
-                s_dStepTimer := 0;
         END_CASE;
     END_IF;
 
-    // 4. 统一末尾封包与回写
+    // 5. 统一末尾封包与回写
     io_stStation.stStatus.iStep       := s_iStep;
     io_stStation.stStatus.bRunning     := s_bRunning;
     io_stStation.stStatus.bDone        := s_bDone;
