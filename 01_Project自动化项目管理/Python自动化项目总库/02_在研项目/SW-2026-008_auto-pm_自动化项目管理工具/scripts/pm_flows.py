@@ -7,13 +7,15 @@
   python <本项目>/scripts/pm_flows.py steps <entry|checkup|closeout>
 
 “进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``claim list`` 看占位表，再对登记路径落在
-本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件。
+本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件，再按卡类型提示该读哪个角色包
+（控制根 ``roles/`` 下每个有 ``role.json`` 的包；本项目的卡按登记路径对上包里的 ``owned_paths_patterns``）。
 “steps”只列出一个流程的每一步和整条命令，一条都不跑，也不写运行记录。
 
 规矩（协调者 2026-11-14 01:35Z 裁定的做法，这里照做）：
 1. 只串联：每一步都是一条现成的 ``main.py`` 命令，原样运行，原样显示输出和退出码；脚本不判断、不改写结果。
    两处例外，都只读：体检最后一步“工作区根目录清洁”是脚本自己看一眼控制根顶层有没有临时文件（DEV-TMP-001），
-   有就提醒，不算红、不删；“进门”从 ``claim list --json`` 的输出里挑出路径落在本项目目录里的卡，再逐张跑 ``claim log``。
+   有就提醒，不算红、不删；“进门”从 ``claim list --json`` 的输出里挑出路径落在本项目目录里的卡，再逐张跑 ``claim log``；
+   进门最后的角色包提示也是脚本自己读控制根 ``roles/*/role.json``，只提示，不算红。
 2. 退出码不是 0 就算这一步红。“交卷到收口”停在红的那一步，报出整条命令和退出码，后面的不跑；
    “项目体检”全是只读，每一步都跑完，最后出小结表点名红的步骤和命令，有红就退出 1（协调者 03:55Z 裁定）。
    项目号、卡号格式不对直接报用法错，一条命令都不跑。
@@ -31,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -68,6 +71,18 @@ KEEP_GOING = frozenset({"checkup", "entry"})
 ROOT_LITTER_PREFIXES = ("tmp_",)
 ROOT_LITTER_NAMES = frozenset({".coverage", "htmlcov", ".pytest_cache", "coverage.xml"})
 ROOT_LITTER_SUFFIXES = (".log", ".tmp")
+
+# 进门最后按卡类型提示该读哪个角色包（CHG-SCPT-2026-711）。包的正本在控制根 roles/<角色号>/，规范、命令、门禁和
+# 可改范围上限（owned_paths_patterns）在包里的 role.json；这里只记每个包对应哪类卡。roles/ 下新加一个包，这张表就要
+# 加一行，否则 tests/core/test_role_pack_wiring.py 红。
+ROLES_DIR = Path("roles")
+ROLE_CARD_TYPES: Mapping[str, str] = {
+    "plc-electrical-engineer": "PLC 卡（SCL/ST 程序、点表和接口文档）",
+    "fullstack-engineer": "Python 卡（上位机、驾驶舱、脚本和测试）",
+    "test-engineer": "审计卡、测试验证卡（审 PR、跑门禁）",
+    "ui-designer": "画面卡（HTML 原型、HMI 画面、QML 视图）",
+    "product-pm": "计划卡（需求、计划、派活、验收和收口）",
+}
 
 # 旧发布版本没有交接记录命令时 click 报的原话（AGENTS.md FLOW-002 进门三步）。
 NO_LOG_COMMAND = "No such command 'log'"
@@ -273,6 +288,88 @@ def project_cards(claims: Any, project_root: str) -> tuple[list[dict[str, Any]],
     return sorted(picked, key=lambda claim: str(claim["card"])), released
 
 
+def role_packs(root: Path) -> list[dict[str, Any]]:
+    """控制根 ``roles/`` 下每个有 ``role.json`` 和 ``SKILL.md`` 的角色包，按 ``ROLE_CARD_TYPES`` 的顺序排（表外的排最后）。
+
+    每项：角色号、岗位名（role.json 的 title）、卡类型、``SKILL.md`` 的路径（控制根起，正斜杠）、可改范围上限的模式。
+    读不到或读不懂的包跳过（``main.py role check`` 会报它）。
+    """
+    try:
+        folders = sorted(path for path in (root / ROLES_DIR).iterdir() if path.is_dir())
+    except OSError:
+        return []
+    order = list(ROLE_CARD_TYPES)
+    packs: list[dict[str, Any]] = []
+    for folder in folders:
+        if not (folder / "SKILL.md").is_file():
+            continue
+        try:
+            config = json.loads((folder / "role.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(config, dict):
+            continue
+        patterns = config.get("owned_paths_patterns")
+        packs.append(
+            {
+                "id": folder.name,
+                "title": str(config.get("title", folder.name)),
+                "card_type": ROLE_CARD_TYPES.get(folder.name, "（进门表里还没登记这类卡）"),
+                "skill": f"{ROLES_DIR.as_posix()}/{folder.name}/SKILL.md",
+                "patterns": [str(item) for item in patterns] if isinstance(patterns, list) else [],
+            }
+        )
+    return sorted(
+        packs, key=lambda pack: order.index(pack["id"]) if pack["id"] in order else len(order)
+    )
+
+
+def _path_matches(path: str, pattern: str) -> bool:
+    """``**/*.py`` 这类模式也认仓库根下的 ``a.py``；``*`` 跨目录（同 fnmatch）。"""
+    candidates = [pattern]
+    if pattern.startswith("**/"):
+        candidates.append(pattern[3:])
+    return any(fnmatch.fnmatchcase(path, candidate) for candidate in candidates)
+
+
+def packs_for_paths(packs: Sequence[Mapping[str, Any]], paths: Sequence[str]) -> list[str]:
+    """登记路径对得上哪些包的可改范围上限，按包的顺序给角色号；一个都对不上返回空。"""
+    clean = [str(path).replace("\\", "/").lstrip("/") for path in paths]
+    return [
+        str(pack["id"])
+        for pack in packs
+        if any(_path_matches(path, pattern) for path in clean for pattern in pack["patterns"])
+    ]
+
+
+def _print_role_hints(
+    packs: Sequence[Mapping[str, Any]],
+    cards: Sequence[Mapping[str, Any]],
+    out: Callable[[str], None],
+) -> list[dict[str, Any]]:
+    """进门最后一段：按卡类型该读哪个角色包；本项目的每张卡按登记路径猜一个。返回写进运行记录的那几行。"""
+    out("\n【该读哪个角色包】（按卡类型；包里要守的规范、能用的命令、门禁在同目录 role.json）")
+    if not packs:
+        out("控制根里没有 roles/ 角色包，没法提示；先跑 main.py role check 看看。")
+        return []
+    for pack in packs:
+        out(f"- {pack['card_type']}：{pack['skill']}（{pack['title']}）")
+    by_id = {str(pack["id"]): pack for pack in packs}
+    hints: list[dict[str, Any]] = []
+    if cards:
+        out("本项目的卡（按登记路径猜，是提示不是状态；对不上就按卡的目标照上表挑）：")
+    for card in cards:
+        matched = packs_for_paths(packs, card.get("paths") or [])
+        hints.append({"card": str(card["card"]), "roles": matched})
+        shown_roles = "、".join(str(by_id[role]["skill"]) for role in matched)
+        out(
+            f"  {card['card']}：{shown_roles}"
+            if matched
+            else f"  {card['card']}：登记路径认不出卡类型（多半是文档或计划），按上表对卡的目标挑"
+        )
+    return hints
+
+
 def handover_lines(text: str) -> dict[str, str]:
     """``claim log`` 输出末尾的三行（最后一笔、下一棒、先读），原话照抄；没有交接记录时返回空。"""
     found: dict[str, str] = {}
@@ -384,6 +481,10 @@ def print_steps(flow: str, out: Callable[[str], None] = print) -> int:
             f"| {len(rows) + 1}… | 交接记录 | `main.py claim log <卡号>` | 脚本跑（只读） | "
             "对上一步挑出的每张卡各跑一次，最后列出最后三行和先读的文件 |"
         )
+        out(
+            f"| {len(rows) + 2}… | 角色包提示 | （脚本自己读控制根 roles/*/role.json） | 脚本（只读） | "
+            "按卡类型列出该读哪个角色包，本项目的卡按登记路径猜一个；只提示，不算红 |"
+        )
     return EXIT_DONE
 
 
@@ -447,6 +548,7 @@ def run_flow(
     number = start
     finished = True
     handover: list[dict[str, Any]] = []
+    project_claims: list[dict[str, Any]] = []
     while queue:
         step = queue.pop(0)
         number += 1
@@ -547,6 +649,7 @@ def run_flow(
                         lines.append(
                             f"另有 {released} 张已放下的卡（PR 已合、卡已收），不读交接记录"
                         )
+                project_claims = list(cards)
                 for claim in cards:
                     card = str(claim["card"])
                     handover.append({"card": card, "free": bool(claim.get("free"))})
@@ -624,6 +727,7 @@ def run_flow(
             if flow == "entry":
                 record["handover"] = handover
                 _print_handover(handover, out)
+                record["role_hints"] = _print_role_hints(role_packs(root), project_claims, out)
         else:
             record["result"] = "走完"
             out(f"\n✓ 【{FLOW_NAMES[flow]}】走完。")
@@ -678,7 +782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="flow", required=True)
     entry = sub.add_parser(
-        "entry", help="进门：项目体检，再看占位表和本项目每张卡的交接记录；全程只读"
+        "entry",
+        help="进门：项目体检，再看占位表和本项目每张卡的交接记录，最后提示该读哪个角色包；全程只读",
     )
     entry.add_argument("pid")
     steps = sub.add_parser("steps", help="只列出一个流程的每一步和整条命令，一条都不跑")

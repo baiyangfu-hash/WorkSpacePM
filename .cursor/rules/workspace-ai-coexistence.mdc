@@ -19,6 +19,9 @@ alwaysApply: true
 | 当前计划与状态投影 | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md`（以其“当前排序”一节为准；39 号计划是历史依据） |
 | 全栈执行 | `roles/fullstack-engineer/SKILL.md` |
 | PLC 执行 | `roles/plc-electrical-engineer/SKILL.md` |
+| 产品型项目经理 | `roles/product-pm/SKILL.md` |
+| 测试审计 | `roles/test-engineer/SKILL.md` |
+| UI 画面 | `roles/ui-designer/SKILL.md` |
 | 工位与控制根规则 | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)” |
 | 独立审计（审 PR 时） | `AGENTS.md`“独立审计 (AUD-001)” |
 | 规范索引 | `00_Obsidian_Base全局规范文件仓库/00_INDEX_全局规范索引.md` |
@@ -51,8 +54,10 @@ alwaysApply: true
 
 | 用户意图 | 先读 |
 |----------|------|
-| 治理、需求、迭代、变更、发布 | `26_SW-2026-008_治理恢复与连续性重基线总计划_PM.md`；先核验 CHG/Decision/Work/Run |
+| 治理、需求、迭代、变更、发布 | `product-pm/SKILL.md`；先核验 CHG/Decision/Work/Run |
 | Python/Web/QML/全栈 | `fullstack-engineer/SKILL.md` |
 | PLC/SCL/电气 | `plc-electrical-engineer/SKILL.md` |
+| 审 PR、跑门禁做测试验证 | `test-engineer/SKILL.md` |
+| HTML 原型、HMI 画面、QML 视图 | `ui-designer/SKILL.md` |
 
 驾驶舱命令只使用工作区根 `.venv\Scripts\python.exe main.py`；不得直连研发母体或 `python -m auto_pm`。

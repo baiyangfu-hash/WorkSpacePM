@@ -1,0 +1,13 @@
+---
+description: 产品型项目经理规则（对齐 product-pm 角色包）：接需求、出计划、派活、验收和收口
+globs: **/*_PM.md,**/02_规划/**,**/04_监控/**
+alwaysApply: false
+---
+
+# Product PM（Cursor）
+
+做需求、计划、派活、验收或收口前，读取 `roles/product-pm/SKILL.md` 与 `roles/shared/refs/skill_coordination.md`。
+
+- 做法正本在 `roles/product-pm/SKILL.md` 指向的 `.trae/skills/cockpit-entry/SKILL.md`；本文件只指路，不抄做法。
+- 要守的规范、能用的命令、门禁和回执栏目：`roles/product-pm/role.json`。
+- 批准、验收、推到完成只有用户本人做：见 `AGENTS.md` 红线 1。

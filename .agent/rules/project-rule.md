@@ -19,6 +19,9 @@ alwaysApply: true
 | **当前计划与状态投影** | `01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md`（以其“当前排序”一节为准；39 号计划是历史依据） |
 | **PLC 电气工程** | `roles/plc-electrical-engineer/SKILL.md` |
 | **全栈高级语言** | `roles/fullstack-engineer/SKILL.md` |
+| **产品型项目经理（需求、计划、派活、验收）** | `roles/product-pm/SKILL.md` |
+| **测试审计（测试验证与独立审计）** | `roles/test-engineer/SKILL.md` |
+| **UI 画面（HTML 原型、HMI、QML 视图）** | `roles/ui-designer/SKILL.md` |
 | **Obsidian 规范注册表** | `00_Obsidian_Base全局规范文件仓库/spec_registry.json` |
 | **全局协作入口** | `AGENTS.md` |
 | **工位与控制根规则** | `AGENTS.md`“多 agent 工位与控制根规则 (WS-001)”：每台电脑 1 个控制根，每个对话一个工位 `.auto-pm/worktrees/<基名>-<会话ID前6位>`（名字规则见该节） |

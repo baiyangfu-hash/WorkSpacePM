@@ -8,6 +8,15 @@
     },
     {
       "path": "../roles/plc-electrical-engineer"
+    },
+    {
+      "path": "../roles/product-pm"
+    },
+    {
+      "path": "../roles/test-engineer"
+    },
+    {
+      "path": "../roles/ui-designer"
     }
   ]
 }
