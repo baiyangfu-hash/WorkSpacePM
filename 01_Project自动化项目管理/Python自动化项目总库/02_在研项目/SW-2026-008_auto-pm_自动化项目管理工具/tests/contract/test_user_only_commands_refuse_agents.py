@@ -62,6 +62,8 @@ class Guard:
 
 
 GUARDS: dict[str, Guard] = {
+    "agent register": Guard(ALWAYS, "ui/cli/agent.py::agent_register", "agent_markers"),
+    "agent unregister": Guard(ALWAYS, "ui/cli/agent.py::agent_unregister", "agent_markers"),
     "claim reclaim": Guard(WORDS, "application/core/claim_service.py::ClaimService.reclaim", "user_evidence_problem"),
     "continuity lease extend-hold": Guard(WORDS, "ui/cli/continuity.py::extend_lease_hold", "user_evidence_problem"),
     "continuity restore-backup": Guard(MARKER, "ui/cli/continuity_backup.py::restore_backup_command", "refuse_agent_approval"),

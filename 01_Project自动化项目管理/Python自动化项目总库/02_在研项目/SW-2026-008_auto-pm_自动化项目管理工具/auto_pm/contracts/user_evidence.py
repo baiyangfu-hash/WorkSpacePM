@@ -8,6 +8,7 @@ could miss the other (TD-071 card 2 audit 75, low).  Both now read from here.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
 from typing import Final
 
 USER_CONFIRMATION_PREFIX: Final = "user-confirmation:"
@@ -43,6 +44,29 @@ AGENT_MARKER = re.compile(
 )
 
 
+# CHG-SCPT-2026-712: the AIs the user registered on this machine (and the built-in roster names) count as agent names too.
+# This module is pure data and cannot read the ledger, so the application layer hands in a source
+# (``agent_registry.use_ledger_roster``); it is asked lazily, each time a text is judged.  No source: the built-in words only.
+_EXTRA_NAME = re.compile(r"[a-z][a-z0-9]{1,19}")
+_extra_source: list[Callable[[], Iterable[str]]] = []
+
+
+def use_extra_agent_names(source: Callable[[], Iterable[str]] | None) -> None:
+    """Also treat the names ``source`` returns as agent names (``None``: only ``AGENT_NAMES``)."""
+
+    _extra_source[:] = [] if source is None else [source]
+
+
+def _extra_names() -> tuple[str, ...]:
+    if not _extra_source:
+        return ()
+    try:
+        names = tuple(_extra_source[0]())
+    except Exception:  # noqa: BLE001 - a source that cannot answer adds nothing; the built-in words still apply
+        return ()
+    return tuple(sorted({name for name in names if _EXTRA_NAME.fullmatch(name) and name not in AGENT_NAMES}))
+
+
 def is_user_confirmation(evidence_ref: str) -> bool:
     """Whether ``evidence_ref`` has the ``user-confirmation:<reference>`` form."""
 
@@ -52,7 +76,13 @@ def is_user_confirmation(evidence_ref: str) -> bool:
 def names_an_agent(text: str) -> bool:
     """Whether ``text`` names an agent, a model or an AI tool as a whole word."""
 
-    return AGENT_MARKER.search(text) is not None
+    if AGENT_MARKER.search(text) is not None:
+        return True
+    extra = _extra_names()
+    if not extra:
+        return False
+    marker = re.compile(r"(?:^|[-_. (:/])(?:" + "|".join(extra) + r")(?:$|[-_. ):/])", re.IGNORECASE)
+    return marker.search(text) is not None
 
 
 def user_evidence_problem(evidence_ref: str) -> str:

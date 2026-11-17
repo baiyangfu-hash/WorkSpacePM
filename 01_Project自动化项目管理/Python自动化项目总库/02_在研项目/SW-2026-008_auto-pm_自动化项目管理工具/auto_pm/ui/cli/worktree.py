@@ -19,6 +19,7 @@ from rich.table import Table
 from auto_pm.app_context import AppContext
 from auto_pm.application.core.agent_worktree_service import (
     AGENT_ROSTER,
+    BUILTIN_ROSTER,
     MAX_STATIONS,
     STALE_DAYS,
     AgentWorktreeError,
@@ -29,6 +30,7 @@ from auto_pm.application.core.agent_worktree_service import (
     base_agent,
     caller_alias,
     ensure_session_id,
+    roster_names,
 )
 from auto_pm.application.core.station_presence import Presence, list_presence, record_presence
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
@@ -52,10 +54,16 @@ class _AgentName(click.ParamType):  # type: ignore[type-arg]
             return alias
         if base_agent(text):
             return text
-        self.fail(f"`{text}` 不是名册里的 agent（{'、'.join(sorted(AGENT_ROSTER))}）或会话别名（如 claude-b89bc8）", param, ctx)
+        self.fail(
+            f"`{text}` 不是名册里的 agent（{roster_names()}）或会话别名（如 claude-b89bc8）；"
+            "别的 AI 先由用户本人登记（看板“登记新 AI”，或 main.py agent register <名字>）",
+            param,
+            ctx,
+        )
 
     def get_metavar(self, param: click.Parameter, ctx: click.Context | None = None) -> str:
-        return "[" + "|".join(sorted(AGENT_ROSTER)) + "|<基名>-<6位十六进制>]"
+        # 帮助文字只列内置的五个：登记的 AI 每台电脑不同，帮助里写“登记的名字”
+        return "[" + "|".join(sorted(BUILTIN_ROSTER)) + "|登记的名字|<基名>-<6位十六进制>]"
 
 
 AGENTS = _AgentName()
@@ -149,6 +157,8 @@ def _station_json(station: Station) -> dict[str, Any]:
         "size_bytes": station.size_bytes,
         "idle_days": station.idle_days,  # whole days since the last commit / branch switch / opening; null: unknown
         "stale": station.stale,  # untouched for more than 3 days (WS-001 rule 5)
+        # CHG-SCPT-2026-712: the branch prefix of the station's agent (a registered AI too); "" when not an agent station.
+        "branch_prefix": AGENT_ROSTER.get(base_agent(station.name), "") if station.kind == "agent" else "",
     }
 
 

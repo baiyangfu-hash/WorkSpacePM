@@ -35,6 +35,7 @@ from auto_pm.application.core.agent_worktree_service import (
     base_agent,
     caller_agent,
     caller_alias,
+    roster_names,
 )
 from auto_pm.application.core.claim_service import claim_refusal
 from auto_pm.application.core.implementation_card_precheck import precheck_markdown_card
@@ -178,7 +179,7 @@ class PrOpenService:
         prefix = AGENT_ROSTER.get(base_agent(agent))
         if prefix is None:
             raise PrOpenRefusedError(
-                f"`{agent}` 不在 agent 名册里（{'、'.join(sorted(AGENT_ROSTER))}）"
+                f"`{agent}` 不在 agent 名册里（{roster_names()}）；别的 AI 先由用户本人登记（main.py agent register <名字>）"
             )
         self._require_caller(agent)
         branch = f"{prefix}{card}"

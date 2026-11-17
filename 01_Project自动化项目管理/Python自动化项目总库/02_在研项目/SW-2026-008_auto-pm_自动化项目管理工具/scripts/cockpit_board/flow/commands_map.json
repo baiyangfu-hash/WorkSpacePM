@@ -9,11 +9,23 @@
   ],
   "counts": {
     "never": 13,
-    "read": 68,
-    "user_only": 22,
+    "read": 69,
+    "user_only": 24,
     "write": 116
   },
   "commands": {
+    "agent list": {
+      "class": "read",
+      "note": "列名册：内置五个和本机登记的 AI（CHG-SCPT-2026-712）"
+    },
+    "agent register": {
+      "class": "user_only",
+      "note": "登记新 AI 只限用户本人：带任何 agent 标记都拒；看板“登记新 AI”按钮跑它（CHG-SCPT-2026-712）"
+    },
+    "agent unregister": {
+      "class": "user_only",
+      "note": "注销 AI 只限用户本人：带任何 agent 标记都拒，还有工位或有效占位也拒（CHG-SCPT-2026-712）"
+    },
     "change create": {
       "class": "write"
     },

@@ -49,7 +49,9 @@ from rich.console import Console  # noqa: E402
 
 from auto_pm import __version__  # noqa: E402
 from auto_pm.app_context import AppContext  # noqa: E402
+from auto_pm.application.core.agent_registry import use_ledger_roster  # noqa: E402
 from auto_pm.infrastructure.continuity_store import ContinuityStoreSchemaError  # noqa: E402
+from auto_pm.ui.cli.agent import agent_group  # noqa: E402
 from auto_pm.ui.cli.argv_guard import ARGV_EXIT_CODE, broken_argument_message  # noqa: E402
 from auto_pm.ui.cli.caller_path import anchor_to_caller  # noqa: E402
 from auto_pm.ui.cli.change import change_group  # noqa: E402
@@ -152,6 +154,8 @@ def cli(ctx: click.Context, workspace: str | None, control_root: str | None) -> 
     if workspace:
         app_ctx.workspace_root = os.path.abspath(anchor_to_caller(workspace))
     app_ctx.control_root = os.path.abspath(anchor_to_caller(control_root)) if control_root else app_ctx.workspace_root
+    # CHG-SCPT-2026-712: the AIs the user registered in this control root's ledger are on the roster (read lazily).
+    use_ledger_roster(app_ctx.control_root)
 
 
 # 挂载子命令组
@@ -190,6 +194,7 @@ cli.add_command(long_run_group)
 cli.add_command(gate_group)
 cli.add_command(pr_group)
 cli.add_command(role_group)
+cli.add_command(agent_group)
 
 
 if __name__ == "__main__":

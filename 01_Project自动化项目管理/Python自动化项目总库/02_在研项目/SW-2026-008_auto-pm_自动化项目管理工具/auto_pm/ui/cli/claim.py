@@ -13,7 +13,7 @@ from pathlib import Path
 import click
 
 from auto_pm.app_context import AppContext
-from auto_pm.application.core.agent_worktree_service import caller_agent, recorder
+from auto_pm.application.core.agent_worktree_service import caller_agent, recorder, roster_names
 from auto_pm.application.core.claim_note_service import (
     KINDS,
     VERDICTS,
@@ -85,7 +85,8 @@ def _owner(explicit: str) -> str:
         _fail(
             ClaimError(
                 "认不出调用方（带了 AI 标记，但不在名册里，或几个标记说法不一）：占位和交接记录要记清是谁写的。"
-                "请按 AGENTS.md 的名字规则设好 AUTO_PM_AGENT（名册里的基名：claude、trae、cursor、vscode、codex）再运行"
+                f"请按 AGENTS.md 的名字规则设好 AUTO_PM_AGENT（名册里的基名：{roster_names()}）再运行；"
+                "名册外的 AI 先由用户本人登记（看板“登记新 AI”，或 main.py agent register <名字>）"
             )
         )
     return explicit.strip() or recorder()

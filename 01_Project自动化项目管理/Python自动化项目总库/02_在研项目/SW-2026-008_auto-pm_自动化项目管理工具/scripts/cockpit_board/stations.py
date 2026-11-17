@@ -31,8 +31,9 @@ from typing import Any
 
 from cockpit_board import policy
 
-# 名册和会话别名的写法：和 auto_pm.application.core.agent_worktree_service 的 AGENT_ROSTER、_ALIAS 逐字一致（测试对照）；
-# 本包不 import auto_pm，所以照抄。
+# 内置名册和会话别名的写法：和 auto_pm.application.core.agent_worktree_service 的 BUILTIN_ROSTER、_ALIAS 逐字一致（测试对照）；
+# 本包不 import auto_pm，所以照抄。用户登记的 AI（CHG-SCPT-2026-712）不在这里：`worktree list --json` 每个 agent 工位行
+# 自带 kind="agent" 和 branch_prefix（命令按本机登记表判的），页上按行里的这两项走，不另抄一份登记表。
 ROSTER_PREFIX = {"claude": "claude/", "trae": "trae/", "cursor": "cursor/", "vscode": "vscode/", "codex": "codex/"}
 ALIAS = re.compile(r"^(claude|codex|cursor|trae|vscode)-[0-9a-f]{6}$")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")  # 进命令行的目录名：只认这些字符
@@ -140,10 +141,10 @@ def _last_seen(row: Mapping[str, Any], note: Mapping[str, Any], now: datetime) -
     return "，".join(parts) or UNKNOWN
 
 
-def _who(name: str, claim: Mapping[str, Any] | None, note: Mapping[str, Any]) -> str:
+def _who(name: str, claim: Mapping[str, Any] | None, note: Mapping[str, Any], prefix: str = "") -> str:
     title = str(note.get("title") or "").strip() if note else ""
     owner = str(claim.get("owner") or "").strip() if claim else ""
-    base = base_agent(name)
+    base = base_agent(name) or prefix.rstrip("/")  # 登记的 AI：基名就是它分支前缀去掉斜杠
     parts = [p for p in (title and f"对话“{title}”", owner and f"占位人 {owner}") if p]
     if not parts and base:
         parts.append(f"{base}（{'会话别名' if name != base else '共用名'}）")
@@ -178,7 +179,7 @@ def close_block(row: Mapping[str, Any], sweep_reason: str = "") -> str:
         return "工位被 git worktree lock 锁着，命令不收"
     if not branch:
         return "工位不在分支上（detached HEAD），命令不收"
-    prefix = ROSTER_PREFIX.get(base_agent(name), "")
+    prefix = str(row.get("branch_prefix") or "") or ROSTER_PREFIX.get(base_agent(name), "")
     if prefix and not branch.startswith(prefix):
         return f"分支 {branch} 不是 {prefix} 开头，命令不收；这个工位归谁要你先确认"
     dirty, unpushed = row.get("dirty"), row.get("unpushed")
@@ -266,7 +267,7 @@ def build_view(
                 blocked = ""
         view.rows.append(StationRow(
             name=name, kind=kind, branch=branch or "（没有分支）",
-            who=_who(name, claim, note),
+            who=_who(name, claim, note, str(row.get("branch_prefix") or "") if kind == "agent" else ""),
             card=(card or UNKNOWN) + ("" if claim or not card else "（占位表里没有这张）"),
             project=project_of(claim.get("paths") or ()) or UNKNOWN if claim else UNKNOWN,
             last_seen=_last_seen(row, note, now),
