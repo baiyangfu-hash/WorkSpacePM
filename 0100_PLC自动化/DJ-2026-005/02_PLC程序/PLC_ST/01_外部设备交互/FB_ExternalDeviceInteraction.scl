@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_ExternalDeviceInteraction (FB_3001)                *)
 (*  功能描述:   组框机链路: 联机 / 连续送框 / 单套送框许可,           *)
 (*              本机 -> 组框机安全异常与暂停 / 急停输出 Y45 / Y46,    *)
@@ -31,8 +31,8 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fb_trPermitUp       : FB_R_TRIG;            // 组框机允许送料 上升沿
-    fb_tfPermitDn       : FB_F_TRIG;            // 组框机允许送料 下降沿
+    fb_trPermitUp       : R_TRIG;            // 组框机允许送料 上升沿
+    fb_tfPermitDn       : F_TRIG;            // 组框机允许送料 下降沿
     s_bPermitUp         : BOOL := FALSE;
     s_bPermitDn         : BOOL := FALSE;
     s_iI                : INT := 0;
@@ -54,8 +54,10 @@ BEGIN
     END_REGION
 
     REGION 02_Edges 边沿
-    fb_trPermitUp(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitUp);
-    fb_tfPermitDn(IN := io_stExt.bLinkMode AND io_stExt.bPeerPermit, Q => s_bPermitDn);
+    fb_trPermitUp(CLK := io_stExt.bLinkMode AND io_stExt.bPeerPermit);
+    s_bPermitUp := fb_trPermitUp.Q;
+    fb_tfPermitDn(CLK := io_stExt.bLinkMode AND io_stExt.bPeerPermit);
+    s_bPermitDn := fb_tfPermitDn.Q;
     END_REGION
 
     REGION 03_SingleFeedPermit 单套送框许可 M510

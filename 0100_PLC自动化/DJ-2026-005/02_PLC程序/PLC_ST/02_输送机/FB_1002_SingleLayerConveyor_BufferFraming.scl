@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1002_SingleLayerConveyor_BufferFraming             *)
 (*  功能描述:   单层边框输送机 10 步状态机 (4 层各调用一次)           *)
 (*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V14.x)      *)
@@ -7,7 +7,7 @@
 (*    - 详细设计说明书_DSN.md 5.1 / 5.2                              *)
 (*    - 接口文档_INT.md 4.5 / 5 / 8 / 9                              *)
 (*    - 原程序 PDF 的送料分料块 (步序 0/1/2/10/20/30/50/60/70/80)    *)
-(*  遵循规范: LSP-905 SCL编程规范; 定时器用 SysLib FB_TON (毫秒)     *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
 (*  与 DSN 的差异 (评审请确认):                                      *)
 (*    1. 不再调用 FB_1011 / FB_1012: 阻挡、分料命令直接输出 Y30 系列, *)
@@ -36,68 +36,68 @@ END_VAR
 
 VAR
     (* 工艺定时器 (三段式: 顶部调用, 逻辑段置 IN, 下一扫描读 Q) *)
-    fb_tInitRev         : FB_TON;       // 步 2 反转 10 s
+    fb_tInitRev         : TON_TIME;       // 步 2 反转 10 s
     s_bInitRevIn        : BOOL := FALSE;
     s_bInitRevQ         : BOOL := FALSE;
     s_dInitRevEt        : DINT := 0;
 
-    fb_tPreBlock        : FB_TON;       // 步 20 阻挡前到位 3 s
+    fb_tPreBlock        : TON_TIME;       // 步 20 阻挡前到位 3 s
     s_bPreBlockIn       : BOOL := FALSE;
     s_bPreBlockQ        : BOOL := FALSE;
     s_dPreBlockEt       : DINT := 0;
 
-    fb_tSlowFeed        : FB_TON;       // 步 60 慢速 2 s
+    fb_tSlowFeed        : TON_TIME;       // 步 60 慢速 2 s
     s_bSlowFeedIn       : BOOL := FALSE;
     s_bSlowFeedQ        : BOOL := FALSE;
     s_dSlowFeedEt       : DINT := 0;
 
-    fb_tRelease         : FB_TON;       // 步 80 取走后延时 1 s / 8 s
+    fb_tRelease         : TON_TIME;       // 步 80 取走后延时 1 s / 8 s
     s_bReleaseIn        : BOOL := FALSE;
     s_bReleaseQ         : BOOL := FALSE;
     s_dReleaseEt        : DINT := 0;
     s_dReleasePt        : DINT := 0;    // 本扫描生效的延时设定
 
-    fb_tStarve          : FB_TON;       // 缺料 10 s
+    fb_tStarve          : TON_TIME;       // 缺料 10 s
     s_bStarveIn         : BOOL := FALSE;
     s_bStarveQ          : BOOL := FALSE;
     s_dStarveEt         : DINT := 0;
 
     (* 气缸位置报警定时器: 命令后 5 s 位置未到 *)
-    fb_tBlkUp1          : FB_TON;
+    fb_tBlkUp1          : TON_TIME;
     s_bBlkUp1In         : BOOL := FALSE;
     s_bBlkUp1Q          : BOOL := FALSE;
     s_dBlkUp1Et         : DINT := 0;
-    fb_tBlkUp2          : FB_TON;
+    fb_tBlkUp2          : TON_TIME;
     s_bBlkUp2In         : BOOL := FALSE;
     s_bBlkUp2Q          : BOOL := FALSE;
     s_dBlkUp2Et         : DINT := 0;
-    fb_tBlkDn1          : FB_TON;
+    fb_tBlkDn1          : TON_TIME;
     s_bBlkDn1In         : BOOL := FALSE;
     s_bBlkDn1Q          : BOOL := FALSE;
     s_dBlkDn1Et         : DINT := 0;
-    fb_tBlkDn2          : FB_TON;
+    fb_tBlkDn2          : TON_TIME;
     s_bBlkDn2In         : BOOL := FALSE;
     s_bBlkDn2Q          : BOOL := FALSE;
     s_dBlkDn2Et         : DINT := 0;
-    fb_tSepUp1          : FB_TON;
+    fb_tSepUp1          : TON_TIME;
     s_bSepUp1In         : BOOL := FALSE;
     s_bSepUp1Q          : BOOL := FALSE;
     s_dSepUp1Et         : DINT := 0;
-    fb_tSepUp2          : FB_TON;
+    fb_tSepUp2          : TON_TIME;
     s_bSepUp2In         : BOOL := FALSE;
     s_bSepUp2Q          : BOOL := FALSE;
     s_dSepUp2Et         : DINT := 0;
-    fb_tSepDn1          : FB_TON;
+    fb_tSepDn1          : TON_TIME;
     s_bSepDn1In         : BOOL := FALSE;
     s_bSepDn1Q          : BOOL := FALSE;
     s_dSepDn1Et         : DINT := 0;
-    fb_tSepDn2          : FB_TON;
+    fb_tSepDn2          : TON_TIME;
     s_bSepDn2In         : BOOL := FALSE;
     s_bSepDn2Q          : BOOL := FALSE;
     s_dSepDn2Et         : DINT := 0;
 
     (* 边沿 *)
-    fb_trUnload         : FB_R_TRIG;    // 退料上升沿
+    fb_trUnload         : R_TRIG;    // 退料上升沿
     s_bUnloadEdge       : BOOL := FALSE;
 
     (* 状态与内部命令 *)
@@ -130,20 +130,47 @@ END_VAR
 
 BEGIN
     REGION 00_Timers 定时器统一调用 (顶部, 无条件)
-    fb_tInitRev(IN := s_bInitRevIn, PT := i_dInitRevMs, Q => s_bInitRevQ, ET => s_dInitRevEt);
-    fb_tPreBlock(IN := s_bPreBlockIn, PT := i_dPreBlockMs, Q => s_bPreBlockQ, ET => s_dPreBlockEt);
-    fb_tSlowFeed(IN := s_bSlowFeedIn, PT := i_dSlowFeedMs, Q => s_bSlowFeedQ, ET => s_dSlowFeedEt);
-    fb_tRelease(IN := s_bReleaseIn, PT := s_dReleasePt, Q => s_bReleaseQ, ET => s_dReleaseEt);
-    fb_tStarve(IN := s_bStarveIn, PT := i_dStarveMs, Q => s_bStarveQ, ET => s_dStarveEt);
-    fb_tBlkUp1(IN := s_bBlkUp1In, PT := i_dCylTimeoutMs, Q => s_bBlkUp1Q, ET => s_dBlkUp1Et);
-    fb_tBlkUp2(IN := s_bBlkUp2In, PT := i_dCylTimeoutMs, Q => s_bBlkUp2Q, ET => s_dBlkUp2Et);
-    fb_tBlkDn1(IN := s_bBlkDn1In, PT := i_dCylTimeoutMs, Q => s_bBlkDn1Q, ET => s_dBlkDn1Et);
-    fb_tBlkDn2(IN := s_bBlkDn2In, PT := i_dCylTimeoutMs, Q => s_bBlkDn2Q, ET => s_dBlkDn2Et);
-    fb_tSepUp1(IN := s_bSepUp1In, PT := i_dCylTimeoutMs, Q => s_bSepUp1Q, ET => s_dSepUp1Et);
-    fb_tSepUp2(IN := s_bSepUp2In, PT := i_dCylTimeoutMs, Q => s_bSepUp2Q, ET => s_dSepUp2Et);
-    fb_tSepDn1(IN := s_bSepDn1In, PT := i_dCylTimeoutMs, Q => s_bSepDn1Q, ET => s_dSepDn1Et);
-    fb_tSepDn2(IN := s_bSepDn2In, PT := i_dCylTimeoutMs, Q => s_bSepDn2Q, ET => s_dSepDn2Et);
-    fb_trUnload(IN := io_stLayer.bUnload, Q => s_bUnloadEdge);
+    fb_tInitRev(IN := s_bInitRevIn, PT := DINT_TO_TIME(i_dInitRevMs));
+    s_bInitRevQ := fb_tInitRev.Q;
+    s_dInitRevEt := TIME_TO_DINT(fb_tInitRev.ET);
+    fb_tPreBlock(IN := s_bPreBlockIn, PT := DINT_TO_TIME(i_dPreBlockMs));
+    s_bPreBlockQ := fb_tPreBlock.Q;
+    s_dPreBlockEt := TIME_TO_DINT(fb_tPreBlock.ET);
+    fb_tSlowFeed(IN := s_bSlowFeedIn, PT := DINT_TO_TIME(i_dSlowFeedMs));
+    s_bSlowFeedQ := fb_tSlowFeed.Q;
+    s_dSlowFeedEt := TIME_TO_DINT(fb_tSlowFeed.ET);
+    fb_tRelease(IN := s_bReleaseIn, PT := DINT_TO_TIME(s_dReleasePt));
+    s_bReleaseQ := fb_tRelease.Q;
+    s_dReleaseEt := TIME_TO_DINT(fb_tRelease.ET);
+    fb_tStarve(IN := s_bStarveIn, PT := DINT_TO_TIME(i_dStarveMs));
+    s_bStarveQ := fb_tStarve.Q;
+    s_dStarveEt := TIME_TO_DINT(fb_tStarve.ET);
+    fb_tBlkUp1(IN := s_bBlkUp1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkUp1Q := fb_tBlkUp1.Q;
+    s_dBlkUp1Et := TIME_TO_DINT(fb_tBlkUp1.ET);
+    fb_tBlkUp2(IN := s_bBlkUp2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkUp2Q := fb_tBlkUp2.Q;
+    s_dBlkUp2Et := TIME_TO_DINT(fb_tBlkUp2.ET);
+    fb_tBlkDn1(IN := s_bBlkDn1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkDn1Q := fb_tBlkDn1.Q;
+    s_dBlkDn1Et := TIME_TO_DINT(fb_tBlkDn1.ET);
+    fb_tBlkDn2(IN := s_bBlkDn2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bBlkDn2Q := fb_tBlkDn2.Q;
+    s_dBlkDn2Et := TIME_TO_DINT(fb_tBlkDn2.ET);
+    fb_tSepUp1(IN := s_bSepUp1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepUp1Q := fb_tSepUp1.Q;
+    s_dSepUp1Et := TIME_TO_DINT(fb_tSepUp1.ET);
+    fb_tSepUp2(IN := s_bSepUp2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepUp2Q := fb_tSepUp2.Q;
+    s_dSepUp2Et := TIME_TO_DINT(fb_tSepUp2.ET);
+    fb_tSepDn1(IN := s_bSepDn1In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepDn1Q := fb_tSepDn1.Q;
+    s_dSepDn1Et := TIME_TO_DINT(fb_tSepDn1.ET);
+    fb_tSepDn2(IN := s_bSepDn2In, PT := DINT_TO_TIME(i_dCylTimeoutMs));
+    s_bSepDn2Q := fb_tSepDn2.Q;
+    s_dSepDn2Et := TIME_TO_DINT(fb_tSepDn2.ET);
+    fb_trUnload(CLK := io_stLayer.bUnload);
+    s_bUnloadEdge := fb_trUnload.Q;
     END_REGION
 
     REGION 01_Derived 本扫描派生量

@@ -1,4 +1,7 @@
-# 使用说明 GlobalVars.db
+# 使用说明 GlobalVars.scl
+
+> **现行（2026-11-15，CHG-PLC-2026-022）**：各功能块经自己的背景数据块调用（如 `"DB_1001_MachineMode_DJ005"(...)`），GlobalVars 不再含 FB 实例，源文件改为 `GlobalVars.scl`；现行接口以 `00_程序方案/接口文档_INT.md` 4.1 与 `OB1.scl` 为准，下文旧版本内容只作历史。
+
 
 ## 1. 功能
 
@@ -38,5 +41,5 @@ FB_External(stExternal := "GlobalVars".stExternal);
 
 1. 修改结构体字段后需同步更新对应 FB 的 VAR_IN_OUT 接口定义
 2. 结构体字段命名遵循 LSP-905 前缀规范（i_=输入, q_=输出, st=结构体）
-3. 新增 FB 实例时在 GlobalVars.db 中声明对应的 STRUCT 类型
+3. 新增 FB 时给它建自己的背景数据块（`DB_<编号>_<名>_DJ005.scl`），不要把 FB 实例放进 GlobalVars（LSP-905 §4.11）；GlobalVars 只放结构体与数组
 4. 报警码类型为 WORD（16#0000=无报警）

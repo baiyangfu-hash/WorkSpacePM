@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1005_HomePrepare_BufferFraming                     *)
 (*  功能描述:   回原点序列 (预处理 -> Z -> X1/X2) 与准备序列          *)
 (*              (夹爪/升降缸 -> Z 待机点 -> X1 取料点 -> X2 取料点 -> *)
@@ -7,7 +7,7 @@
 (*                                                                   *)
 (*  依据: 详细设计说明书_DSN.md 4.2; 接口文档_INT.md 4.10 / 5 / 8;   *)
 (*        原程序工艺说明 PRC 4                                       *)
-(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
 (*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2], X2 = io_arrAxis[3]。  *)
 (*                                                                   *)
@@ -36,15 +36,15 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fb_tPrepZ           : FB_TON;       // 准备: Z 动作前延时
+    fb_tPrepZ           : TON_TIME;       // 准备: Z 动作前延时
     s_bPrepZIn          : BOOL := FALSE;
     s_bPrepZQ           : BOOL := FALSE;
     s_dPrepZEt          : DINT := 0;
-    fb_tPrepX1          : FB_TON;       // 准备: X1 动作前延时
+    fb_tPrepX1          : TON_TIME;       // 准备: X1 动作前延时
     s_bPrepX1In         : BOOL := FALSE;
     s_bPrepX1Q          : BOOL := FALSE;
     s_dPrepX1Et         : DINT := 0;
-    fb_tPrepX2          : FB_TON;       // 准备: X2 动作前延时
+    fb_tPrepX2          : TON_TIME;       // 准备: X2 动作前延时
     s_bPrepX2In         : BOOL := FALSE;
     s_bPrepX2Q          : BOOL := FALSE;
     s_dPrepX2Et         : DINT := 0;
@@ -93,9 +93,15 @@ END_VAR
 
 BEGIN
     REGION 00_Timers 定时器统一调用 (顶部, 无条件)
-    fb_tPrepZ(IN := s_bPrepZIn, PT := io_stHome.dPrepZDelayMs, Q => s_bPrepZQ, ET => s_dPrepZEt);
-    fb_tPrepX1(IN := s_bPrepX1In, PT := io_stHome.dPrepX1DelayMs, Q => s_bPrepX1Q, ET => s_dPrepX1Et);
-    fb_tPrepX2(IN := s_bPrepX2In, PT := io_stHome.dPrepX2DelayMs, Q => s_bPrepX2Q, ET => s_dPrepX2Et);
+    fb_tPrepZ(IN := s_bPrepZIn, PT := DINT_TO_TIME(io_stHome.dPrepZDelayMs));
+    s_bPrepZQ := fb_tPrepZ.Q;
+    s_dPrepZEt := TIME_TO_DINT(fb_tPrepZ.ET);
+    fb_tPrepX1(IN := s_bPrepX1In, PT := DINT_TO_TIME(io_stHome.dPrepX1DelayMs));
+    s_bPrepX1Q := fb_tPrepX1.Q;
+    s_dPrepX1Et := TIME_TO_DINT(fb_tPrepX1.ET);
+    fb_tPrepX2(IN := s_bPrepX2In, PT := DINT_TO_TIME(io_stHome.dPrepX2DelayMs));
+    s_bPrepX2Q := fb_tPrepX2.Q;
+    s_dPrepX2Et := TIME_TO_DINT(fb_tPrepX2.ET);
     END_REGION
 
     REGION 01_Derived 派生量

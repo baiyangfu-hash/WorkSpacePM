@@ -45,22 +45,22 @@ tags: ["详细设计", "PLC程序"]
 | FB_1003_PickPlace_BufferFraming | `03_取放料/` | 1 | S20~S25 取放料 | R-PP-* |
 | FB_1004_GlueMachineFeeder_BufferFraming | `04_打胶机送料/` | 1 | X2 小车 4 步 + 打胶机握手 | R-FEED-* |
 | FB_2001_CommonAlarm_AllStation | `05_公共报警/` | 1 | F0~F127 自保持、分级、汇总、复位、声光 | R-ALM-*、R-MODE-07 |
-| GlobalVars | `00_全局数据/GlobalVars.db` | 1 | 各机构结构体 + FB 实例 | R-NFR-06 |
+| GlobalVars | `00_全局数据/GlobalVars.scl` | 1 | 各机构结构体（FB 实例在各自背景数据块，LSP-905 §4.11） | R-NFR-06 |
 
 > 旧版中的 MES 报警队列、10 组配方管理器、STD-820 全套握手字段，原程序没有对应功能，**新版不保留**（评审时请确认是否同意删除）。
 
 ### 3.2 OB1 调用顺序（9 行）
 
 ```scl
-GlobalVars.fbMode(io_stMachine := GlobalVars.stMachine, ...);
-GlobalVars.fbHomePrepare(...);
-GlobalVars.fbManual(...);
-GlobalVars.fbExternal(...);
-GlobalVars.fbBridge(...);          // 站间信号中继（读上一扫描的输出）
-GlobalVars.fbConveyorSystem(...);
-GlobalVars.fbPickPlace(...);
-GlobalVars.fbFeeder(...);
-GlobalVars.fbAlarm(...);           // 最后：汇总报警，产生本扫描的 Hold / M8，下一扫描生效
+"DB_1001_MachineMode_DJ005"(io_stMachine := GlobalVars.stMachine, ...);
+"DB_1005_HomePrepare_DJ005"(...);
+"DB_1006_ManualTeach_DJ005"(...);
+"DB_3001_ExternalDevice_DJ005"(...);
+"DB_2002_StationBridge_DJ005"(...);  // 站间信号中继（读上一扫描的输出）
+"DB_1007_ConveyorSystem_DJ005"(...);
+"DB_1003_PickPlace_DJ005"(...);
+"DB_1004_GlueMachineFeeder_DJ005"(...);
+"DB_2001_CommonAlarm_DJ005"(...);     // 最后：汇总报警，产生本扫描的 Hold / M8，下一扫描生效
 ```
 
 信号一拍延迟（一个扫描周期）可接受，原程序同样存在块间一拍。具体 `VAR_IN_OUT` 参数见 INT 第 5 节。
@@ -70,7 +70,7 @@ GlobalVars.fbAlarm(...);           // 最后：汇总报警，产生本扫描的
 | 约定 | 内容 |
 |---|---|
 | 步序 | `s_iStep`（INT）+ 具名常量，数值表见 INT 第 8 节（TIA V19 无枚举）；每个 CASE 必有 `ELSE`（回安全步）(STD-850) |
-| 步入口 | 步内的“入口 0.5 s 窗口”用 `FB_TON` 实现（`s_fbSettle`），时间取参数 `dSettleMs`（默认 500） |
+| 步入口 | 步内的“入口 0.5 s 窗口”用 `TON_TIME` 实现（`s_fbSettle`），时间取参数 `dSettleMs`（默认 500） |
 | 定时器 | FB 顶部集中批量调用，三段式；暂停 / 本机构保持时对应 `IN` 置 FALSE（清零，等同原程序非保持定时器） |
 | 保持（Hold） | 来自 FB_2001 的 `bHold*`：该机构步序保持、电机 / 轴停；气缸命令保持；不清步序 |
 | 复位（Reset） | 急停类 M8 或进手动：步序回 0、轴 Stop、输送电机停、阻挡 / 分料升起；夹爪和升降缸不动（R-PP-09） |

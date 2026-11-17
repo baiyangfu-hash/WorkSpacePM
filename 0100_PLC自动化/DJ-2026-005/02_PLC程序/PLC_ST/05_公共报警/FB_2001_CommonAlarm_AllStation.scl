@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_2001_CommonAlarm_AllStation                        *)
 (*  功能描述:   F0~F127 报警自保持、分级、汇总、复位、声光            *)
 (*  版本号:     V15.0.0 (2026-10-24, 依据新设计重写, 取代 V4.x)       *)
@@ -6,7 +6,7 @@
 (*  依据:                                                            *)
 (*    - 详细设计说明书_DSN.md 9; 接口文档_INT.md 4.9 / 9              *)
 (*    - 原程序 PDF 的报警块与声光块                                  *)
-(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
 (*  调用位置: OB1 最后一个, 本扫描产生的 Hold / M8 下一扫描生效。    *)
 (*  分级: A 类进 bFault (M8); B 类按机构给 Hold; 提示类只显示。      *)
@@ -27,21 +27,21 @@ VAR_IN_OUT
 END_VAR
 
 VAR
-    fb_trReset          : FB_R_TRIG;        // 复位键上升沿
+    fb_trReset          : R_TRIG;        // 复位键上升沿
     s_bResetEdge        : BOOL := FALSE;
 
-    (* 时钟: 两个 FB_TON 互相触发的方波振荡 *)
-    fb_tClk1On          : FB_TON;           // 1 s 时钟: 低电平 500 ms
+    (* 时钟: 两个 TON_TIME 互相触发的方波振荡 *)
+    fb_tClk1On          : TON_TIME;           // 1 s 时钟: 低电平 500 ms
     s_bClk1OnQ          : BOOL := FALSE;
     s_dClk1OnEt         : DINT := 0;
-    fb_tClk1Off         : FB_TON;           // 1 s 时钟: 高电平 500 ms
+    fb_tClk1Off         : TON_TIME;           // 1 s 时钟: 高电平 500 ms
     s_bClk1OffQ         : BOOL := FALSE;
     s_dClk1OffEt        : DINT := 0;
     s_bClk1s            : BOOL := FALSE;    // 1 s 时钟
-    fb_tClk01On         : FB_TON;           // 100 ms 时钟: 低电平 50 ms
+    fb_tClk01On         : TON_TIME;           // 100 ms 时钟: 低电平 50 ms
     s_bClk01OnQ         : BOOL := FALSE;
     s_dClk01OnEt        : DINT := 0;
-    fb_tClk01Off        : FB_TON;           // 100 ms 时钟: 高电平 50 ms
+    fb_tClk01Off        : TON_TIME;           // 100 ms 时钟: 高电平 50 ms
     s_bClk01OffQ        : BOOL := FALSE;
     s_dClk01OffEt       : DINT := 0;
     s_bClk01s           : BOOL := FALSE;    // 100 ms 时钟
@@ -62,11 +62,20 @@ END_VAR
 
 BEGIN
     REGION 00_TimersEdges 定时器与边沿统一调用 (顶部, 无条件)
-    fb_trReset(IN := io_stIo.bResetButton, Q => s_bResetEdge);
-    fb_tClk1On(IN := NOT s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OnQ, ET => s_dClk1OnEt);
-    fb_tClk1Off(IN := s_bClk1s, PT := CLK1_HALF_MS, Q => s_bClk1OffQ, ET => s_dClk1OffEt);
-    fb_tClk01On(IN := NOT s_bClk01s, PT := CLK01_HALF_MS, Q => s_bClk01OnQ, ET => s_dClk01OnEt);
-    fb_tClk01Off(IN := s_bClk01s, PT := CLK01_HALF_MS, Q => s_bClk01OffQ, ET => s_dClk01OffEt);
+    fb_trReset(CLK := io_stIo.bResetButton);
+    s_bResetEdge := fb_trReset.Q;
+    fb_tClk1On(IN := NOT s_bClk1s, PT := DINT_TO_TIME(CLK1_HALF_MS));
+    s_bClk1OnQ := fb_tClk1On.Q;
+    s_dClk1OnEt := TIME_TO_DINT(fb_tClk1On.ET);
+    fb_tClk1Off(IN := s_bClk1s, PT := DINT_TO_TIME(CLK1_HALF_MS));
+    s_bClk1OffQ := fb_tClk1Off.Q;
+    s_dClk1OffEt := TIME_TO_DINT(fb_tClk1Off.ET);
+    fb_tClk01On(IN := NOT s_bClk01s, PT := DINT_TO_TIME(CLK01_HALF_MS));
+    s_bClk01OnQ := fb_tClk01On.Q;
+    s_dClk01OnEt := TIME_TO_DINT(fb_tClk01On.ET);
+    fb_tClk01Off(IN := s_bClk01s, PT := DINT_TO_TIME(CLK01_HALF_MS));
+    s_bClk01OffQ := fb_tClk01Off.Q;
+    s_dClk01OffEt := TIME_TO_DINT(fb_tClk01Off.ET);
 
     IF s_bClk1OnQ THEN
         s_bClk1s := TRUE;

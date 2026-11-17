@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1007_ConveyorSystem_BufferFraming                  *)
 (*  功能描述:   4 层输送系统: 持有 4 个 FB_1002 实例, 搬运传感器 /     *)
 (*              命令 / 输出, 手动强制, 上料按钮, 一键退料, 缺料与气缸  *)
@@ -34,7 +34,7 @@ VAR
     fb_L2                : FB_1002_SingleLayerConveyor_BufferFraming;
     fb_L3                : FB_1002_SingleLayerConveyor_BufferFraming;
     fb_L4                : FB_1002_SingleLayerConveyor_BufferFraming;
-    fb_trUnload         : FB_R_TRIG;            // 一键退料 M515 上升沿
+    fb_trUnload         : R_TRIG;            // 一键退料 M515 上升沿
     s_bUnloadEdge       : BOOL := FALSE;
     s_bUnloadReq        : BOOL := FALSE;        // 退料有效 (非自动)
     s_iK                : INT := 0;             // 报警下标
@@ -55,7 +55,8 @@ END_VAR
 
 BEGIN
     REGION 01_PurgeRequest 一键退料 M515: 非自动下上升沿, 4 层重新初始化
-    fb_trUnload(IN := io_stHmi.bBlinkOpt, Q => s_bUnloadEdge);
+    fb_trUnload(CLK := io_stHmi.bBlinkOpt);
+    s_bUnloadEdge := fb_trUnload.Q;
     s_bUnloadReq := io_stHmi.bBlinkOpt AND (NOT io_stMachine.bAuto);
 
     (* ---- 1 层: 输入搬运 ---- *)

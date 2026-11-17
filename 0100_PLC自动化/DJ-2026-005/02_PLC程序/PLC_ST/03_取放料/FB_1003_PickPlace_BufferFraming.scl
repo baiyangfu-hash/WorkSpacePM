@@ -1,4 +1,4 @@
-(* ================================================================= *)
+﻿(* ================================================================= *)
 (*  功能块名称: FB_1003_PickPlace_BufferFraming                       *)
 (*  功能描述:   取放料机构 S20~S25 状态机 (2 根 / 4 根模式, Z + X1)  *)
 (*  版本号:     V15.1.0 (2026-10-24, 增加 2 根 / 4 根取料模式)        *)
@@ -6,7 +6,7 @@
 (*  依据:                                                            *)
 (*    - 详细设计说明书_DSN.md 6 / 3.3; 接口文档_INT.md 4.6 / 5 / 8   *)
 (*    - 原程序 PDF 的取放料块 (S20 待料 ~ S25 松开)                  *)
-(*  遵循规范: LSP-905; 定时器用 SysLib FB_TON (毫秒)                 *)
+(*  遵循规范: LSP-905; 定时器/边沿用 TIA 原生 TON_TIME/R_TRIG        *)
 (*                                                                   *)
 (*  轴: Z = io_arrAxis[1], X1 = io_arrAxis[2] (沿用现有 GlobalVars    *)
 (*  轴编号, 与原程序的轴号不同, 以信号名为准)。                      *)
@@ -27,73 +27,73 @@ END_VAR
 
 VAR
     (* 过程定时器 *)
-    fb_tSettle          : FB_TON;       // 步入口窗口 / S25 松开计时
+    fb_tSettle          : TON_TIME;       // 步入口窗口 / S25 松开计时
     s_bSettleIn         : BOOL := FALSE;
     s_bSettleQ          : BOOL := FALSE;
     s_dSettleEt         : DINT := 0;
-    fb_tAB              : FB_TON;       // A 或 B 请求出现满 0.5 s
+    fb_tAB              : TON_TIME;       // A 或 B 请求出现满 0.5 s
     s_bABIn             : BOOL := FALSE;
     s_bABQ              : BOOL := FALSE;
     s_dABEt             : DINT := 0;
-    fb_tClamp           : FB_TON;       // 夹紧超时 (F106)
+    fb_tClamp           : TON_TIME;       // 夹紧超时 (F106)
     s_bClampIn          : BOOL := FALSE;
     s_bClampQ           : BOOL := FALSE;
     s_dClampEt          : DINT := 0;
 
     (* 报警定时器: F30~F33, F66~F73, F74, F75 *)
-    fb_tF30             : FB_TON;
+    fb_tF30             : TON_TIME;
     s_bF30In            : BOOL := FALSE;
     s_bF30Q             : BOOL := FALSE;
     s_dF30Et            : DINT := 0;
-    fb_tF31             : FB_TON;
+    fb_tF31             : TON_TIME;
     s_bF31In            : BOOL := FALSE;
     s_bF31Q             : BOOL := FALSE;
     s_dF31Et            : DINT := 0;
-    fb_tF32             : FB_TON;
+    fb_tF32             : TON_TIME;
     s_bF32In            : BOOL := FALSE;
     s_bF32Q             : BOOL := FALSE;
     s_dF32Et            : DINT := 0;
-    fb_tF33             : FB_TON;
+    fb_tF33             : TON_TIME;
     s_bF33In            : BOOL := FALSE;
     s_bF33Q             : BOOL := FALSE;
     s_dF33Et            : DINT := 0;
-    fb_tF66             : FB_TON;
+    fb_tF66             : TON_TIME;
     s_bF66In            : BOOL := FALSE;
     s_bF66Q             : BOOL := FALSE;
     s_dF66Et            : DINT := 0;
-    fb_tF67             : FB_TON;
+    fb_tF67             : TON_TIME;
     s_bF67In            : BOOL := FALSE;
     s_bF67Q             : BOOL := FALSE;
     s_dF67Et            : DINT := 0;
-    fb_tF68             : FB_TON;
+    fb_tF68             : TON_TIME;
     s_bF68In            : BOOL := FALSE;
     s_bF68Q             : BOOL := FALSE;
     s_dF68Et            : DINT := 0;
-    fb_tF69             : FB_TON;
+    fb_tF69             : TON_TIME;
     s_bF69In            : BOOL := FALSE;
     s_bF69Q             : BOOL := FALSE;
     s_dF69Et            : DINT := 0;
-    fb_tF70             : FB_TON;
+    fb_tF70             : TON_TIME;
     s_bF70In            : BOOL := FALSE;
     s_bF70Q             : BOOL := FALSE;
     s_dF70Et            : DINT := 0;
-    fb_tF71             : FB_TON;
+    fb_tF71             : TON_TIME;
     s_bF71In            : BOOL := FALSE;
     s_bF71Q             : BOOL := FALSE;
     s_dF71Et            : DINT := 0;
-    fb_tF72             : FB_TON;
+    fb_tF72             : TON_TIME;
     s_bF72In            : BOOL := FALSE;
     s_bF72Q             : BOOL := FALSE;
     s_dF72Et            : DINT := 0;
-    fb_tF73             : FB_TON;
+    fb_tF73             : TON_TIME;
     s_bF73In            : BOOL := FALSE;
     s_bF73Q             : BOOL := FALSE;
     s_dF73Et            : DINT := 0;
-    fb_tF74             : FB_TON;
+    fb_tF74             : TON_TIME;
     s_bF74In            : BOOL := FALSE;
     s_bF74Q             : BOOL := FALSE;
     s_dF74Et            : DINT := 0;
-    fb_tF75             : FB_TON;
+    fb_tF75             : TON_TIME;
     s_bF75In            : BOOL := FALSE;
     s_bF75Q             : BOOL := FALSE;
     s_dF75Et            : DINT := 0;
@@ -149,23 +149,57 @@ END_VAR
 
 BEGIN
     REGION 00_Timers 定时器统一调用 (顶部, 无条件)
-    fb_tSettle(IN := s_bSettleIn, PT := io_stPP.dSettleMs, Q => s_bSettleQ, ET => s_dSettleEt);
-    fb_tAB(IN := s_bABIn, PT := io_stPP.dSettleMs, Q => s_bABQ, ET => s_dABEt);
-    fb_tClamp(IN := s_bClampIn, PT := io_stPP.dClampTimeoutMs, Q => s_bClampQ, ET => s_dClampEt);
-    fb_tF30(IN := s_bF30In, PT := io_stPP.dCylTimeoutMs, Q => s_bF30Q, ET => s_dF30Et);
-    fb_tF31(IN := s_bF31In, PT := io_stPP.dCylTimeoutMs, Q => s_bF31Q, ET => s_dF31Et);
-    fb_tF32(IN := s_bF32In, PT := io_stPP.dCylTimeoutMs, Q => s_bF32Q, ET => s_dF32Et);
-    fb_tF33(IN := s_bF33In, PT := io_stPP.dCylTimeoutMs, Q => s_bF33Q, ET => s_dF33Et);
-    fb_tF66(IN := s_bF66In, PT := io_stPP.dCylTimeoutMs, Q => s_bF66Q, ET => s_dF66Et);
-    fb_tF67(IN := s_bF67In, PT := io_stPP.dCylTimeoutMs, Q => s_bF67Q, ET => s_dF67Et);
-    fb_tF68(IN := s_bF68In, PT := io_stPP.dCylTimeoutMs, Q => s_bF68Q, ET => s_dF68Et);
-    fb_tF69(IN := s_bF69In, PT := io_stPP.dCylTimeoutMs, Q => s_bF69Q, ET => s_dF69Et);
-    fb_tF70(IN := s_bF70In, PT := io_stPP.dCylTimeoutMs, Q => s_bF70Q, ET => s_dF70Et);
-    fb_tF71(IN := s_bF71In, PT := io_stPP.dCylTimeoutMs, Q => s_bF71Q, ET => s_dF71Et);
-    fb_tF72(IN := s_bF72In, PT := io_stPP.dCylTimeoutMs, Q => s_bF72Q, ET => s_dF72Et);
-    fb_tF73(IN := s_bF73In, PT := io_stPP.dCylTimeoutMs, Q => s_bF73Q, ET => s_dF73Et);
-    fb_tF74(IN := s_bF74In, PT := io_stPP.dCylTimeoutMs, Q => s_bF74Q, ET => s_dF74Et);
-    fb_tF75(IN := s_bF75In, PT := io_stPP.dCylTimeoutMs, Q => s_bF75Q, ET => s_dF75Et);
+    fb_tSettle(IN := s_bSettleIn, PT := DINT_TO_TIME(io_stPP.dSettleMs));
+    s_bSettleQ := fb_tSettle.Q;
+    s_dSettleEt := TIME_TO_DINT(fb_tSettle.ET);
+    fb_tAB(IN := s_bABIn, PT := DINT_TO_TIME(io_stPP.dSettleMs));
+    s_bABQ := fb_tAB.Q;
+    s_dABEt := TIME_TO_DINT(fb_tAB.ET);
+    fb_tClamp(IN := s_bClampIn, PT := DINT_TO_TIME(io_stPP.dClampTimeoutMs));
+    s_bClampQ := fb_tClamp.Q;
+    s_dClampEt := TIME_TO_DINT(fb_tClamp.ET);
+    fb_tF30(IN := s_bF30In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF30Q := fb_tF30.Q;
+    s_dF30Et := TIME_TO_DINT(fb_tF30.ET);
+    fb_tF31(IN := s_bF31In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF31Q := fb_tF31.Q;
+    s_dF31Et := TIME_TO_DINT(fb_tF31.ET);
+    fb_tF32(IN := s_bF32In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF32Q := fb_tF32.Q;
+    s_dF32Et := TIME_TO_DINT(fb_tF32.ET);
+    fb_tF33(IN := s_bF33In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF33Q := fb_tF33.Q;
+    s_dF33Et := TIME_TO_DINT(fb_tF33.ET);
+    fb_tF66(IN := s_bF66In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF66Q := fb_tF66.Q;
+    s_dF66Et := TIME_TO_DINT(fb_tF66.ET);
+    fb_tF67(IN := s_bF67In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF67Q := fb_tF67.Q;
+    s_dF67Et := TIME_TO_DINT(fb_tF67.ET);
+    fb_tF68(IN := s_bF68In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF68Q := fb_tF68.Q;
+    s_dF68Et := TIME_TO_DINT(fb_tF68.ET);
+    fb_tF69(IN := s_bF69In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF69Q := fb_tF69.Q;
+    s_dF69Et := TIME_TO_DINT(fb_tF69.ET);
+    fb_tF70(IN := s_bF70In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF70Q := fb_tF70.Q;
+    s_dF70Et := TIME_TO_DINT(fb_tF70.ET);
+    fb_tF71(IN := s_bF71In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF71Q := fb_tF71.Q;
+    s_dF71Et := TIME_TO_DINT(fb_tF71.ET);
+    fb_tF72(IN := s_bF72In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF72Q := fb_tF72.Q;
+    s_dF72Et := TIME_TO_DINT(fb_tF72.ET);
+    fb_tF73(IN := s_bF73In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF73Q := fb_tF73.Q;
+    s_dF73Et := TIME_TO_DINT(fb_tF73.ET);
+    fb_tF74(IN := s_bF74In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF74Q := fb_tF74.Q;
+    s_dF74Et := TIME_TO_DINT(fb_tF74.ET);
+    fb_tF75(IN := s_bF75In, PT := DINT_TO_TIME(io_stPP.dCylTimeoutMs));
+    s_bF75Q := fb_tF75.Q;
+    s_dF75Et := TIME_TO_DINT(fb_tF75.ET);
     END_REGION
 
     REGION 01_Derived 派生量

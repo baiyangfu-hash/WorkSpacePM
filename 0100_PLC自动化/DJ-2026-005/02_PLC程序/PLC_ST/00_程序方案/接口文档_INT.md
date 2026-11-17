@@ -52,21 +52,20 @@ tags: ["接口文档", "PLC程序"]
 | `stBridge` | `ST_Bridge` | 站间中继信号（第 6 节） |
 | `stAlarm` | `ST_Alarm` | 报警触发、锁存、分级输出、声光 |
 | `astAxis` | `ARRAY[1..3] OF ST_ServoAxis` | 轴（沿用 SysLib；编号沿用现有 GlobalVars：1 = Z、2 = X1、3 = X2） |
-| `fbMode … fbAlarm` | 各 FB 实例 | 见 OB1 |
 
-FB 实例表（`GlobalVars.db` 第四部分，OB1 按下表顺序调用，报警最后）：
+FB 实例表（每个 FB 一个背景数据块，OB1 按下表顺序调用，报警最后；TIA 全局 DB 里不能放 FB 实例，见 LSP-905 §4.11，2026-11-15 CHG-PLC-2026-022 由 `GlobalVars.db` 第四部分改来）：
 
 | FB 类型名 | 实例名 | 说明 |
 |---|---|---|
-| FB_1001_MachineMode_BufferFraming | fbMode | 模式 |
-| FB_1005_HomePrepare_BufferFraming | fbHome | 回原点 / 准备 |
-| FB_1006_ManualTeach_BufferFraming | fbManual | 手动 / 示教 |
-| FB_ExternalDeviceInteraction | fbExternal | 组框机链路（FB_3001） |
-| FB_2002_StationBridge | fbBridge | 站间中继 |
-| FB_1007_ConveyorSystem_BufferFraming | fbConv | 4 层输送（内含 4 个 FB_1002） |
-| FB_1003_PickPlace_BufferFraming | fbPickPlace | 取放料 |
-| FB_1004_GlueMachineFeeder_BufferFraming | fbFeeder | 小车 |
-| FB_2001_CommonAlarm_AllStation | fbAlarm | 报警（最后调用） |
+| FB_1001_MachineMode_BufferFraming | DB_1001_MachineMode_DJ005 | 模式 |
+| FB_1005_HomePrepare_BufferFraming | DB_1005_HomePrepare_DJ005 | 回原点 / 准备 |
+| FB_1006_ManualTeach_BufferFraming | DB_1006_ManualTeach_DJ005 | 手动 / 示教 |
+| FB_ExternalDeviceInteraction | DB_3001_ExternalDevice_DJ005 | 组框机链路（FB_3001） |
+| FB_2002_StationBridge | DB_2002_StationBridge_DJ005 | 站间中继 |
+| FB_1007_ConveyorSystem_BufferFraming | DB_1007_ConveyorSystem_DJ005 | 4 层输送（内含 4 个 FB_1002） |
+| FB_1003_PickPlace_BufferFraming | DB_1003_PickPlace_DJ005 | 取放料 |
+| FB_1004_GlueMachineFeeder_BufferFraming | DB_1004_GlueMachineFeeder_DJ005 | 小车 |
+| FB_2001_CommonAlarm_AllStation | DB_2001_CommonAlarm_DJ005 | 报警（最后调用） |
 
 > 轴编号沿用现有 GlobalVars（见 TEC），与原程序“轴 1 = X1、轴 2 = X2、轴 3 = Z”不同；IO 表里以信号名（`X1_*`、`X2_*`、`Z_*`）为准，**写代码时以名为准，不以编号为准**。
 

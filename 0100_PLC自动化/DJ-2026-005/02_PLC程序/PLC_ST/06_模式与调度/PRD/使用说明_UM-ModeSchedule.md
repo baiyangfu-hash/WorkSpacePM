@@ -48,4 +48,4 @@
 
 ## 调用
 
-OB1 的调用行见 `00_主程序/OB1.scl`，实例声明见 `00_全局数据/GlobalVars.db`。
+OB1 的调用行见 `00_主程序/OB1.scl`，实例在本目录的背景数据块 `DB_1001_MachineMode_DJ005.scl`、`DB_1005_HomePrepare_DJ005.scl`、`DB_1006_ManualTeach_DJ005.scl`、`DB_2002_StationBridge_DJ005.scl`（LSP-905 §4.11）。
