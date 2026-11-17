@@ -7,6 +7,7 @@ codex 有没推送的、trae 有未提交的，灰着照抄命令原话；远程
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -27,7 +28,11 @@ sys.path.insert(0, str(SCRIPTS))
 from cockpit_board import actions, decisions, policy, readers, stations  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.decisions import ConfirmDialog, DecisionsPage  # noqa: E402
-from cockpit_board.widgets.worktrees import ActionDialog, WorktreesPage  # noqa: E402
+from cockpit_board.widgets.worktrees import (  # noqa: E402
+    ActionDialog,
+    RegistryDialog,
+    WorktreesPage,
+)
 from cockpit_board.worktree_controller import (  # noqa: E402
     NOT_ALLOWED,
     NOTHING_TO_RECLAIM,
@@ -194,15 +199,19 @@ def test_claim_list_reader() -> None:
 
 
 class FakeCli:
-    def __init__(self, preview: str = "") -> None:
+    def __init__(self, preview: str = "", registry: str = "", registry_rc: int = 0) -> None:
         self.calls: list[list[str]] = []
         self.preview = preview
+        self.registry = registry
+        self.registry_rc = registry_rc
 
     def __call__(self, command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         args = command[3:]
         self.calls.append(args)
         if args == ["worktree", "reclaim", "--stale"]:
             return subprocess.CompletedProcess(command, 0, self.preview, "")
+        if args == ["agent", "list", "--json"]:
+            return subprocess.CompletedProcess(command, self.registry_rc, self.registry, "账本读不了" if self.registry_rc else "")
         return subprocess.CompletedProcess(command, 0, "已收工位\n", "")
 
 
@@ -375,3 +384,147 @@ def test_the_clean_dialog_shows_the_sweep_verdict_with_the_kind_and_the_head() -
     assert ("清理清单判词", said) in gate.action.facts
     formal = _row(_view(), "gate-formal").action
     assert formal is not None and ("清理清单判词", "已并进 main、干净") in formal.facts
+
+
+# ---------------------------------------------------------------- AI 登记表（CHG-SCPT-2026-712）：“登记新 AI”和“注销”
+
+REGISTRY = {
+    "builtin": [{"name": name, "branch_prefix": prefix} for name, prefix in stations.ROSTER_PREFIX.items()],
+    "registered": [{"name": "antigravity", "branch_prefix": "antigravity/", "status": "active", "registered_by": "baiyang",
+                    "registered_at": "2026-11-17T13:00:00Z", "source_ref": "board"}],
+}
+REGISTRY_JSON = json.dumps(REGISTRY, ensure_ascii=False)
+
+
+def test_registry_name_rule_is_the_same_as_the_cockpit_command() -> None:
+    from auto_pm.application.core import agent_registry
+
+    assert stations.AGENT_NAME.pattern == agent_registry.NAME.pattern
+
+
+def test_registry_commands_are_on_the_policy_list_and_nothing_else_is() -> None:
+    registered = REGISTRY["registered"][0]
+    produced = [stations.registry_preview_args(), stations.register_action("kiro").args, stations.unregister_action(registered).args]
+    assert produced == [("agent", "list", "--json"), ("agent", "register", "kiro", "--via", "board"), ("agent", "unregister", "antigravity")]
+    assert all(stations.allowed_command(args) for args in produced)
+    for bad in (("agent", "register", "kiro"), ("agent", "register", "kiro", "--via", "terminal"), ("agent", "register", "a b", "--via", "board"),
+                ("agent", "register", "--via", "--via", "board"), ("agent", "unregister", "kiro", "--force"), ("agent", "list")):
+        assert not stations.allowed_command(bad), bad
+    assert {"登记新 AI", "注销"} <= policy.WORKTREE_BUTTONS
+
+
+def test_registry_listing_is_read_back_or_said_unreadable() -> None:
+    parsed = stations.parse_registry(REGISTRY_JSON)
+    assert parsed is not None
+    builtin, registered = parsed
+    assert [b["name"] for b in builtin] == list(stations.ROSTER_PREFIX) and [r["name"] for r in registered] == ["antigravity"]
+    for bad in ("", "不是 JSON", "[]", '{"builtin": [], "registered": {}}', '{"registered": []}'):
+        assert stations.parse_registry(bad) is None, bad
+
+
+def test_register_problem_says_what_is_wrong_before_the_command_runs() -> None:
+    taken = ["claude", "antigravity"]
+    assert stations.register_problem("kiro", taken) == ""
+    assert stations.register_problem("", taken) == "先填名字"
+    for bad in ("Kiro", "k", "kiro-1", "1kiro", "kiro ai", "a" * 21):
+        assert "小写字母开头" in stations.register_problem(bad, taken), bad
+    assert stations.register_problem("antigravity", taken) == "antigravity 已经在名册里了"
+    assert stations.register_problem("claude", taken) == "claude 已经在名册里了"
+
+
+def _registry_buttons(dialog: QDialog) -> dict[str, QPushButton]:
+    return {str(b.property("registry_unregister")): b for b in dialog.findChildren(QPushButton) if b.property("registry_unregister")}
+
+
+def test_the_register_button_is_on_the_page_and_grey_with_an_ai_marker(qapp: QApplication) -> None:
+    assert _buttons(_page())["registry:"].isEnabled()
+    assert not _buttons(_page(("CLAUDECODE",)))["registry:"].isEnabled()
+    assert not _buttons(_page(None))["registry:"].isEnabled()  # 认不出带没带标记，也灰着
+
+
+def test_the_register_dialog_lists_the_roster_and_only_runs_a_legal_new_name(qapp: QApplication) -> None:
+    page = _page()
+    dialog = page.open_registry(stations.parse_registry(REGISTRY_JSON), run=False)
+    assert isinstance(dialog, RegistryDialog) and page.last_registry is dialog
+    texts = " ".join(label.text() for label in dialog.findChildren(QLabel))
+    assert "claude" in texts and "antigravity · antigravity/ · 登记 baiyang" in texts
+    assert set(_registry_buttons(dialog)) == {"antigravity"} and _registry_buttons(dialog)["antigravity"].isEnabled()
+    assert not dialog.run_button.isEnabled() and dialog.problem.text() == "先填名字"
+    assert dialog.command_label.text() == "main.py agent register <名字> --via board"
+    for name, problem in (("claude", "claude 已经在名册里了"), ("antigravity", "antigravity 已经在名册里了"), ("Kiro", "小写字母开头")):
+        dialog.name_input.setText(name)
+        assert not dialog.run_button.isEnabled() and problem in dialog.problem.text(), name
+    dialog.name_input.setText(" kiro ")
+    assert dialog.run_button.isEnabled() and dialog.problem.text() == ""
+    assert dialog.command_label.text() == "main.py agent register kiro --via board"
+    dialog.run_button.click()
+    assert dialog.chosen == stations.register_action("kiro")
+    assert {b.text() for b in dialog.findChildren(QPushButton)} <= policy.WORKTREE_BUTTONS
+
+
+def test_unregister_from_the_dialog_goes_through_a_second_confirm(qapp: QApplication) -> None:
+    page = _page()
+    dialog = page.open_registry(stations.parse_registry(REGISTRY_JSON), run=False)
+    _registry_buttons(dialog)["antigravity"].click()
+    chosen = dialog.chosen
+    assert chosen is not None and chosen.key == "unregister" and chosen.args == ("agent", "unregister", "antigravity")
+    confirm = page.open_dialog(chosen, run=False)
+    assert isinstance(confirm, ActionDialog) and confirm.run_button.isEnabled()
+    assert confirm.command_text == "main.py agent unregister antigravity"
+    texts = " ".join(label.text() for label in confirm.findChildren(QLabel))
+    assert "antigravity/" in texts and "baiyang，2026-11-17T13:00:00Z" in texts
+
+
+def test_an_unreadable_roster_still_lets_the_user_register_and_says_so(qapp: QApplication) -> None:
+    dialog = _page().open_registry(None, run=False)
+    texts = " ".join(label.text() for label in dialog.findChildren(QLabel))
+    assert "读不懂" in texts and not _registry_buttons(dialog)
+    dialog.name_input.setText("kiro")
+    assert dialog.run_button.isEnabled()  # 判重交给命令自己
+
+
+def test_with_an_ai_marker_the_register_dialog_cannot_register_or_unregister(qapp: QApplication) -> None:
+    page = _page(("CLAUDECODE",))
+    dialog = page.open_registry(stations.parse_registry(REGISTRY_JSON), run=False)
+    assert dialog.blocked and not _registry_buttons(dialog)["antigravity"].isEnabled()
+    dialog.name_input.setText("kiro")
+    assert not dialog.run_button.isEnabled()
+    dialog._register()
+    dialog._choose(stations.unregister_action(REGISTRY["registered"][0]))
+    assert dialog.chosen is None
+
+
+def test_controller_lists_the_roster_first_then_runs_the_register_command(qapp: QApplication) -> None:
+    page, changed = _page(), []
+    fake = FakeCli(registry=REGISTRY_JSON)
+    controller = WorktreeController(page, Path("/nowhere"), lambda: changed.append(1), runner=fake, markers=lambda: ())
+    controller.dialog_on_preview = False
+    _buttons(page)["registry:"].click()
+    _wait(controller, qapp)
+    assert fake.calls == [["agent", "list", "--json"]]  # 只读，什么都不动
+    assert page.pending_registry == stations.parse_registry(REGISTRY_JSON)
+    page.run_requested.emit(stations.register_action("kiro"))
+    _wait(controller, qapp)
+    assert fake.calls[-1] == ["agent", "register", "kiro", "--via", "board"] and changed == [1]
+    assert page.receipts[-1].rc == 0
+
+
+def test_controller_leaves_a_receipt_when_the_roster_cannot_be_listed(qapp: QApplication) -> None:
+    page = _page()
+    fake = FakeCli(registry_rc=2)
+    controller = WorktreeController(page, Path("/nowhere"), lambda: None, runner=fake, markers=lambda: ())
+    controller.dialog_on_preview = False
+    controller.preview_registry()
+    _wait(controller, qapp)
+    assert fake.calls == [["agent", "list", "--json"]] and page.pending_registry is None
+    assert page.receipts[-1].rc == 2
+
+
+def test_controller_refuses_the_registry_with_an_ai_marker(qapp: QApplication) -> None:
+    page, fake = _page(), FakeCli(registry=REGISTRY_JSON)
+    agent = WorktreeController(page, Path("/nowhere"), lambda: None, runner=fake, markers=lambda: ("CLAUDECODE",))
+    agent.preview_registry()
+    agent.run(stations.register_action("kiro"))
+    _wait(agent, qapp)
+    assert fake.calls == [] and all("未运行" in r.command for r in page.receipts[-2:])
+    assert page.receipts[-1].output == decisions.human_only_block(("CLAUDECODE",))

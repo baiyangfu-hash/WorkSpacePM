@@ -18,7 +18,7 @@ from cockpit_board import decisions, shell, stations, theme
 from cockpit_board.actions import Receipt
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 LISTED = 12
 RECEIPT_LIMIT = 6
@@ -128,9 +128,94 @@ class ActionDialog(QDialog):
         outer.addLayout(row)
 
 
+class RegistryDialog(QDialog):
+    """“登记新 AI”点开的框：现在的名册（内置的、登记的，登记的每个带“注销”），下面填新名字。
+
+    ``registry`` 是 ``agent list --json`` 读到的（None：读不懂，名单写“读不懂”，仍可登记，命令自己判重）。
+    点“确认并运行”→ ``chosen`` 是登记那条命令；点某一行的“注销”→ ``chosen`` 是注销那条，外面再弹一次确认框。
+    """
+
+    def __init__(self, registry: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None, blocked: str,
+                 on_copy: Callable[[str], None], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.blocked = blocked
+        self.chosen: stations.Action | None = None
+        self.setObjectName("registry_dialog")
+        self.setWindowTitle("登记新 AI")
+        self.setMinimumWidth(560)
+        outer = QVBoxLayout(self)
+        outer.setSpacing(theme.SPACE)
+        outer.addWidget(c.label("登记新 AI", "title", wrap=False))
+        outer.addWidget(c.label(stations.REGISTER_SUMMARY))
+        builtin, registered = registry if registry is not None else ([], [])
+        self.taken = [str(b.get("name") or "") for b in builtin] + [str(r.get("name") or "") for r in registered]
+        if registry is None:
+            outer.addWidget(c.label("名册" + c.STATES["unreadable"] + "（agent list --json 的输出不是认得的格式）", "small"))
+        else:
+            outer.addWidget(c.kv([("内置", "、".join(str(b.get("name")) for b in builtin) or "（没有）")]))
+            if not registered:
+                outer.addWidget(c.label("登记的：还没有", "muted"))
+            for item in registered:
+                action = stations.unregister_action(item)
+                drop = c.button("注销", "", action.summary)
+                drop.setProperty("registry_unregister", action.target)
+                drop.setEnabled(not blocked)
+                drop.clicked.connect(lambda _checked=False, a=action: self._choose(a))
+                text = f"{item.get('name')} · {item.get('branch_prefix')} · 登记 {item.get('registered_by')}，{item.get('registered_at')}"
+                outer.addWidget(c.hrow(c.label(text, "small"), drop, 1))
+        outer.addWidget(c.label("新 AI 的名字", "muted", wrap=False))
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("field_agent_name")
+        self.name_input.setPlaceholderText("例如 antigravity：小写字母开头，2～20 位小写字母和数字")
+        self.name_input.textChanged.connect(self._refresh)
+        outer.addWidget(self.name_input)
+        outer.addWidget(c.label("等价的命令行", "q"))
+        self.command_label = c.label("", "mono")
+        outer.addWidget(self.command_label)
+        self.problem = c.label("", "muted")
+        outer.addWidget(self.problem)
+        if blocked:
+            outer.addWidget(c.label(blocked, "small"))
+        row = QHBoxLayout()
+        self.copy_button = c.button("复制命令")
+        self.copy_button.clicked.connect(lambda: on_copy(self.command_label.text()))
+        self.cancel_button = c.button("取消")
+        self.cancel_button.clicked.connect(self.reject)
+        self.run_button = c.button("确认并运行")
+        self.run_button.setObjectName("run")
+        self.run_button.clicked.connect(self._register)
+        row.addWidget(self.copy_button)
+        row.addStretch(1)
+        row.addWidget(self.cancel_button)
+        row.addWidget(self.run_button)
+        outer.addLayout(row)
+        self._refresh()
+
+    def name(self) -> str:
+        return self.name_input.text().strip()
+
+    def _refresh(self) -> None:
+        problem = stations.register_problem(self.name(), self.taken)
+        self.command_label.setText(stations.shown_command(stations.register_action(self.name() or "<名字>").args))
+        self.problem.setText(problem)
+        self.run_button.setEnabled(not self.blocked and not problem)
+
+    def _register(self) -> None:
+        if self.blocked or stations.register_problem(self.name(), self.taken):
+            return
+        self._choose(stations.register_action(self.name()))
+
+    def _choose(self, action: stations.Action) -> None:
+        if self.blocked:
+            return
+        self.chosen = action
+        self.accept()
+
+
 class WorktreesPage(c.ReadPage):
     run_requested = Signal(object)  # stations.Action：用户在确认框里点了“确认并运行”
     reclaim_requested = Signal()  # 点了“清残留持有记录”：控制器先跑只列命令，再回来弹确认框
+    registry_requested = Signal()  # 点了“登记新 AI”：控制器先跑 agent list --json（只读），再回来弹登记框
 
     def __init__(self, root: Path | None = None, markers: Callable[[], Sequence[str] | None] | None = None,
                  on_copy: Callable[[str], None] | None = None, now: Callable[[], datetime] | None = None) -> None:
@@ -145,6 +230,8 @@ class WorktreesPage(c.ReadPage):
         self.last_dialog: ActionDialog | None = None
         self.human_block = ""
         self.pending_reclaim: stations.Action | None = None  # “清残留持有记录”只列出来的那几条，确认框用的就是它
+        self.last_registry: RegistryDialog | None = None
+        self.pending_registry: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
@@ -197,6 +284,12 @@ class WorktreesPage(c.ReadPage):
         reclaim.setEnabled(not self.human_block)
         reclaim.clicked.connect(self.reclaim_requested.emit)
         lay.addWidget(c.hrow(reclaim, 1))
+        lay.addWidget(c.section("登记的 AI", "内置五个以外的 AI 由你本人在这里登记一次，不用改代码、不用发版"))
+        register = c.button("登记新 AI", "", "先只读列出现在的名册（agent list --json），在框里填名字后再登记")
+        register.setProperty("worktree_action", "registry")
+        register.setEnabled(not self.human_block)
+        register.clicked.connect(self.registry_requested.emit)
+        lay.addWidget(c.hrow(register, 1))
         lay.addWidget(c.section("刚才运行过的命令", f"最近 {RECEIPT_LIMIT} 条，命令、退出码和原文输出"))
         if not self.receipts:
             lay.addWidget(c.label("还没有运行过。", "muted"))
@@ -248,6 +341,19 @@ class WorktreesPage(c.ReadPage):
         self.last_dialog = dialog
         if run and dialog.exec() == QDialog.DialogCode.Accepted and not dialog.blocked:
             self.run_requested.emit(action)
+        return dialog
+
+    def open_registry(self, registry: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None, *,
+                      run: bool = True) -> RegistryDialog:
+        """登记框；选了登记就直接交给控制器跑，选了注销先再弹一次确认框（对象、登记记录、等价命令）。"""
+        blocked = decisions.human_only_block(self.markers())
+        dialog = RegistryDialog(registry, blocked, self.on_copy, self)
+        self.last_registry = dialog
+        if run and dialog.exec() == QDialog.DialogCode.Accepted and dialog.chosen is not None and not blocked:
+            if dialog.chosen.key == "unregister":
+                self.open_dialog(dialog.chosen)
+            else:
+                self.run_requested.emit(dialog.chosen)
         return dialog
 
     def add_receipt(self, receipt: Receipt) -> None:

@@ -38,7 +38,10 @@ NEVER = ("合并", "删除", "切换发布", "代签", "签字", "no-verify", "�
 # 3. 只跑 WORKTREE_COMMANDS 里登记的几种命令形状，别的参数一律不运行；命令自己的护栏（有改动或没推送不收、
 #    认不出调用方就拒、保留名单不动、远程分支不动）一条不少，页上的判断只是让人先看明白；
 # 4. 每次点击都留回执：命令、退出码、原文输出留在页上。
-WORKTREE_BUTTONS = frozenset({"收工位", "清理", "清理全部可清项", "清残留持有记录", "复制命令", "取消", "确认并运行"})
+WORKTREE_BUTTONS = frozenset({"收工位", "清理", "清理全部可清项", "清残留持有记录", "复制命令", "取消", "确认并运行",
+                              # AI 登记表（CHG-SCPT-2026-712）：登记、注销内置五个以外的 AI，只限你本人打开的看板，保护同上 1～4 条；
+                              # 命令 agent register / unregister 自己也拒任何带 agent 标记的调用（commands_map 里是 user_only）
+                              "登记新 AI", "注销"})
 # 这一页能起的命令形状（main.py 后面的参数）；"<名字>" 处只认 stations._NAME 的字符。只列（不带 --apply）的那条也在这里。
 WORKTREE_COMMANDS = (
     ("worktree", "close", "<名字>"),
@@ -46,6 +49,9 @@ WORKTREE_COMMANDS = (
     ("worktree", "sweep", "--apply", "--no-fetch"),
     ("worktree", "reclaim", "--stale"),
     ("worktree", "reclaim", "--stale", "--apply"),
+    ("agent", "list", "--json"),
+    ("agent", "register", "<名字>", "--via", "board"),
+    ("agent", "unregister", "<名字>"),
 )
 
 # “发版”页（CHG-SCPT-2026-707，用户 2026-11-17T01:54:27Z 批准）：“同意切换到 <发布号>”是 PM_FORBIDDEN_WORDS 里“同意”“切换”的
