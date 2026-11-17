@@ -39,6 +39,7 @@ class WorktreeController(QObject):
         self.dialog_on_preview = True  # 测试置 False：只列完不弹确认框（弹框要人点）
         page.run_requested.connect(self.run)
         page.reclaim_requested.connect(self.preview_reclaim)
+        page.registry_requested.connect(self.preview_registry)
 
     def _refuse(self, label: str, args: Sequence[str], why: str) -> None:
         self.page.add_receipt(actions.Receipt(self.now().strftime("%H:%M"), label, stations.shown_command(args) + "（未运行）", 1,
@@ -99,6 +100,26 @@ class WorktreeController(QObject):
         self.page.pending_reclaim = stations.reclaim_action(found)
         if self.dialog_on_preview:
             self.page.open_dialog(self.page.pending_reclaim)
+
+    def preview_registry(self) -> None:
+        """“登记新 AI”：先只读列名册（agent list --json），读到的放进登记框；没读成只留回执，不弹框。"""
+        args = stations.registry_preview_args()
+        if self._blocked("登记新 AI（只列名册）", args):
+            return
+        extra: dict[str, Any] = {"runner": self.runner} if self.runner else {}
+        self._spawn(lambda: actions.run_cli(self.root, "登记新 AI（只列名册）", args, timeout=actions.READ_TIMEOUT, **extra),
+                    self._registry_listed)
+
+    def _registry_listed(self, result: actions.Receipt | Exception) -> None:
+        if isinstance(result, Exception):
+            self._refuse("登记新 AI（只列名册）", stations.registry_preview_args(), f"{type(result).__name__}: {result}")
+            return
+        if result.rc != 0:
+            self.page.add_receipt(result)
+            return
+        self.page.pending_registry = stations.parse_registry(result.stdout)
+        if self.dialog_on_preview:
+            self.page.open_registry(self.page.pending_registry)
 
     def busy(self) -> bool:
         return bool(self._jobs)
