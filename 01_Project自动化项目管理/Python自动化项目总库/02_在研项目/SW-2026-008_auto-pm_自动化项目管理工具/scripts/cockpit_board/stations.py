@@ -7,6 +7,8 @@
   只能“清理”→ ``worktree sweep --apply --only <目录名> --no-fetch``，而且要清理清单里这一项判了“可清”；
 * “清残留持有记录”→ 先跑 ``worktree reclaim --stale``（只列），列出来的再跑 ``worktree reclaim --stale --apply``；
 * “清理全部可清项”→ ``worktree sweep --apply --no-fetch``（远程已删的本地分支没有单项参数，只能整批）。
+* “登记新 AI”（CHG-SCPT-2026-712）→ 先只读跑 ``agent list --json`` 列名册，在框里填名字后跑 ``agent register <名字> --via board``；
+  名册里登记的每个 AI 带“注销”→ 再弹一次确认框，跑 ``agent unregister <名字>``（还有工位或有效占位命令自己会拒）。
 
 为什么这一页现在有会收目录的按钮（policy.WORKTREE_BUTTONS 写了来由）：以前骨架不放按钮，让用户去终端敲；
 用户 2026-11-16 说“我没办法用”，项目经理定这一页加按钮，保护是下面几条，每条都有测试：
@@ -334,6 +336,55 @@ def parse_reclaim_preview(text: str) -> list[str]:
 def reclaim_action(found: Sequence[str]) -> Action:
     return Action("reclaim", "清残留持有记录", RECLAIM_SUMMARY, ("worktree", "reclaim", "--stale", "--apply"),
                   f"{len(found)} 条", tuple(("会清", line) for line in found))
+
+
+# ---- AI 登记表（CHG-SCPT-2026-712）：“登记新 AI”先只读列出名册（agent list --json），确认框里填名字再跑 agent register
+
+AGENT_NAME = re.compile(r"[a-z][a-z0-9]{1,19}")  # 和 auto_pm.application.core.agent_registry.NAME 逐字一致（测试对照）
+REGISTER_SUMMARY = ("登记一个内置五个以外的 AI：分支前缀自动是 <名字>/。登记后它用 AUTO_PM_AGENT=<名字>（pm-as-agent.ps1 <名字>）"
+                    "运行驾驶舱命令、开工位。只在你本人打开的看板能点，命令自己也拒任何 AI 来登记。")
+UNREGISTER_SUMMARY = "注销这个 AI：以后带这个名字的 AI 会被拒。它还有工位或有效占位时命令会拒绝，什么都不动；登记记录留着。"
+
+
+def registry_preview_args() -> tuple[str, ...]:
+    return ("agent", "list", "--json")
+
+
+def parse_registry(text: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """``agent list --json`` → (内置, 登记的)；读不懂返回 None（按钮照样能点，但名单写“读不懂”）。"""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    builtin, registered = data.get("builtin"), data.get("registered")
+    if not isinstance(builtin, list) or not isinstance(registered, list):
+        return None
+    return [b for b in builtin if isinstance(b, dict)], [r for r in registered if isinstance(r, dict)]
+
+
+def register_problem(name: str, taken: Sequence[str]) -> str:
+    """确认框里填的名字能不能登记；能返回空串（命令自己还会再判一遍）。"""
+    if not name:
+        return "先填名字"
+    if not AGENT_NAME.fullmatch(name):
+        return "名字要小写字母开头，2～20 位小写字母和数字（不带横线、空格、大写）"
+    if name in taken:
+        return f"{name} 已经在名册里了"
+    return ""
+
+
+def register_action(name: str) -> Action:
+    return Action("register", "登记新 AI", REGISTER_SUMMARY, ("agent", "register", name, "--via", "board"), name,
+                  (("名字", name), ("分支前缀", f"{name}/")))
+
+
+def unregister_action(item: Mapping[str, Any]) -> Action:
+    name = str(item.get("name") or "")
+    facts = (("名字", name), ("分支前缀", str(item.get("branch_prefix") or "")),
+             ("登记", f"{item.get('registered_by') or UNKNOWN}，{item.get('registered_at') or UNKNOWN}"))
+    return Action("unregister", "注销", UNREGISTER_SUMMARY, ("agent", "unregister", name), name, facts)
 
 
 def allowed_command(args: Sequence[str]) -> bool:
