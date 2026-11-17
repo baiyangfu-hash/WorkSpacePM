@@ -27,7 +27,11 @@ from auto_pm.application.core.agent_registry import (
 )
 from auto_pm.application.core.agent_worktree_service import BUILTIN_ROSTER
 from auto_pm.application.core.lease_handover_service import agent_markers
-from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
+from auto_pm.ui.cli.runtime_identity_guard import (
+    COCKPIT_PROJECT_ID,
+    require_runtime_identity_for_workspace,
+    warn_runtime_identity,
+)
 
 
 def _root(ctx: click.Context) -> str:
@@ -99,6 +103,8 @@ def agent_unregister(ctx: click.Context, name: str) -> None:
 def agent_list(ctx: click.Context, as_json: bool, include_retired: bool) -> None:
     """列出名册：内置的五个和本机登记的 AI（只读）"""
 
+    # 只读：运行身份有冲突只在 stderr 提醒，不拦（看板只解析 stdout）
+    warn_runtime_identity(ctx, COCKPIT_PROJECT_ID)
     try:
         registered = AgentRegistryService(_root(ctx)).list(include_retired=include_retired)
     except AgentRegistryError as error:
