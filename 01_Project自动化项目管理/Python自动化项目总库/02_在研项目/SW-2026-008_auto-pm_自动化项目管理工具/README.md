@@ -34,17 +34,17 @@ GUI 驾驶舱亦可在 **系统设置 (Settings)** 页面右上角点击 **🩺 
 ### 开发模式安装
 
 ```bash
-# 进入工作空间根目录
+# 进入工作空间根目录（控制根）
 cd <工作空间根>
 
 # 激活工作空间虚拟环境
 & ".\.venv\Scripts\Activate.ps1"
 
-# 安装基础设施运行位为可编辑模式
-python -m pip install -e "00_Infrastructure/auto_pm" --no-deps
+# 日常运行一律经根目录 main.py（启动器跑 00_Infrastructure/auto_pm/releases/<当前版本>），不用 pip 安装
+python main.py doctor
 
-# 验证驾驶舱健康状态
-python -m auto_pm doctor
+# 改驾驶舱代码：在自己的工位里改本目录（SW-2026-008）的源码。
+# 00_Infrastructure/auto_pm 下的 auto_pm/、tests/、templates/ 是 1.2.4 旧包，不维护、不使用，不要按它安装。
 ```
 
 ### 依赖
@@ -335,7 +335,7 @@ auto-pm/
 | INT 接口文档 | `02_规划/002_接口文档_INT.md` | DTO/Command/Event 接口契约 |
 | DSN 详细设计说明书 | `02_规划/003_详细设计说明书_DSN.md` | 五层架构详细设计 |
 | TEC 技术方案文档 | `02_规划/004_技术方案文档_TEC.md` | 技术选型与方案（接口优先策略） |
-| 里程碑与实施计划 | `02_规划/005_里程碑与实施计划.md` | 30 周滚动计划（M0-M9） |
+| 里程碑与 WBS（唯一现行计划） | `02_规划/驾驶舱开发基线_20261114/02_里程碑与WBS.md` | `AGENTS.md` 指定；26 号、39 号和 M3 后路线都是历史 |
 | UI 架构原型 | `02_规划/Html原型预览/` | HTML 交互原型目录 |
 | UI 原型说明 | `02_规划/007_UI架构原型说明.md` | 原型配套说明 |
 
