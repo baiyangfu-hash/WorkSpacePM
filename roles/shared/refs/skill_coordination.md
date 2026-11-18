@@ -22,7 +22,7 @@
 
 ## 3. 四阶段流程
 
-1. **Grooming**：先运行 `pm resume <PID> --json`，再只读勘测源码、配置、接口和测试。变更单未经用户批准时只能返回事实，不得修改（“直接做，事后告诉你”那一类例外，见 `AGENTS.md` FLOW-001）。
+1. **Grooming**：先运行 `pm resume <PID> --json`，再只读勘测源码、配置、接口和测试。变更单未经用户批准时只能返回事实，不得修改（快线例外，见 `AGENTS.md` FLOW-001）。
 2. **Approval**：PM 角色建立 CHG、出《需求分析与技术实施计划》报批（走 Run 的卡另建 Decision 并创建/授权 Work）；User 明示批准前不得进入 Execution。
 3. **Execution**：执行技能核对已批准的变更单、领卡占位的可改范围和 Git baseline（走 Run 的卡另核 Work/Run/Decision 与 lease），只修改可改范围内的文件；dirty tree 未声明、lease 过期或 schema 未知时停止。
 4. **Acceptance**：执行端运行领域门禁，创建 Checkpoint；需要换 Agent 时创建 checkpoint-bound handoff.v2。PM 角色核验代码、证据、状态和台账后关闭 Work/CHG。
