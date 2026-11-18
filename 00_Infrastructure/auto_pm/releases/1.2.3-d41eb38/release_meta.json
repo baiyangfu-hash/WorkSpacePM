@@ -1,9 +1,0 @@
-{
- "release_id": "1.2.3-d41eb38",
- "version": "1.2.3",
- "source_commit": "d41eb38c773c0b5f175b3231cb6c30f4c90b60aa",
- "built_at": "2026-09-05T22:40:21.245306+00:00",
- "builder": "ZCode (NG-WP-14, CHG-SCPT-2026-016)",
- "build_method": "copy from clean candidate worktree (verified HEAD==d41eb38, porcelain empty)",
- "layout": "auto_pm/ + templates/ (package-parent templates resolution per app_context)"
-}
