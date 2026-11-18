@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,7 @@ from cockpit_board.widgets.worktrees import (  # noqa: E402
 from cockpit_board.worktree_controller import (  # noqa: E402
     NOT_ALLOWED,
     NOTHING_TO_RECLAIM,
+    RUNNING,
     WorktreeController,
 )
 
@@ -528,3 +530,60 @@ def test_controller_refuses_the_registry_with_an_ai_marker(qapp: QApplication) -
     _wait(agent, qapp)
     assert fake.calls == [] and all("未运行" in r.command for r in page.receipts[-2:])
     assert page.receipts[-1].output == decisions.human_only_block(("CLAUDECODE",))
+
+
+def test_running_receipt_is_replaced_when_command_finishes(qapp: QApplication) -> None:
+    page = _page()
+    action = stations.register_action("antigravity")
+    page.add_receipt(actions.Receipt("20:49", action.label, stations.shown_command(action.args), None, False, RUNNING))
+    assert RUNNING in [label.text() for label in page.findChildren(QLabel)]
+    page.add_receipt(actions.Receipt("20:49", action.label, stations.shown_command(action.args), 0, False, "已登记 antigravity"))
+    assert len(page.receipts) == 1 and page.receipts[0].rc == 0
+    texts = [label.text() for label in page.findChildren(QLabel)]
+    assert RUNNING not in texts and "已登记 antigravity" in texts
+
+
+def test_page_shows_registered_ai_roster_from_ledger_and_refreshes_on_register(qapp: QApplication, tmp_path: Path) -> None:
+    from auto_pm.infrastructure.continuity_store import AGENT_REGISTRY_DDL
+
+    empty_page = WorktreesPage(tmp_path, lambda: (), lambda _text: None, lambda: NOW)
+    empty_page.show_results("范围：本机控制根", _results())
+    empty_texts = [label.text() for label in empty_page.findChildren(QLabel)]
+    assert "已登记：还没有" in empty_texts
+    assert any(text.startswith("内置：claude（claude/）") for text in empty_texts)
+
+    db_path = tmp_path / ".auto-pm" / "continuity.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(AGENT_REGISTRY_DDL)
+        conn.execute(
+            "INSERT INTO agent_registry (name, branch_prefix, status, registered_by, registered_at, source_ref)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("antigravity", "antigravity/", "active", "no-agent-marker", "2026-11-18T03:49:12Z", "board"),
+        )
+        conn.execute(
+            "INSERT INTO agent_registry (name, branch_prefix, status, registered_by, registered_at, source_ref)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("oldai", "oldai/", "retired", "no-agent-marker", "2026-11-17T00:00:00Z", "board"),
+        )
+        conn.commit()
+
+    rows = stations.read_registered(tmp_path)
+    assert [row["name"] for row in rows] == ["antigravity"]
+
+    page = WorktreesPage(tmp_path, lambda: (), lambda _text: None, lambda: NOW)
+    page.pending_registry = ([], [])
+    fake = FakeCli(registry=REGISTRY_JSON)
+    controller = WorktreeController(
+        page, tmp_path, lambda: page.show_results("范围：本机控制根", _results()), runner=fake, markers=lambda: ()
+    )
+    page.show_results("范围：本机控制根", _results())
+    assert "已登记：还没有" in [label.text() for label in page.findChildren(QLabel)]
+
+    page.run_requested.emit(stations.register_action("antigravity"))
+    _wait(controller, qapp)
+    assert page.pending_registry is None
+    assert "已登记：antigravity · antigravity/ · 登记 no-agent-marker，2026-11-18T03:49:12Z" in [
+        label.text() for label in page.findChildren(QLabel)
+    ]
+    assert [r.rc for r in page.receipts] == [0]

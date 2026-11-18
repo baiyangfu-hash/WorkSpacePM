@@ -195,6 +195,8 @@ class ReleasePage(c.ReadPage):
         self.render_ship()
 
     def add_receipt(self, receipt: Receipt) -> None:
+        if receipt.rc is not None:
+            self.receipts = [r for r in self.receipts if not (r.rc is None and r.action == receipt.action)]
         self.receipts.append(receipt)
         self.receipts = self.receipts[-RECEIPT_LIMIT * 2:]
         self.render_ship()
