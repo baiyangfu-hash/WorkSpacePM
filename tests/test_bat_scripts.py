@@ -77,7 +77,8 @@ SCRIPTS = _tracked_scripts()
 def test_found_the_known_scripts() -> None:
     names = {p.name for p in SCRIPTS}
     assert "setup_env.bat" in names
-    assert "双击启动驾驶舱.bat" in names
+    assert "双击打开驾驶舱看板.bat" in names
+    assert "双击启动驾驶舱.bat" not in names
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.relative_to(WORKSPACE_ROOT).as_posix())

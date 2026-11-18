@@ -233,11 +233,10 @@ def test_launcher_batch_file_crlf_line_endings() -> None:
     Windows cmd.exe 依赖 CRLF (2 字节) 计算 goto 标签字节偏移；UNIX LF 会导致跳转偏移漂移，
     产生指令撕裂与静默闪退。参见 .gitattributes 第 23 行。
     """
+    ws_root = Path(__file__).resolve().parents[4]
     targets = [
-        Path(r"c:\Users\fubai\Documents\My_Workspace\双击启动驾驶舱.bat"),
-        Path(
-            r"C:\Users\fubai\.codex\visualizations\2026\09\05\01a06f4b-eb60-7e83-8ee7-f3d84cfec583\NG-WP-02\candidate\双击启动驾驶舱.bat"
-        ),
+        ws_root / "setup_env.bat",
+        ws_root / "00_Infrastructure" / "auto_pm" / "environment" / "双击打开驾驶舱看板.bat",
     ]
     checked = 0
     for bat_path in targets:
@@ -261,7 +260,7 @@ def test_launcher_batch_cmd_execution_zero_syntax_errors() -> None:
     """防回归门禁：在 Windows cmd.exe 下实测批处理无语法撕裂报错并正确捕获锁冲突退出码。"""
     import subprocess
 
-    ws_root = Path(r"c:\Users\fubai\Documents\My_Workspace")
+    ws_root = Path(__file__).resolve().parents[4]
     bat_file = ws_root / "双击启动驾驶舱.bat"
     if not bat_file.is_file():
         pytest.skip("根目录批处理不存在")

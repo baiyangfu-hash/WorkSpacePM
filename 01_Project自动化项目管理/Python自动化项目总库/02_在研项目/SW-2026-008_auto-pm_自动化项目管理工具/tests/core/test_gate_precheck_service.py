@@ -437,3 +437,18 @@ def test_the_command_exits_one_on_a_failed_step_and_two_when_it_cannot_start(
     assert failed.exit_code == 1 and "FAIL" in failed.output and "完整输出" in failed.output
     not_git = CliRunner().invoke(gate_group, ["precheck", "--worktree", str(tmp_path)])
     assert not_git.exit_code == 2
+
+
+def test_parallel_related_tests_receive_full_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen_timeouts: dict[str, int] = {}
+
+    def runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path, timeout: int) -> int:
+        seen_timeouts[log.stem] = timeout
+        log.write_text(OK_PYTEST if log.stem == "pytest" else "All checks passed!\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: _py_changed())
+    monkeypatch.setattr(pre, "related_tests", lambda project, inside: ([f"tests/t{i}.py" for i in range(pre.PARALLEL_FROM)], "守卫"))
+    report = PrecheckService(runner=runner).run(_repo_root(), out_dir=tmp_path / "out")
+    assert report.verdict == "PASS"
+    assert seen_timeouts["pytest"] >= pre.FULL_TIMEOUT_SECONDS

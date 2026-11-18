@@ -29,7 +29,6 @@ ROOT_FILES_ALLOWED = frozenset(
         "main.py",
         "requirements.txt",
         "setup_env.bat",
-        "双击启动驾驶舱.bat",
     }
 )
 # 不管在不在允许表里，这些名字出现在根目录就是残留的临时产物

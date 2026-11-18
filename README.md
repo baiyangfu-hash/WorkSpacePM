@@ -79,9 +79,9 @@ AUTO_PM_INSTALL_SYSLIBS=1 sh 00_Infrastructure/auto_pm/environment/setup_env.sh 
 
 ## 5. 启动桌面驾驶舱
 
-两个双击入口：
-- **`双击启动驾驶舱.bat`**（根目录）：在根目录运行 `python main.py`，不带参数时用 `00_Infrastructure/auto_pm/active_release.json` 指的发布版打开驾驶舱主界面（等于 `python main.py gui`）。
+双击入口：
 - **`00_Infrastructure/auto_pm/environment/双击打开驾驶舱看板.bat`**：从 SW-2026-008 源码目录打开驾驶舱总控屏（`01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/pm_dashboard_gui.py`），不走发布版。
+- 如需从命令行打开当前发布版旧桌面端，可在根目录运行 `python main.py gui`。
 
 两个界面各有哪些功能能用，见 `docs/功能清单.md`。
 

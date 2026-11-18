@@ -345,7 +345,11 @@ class PrecheckService:
             log = logs / f"{name}.txt"
             code: int | None
             try:
-                limit = max(timeout_seconds, FULL_TIMEOUT_SECONDS) if tests == ["tests"] and name == "pytest" else timeout_seconds
+                limit = (
+                    max(timeout_seconds, FULL_TIMEOUT_SECONDS)
+                    if (tests == ["tests"] or len(tests) >= PARALLEL_FROM) and name == "pytest"
+                    else timeout_seconds
+                )
                 code = self._runner(argv, project, env, log, limit)
             except (OSError, subprocess.SubprocessError) as error:
                 log.write_text(f"[precheck] could not start: {error}\n", encoding="utf-8")
