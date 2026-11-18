@@ -73,6 +73,7 @@ HOOK_MARK = "pm_merge.py install-hook"
 GIT_TIMEOUT = 120
 NET_TIMEOUT = 60
 GATE_TIMEOUT = 4 * 60 * 60
+PRECHECK_JOBS = min(max((os.cpu_count() or 4) * 3 // 4, 4), 12)
 SKIP_DIRS = frozenset({".git", ".auto-pm", "releases", "node_modules", ".venv", "__pycache__"})
 
 
@@ -223,28 +224,90 @@ class GateResult:
     lines: list[str] = field(default_factory=list)
 
 
+def _parse_precheck_json(stdout: str) -> dict[str, Any] | None:
+    start = stdout.find("{")
+    if start < 0:
+        return None
+    try:
+        loaded = json.loads(stdout[start:])
+    except ValueError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
 def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
-    """本机门禁：先 ``gate precheck``，需要时再 ``gate run``。原样调驾驶舱命令，只看退出码。"""
+    """本机门禁：跑 ``gate precheck``（带 ``--jobs`` 与 ``--json``）；有项目外改动或 ``full`` 时再跑根目录 ``tests/``。"""
     python = _python(root)
-    entry = str(root / "main.py")
-    commands = [
-        [python, "-B", entry, "gate", "precheck", "--worktree", str(worktree), "--base", "main"]
+    wt_entry = (worktree / COCKPIT_PREFIX / "main.py") if COCKPIT_PREFIX else (worktree / "main.py")
+    entry = str(wt_entry if wt_entry.is_file() else (root / "main.py"))
+    precheck_cmd = [
+        python,
+        "-B",
+        entry,
+        "gate",
+        "precheck",
+        "--worktree",
+        str(worktree),
+        "--base",
+        "main",
+        "--jobs",
+        str(PRECHECK_JOBS),
+        "--json",
     ]
-    if full:
-        out = state_dir(root) / f"gate_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-        commands.append(
-            [python, "-B", entry, "gate", "run", "--worktree", str(worktree), "--out", str(out)]
+    lines: list[str] = []
+    try:
+        result = subprocess.run(
+            precheck_cmd,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GATE_TIMEOUT,
+            check=False,
         )
-    lines = []
-    for command in commands:
-        name = " ".join(command[3:5])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        lines.append(f"gate precheck：没跑完（{exc}）")
+        return GateResult(False, lines)
+    report = _parse_precheck_json(result.stdout or "")
+    steps = (report.get("steps") or []) if report else []
+    outside = (report.get("outside_changes") or []) if report else []
+    steps_ok = (
+        bool(steps)
+        and all(isinstance(s, dict) and s.get("verdict") in ("PASS", "SKIPPED") for s in steps)
+        and any(isinstance(s, dict) and s.get("verdict") == "PASS" for s in steps)
+    )
+    if result.returncode == 0:
+        lines.append("gate precheck：退出码 0")
+    elif steps_ok and outside:
+        lines.append("gate precheck：项目内步骤 PASS（含项目外改动，续跑根目录 tests）")
+    else:
+        detail = ""
+        for s in steps:
+            if isinstance(s, dict) and s.get("verdict") not in ("PASS", "SKIPPED"):
+                detail = f"（{s.get('name')} {s.get('verdict')}：{s.get('why') or s.get('exit')}）"
+                break
+        lines.append(f"gate precheck：退出码 {result.returncode}{detail}")
+        return GateResult(False, lines)
+    if (full or outside) and (worktree / "tests").is_dir():
+        root_cmd = [
+            python,
+            "-B",
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "addopts=",
+            str(worktree / "tests"),
+        ]
         try:
-            result = subprocess.run(command, cwd=root, timeout=GATE_TIMEOUT, check=False)
+            root_res = subprocess.run(root_cmd, cwd=worktree, timeout=GATE_TIMEOUT, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            lines.append(f"{name}：没跑完（{exc}）")
+            lines.append(f"root pytest：没跑完（{exc}）")
             return GateResult(False, lines)
-        lines.append(f"{name}：退出码 {result.returncode}")
-        if result.returncode != 0:
+        lines.append(f"root pytest：退出码 {root_res.returncode}")
+        if root_res.returncode != 0:
             return GateResult(False, lines)
     return GateResult(True, lines)
 

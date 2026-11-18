@@ -72,6 +72,8 @@ class WorktreeController(QObject):
         if isinstance(result, Exception):
             self._refuse(action.label, action.args, f"{type(result).__name__}: {result}")
             return
+        if result.rc == 0 and action.key in ("register", "unregister"):
+            self.page.pending_registry = None
         self.page.add_receipt(result)
         if result.rc == 0:
             self.on_changed()

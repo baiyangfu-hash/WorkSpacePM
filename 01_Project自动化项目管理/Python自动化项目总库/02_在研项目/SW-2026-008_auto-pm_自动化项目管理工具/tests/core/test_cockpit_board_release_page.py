@@ -444,3 +444,13 @@ def test_the_window_checks_candidates_when_the_release_page_opens(qapp: QApplica
     dialog = window.release.open_dialog(RELEASE_ID, run=False)
     assert dialog is not None and dialog.approver() == "白"  # 批准人默认取“决定”页填的名字
     window.close()
+
+
+def test_running_receipt_is_replaced_when_switch_finishes(qapp: QApplication, tmp_path: Path) -> None:
+    page, controller, _ship = _setup(qapp, tmp_path)
+    page.switch_requested.emit(RELEASE_ID, "白")
+    assert page.receipts[-1].rc is None and release.RUNNING in _labels(page)
+    _wait(controller, qapp)
+    assert [r for r in page.receipts if r.rc is None] == []
+    assert [r.rc for r in page.receipts] == [0]
+    assert release.RUNNING not in _labels(page)

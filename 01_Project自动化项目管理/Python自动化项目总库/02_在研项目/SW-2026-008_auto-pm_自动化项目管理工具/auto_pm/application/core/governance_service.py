@@ -36,7 +36,6 @@ ROOT_WHITELIST: set[str] = {
     "main.py",
     "requirements.txt",
     "setup_env.bat",
-    "双击启动驾驶舱.bat",
 }
 
 

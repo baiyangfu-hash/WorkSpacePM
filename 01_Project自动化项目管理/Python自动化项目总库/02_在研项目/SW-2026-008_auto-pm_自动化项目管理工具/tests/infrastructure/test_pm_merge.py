@@ -356,3 +356,32 @@ def test_the_log_is_json_lines_outside_git(pm: ModuleType, repo: SimpleNamespace
     lines = (repo.root / pm.STATE_DIR / pm.LOG_NAME).read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1 and json.loads(lines[0])["branch"] == "claude/311"
     assert git(repo.root, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_run_gates_passes_jobs_and_verifies_root_tests_when_outside_changes_exist(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wt = tmp_path / "wt"
+    (wt / "tests").mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if "precheck" in cmd:
+            payload = {
+                "verdict": "UNVERIFIED",
+                "outside_changes": ["双击启动驾驶舱.bat"],
+                "steps": [
+                    {"name": "ruff", "verdict": "PASS", "exit": 0},
+                    {"name": "mypy", "verdict": "PASS", "exit": 0},
+                    {"name": "pytest", "verdict": "PASS", "exit": 0},
+                ],
+            }
+            return subprocess.CompletedProcess(cmd, 1, json.dumps(payload), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(pm.subprocess, "run", fake_run)
+    res = pm.run_gates(tmp_path, wt, True)
+    assert res.ok
+    assert "--jobs" in calls[0] and "--json" in calls[0]
+    assert len(calls) == 2 and str(wt / "tests") in calls[1]

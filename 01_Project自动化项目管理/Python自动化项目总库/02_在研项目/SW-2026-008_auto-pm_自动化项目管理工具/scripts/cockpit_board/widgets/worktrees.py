@@ -285,6 +285,26 @@ class WorktreesPage(c.ReadPage):
         reclaim.clicked.connect(self.reclaim_requested.emit)
         lay.addWidget(c.hrow(reclaim, 1))
         lay.addWidget(c.section("登记的 AI", "内置五个以外的 AI 由你本人在这里登记一次，不用改代码、不用发版"))
+        lay.addWidget(
+            c.label(
+                "内置：" + "、".join(f"{k}（{v}）" for k, v in stations.ROSTER_PREFIX.items()),
+                "small",
+            )
+        )
+        registered = (
+            self.pending_registry[1]
+            if self.pending_registry is not None
+            else stations.read_registered(self.root)
+        )
+        if not registered:
+            lay.addWidget(c.label("已登记：还没有", "muted"))
+        else:
+            for entry in registered:
+                name = str(entry.get("name") or stations.UNKNOWN)
+                prefix = str(entry.get("branch_prefix") or stations.UNKNOWN)
+                by = str(entry.get("registered_by") or stations.UNKNOWN)
+                at = str(entry.get("registered_at") or stations.UNKNOWN)
+                lay.addWidget(c.label(f"已登记：{name} · {prefix} · 登记 {by}，{at}", "small"))
         register = c.button("登记新 AI", "", "先只读列出现在的名册（agent list --json），在框里填名字后再登记")
         register.setProperty("worktree_action", "registry")
         register.setEnabled(not self.human_block)
@@ -357,6 +377,8 @@ class WorktreesPage(c.ReadPage):
         return dialog
 
     def add_receipt(self, receipt: Receipt) -> None:
+        if receipt.rc is not None:
+            self.receipts = [r for r in self.receipts if not (r.rc is None and r.action == receipt.action)]
         self.receipts.append(receipt)
         self.receipts = self.receipts[-RECEIPT_LIMIT * 2:]
         if self.results:

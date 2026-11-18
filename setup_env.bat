@@ -118,7 +118,7 @@ echo.
 echo ==============================================================================
 echo  [成功] Auto-PM 工作台环境已成功就绪！
 echo.
-echo  • 启动桌面驾驶舱：双击运行 "双击启动驾驶舱.bat" 或执行 "python main.py"
+echo  • 启动驾驶舱看板：双击运行 "00_Infrastructure\auto_pm\environment\双击打开驾驶舱看板.bat"
 echo  • 运行 CLI：执行 "python main.py --help"（统一经过 stable launcher）
 echo  • 运行全量单测：pytest
 echo  • 运行规范体检：python main.py spec sync（统一经过 stable launcher）

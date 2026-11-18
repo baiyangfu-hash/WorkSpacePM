@@ -23,8 +23,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -309,6 +311,26 @@ def read_holders(root: Path | None) -> dict[str, dict[str, Any]]:
         if isinstance(loaded, dict):
             found[entry.stem] = loaded
     return found
+
+
+def read_registered(root: Path | None) -> list[dict[str, Any]]:
+    """从控制根账本只读读取已登记的表外 AI 花名册（只返回 active）。"""
+    if root is None:
+        return []
+    db = root / ".auto-pm" / "continuity.db"
+    if not db.is_file():
+        return []
+    try:
+        uri = f"{db.resolve().as_uri()}?mode=ro"
+        with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=1.0)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT name, branch_prefix, status, registered_by, registered_at, source_ref "
+                "FROM agent_registry WHERE status = 'active' ORDER BY name"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
 
 
 def reclaim_preview_args() -> tuple[str, ...]:
