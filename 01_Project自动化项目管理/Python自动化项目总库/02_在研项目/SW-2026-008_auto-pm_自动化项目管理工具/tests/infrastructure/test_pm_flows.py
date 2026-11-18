@@ -142,10 +142,12 @@ def test_checkup_runs_every_step_in_order_and_writes_a_record(
         "plc docs check DJ-2026-005",
         "prototype check --pid DJ-2026-005",
     ]
-    assert runner.calls[-2]["command"][2].endswith("plan_status.py")
-    assert runner.calls[-2]["command"][3:] == ["DJ-2026-005", "--root", str(root)]
-    assert runner.calls[-1]["command"][2].endswith("command_catalog.py")
-    assert runner.calls[-1]["command"][3:] == ["--print"]
+    assert runner.calls[-3]["command"][2].endswith("plan_status.py")
+    assert runner.calls[-3]["command"][3:] == ["DJ-2026-005", "--root", str(root)]
+    assert runner.calls[-2]["command"][2].endswith("command_catalog.py")
+    assert runner.calls[-2]["command"][3:] == ["--print"]
+    assert runner.calls[-1]["command"][2].endswith("pm_merge.py"), "本机合并对账（卡 311）"
+    assert runner.calls[-1]["command"][3:] == ["--root", str(root), "verify-log"]
     for call in runner.calls:
         assert "shell" not in call and call["cwd"] == str(root)
         assert call["command"][0] == str(flows.resolve_python(root))
@@ -153,7 +155,7 @@ def test_checkup_runs_every_step_in_order_and_writes_a_record(
     assert len(records) == 1
     record = json.loads(records[0].read_text(encoding="utf-8"))
     assert record["result"] == "走完，全过" and record["pid"] == "DJ-2026-005"
-    assert [step["rc"] for step in record["steps"]] == [0] * 10 + [None]
+    assert [step["rc"] for step in record["steps"]] == [0] * 11 + [None]
     assert record["steps"][-1]["key"] == "root_clean" and record["steps"][-1]["status"] == "通过"
     assert record["steps"][0]["command"].endswith("main.py pm orient DJ-2026-005")
     assert Path(record["catalog"]).is_file()
@@ -183,7 +185,7 @@ def test_checkup_runs_every_step_even_after_a_red_one_and_sums_up(
 
     assert flows.run_flow("checkup", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
 
-    assert len(runner.calls) == 10, "体检一步红了也要跑完十步"
+    assert len(runner.calls) == 11, "体检一步红了也要跑完十一步"
     text = "\n".join(lines)
     assert "小结" in text
     assert "| 4 | 对账 | 红 |" in text and "ledger reconcile DJ-2026-005 | 2 |" in text
@@ -639,7 +641,7 @@ def test_root_clean_names_leftovers_but_is_not_red_and_deletes_nothing(
     )
     text = "\n".join(lines)
     assert "根目录有临时文件：.coverage、htmlcov、run.log、tmp_probe.py" in text
-    assert "| 11 | 工作区根目录清洁 | 提醒 |" in text
+    assert "| 12 | 工作区根目录清洁 | 提醒 |" in text
     assert all(
         (root / name).exists() for name in ("tmp_probe.py", ".coverage", "run.log", "htmlcov")
     )

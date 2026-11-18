@@ -55,6 +55,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = PROJECT_ROOT.parents[3]
 CATALOG_SCRIPT = PROJECT_ROOT / "scripts" / "command_catalog.py"
 PLAN_SCRIPT = PROJECT_ROOT / "scripts" / "plan_status.py"
+MERGE_SCRIPT = PROJECT_ROOT / "scripts" / "pm_merge.py"
 REGISTRY = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
 REPORTS = Path(".auto-pm") / "reports" / "flows"
 PLC_ROOT = "0100_PLC自动化/"
@@ -103,7 +104,8 @@ class Step:
     kind 为 ``run``：脚本运行这条只读命令。kind 为 ``stop``：脚本停下，只打印这条命令和要用户本人说的话。
     args 里的 ``{pid}``、``{mission}``、``{chg}``、``{card}`` 运行时换成项目号、Mission 号、变更单号和占位卡号；
     ``{catalog}`` 表示运行命令目录脚本而不是 main.py；
-    ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）。
+    ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）；
+    ``{merge}`` 表示运行本机合并脚本 ``pm_merge.py``（卡 311，控制根由本脚本补上）。
     ``ok`` 是这条命令算“通过”的退出码：默认只有 0；``pr settle-scan`` 用 1 表示“有等收口的卡”，那是收口时的常态，不是红。
     """
 
@@ -140,6 +142,12 @@ CHECKUP: tuple[Step, ...] = (
         "当前命令目录",
         ("{catalog}", "--print"),
         note="现场生成，存进运行记录目录，不入库",
+    ),
+    Step(
+        "local_merges",
+        "本机合并对账",
+        ("{merge}", "verify-log"),
+        note="核对本机合并命令上线后 main 上每个提交的来历（本机合并记录、GitHub PR 合并或经 GitHub 同步的本机合并），只读",
     ),
     Step(
         "root_clean",
@@ -479,6 +487,8 @@ def command_of(
         return [str(python), "-B", str(PLAN_SCRIPT), *args[1:], "--root", str(root)]
     if args and args[0] == "{catalog}":
         return [str(python), "-B", str(CATALOG_SCRIPT), *args[1:]]
+    if args and args[0] == "{merge}":
+        return [str(python), "-B", str(MERGE_SCRIPT), "--root", str(root), *args[1:]]
     return [str(python), "-B", str(root / "main.py"), *args]
 
 
