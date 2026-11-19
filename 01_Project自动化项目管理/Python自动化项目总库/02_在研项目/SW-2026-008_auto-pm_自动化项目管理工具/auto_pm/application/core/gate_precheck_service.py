@@ -39,7 +39,7 @@ from auto_pm.application.core.gate_run_service import (
 
 DEFAULT_BASE = "origin/main"
 STEP_TIMEOUT_SECONDS = 20 * 60
-FULL_TIMEOUT_SECONDS = 45 * 60  # the whole tests/ tree with -n 4 took about 12 minutes on the cloud container (audit of #634)
+FULL_TIMEOUT_SECONDS = 120 * 60  # Windows local parallel runs need headroom beyond the old 45-minute cloud estimate (CHG-SCPT-2026-722)
 PARALLEL_FROM = 4  # this many test files or more (or the whole tree): run them with xdist
 # A change to one of these can break any test: the related set is everything (slow, said out loud in the report).
 EVERYTHING_FILES = frozenset({"tests/conftest.py", "pyproject.toml", "requirements.txt"})
@@ -151,11 +151,95 @@ def _touches(imports: set[str], module: str, is_package: bool) -> bool:
 
 
 _SOURCE_TREE_WORDS = ("auto_pm", "scripts", "tests")
-_WALKERS = frozenset({"rglob", "glob", "walk", "scandir"})
+_OS_WALKERS = frozenset({"walk", "scandir"})
+_GLOB_WALKERS = frozenset({"glob", "iglob"})
+_NON_PY_PATTERN_SUFFIXES = (
+    ".md",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".txt",
+    ".log",
+    ".scl",
+    ".qml",
+    ".html",
+    ".css",
+    ".js",
+    ".xml",
+    ".csv",
+    ".png",
+    ".svg",
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".db",
+    ".sqlite",
+    ".lock",
+    ".bak",
+    ".tmp",
+    ".jsonl",
+    ".jinja",
+    ".j2",
+    ".rst",
+    ".ini",
+    ".cfg",
+    ".sh",
+    ".bat",
+    ".ps1",
+    ".zip",
+    ".tar",
+    ".gz",
+)
+
+
+def _call_arg(node: ast.Call, keyword: str) -> ast.expr | None:
+    if node.args:
+        return node.args[0]
+    for kw in node.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    return None
+
+
+def _pattern_scans_python(arg: ast.expr | None) -> bool:
+    """Whether a ``glob``/``rglob`` pattern argument can match Python source files (fail-closed on unknown dynamic expressions)."""
+
+    if arg is None:
+        return True
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        pat = arg.value.strip().lower()
+        if pat.endswith(".py"):
+            return True
+        if any(pat.endswith(ext) for ext in _NON_PY_PATTERN_SUFFIXES):
+            return False
+        if pat in ("*", "**", "**/*"):
+            return False
+        return ".py" in pat and not pat.endswith(".pyc")
+    if isinstance(arg, ast.JoinedStr):
+        tail = arg.values[-1] if arg.values else None
+        if isinstance(tail, ast.Constant) and isinstance(tail.value, str):
+            low = tail.value.strip().lower()
+            if low.endswith(".py"):
+                return True
+            if any(low.endswith(ext) for ext in _NON_PY_PATTERN_SUFFIXES):
+                return False
+        literals = [v.value.lower() for v in arg.values if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+        if any(lit.endswith(".py") for lit in literals):
+            return True
+        if any(any(lit.endswith(ext) for ext in _NON_PY_PATTERN_SUFFIXES) for lit in literals):
+            return False
+        return True
+    return True
 
 
 def _scans_the_tree(path: Path) -> bool:
-    """A guard test: it walks a source folder (``rglob``/``glob``/``os.walk``/``scandir`` call) and names ``auto_pm``, ``scripts`` or ``tests``.
+    """A guard test: it walks a source folder for Python files and names ``auto_pm``, ``scripts`` or ``tests``.
+
+    Recognised walkers:
+    * ``os.walk`` / ``os.scandir`` (including module/symbol aliases, excluding ``ast.walk`` or unrelated local ``walk()``);
+    * ``.rglob(...)`` / ``.glob(...)`` / ``glob.glob(...)`` / ``glob.iglob(...)`` whose pattern can match ``.py`` source files
+      (excluding explicit non-Python data globs such as ``*.json``, ``*.md``, ``*.scl``, ``*.qml``, ``*.pyc``).
 
     Such a test does not import the module a change touches, it reads every file, so any Python file written wrongly turns it red.
     Unreadable or unparsable counts as a guard (run more).
@@ -169,11 +253,48 @@ def _scans_the_tree(path: Path) -> bool:
     text = raw.decode("utf-8", errors="ignore")  # lenient-decode: only looks for three words
     if not any(word in text for word in _SOURCE_TREE_WORDS):
         return False
+    os_mods: set[str] = set()
+    os_funcs: set[str] = set()
+    glob_mods: set[str] = set()
+    glob_funcs: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
-            if name in _WALKERS:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name == "os":
+                    os_mods.add(local)
+                elif alias.name == "glob":
+                    glob_mods.add(local)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "os":
+                for alias in node.names:
+                    if alias.name == "*":
+                        os_funcs.update(_OS_WALKERS)
+                    elif alias.name in _OS_WALKERS:
+                        os_funcs.add(alias.asname or alias.name)
+            elif node.module == "glob":
+                for alias in node.names:
+                    if alias.name == "*":
+                        glob_funcs.update(_GLOB_WALKERS)
+                    elif alias.name in _GLOB_WALKERS:
+                        glob_funcs.add(alias.asname or alias.name)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            if func.attr in _OS_WALKERS and isinstance(func.value, ast.Name) and func.value.id in os_mods:
+                return True
+            if func.attr in _GLOB_WALKERS and isinstance(func.value, ast.Name) and func.value.id in glob_mods:
+                if _pattern_scans_python(_call_arg(node, "pathname")):
+                    return True
+            elif func.attr in ("rglob", "glob"):
+                if _pattern_scans_python(_call_arg(node, "pattern")):
+                    return True
+        elif isinstance(func, ast.Name):
+            if func.id in os_funcs:
+                return True
+            if func.id in glob_funcs and _pattern_scans_python(_call_arg(node, "pathname")):
                 return True
     return False
 
@@ -191,11 +312,13 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
     * a changed file that is neither Python nor documentation (``.qml``, ``.jinja``, ``.yaml`` ...) and a test file that cannot be parsed
       mean everything, because nothing says which tests read it;
     * documentation (``.md`` / ``.rst``) relates to nothing;
-    * **any changed Python file also pulls in every guard test** (audit 2 of #634): a test file that calls ``rglob``/``glob``/``os.walk``/
-      ``scandir`` (found with ``ast``, no hand-kept list) and mentions ``auto_pm``, ``scripts`` or ``tests`` in its text.  These read the
-      whole source tree (no unexplained ``errors="replace"``, subprocess encodings and timeouts, layer imports ...) and never import the
-      changed module, so the import graph cannot select them.  The criterion is deliberately wide (about 84 of 440 files; 22 of them
-      ``rglob("*.py")`` the tree); a test that walks the tree by other means (``iterdir`` recursion, ``git ls-files``) is not recognised.
+    * **any changed Python file also pulls in every guard test** (audit 2 of #634, refined by CHG-SCPT-2026-722): a test file that walks
+      the source tree via ``os.walk``/``os.scandir`` or Python-matching ``rglob``/``glob`` (found with ``ast``, no hand-kept list) and
+      mentions ``auto_pm``, ``scripts`` or ``tests`` in its text.  These read the whole source tree (no unexplained ``errors="replace"``,
+      subprocess encodings and timeouts, layer imports ...) and never import the changed module, so the import graph cannot select them.
+      Non-filesystem ``ast.walk`` calls and non-Python data globs (``*.json``, ``*.md``, ``*.scl``, ``*.qml``, ``*.pyc``) are excluded so
+      unrelated E2E/PLC/QML tests are not pulled in on every edit; a test that walks the tree by other means (``iterdir`` recursion,
+      ``git ls-files``) is not recognised.
 
     A string constant counts too: a dotted name (``monkeypatch.setattr("auto_pm.x.y", ...)``, ``import_module``) refers to the module and its
     packages, and a path or file name (``"main.py"``) refers to the file (audit 2 self-check: 18 tests reach a module only that way).
