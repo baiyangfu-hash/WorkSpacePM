@@ -443,9 +443,12 @@ def run(
     elif not snapshot.ok:
         out(f"【项目计划状态】{pid}")
         out(f"✗ {snapshot.describe()}")
-        out(
-            "没查到：远程读不到，计划表和各卡状态都没法算。联网后再跑；要用本机旧数据就加 --offline。"
-        )
+        if snapshot.local:
+            out("没查到：本机 main 分支不可读，计划表和各卡状态都没法算。请确认控制根仓库完整且存在 main 分支。")
+        else:
+            out(
+                "没查到：远程读不到，计划表和各卡状态都没法算。联网后再跑；要用本机旧数据就加 --offline。"
+            )
         return 1
     else:
         suffix = PLAN_SUFFIX.format(pid=pid)

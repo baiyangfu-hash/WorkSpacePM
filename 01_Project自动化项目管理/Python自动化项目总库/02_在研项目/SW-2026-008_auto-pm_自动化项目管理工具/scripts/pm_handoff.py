@@ -447,7 +447,6 @@ def _live_dev_worktrees(root: Path, runner: Runner) -> list[tuple[str, str]] | N
     if rc != 0:
         return None
     blocks = [block.strip() for block in out.replace("\r\n", "\n").split("\n\n") if block.strip()]
-    resolved_root = root.resolve()
     dev: list[tuple[str, str]] = []
     for index, block in enumerate(blocks):
         wt_path = ""
@@ -460,11 +459,9 @@ def _live_dev_worktrees(root: Path, runner: Runner) -> list[tuple[str, str]] | N
         if not wt_path:
             continue
         candidate = Path(wt_path)
-        try:
-            same_as_root = candidate.resolve() == resolved_root
-        except OSError:
-            same_as_root = False
-        if index == 0 or same_as_root:
+        # git worktree list --porcelain 第 0 块固定为主工作树（控制根，其 .git 为目录）；
+        # 不能按 candidate == root 排除，否则从工位执行 --root <工位> 时会误排除当前工位自身。
+        if index == 0 or (candidate / ".git").is_dir():
             continue
         name = candidate.name
         if name.startswith("deploy-"):
@@ -852,7 +849,13 @@ def append_log_command(
         return EXIT_INVALID
 
     handoff_dir.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
+    need_leading_newline = False
+    if journal_path.exists():
+        raw_bytes = journal_path.read_bytes()
+        need_leading_newline = bool(raw_bytes) and not raw_bytes.endswith(b"\n")
+    line = ("\n" if need_leading_newline else "") + json.dumps(
+        event, ensure_ascii=False, separators=(",", ":")
+    ) + "\n"
     with journal_path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(line)
     out(f"✓ 已追加交接事件到 {handoff_rel}/{JOURNAL_FILE}")

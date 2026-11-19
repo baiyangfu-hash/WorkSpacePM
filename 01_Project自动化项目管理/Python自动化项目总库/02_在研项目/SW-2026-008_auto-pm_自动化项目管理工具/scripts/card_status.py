@@ -195,7 +195,8 @@ class Snapshot:
 
     def describe(self) -> str:
         if not self.ok:
-            return f"远程没读到：{self.problem}"
+            prefix = "本机仓库没读到" if self.local else "远程没读到"
+            return f"{prefix}：{self.problem}"
         if self.local:
             return (
                 f"按本机 {self.ref} {self.commit[:9]}（{self.commit_time}）算，"

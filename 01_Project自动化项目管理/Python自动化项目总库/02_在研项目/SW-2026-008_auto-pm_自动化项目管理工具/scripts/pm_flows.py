@@ -11,9 +11,10 @@
 （凭已批准的变更单、领卡占位和 PR 干活，CHG-SCPT-2026-717）：PR 合进 main 后把变更单推到验收中、请用户推到完成、
 对账、放下占位、收工位。
 
-“进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``claim list`` 看占位表，再对登记路径落在
-本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件，再按卡类型提示该读哪个角色包
-（控制根 ``roles/`` 下每个有 ``role.json`` 的包；本项目的卡按登记路径对上包里的 ``owned_paths_patterns``）。
+“进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``pm_handoff.py show`` 读本机交接交换区
+（PM-056 V2.0.0）；处于“多机”档时再跑 ``claim list`` 看占位表并对本项目每张卡跑 ``claim log``（单机模式跳过
+远程占位表），最后列出本机交接摘要、先读文件并按卡类型提示该读哪个角色包（控制根 ``roles/`` 下每个有
+``role.json`` 的包；本项目的卡按登记路径对上包里的 ``owned_paths_patterns``）。
 “steps”只列出一个流程的每一步和整条命令，一条都不跑，也不写运行记录。
 
 规矩（协调者 2026-11-14 01:35Z 裁定的做法，这里照做）：
@@ -109,7 +110,8 @@ class Step:
     args 里的 ``{pid}``、``{mission}``、``{chg}``、``{card}`` 运行时换成项目号、Mission 号、变更单号和占位卡号；
     ``{catalog}`` 表示运行命令目录脚本而不是 main.py；
     ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）；
-    ``{merge}`` 表示运行本机合并脚本 ``pm_merge.py``（卡 311，控制根由本脚本补上）。
+    ``{merge}`` 表示运行本机合并脚本 ``pm_merge.py``（卡 311，控制根由本脚本补上）；
+    ``{handoff}`` 表示运行本机轻轨交接脚本 ``pm_handoff.py``（卡 318，控制根由本脚本补上）。
     ``ok`` 是这条命令算“通过”的退出码：默认只有 0；``pr settle-scan`` 用 1 表示“有等收口的卡”，那是收口时的常态，不是红。
     """
 
@@ -546,7 +548,12 @@ def _print_local_handoff(
     if not summary or not summary.get("established"):
         out("本项目尚未建立本机交接交换区（可用 scripts/pm_handoff.py set-focus 在工位初始化）。")
         return
-    if not summary.get("stage_goal") and not summary.get("next_action"):
+    if (
+        not summary.get("stage_goal")
+        and not summary.get("next_action")
+        and not summary.get("warnings")
+        and not summary.get("read_first")
+    ):
         out("已读取本机交接交换区（详见上方「本机交接状态」步骤输出）。")
         return
     if summary.get("updated"):

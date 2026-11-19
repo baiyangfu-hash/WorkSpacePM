@@ -143,7 +143,7 @@ schema 必须显式版本化。旧 Handoff 可保留只读兼容，但缺少 Wor
 | `updated_by` | string | 是 | 非空，≤40 字符 | 更新者标识（如 `antigravity`/`claude`/`user`） |
 | `stage_goal` | string | 是 | 非空，≤120 字符 | 当前阶段唯一核心目标 |
 | `priorities` | array | 是 | 最多 5 项；每项含 `rank`（1..5 唯一整数）、`item`（非空，≤100 字符）、`ref`（string，≤120 字符，可空） | 排好序的当前优先事项 |
-| `active_work` | object \| null | 是 | 为对象时含 `card`（非空，≤64 字符）、`branch`（string，可空）、`chg`（string，可空）、`breakpoint`（string，≤150 字符） | 当前在干卡的断点（无在干卡时填 `null`） |
+| `active_work` | object \| null | 是 | 为对象时含 `card`（非空，≤64 字符）、`branch`（string，≤120 字符，可空）、`chg`（string，≤64 字符，可空）、`breakpoint`（string，≤150 字符，可空） | 当前在干卡的断点（无在干卡时填 `null`） |
 | `waiting_for_user` | array[string] | 是 | 最多 5 项，每项非空且 ≤150 字符 | 待用户确认、验收、决策或实测的事项 |
 | `next_action` | string | 是 | 非空，≤150 字符 | 新对话接手后第一件合法只读/汇报动作 |
 

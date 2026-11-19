@@ -297,8 +297,8 @@ def test_fail_closed_on_corrupt_json_unknown_schema_lengths_and_unsafe_paths(
     assert hm.show_handoff("SW-2026-008", root=root, runner=FakeGitRunner(), out=lambda _: None) == 1
     assert hm.validate_command("SW-2026-008", root=root, out=lambda _: None) == 1
 
-    # 2. 未知 schema 与未定义顶层字段 -> 失败关闭
-    bad_focus: dict[str, Any] = {
+    # 2a. 仅未知 schema（不含多余字段），确保真正命中 schema 校验而非提前返回
+    bad_schema_focus: dict[str, Any] = {
         "schema": "local-handoff-focus.v99",
         "project_id": "SW-2026-008",
         "updated_at": "2026-11-19T22:00:00Z",
@@ -308,13 +308,50 @@ def test_fail_closed_on_corrupt_json_unknown_schema_lengths_and_unsafe_paths(
         "active_work": None,
         "waiting_for_user": [],
         "next_action": "ok",
+    }
+    (hdir / "focus.json").write_text(json.dumps(bad_schema_focus), encoding="utf-8")
+    err_lines: list[str] = []
+    assert hm.validate_command("SW-2026-008", root=root, out=err_lines.append) == 1
+    assert any("schema 不匹配" in line for line in err_lines), err_lines
+
+    # 2b. 仅未定义顶层字段 -> 失败关闭并明确报错
+    extra_field_focus: dict[str, Any] = {
+        **bad_schema_focus,
+        "schema": "local-handoff-focus.v1",
         "unexpected_extra": 1,
     }
-    (hdir / "focus.json").write_text(json.dumps(bad_focus), encoding="utf-8")
-    assert hm.validate_command("SW-2026-008", root=root, out=lambda _: None) == 1
+    (hdir / "focus.json").write_text(json.dumps(extra_field_focus), encoding="utf-8")
+    err_lines.clear()
+    assert hm.validate_command("SW-2026-008", root=root, out=err_lines.append) == 1
+    assert any("含未定义字段" in line for line in err_lines), err_lines
+
+    # 2c. journal.jsonl 未知 schema 与非法 kind -> 失败关闭并指出具体行号
+    (hdir / "focus.json").unlink()
+    bad_event_schema = {
+        "schema": "local-handoff-event.v99",
+        "ts": "2026-11-19T22:00:00Z",
+        "agent": "antigravity",
+        "kind": "handoff",
+        "card": "318",
+        "commit": "",
+        "chg": "",
+        "summary": "test",
+        "read_first": [],
+        "next": "",
+    }
+    (hdir / "journal.jsonl").write_text(json.dumps(bad_event_schema) + "\n", encoding="utf-8")
+    err_lines.clear()
+    assert hm.validate_command("SW-2026-008", root=root, out=err_lines.append) == 1
+    assert any("第 1 行" in line and "schema 不匹配" in line for line in err_lines), err_lines
+
+    bad_event_kind = {**bad_event_schema, "schema": "local-handoff-event.v1", "kind": "unknown_kind"}
+    (hdir / "journal.jsonl").write_text(json.dumps(bad_event_kind) + "\n", encoding="utf-8")
+    err_lines.clear()
+    assert hm.validate_command("SW-2026-008", root=root, out=err_lines.append) == 1
+    assert any("第 1 行" in line and "kind 不合法" in line for line in err_lines), err_lines
+    (hdir / "journal.jsonl").unlink()
 
     # 3. 写入端长度超限、重复 rank、越界路径全部在写入前被拒
-    (hdir / "focus.json").unlink()
     assert (
         hm.set_focus_command(
             "SW-2026-008",
@@ -371,6 +408,92 @@ def test_fail_closed_on_corrupt_json_unknown_schema_lengths_and_unsafe_paths(
         )
         == 1
     )
+
+
+def test_drift_detection_when_root_is_a_worktree_itself(hm: ModuleType, tmp_path: Path) -> None:
+    """B2 回归：--root 指向开发工位自身（worktree list 非第 0 块）时，既不误报当前分支缺失，也不漏报未登记工位。"""
+    control = tmp_path / "control"
+    (control / ".git").mkdir(parents=True)
+    wt = _make_root(tmp_path / "wt_wrap", as_worktree=True)
+    now = datetime(2026, 11, 19, 22, 0, 0, tzinfo=UTC)
+    wt_out = (
+        f"worktree {control}\nHEAD 1111\nbranch refs/heads/main\n\n"
+        f"worktree {wt}\nHEAD 2222\nbranch refs/heads/antigravity/318\n"
+    )
+    runner = FakeGitRunner(worktree_porcelain=wt_out)
+
+    # 场景 1：active_work 匹配当前工位分支 -> 0 提醒（不能误报不在活跃工位列表）
+    assert (
+        hm.set_focus_command(
+            "SW-2026-008",
+            root=wt,
+            updated_by="antigravity",
+            stage_goal="工位内核对",
+            next_action="继续",
+            active_card="318",
+            active_branch="antigravity/318",
+            now=now,
+            out=lambda _: None,
+        )
+        == 0
+    )
+    lines: list[str] = []
+    assert hm.show_handoff("SW-2026-008", root=wt, now=now, runner=runner, out=lines.append) == 0
+    assert "⚠ 提醒：" not in "\n".join(lines), lines
+
+    # 场景 2：active_work=None 但当前工位在活跃列表中 -> 必须报出未登记活跃工位（不能漏报）
+    assert (
+        hm.set_focus_command(
+            "SW-2026-008",
+            root=wt,
+            updated_by="antigravity",
+            stage_goal="工位内核对",
+            next_action="继续",
+            now=now,
+            out=lambda _: None,
+        )
+        == 0
+    )
+    lines.clear()
+    assert hm.show_handoff("SW-2026-008", root=wt, now=now, runner=runner, out=lines.append) == 0
+    joined = "\n".join(lines)
+    assert "未登记在 focus.json 的活跃工位" in joined and "antigravity/318" in joined
+
+
+def test_append_log_handles_existing_journal_missing_trailing_newline(
+    hm: ModuleType, tmp_path: Path
+) -> None:
+    """N2 回归：已有非空 journal.jsonl 缺少末尾换行时，追加事件自动补换行，不破坏 JSONL。"""
+    root = _make_root(tmp_path, as_worktree=True)
+    hdir, _ = hm.handoff_dir_of(root, "SW-2026-008")
+    hdir.mkdir(parents=True)
+    first = {
+        "schema": "local-handoff-event.v1",
+        "ts": "2026-11-19T21:00:00Z",
+        "agent": "antigravity",
+        "kind": "handoff",
+        "card": "318",
+        "commit": "",
+        "chg": "",
+        "summary": "第一条无尾换行",
+        "read_first": [],
+        "next": "",
+    }
+    (hdir / "journal.jsonl").write_text(json.dumps(first, ensure_ascii=False), encoding="utf-8")
+
+    assert (
+        hm.append_log_command(
+            "SW-2026-008",
+            root=root,
+            agent="antigravity",
+            kind="takeover",
+            summary="第二条正常追加",
+            out=lambda _: None,
+        )
+        == 0
+    )
+    loaded = hm.load_handoff(root, "SW-2026-008")
+    assert loaded is not None and loaded.ok and len(loaded.events) == 2
 
 
 def test_cli_outputs_utf8_even_under_gbk_pipe(tmp_path: Path) -> None:
