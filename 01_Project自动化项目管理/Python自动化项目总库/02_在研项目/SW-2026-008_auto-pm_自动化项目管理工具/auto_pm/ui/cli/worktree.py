@@ -224,10 +224,10 @@ def worktree_group() -> None:
 @worktree_group.command("open")
 @click.argument("agent", type=AGENTS)
 @click.argument("card")
-@click.option("--no-fetch", is_flag=True, help="断网时用本机现有的 origin/main，不先拉取")
+@click.option("--no-fetch", is_flag=True, help="断网时用本机现有的 main / origin/main，不先拉取")
 @click.pass_context
 def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
-    """为 AGENT 开工位，分支 <前缀><CARD>，从最新 origin/main 起"""
+    """为 AGENT 开工位，分支 <前缀><CARD>，从最新 main 起"""
     require_runtime_identity_for_workspace(ctx)
     service = _service(ctx, measure_size=False)
     agent = resolve_station_name(service, agent, opening=True)
@@ -237,7 +237,7 @@ def open_cmd(ctx: click.Context, agent: str, card: str, no_fetch: bool) -> None:
         _fail(error)
     console.print(f"[green]已开工位[/green] {station.path}")
     console.print(
-        f"分支 {station.branch}（从 origin/main {station.head[:8]} 起，未设上游；第一次推送用 git push -u origin {station.branch}）"
+        f"分支 {station.branch}（从 main {station.head[:8]} 起，未设上游；日常本机合并用 pm_merge.py merge，多机档推送用 git push -u origin {station.branch}）"
     )
     console.print(
         "Python 环境默认共用控制根的 .venv；只有这张卡改依赖锁定文件时才在工位里另建 .venv，收工时一起删"

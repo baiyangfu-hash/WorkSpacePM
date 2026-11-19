@@ -18,7 +18,7 @@ TESTS = "tests/core/test_agent_worktree_service.py"
 # (名字, 原文, 变异后)：每条都是“去掉一道拒绝条件”。
 MUTANTS: tuple[tuple[str, str, str], ...] = (
     ("有未提交改动也删", "        if station.dirty_paths:\n", "        if False:\n"),
-    ("有没推送的提交也删", "        if station.unpushed:\n", "        if False:\n"),
+    ("有没推送的提交也删", "        if station.unpushed and not station.merged:\n", "        if False:\n"),
     ("锁住的工位也删", "        if station.locked:\n", "        if False:\n"),
     ("detached 工位也删", "        if not station.branch:\n", "        if False:\n"),
     ("可以收别的 agent 的工位", "        if not (acts_for(caller, agent) or self.lent_to_caller(agent)):\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收", "        if False:\n            raise StationRefusedError(\n                f\"你是 {caller_alias() or caller}，不能收"),
@@ -96,7 +96,7 @@ MUTANTS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "远程已删但没并进 main 的分支也删",
-        'if not self._is_ancestor(f"refs/heads/{branch}", MAIN_REF):',
+        'if not self._is_merged_into_main(f"refs/heads/{branch}"):',
         "if False:",
     ),
     (

@@ -2086,3 +2086,85 @@ def test_real_probe_raises_when_the_ledger_exists_but_cannot_be_read(lab: Lab, m
     _with_ledger_file(lab)
     with pytest.raises(OSError):
         _real_probe(lab, monkeypatch, [("R1", "RUNNING", "live-token", 20.0)], broken=True)
+
+
+# ── 卡 314（CHG-SCPT-2026-721）：工位全链路对齐本机合并与 GitHub 三档 ───────────────────────────────
+
+
+def _set_github_mode(lab: Lab, mode: str) -> None:
+    folder = lab.root / ".auto-pm" / "reports" / "local_merge"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "github_mode.json").write_text(json.dumps({"mode": mode}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_close_locally_merged_station_without_push_removes_worktree_and_branch(lab: Lab) -> None:
+    lab.service().open("claude", "CARD-LOCAL")
+    station = lab.station("claude")
+    commit(station, "local.txt")
+    git(lab.root, "merge", "--no-ff", "-q", "-m", "Merge branch 'claude/CARD-LOCAL'", "claude/CARD-LOCAL")
+
+    listed = {s.name: s for s in lab.service().stations(deep=True)}["claude"]
+    assert listed.merged is True and listed.unpushed == 1
+
+    result = lab.service().close("claude", fetch=False)
+
+    assert not station.exists()
+    assert result.branch_deleted is True
+    assert "claude/CARD-LOCAL" not in lab.local_branches()
+    assert "本机 main" in result.note
+
+
+def test_sweep_removes_locally_merged_unpushed_station_and_keeps_unmerged_unpushed(lab: Lab) -> None:
+    lab.service().open("claude", "CARD-LOCAL-MERGED")
+    commit(lab.station("claude"), "merged.txt")
+    git(lab.root, "merge", "--no-ff", "-q", "-m", "Merge claude", "claude/CARD-LOCAL-MERGED")
+
+    lab.service().open("cursor", "CARD-LOCAL-WIP")
+    commit(lab.station("cursor"), "wip.txt")
+
+    report = lab.service().sweep(apply=True, fetch=False)
+
+    assert str(lab.station("claude")) in report.done
+    assert not lab.station("claude").exists()
+    assert "claude/CARD-LOCAL-MERGED" not in lab.local_branches()
+    assert lab.station("cursor").exists()
+    assert "还没推到 GitHub" in _reasons(report)[str(lab.station("cursor"))]
+
+
+def test_open_starts_from_local_main_when_local_main_is_ahead_of_origin(lab: Lab) -> None:
+    local_head = commit(lab.root, "local-merge.txt")
+
+    station = lab.service().open("claude", "CARD-NEXT", fetch=False)
+
+    assert git(station.path, "rev-parse", "HEAD") == local_head
+    assert (station.path / "local-merge.txt").exists()
+
+
+def test_open_refuses_when_local_main_and_origin_main_diverged(lab: Lab) -> None:
+    commit(lab.root, "local-only.txt")
+    commit(lab.github, "remote-only.txt")
+    git(lab.github, "push", "-q", "origin", "main")
+    git(lab.root, "fetch", "-q", "origin", "main")
+
+    with pytest.raises(StationRefusedError, match="分叉"):
+        lab.service().open("claude", "CARD-DIV", fetch=False)
+    assert not lab.station("claude").exists()
+
+
+def test_github_mode_off_works_fully_offline_without_fetch_or_origin_main(lab: Lab) -> None:
+    _set_github_mode(lab, "关")
+    git(lab.root, "remote", "set-url", "origin", "file:///nonexistent/unreachable-remote.git")
+    git(lab.root, "update-ref", "-d", "refs/remotes/origin/main")
+
+    opened = lab.service().open("claude", "CARD-OFFLINE", fetch=True)
+    assert opened.path == lab.station("claude")
+    commit(opened.path, "offline.txt")
+    git(lab.root, "merge", "--no-ff", "-q", "-m", "Merge offline", "claude/CARD-OFFLINE")
+
+    preview = lab.service().sweep(apply=False, fetch=True)
+    assert "GitHub 档为关" in preview.fetch_warning
+    assert {item.target for item in preview.items if item.remove} == {str(opened.path)}
+
+    closed = lab.service().close("claude", fetch=True)
+    assert not opened.path.exists() and closed.branch_deleted is True
+    assert "claude/CARD-OFFLINE" not in lab.local_branches()

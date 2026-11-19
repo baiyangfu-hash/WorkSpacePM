@@ -131,6 +131,9 @@ RESERVED_CARD_PREFIXES = ("control-root", "run-plan")
 RUN_PLAN_NAME = re.compile(r"^run-plan-[0-9a-f]{16}$")
 TERMINAL_RUN_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
 MAIN_REF = "refs/remotes/origin/main"
+LOCAL_MAIN_REF = "refs/heads/main"
+_GITHUB_MODE_PATH = Path(".auto-pm") / "reports" / "local_merge" / "github_mode.json"
+_GITHUB_MODE_OFF = "关"
 _STATIONS_LOCK_SECONDS = 60.0  # 等别的对话开/收工位的最长时间
 # WS-001 / problem pool item 33 rule 4: at most this many directories under ``.auto-pm/worktrees`` at one time.
 # Counted by directory, not by roster: the unregistered shells and ``m3-*`` leftovers are exactly what piles up.
@@ -622,15 +625,16 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"{agent} 已有没收工的工位 {path}；先 `worktree close {agent}`，或回到那个工位继续做"
             )
-        self._make_room(fetch=fetch)
+        do_fetch = fetch and not self._github_off()
+        self._make_room(fetch=do_fetch)
         self._require_room_for_a_station()
-        if fetch:
+        if do_fetch:
             fetched = self._git("fetch", "origin", "main")
             if fetched.returncode != 0:
                 raise AgentWorktreeError(
-                    f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch，用本机现有的 origin/main"
+                    f"`git fetch origin main` 失败：{_detail(fetched)}；断网时可加 --no-fetch，用本机现有的 main / origin/main"
                 )
-        self._require_main_ref()
+        base_ref = self._open_base_ref()
         if self._git("check-ref-format", "--branch", branch).returncode != 0:
             raise AgentWorktreeError(f"分支名不合法: {branch}")
         for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
@@ -641,13 +645,13 @@ class AgentWorktreeService:
         self._require_inside(path)
         self._stations_dir.mkdir(parents=True, exist_ok=True)
         self._require_inside(path)
-        added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), MAIN_REF)
+        added = self._git("worktree", "add", "--no-track", "-b", branch, str(path), base_ref)
         if added.returncode != 0:
             raise AgentWorktreeError(f"建工位失败：{_detail(added)}")
         self._record_borrow(agent, branch)
         self._write_holder_note(agent)
         return self._inspect(
-            path, registered=True, branch=branch, head=self._out("rev-parse", MAIN_REF)
+            path, registered=True, branch=branch, head=self._out("rev-parse", base_ref)
         )
 
     # ── borrowing (D-58) ─────────────────────────────────────────────
@@ -990,7 +994,7 @@ class AgentWorktreeService:
             return
         try:
             candidates = self.stale_aliases()
-            if candidates and fetch:
+            if candidates and fetch and not self._github_off():
                 self._fetch_prune()  # "merged into main" must be judged on what GitHub has now
         except OSError:
             return
@@ -1140,7 +1144,7 @@ class AgentWorktreeService:
             raise StationRefusedError(
                 f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状"
             )
-        if fetch:
+        if fetch and not self._github_off():
             self._fetch_prune()
         station = self._inspect(
             path, registered=True, branch=info.branch, head=info.head, locked=info.locked
@@ -1175,9 +1179,12 @@ class AgentWorktreeService:
             if agent is not None and not acts_for(caller, agent):
                 raise StationRefusedError(f"你是 {caller_alias() or caller}，只能清自己的工位，不能 --agent {agent}")
             agent = agent or caller
-        warning = (
-            self._fetch_prune() if fetch else "没有联网核对（--no-fetch），按本机已知的远程分支判断"
-        )
+        if self._github_off():
+            warning = "GitHub 档为关，未联网核对，按本机 main 与已有远程分支判断"
+        else:
+            warning = (
+                self._fetch_prune() if fetch else "没有联网核对（--no-fetch），按本机已知的远程分支判断"
+            )
         items: list[SweepItem] = []
         plans: list[tuple[SweepItem, Station | None]] = []
         listed_stations = self.stations(only=only, progress=progress)
@@ -1326,7 +1333,7 @@ class AgentWorktreeService:
         if station.ignored_paths:
             return self._other_hold(station)
         if not station.merged:
-            return f"不在分支上（detached HEAD {station.head[:12]}），这个提交不在 origin/main 上，里面可能有没交出去的提交；保留"
+            return f"不在分支上（detached HEAD {station.head[:12]}），这个提交既不在本机 main 也不在 origin/main 上，里面可能有没交出去的提交；保留"
         return _long_run_using(self._root, station.path)
 
     @staticmethod
@@ -1351,7 +1358,7 @@ class AgentWorktreeService:
             return SweepItem(branch, "gone-branch", False, "控制根自己的分支，不动")
         if not branch.startswith(tuple(AGENT_ROSTER.values())):
             return SweepItem(branch, "gone-branch", False, "不是名册前缀的分支，不归本命令管")
-        if not self._is_ancestor(f"refs/heads/{branch}", MAIN_REF):
+        if not self._is_merged_into_main(f"refs/heads/{branch}"):
             return SweepItem(
                 branch,
                 "gone-branch",
@@ -1378,8 +1385,11 @@ class AgentWorktreeService:
                 else ""
             )
             return f"有未提交的改动：{shown}{more}{hint}；先提交或交给用户决定"
-        if station.unpushed:
-            return f"有 {station.unpushed} 个提交还没推到 GitHub；先 `git push -u origin {station.branch}`"
+        if station.unpushed and not station.merged:
+            return (
+                f"有 {station.unpushed} 个提交还没并进 main，也还没推到 GitHub；"
+                f"先本机合并或 `git push -u origin {station.branch}`"
+            )
         return ""
 
     def _require_removable(self, station: Station) -> None:
@@ -1463,7 +1473,12 @@ class AgentWorktreeService:
             note = "本地分支已删" if deleted else "本地分支保留（有别处没有的提交）"
         elif fresh.merged:
             deleted = self._delete_local_branch(station.branch, require_merged=True)
-            note = "已并进 main，本地分支已删；远程分支由 GitHub 自动删"
+            in_origin = self._ref_exists(MAIN_REF) and self._is_ancestor(fresh.head, MAIN_REF)
+            note = (
+                "已并进 main，本地分支已删；远程分支由 GitHub 自动删"
+                if in_origin
+                else "已并进本机 main，本地分支已删（待推到 GitHub 备份）"
+            )
         return CloseResult(
             path=station.path, branch=station.branch, branch_deleted=deleted, note=note
         )
@@ -1483,7 +1498,7 @@ class AgentWorktreeService:
             return False
         if branch in self._checked_out_branches():
             raise StationRefusedError(f"分支 {branch} 正被某个工作树签出，不删")
-        if require_merged and not self._is_ancestor(ref, MAIN_REF):
+        if require_merged and not self._is_merged_into_main(ref):
             raise StationRefusedError(f"分支 {branch} 没并进 main，不删")
         if self._unique_commits(branch):
             return False
@@ -1575,7 +1590,7 @@ class AgentWorktreeService:
                 )
             )
             unpushed = int(self._out("rev-list", "--count", head, "--not", "--remotes") or "0")
-            merged = self._is_ancestor(head, MAIN_REF)
+            merged = self._is_merged_into_main(head)
             untouched = bool(branch) and self._created_at(branch) == head
         size = _tree_size(path) if self._measure_size and path.is_dir() else None
         return Station(
@@ -1652,9 +1667,49 @@ class AgentWorktreeService:
             return f"联网核对失败（{_detail(fetched)}），按本机已知的远程分支判断"
         return ""
 
+    def _github_off(self) -> bool:
+        """本机 GitHub 档设为“关”时（GH-001，卡 311）不碰网络：open/close/sweep/make-room 自动免 fetch。"""
+        path = self._root / _GITHUB_MODE_PATH
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return False
+        return isinstance(data, dict) and data.get("mode") == _GITHUB_MODE_OFF
+
+    def _ref_exists(self, ref: str) -> bool:
+        return self._git("show-ref", "--verify", "--quiet", ref).returncode == 0
+
+    def _open_base_ref(self) -> str:
+        """新工位的起点：本机 main 与 origin/main 谁更新就从谁起；分叉时拒绝，不猜。"""
+        has_local = self._ref_exists(LOCAL_MAIN_REF)
+        has_remote = self._ref_exists(MAIN_REF)
+        if has_local and has_remote:
+            if self._is_ancestor(MAIN_REF, LOCAL_MAIN_REF):
+                return LOCAL_MAIN_REF
+            if self._is_ancestor(LOCAL_MAIN_REF, MAIN_REF):
+                return MAIN_REF
+            raise StationRefusedError(
+                "本机 main 和 origin/main 已分叉（互不为祖先）；先同步并解决分叉再开工位"
+            )
+        if has_local:
+            return LOCAL_MAIN_REF
+        if has_remote:
+            return MAIN_REF
+        raise AgentWorktreeError(
+            "本机既没有 main 也没有 origin/main；先建 main 分支或联网执行 `git fetch origin main`"
+        )
+
+    def _is_merged_into_main(self, commit: str) -> bool:
+        """提交已并进本机 main 或 origin/main 即算已并进 main（兼容本机合并与远端 PR 合并）。"""
+        if self._ref_exists(LOCAL_MAIN_REF) and self._is_ancestor(commit, LOCAL_MAIN_REF):
+            return True
+        return self._ref_exists(MAIN_REF) and self._is_ancestor(commit, MAIN_REF)
+
     def _require_main_ref(self) -> None:
-        if self._git("show-ref", "--verify", "--quiet", MAIN_REF).returncode != 0:
-            raise AgentWorktreeError("本机没有 origin/main；先联网执行 `git fetch origin main`")
+        if not (self._ref_exists(LOCAL_MAIN_REF) or self._ref_exists(MAIN_REF)):
+            raise AgentWorktreeError(
+                "本机既没有 main 也没有 origin/main；先建 main 分支或联网执行 `git fetch origin main`"
+            )
 
     def _is_ancestor(self, commit: str, target: str) -> bool:
         result = self._git("merge-base", "--is-ancestor", commit, target)
