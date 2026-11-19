@@ -451,4 +451,50 @@ def test_parallel_related_tests_receive_full_timeout(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(pre, "related_tests", lambda project, inside: ([f"tests/t{i}.py" for i in range(pre.PARALLEL_FROM)], "守卫"))
     report = PrecheckService(runner=runner).run(_repo_root(), out_dir=tmp_path / "out")
     assert report.verdict == "PASS"
+    assert pre.FULL_TIMEOUT_SECONDS >= 120 * 60
     assert seen_timeouts["pytest"] >= pre.FULL_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize(
+    ("name", "body"),
+    [
+        ("ast_walk", "import ast\nimport auto_pm\ndef test_x():\n    list(ast.walk(ast.parse('x = 1')))\n"),
+        ("local_walk", "import auto_pm\ndef walk(x):\n    return x\ndef test_x():\n    walk('scripts')\n"),
+        ("glob_json", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.glob('*.json'))\n"),
+        ("rglob_md", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.rglob('*.md'))\n"),
+        ("rglob_scl", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.rglob('*.scl'))\n"),
+        ("rglob_qml", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.rglob('*.qml'))\n"),
+        ("rglob_pyc", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.rglob('*.pyc'))\n"),
+        ("rglob_star", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path):\n    list(tmp_path.rglob('*'))\n"),
+        ("fstring_md", "from pathlib import Path\nimport auto_pm\ndef test_x(tmp_path, chg):\n    list(tmp_path.glob(f'{chg}.md'))\n"),
+        ("glob_mod_json", "import glob\nimport auto_pm\ndef test_x():\n    glob.glob('out/*.json')\n"),
+    ],
+)
+def test_scans_the_tree_excludes_ast_walk_local_walk_and_non_python_globs(
+    tmp_path: Path, name: str, body: str
+) -> None:
+    target = tmp_path / f"test_{name}.py"
+    target.write_text(body, encoding="utf-8")
+    assert pre._scans_the_tree(target) is False
+
+
+@pytest.mark.parametrize(
+    ("name", "body"),
+    [
+        ("os_alias_walk", "import os as _os\ndef test_x():\n    list(_os.walk('auto_pm'))\n"),
+        ("from_os_scandir", "from os import scandir as scan\ndef test_x():\n    list(scan('scripts'))\n"),
+        ("glob_alias_py", "import glob as g\ndef test_x():\n    g.glob('auto_pm/**/*.py')\n"),
+        ("from_glob_iglob", "from glob import iglob\ndef test_x():\n    list(iglob('tests/*.py'))\n"),
+        ("kwarg_pattern_py", "from pathlib import Path\ndef test_x():\n    list(Path('auto_pm').rglob(pattern='test_*.py'))\n"),
+        ("fstring_py", "from pathlib import Path\ndef test_x(prefix):\n    list(Path('auto_pm').rglob(f'{prefix}*.py'))\n"),
+        ("dynamic_pattern_fail_closed", "from pathlib import Path\ndef test_x(pat):\n    list(Path('auto_pm').rglob(pat))\n"),
+        ("syntax_error_fail_closed", "def broken(:\n"),
+    ],
+)
+def test_scans_the_tree_keeps_os_walkers_python_globs_and_fail_closed_cases(
+    tmp_path: Path, name: str, body: str
+) -> None:
+    target = tmp_path / f"test_{name}.py"
+    target.write_text(body, encoding="utf-8")
+    assert pre._scans_the_tree(target) is True
+
