@@ -73,6 +73,7 @@ HOOK_MARK = "pm_merge.py install-hook"
 GIT_TIMEOUT = 120
 NET_TIMEOUT = 60
 GATE_TIMEOUT = 4 * 60 * 60
+STATUS_BATCH_CHARS = 8000
 PRECHECK_JOBS = min(max((os.cpu_count() or 4) * 3 // 4, 4), 12)
 SKIP_DIRS = frozenset({".git", ".auto-pm", "releases", "node_modules", ".venv", "__pycache__"})
 
@@ -368,6 +369,25 @@ def _changed_paths(git: Git, base: str, tip: str) -> list[str]:
     return sorted({path for path in raw.split("\0") if path})
 
 
+def _chunk_paths(paths: Sequence[str], max_chars: int | None = None) -> list[list[str]]:
+    """按字符总长分批路径，避免 Windows CreateProcess 命令行超 32767 字符上限报 WinError 206。"""
+    limit = STATUS_BATCH_CHARS if max_chars is None else max_chars
+    batches: list[list[str]] = []
+    current: list[str] = []
+    total = 0
+    for path in paths:
+        cost = len(path) + 3
+        if current and total + cost > limit:
+            batches.append(current)
+            current = []
+            total = 0
+        current.append(path)
+        total += cost
+    if current:
+        batches.append(current)
+    return batches
+
+
 def _control_root_copies(root_git: Git, root: Path, sha: str, paths: list[str]) -> list[str]:
     """控制根里与这些路径重叠的未提交文件：和分支版本只差行尾的列出来（合并前换掉），不一样的直接拒绝。"""
     tracked = root_git.run(
@@ -379,9 +399,9 @@ def _control_root_copies(root_git: Git, root: Path, sha: str, paths: list[str]) 
         raise RefusedError("控制根有未提交的改动，先处理再合并：" + "、".join(unresolved[:10]))
     replace = []
     candidates = set(dirty)
-    if paths:
+    for batch in _chunk_paths(paths):
         untracked = root_git.run(
-            "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *paths, check=True
+            "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *batch, check=True
         ).stdout
         candidates |= {entry[3:] for entry in untracked.split("\0") if entry.startswith("?? ")}
     for path in sorted(candidates):
