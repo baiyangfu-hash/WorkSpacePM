@@ -1123,7 +1123,7 @@
       "title": "跨 Agent 工作连续性与恢复协议",
       "number": "056",
       "canonical_path": "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/056_跨Agent工作连续性与恢复协议_PM.md",
-      "version": "V1.0.0",
+      "version": "V2.0.0",
       "type_prefix": "PM",
       "domain": "pm",
       "lifecycle": "stable",
@@ -1135,7 +1135,8 @@
         "Work",
         "Run",
         "Checkpoint",
-        "Agent"
+        "Agent",
+        "local-handoff"
       ],
       "replaces": [
         "PM-004"

@@ -182,6 +182,7 @@ class Snapshot:
 
     ok: bool
     offline: bool
+    local: bool = False
     ref: str = ""
     commit: str = ""
     commit_time: str = ""
@@ -195,6 +196,11 @@ class Snapshot:
     def describe(self) -> str:
         if not self.ok:
             return f"远程没读到：{self.problem}"
+        if self.local:
+            return (
+                f"按本机 {self.ref} {self.commit[:9]}（{self.commit_time}）算，"
+                f"用的是本机单机模式数据（未联网），取数时间 {self.taken_at}"
+            )
         source = "本机上次取回的数据（没有联网取新）" if self.offline else "刚从远程取回的数据"
         return f"按 {self.ref} {self.commit[:9]}（{self.commit_time}）算，用的是{source}，取数时间 {self.taken_at}"
 
@@ -240,11 +246,47 @@ class GitFacts:
 
     # ── 取数 ──────────────────────────────────────────────────────────
 
-    def refresh(self, *, offline: bool = False) -> Snapshot:
-        """取一次数。联网时：取回 main 和全部占位，并列出远程分支；断网取不到就整体记“没读到”，不拿旧数据充数。"""
+    def refresh(self, *, offline: bool = False, local: bool = False) -> Snapshot:
+        """取一次数。
+
+        - ``local=True``（单机模式：GitHub 档位为「关」或「备份」）：不联网，直接读本机 ``refs/heads/main`` 与本机分支；
+        - ``local=False, offline=False``（多机联网）：取回 ``origin/main`` 和全部占位，并列出远程分支；断网取不到整体记“没读到”；
+        - ``local=False, offline=True``：不联网，只用本机上次取回的远程跟踪引用。
+        """
         taken = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if local:
+            self._ref = f"refs/heads/{self._main}"
+            snapshot = Snapshot(
+                ok=False, offline=True, local=True, ref=self._main, taken_at=taken
+            )
+            code, text = self._git(
+                "for-each-ref",
+                "--format=%(objectname)%09%(refname)",
+                "refs/heads/",
+            )
+            if code != 0:
+                snapshot.problem = f"读本机分支没成功：{text.strip()[:300]}"
+                self.snapshot = snapshot
+                return snapshot
+            for line in text.splitlines():
+                commit, _, ref = line.partition("\t")
+                name = ref.removeprefix("refs/heads/")
+                if name != self._main and not name.startswith("claims/"):
+                    snapshot.branches[name] = commit.strip()
+            code, text = self._git("log", "-1", "--format=%H%x09%cI", self._ref)
+            if code != 0 or "\t" not in text:
+                snapshot.problem = f"本机没有 {snapshot.ref} 分支：{text.strip()[:300]}"
+                self.snapshot = snapshot
+                return snapshot
+            snapshot.commit, _, when = text.strip().partition("\t")
+            snapshot.commit_time = when
+            snapshot.ok = True
+            self.snapshot = snapshot
+            return snapshot
+
+        self._ref = f"refs/remotes/{self._remote}/{self._main}"
         snapshot = Snapshot(
-            ok=False, offline=offline, ref=f"{self._remote}/{self._main}", taken_at=taken
+            ok=False, offline=offline, local=False, ref=f"{self._remote}/{self._main}", taken_at=taken
         )
         local_claims = CLAIM_LOCAL.format(remote=self._remote)
         if not offline:
