@@ -33,6 +33,7 @@ from auto_pm.application.core.memory_gate_arming import disarm_this_process
 from auto_pm.application.core.release_deploy import REQUIRED_SELF_CHECKS, DeployError, SelfCheck
 from auto_pm.application.core.release_deploy_check import CONTAINER, EVIDENCE_PREFIX, exact_tree_ok
 from auto_pm.application.core.release_ledger import PROJECT_ID, DeployPlan, LedgerError, pick_change
+from auto_pm.infrastructure.executable_lookup import find_on_path
 
 COMMAND_TIMEOUT_SECONDS = 300
 LEDGER_PROJECTS = ("SW-2026-008", "SYS-2026-001", "SW-2026-009", "DJ-2026-005")
@@ -45,6 +46,38 @@ HELP_COMMANDS = (
 Runner = Callable[[Sequence[str]], tuple[int, str]]
 Exec = Callable[[Sequence[str], Path], tuple[int, str]]
 LEDGER_CLEAN = "台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条"
+
+
+_WINDOWS_GIT_SH_FALLBACKS: tuple[Path, ...] = (
+    Path(r"C:\Program Files\Git\usr\bin\sh.exe"),
+    Path(r"C:\Program Files\Git\bin\sh.exe"),
+    Path(r"C:\Program Files (x86)\Git\usr\bin\sh.exe"),
+)
+
+
+def resolve_sh_executable(*, platform: str | None = None, fallbacks: Sequence[Path] | None = None) -> str:
+    """Locate POSIX ``sh`` safely via ``find_on_path``; on Windows PowerShell where ``Git\\usr\\bin`` is off ``PATH``, fall back to Git's ``sh.exe``."""
+
+    found = find_on_path("sh")
+    if found:
+        return found
+    if (platform or sys.platform) == "win32":
+        git_exe = find_on_path("git")
+        candidates: list[Path] = []
+        if git_exe:
+            git_dir = Path(git_exe).resolve().parent
+            candidates.extend(
+                (
+                    git_dir.parent / "usr" / "bin" / "sh.exe",
+                    git_dir.parent / "bin" / "sh.exe",
+                    git_dir / "sh.exe",
+                )
+            )
+        candidates.extend(_WINDOWS_GIT_SH_FALLBACKS if fallbacks is None else fallbacks)
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    return "sh"
 
 
 def run_process(argv: Sequence[str], cwd: Path, *, timeout: int = COMMAND_TIMEOUT_SECONDS) -> tuple[int, str]:
@@ -280,7 +313,7 @@ def build_self_checks(
         code, staged = execute(["git", "diff", "--cached", "--name-only"], Path(root))
         if code != 0 or staged.strip():
             return False, "控制根暂存区不是空的（或读不出），钩子干跑不可信"
-        code, output = execute(["sh", ".git/hooks/pre-commit"], Path(root))
+        code, output = execute([resolve_sh_executable(), ".git/hooks/pre-commit"], Path(root))
         return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-120:]}"
 
     def event_chain_drill() -> tuple[bool, str]:

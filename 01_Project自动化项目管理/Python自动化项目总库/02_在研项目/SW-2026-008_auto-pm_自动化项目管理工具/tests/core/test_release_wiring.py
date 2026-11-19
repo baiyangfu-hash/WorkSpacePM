@@ -193,7 +193,7 @@ class Env:
 
     def execute(self, argv: Sequence[str], cwd: Path) -> tuple[int, str]:
         self.execs.append(list(argv))
-        key = argv[0] if argv[0] != "sh" else "hook"
+        key = "hook" if list(argv[1:]) == [".git/hooks/pre-commit"] else argv[0]
         if "-I" in argv:
             key = "drill"
         reply = self.exec_reply.get(key)
@@ -304,7 +304,7 @@ def test_card_precheck_runs_the_precheck_command_on_the_card_file(env: Env) -> N
 def test_hook_dry_run_needs_a_hook_an_empty_index_and_a_zero_exit(env: Env) -> None:
     checks = env.checks()
     assert checks["pre-commit hook dry run"]()[0]
-    assert ["sh", ".git/hooks/pre-commit"] in env.execs
+    assert any(call[1:] == [".git/hooks/pre-commit"] and Path(call[0]).stem.lower() == "sh" for call in env.execs)
 
     env.exec_reply["git"] = (0, "a.py\n")
     assert not checks["pre-commit hook dry run"]()[0], "a dirty index makes the dry run untrustworthy"
@@ -313,6 +313,37 @@ def test_hook_dry_run_needs_a_hook_an_empty_index_and_a_zero_exit(env: Env) -> N
     assert not checks["pre-commit hook dry run"]()[0]
     (env.root / ".git" / "hooks" / "pre-commit").unlink()
     assert not checks["pre-commit hook dry run"]()[0], "no hook is a failure, not a pass"
+
+
+def test_resolve_sh_executable_prefers_path_and_falls_back_to_windows_git_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 1. PATH hit wins immediately
+    monkeypatch.setattr(rw, "find_on_path", lambda name: "/usr/bin/sh" if name == "sh" else None)
+    assert rw.resolve_sh_executable(platform="win32", fallbacks=()) == "/usr/bin/sh"
+
+    # 2. Windows PowerShell: sh not on PATH, git is at <root>/Git/cmd/git.exe -> finds <root>/Git/usr/bin/sh.exe
+    git_cmd = tmp_path / "Git" / "cmd" / "git.exe"
+    git_sh = tmp_path / "Git" / "usr" / "bin" / "sh.exe"
+    git_cmd.parent.mkdir(parents=True)
+    git_sh.parent.mkdir(parents=True)
+    git_cmd.write_bytes(b"")
+    git_sh.write_bytes(b"")
+    monkeypatch.setattr(rw, "find_on_path", lambda name: str(git_cmd) if name == "git" else None)
+    assert rw.resolve_sh_executable(platform="win32", fallbacks=()) == str(git_sh)
+
+    # 3. Windows fallback to <root>/Git/bin/sh.exe when usr/bin/sh.exe is absent
+    git_sh.unlink()
+    bin_sh = tmp_path / "Git" / "bin" / "sh.exe"
+    bin_sh.parent.mkdir(parents=True)
+    bin_sh.write_bytes(b"")
+    assert rw.resolve_sh_executable(platform="win32", fallbacks=()) == str(bin_sh)
+
+    # 4. Nothing found -> falls back to literal "sh" (fail-closed)
+    bin_sh.unlink()
+    monkeypatch.setattr(rw, "find_on_path", lambda _name: None)
+    assert rw.resolve_sh_executable(platform="win32", fallbacks=()) == "sh"
+    assert rw.resolve_sh_executable(platform="linux", fallbacks=()) == "sh"
 
 
 def test_event_chain_drill_runs_on_a_copy_and_needs_no_breaks_and_no_run_activity_failures(env: Env) -> None:
