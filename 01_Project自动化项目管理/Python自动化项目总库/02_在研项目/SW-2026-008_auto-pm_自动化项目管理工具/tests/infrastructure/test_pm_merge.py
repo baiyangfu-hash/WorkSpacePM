@@ -385,3 +385,37 @@ def test_run_gates_passes_jobs_and_verifies_root_tests_when_outside_changes_exis
     assert res.ok
     assert "--jobs" in calls[0] and "--json" in calls[0]
     assert len(calls) == 2 and str(wt / "tests") in calls[1]
+
+
+def test_chunk_paths_splits_large_release_path_lists_under_windows_limit(pm: ModuleType) -> None:
+    paths = [f"00_Infrastructure/auto_pm/releases/1.3.3-d356fb1/auto_pm/mod_{i:04d}.py" for i in range(620)]
+    batches = pm._chunk_paths(paths)
+    assert len(batches) > 1
+    assert [p for batch in batches for p in batch] == paths
+    assert all(sum(len(p) + 3 for p in batch) <= pm.STATUS_BATCH_CHARS for batch in batches)
+
+
+def test_control_root_copies_chunks_git_status_calls_for_many_untracked_files(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    files = {f"rel/file_{i:02d}_long_name_for_batching.txt": f"v{i}\n" for i in range(8)}
+    sha = commit(repo.wt, files, f"add batch\n\n{CARD}")
+    for rel, content in files.items():
+        target = repo.root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(pm, "STATUS_BATCH_CHARS", 120)
+    root_git = pm.Git(repo.root)
+    real_run = root_git.run
+    status_batches: list[list[str]] = []
+
+    def spy_run(*args: str, **kwargs: Any) -> Any:
+        if "--untracked-files=all" in args:
+            sep = args.index("--")
+            status_batches.append(list(args[sep + 1 :]))
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(root_git, "run", spy_run)
+    replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files))
+    assert len(status_batches) >= 2
+    assert replace == sorted(files)
