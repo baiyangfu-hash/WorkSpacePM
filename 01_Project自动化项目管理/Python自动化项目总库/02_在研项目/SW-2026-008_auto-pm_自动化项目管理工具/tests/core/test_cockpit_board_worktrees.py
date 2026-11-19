@@ -57,7 +57,7 @@ def _station(name: str, kind: str, branch: str, *, dirty: int = 0, unpushed: int
 STATIONS = [
     _station("claude-1b7302", "agent", "claude/690-intake-368c1af"),
     _station("gate-formal", "other", "gate/formal"),
-    _station("codex", "agent", "codex/701-io", unpushed=1),
+    _station("codex", "agent", "codex/701-io", unpushed=1, merged=False),
     _station("trae", "agent", "trae/702-ui", dirty=3),
     _station("gate-manual", "other", ""),
 ]
@@ -133,7 +133,8 @@ def test_close_block_follows_the_command_in_order() -> None:
     assert "detached" in stations.close_block({**base, "branch": ""})
     assert "不是 claude/ 开头" in stations.close_block({**base, "branch": "trae/1"})
     assert stations.close_block({**base, "dirty": 2}) == "有未提交的改动 2 个文件"  # 清理清单没读到时按数字写
-    assert stations.close_block({**base, "unpushed": 1}) == "有 1 个提交还没推到 GitHub"
+    assert stations.close_block({**base, "unpushed": 1, "merged": False}) == "有 1 个提交还没推到 GitHub"
+    assert stations.close_block({**base, "unpushed": 2, "merged": True}) == ""  # 已并进本机 main（待推备份）允许收工位
     assert stations.close_block({**base, "dirty": 2}, TRAE_SAID) == TRAE_SAID
     assert "目录坏了" in stations.close_block({**base, "broken": "目录不在了"})
 

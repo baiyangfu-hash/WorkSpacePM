@@ -187,7 +187,7 @@ def close_block(row: Mapping[str, Any], sweep_reason: str = "") -> str:
     if prefix and not branch.startswith(prefix):
         return f"分支 {branch} 不是 {prefix} 开头，命令不收；这个工位归谁要你先确认"
     dirty, unpushed = row.get("dirty"), row.get("unpushed")
-    if dirty or unpushed:
+    if dirty or (unpushed and not row.get("merged")):
         said = sweep_reason if sweep_reason.startswith("有") else ""
         if said:
             return said
