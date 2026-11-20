@@ -11,6 +11,7 @@ from click.testing import Result
 from auto_pm.infrastructure.git_hook_enforcer import (
     CONTROL_ROOT_FILE_BINDINGS,
     CONTROL_ROOT_PREFIX_BINDINGS,
+    PROTECTED_PROD_PATTERNS,
     ProjectBinding,
     StagedIndexEntry,
     StagedSnapshot,
@@ -26,6 +27,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     get_staged_snapshot,
     independent_staged_changes,
     is_excluded_from_production,
+    is_protected_production_file,
 )
 from auto_pm.ui.cli.__main__ import (
     cli,  # noqa: F401  # D-153: load every command module BEFORE ``identity_guard_off`` runs
@@ -721,6 +723,96 @@ def test_td100_independent_comparison_covers_add_modify_delete_and_mode(tmp_path
     assert set(changes) == {SERVICE, "01_Project/SW-2026-008/src/new.py"}
 
 
+# ---- FLOW-001：直接做认“领卡占位”，受保护路径仍要已批准变更单 ----
+
+PROTECTED_PROBE = "01_Project/SW-2026-008/auto_pm/infrastructure/git_hook_enforcer.py"
+
+
+def test_flow001_direct_production_code_passes_with_a_card_line_and_no_change_order(
+    tmp_path: Path,
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    msg.write_text("fix(core): 驾驶舱小修\n\n领卡占位: 20261120-hookfix\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+def test_flow001_direct_production_code_without_a_card_line_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    msg.write_text("fix(core): 驾驶舱小修\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "领卡占位" in capsys.readouterr().out
+
+
+def test_flow001_protected_production_code_with_only_a_card_line_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    protected = cand / PROTECTED_PROBE
+    protected.parent.mkdir(parents=True, exist_ok=True)
+    protected.write_text("VALUE = 1\n", encoding="utf-8")
+    _git(cand, "add", PROTECTED_PROBE)
+    msg.write_text("fix(core): 钩子小修\n\n领卡占位: 20261120-hookfix\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "未绑定变更单" in capsys.readouterr().out
+
+
+def test_flow001_protected_production_code_passes_with_an_approved_change_order(
+    tmp_path: Path,
+) -> None:
+    cand, ctrl, _msg = _make_dual_root_fixture(tmp_path)
+    protected = cand / PROTECTED_PROBE
+    protected.parent.mkdir(parents=True, exist_ok=True)
+    protected.write_text("VALUE = 1\n", encoding="utf-8")
+    _git(cand, "add", PROTECTED_PROBE)
+    msg = cand / "COMMIT_EDITMSG"
+    msg.write_text("fix(core): [CHG-SCPT-2026-346] 钩子小修\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("01_Project/SW-2026-008/src/service.py", False),
+        ("01_Project/SW-2026-008/tests/test_service.py", False),
+        (PROTECTED_PROBE, True),
+        ("01_Project/SW-2026-008/scripts/pm_merge.py", True),
+        ("01_Project/SW-2026-008/auto_pm/infrastructure/change_status_guard.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/change_service.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/status_journal.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/guard_checker.py", True),
+        ("01_Project/SW-2026-008/auto_pm/ui/cli/change.py", True),
+        ("0100_PLC自动化/DJ-2026-005/src/OB1.scl", True),
+        ("01_Project/SW-2026-008/templates/plc-standard/main.scl", True),
+        ("reviews/tools/audit_pr.py", True),
+    ],
+)
+def test_flow001_protected_classification(path: str, expected: bool) -> None:
+    assert is_protected_production_file(path) is expected
+
+
+def test_flow001_protected_patterns_cover_the_rules_approval_list() -> None:
+    """钩子里的清单必须覆盖 rules_approval_check.RULE_PATTERNS，两处不能各写一套。"""
+    repo_root = Path(__file__).resolve().parents[6]
+    rules_file = repo_root / "reviews" / "tools" / "rules_approval_check.py"
+    if not rules_file.is_file():
+        pytest.skip("当前检出里没有 reviews/tools/rules_approval_check.py")
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("rules_approval_check_probe", rules_file)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclass 反射要求模块已注册
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    missing = [pattern for pattern in module.RULE_PATTERNS if pattern not in PROTECTED_PROD_PATTERNS]
+    assert missing == [], f"钩子受保护清单缺少规则文件模式: {missing}"
+
+
 def test_td100_first_commit_without_head_is_all_additions(tmp_path: Path) -> None:
     repo = tmp_path / "fresh"
     repo.mkdir()
@@ -781,14 +873,14 @@ def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | No
 
 
 def test_td100_preflight_refuses_a_content_only_change_of_a_production_file(tmp_path: Path) -> None:
-    """同名生产文件只改内容、提交说明又不绑变更单：整条 preflight 链路必须拒绝。"""
+    """同名生产文件只改内容、提交说明又没绑变更单也没写卡号：整条 preflight 链路必须拒绝。"""
     cand, ctrl, msg = _delete_scene(tmp_path)
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
     _no_chg_message(msg)
     result = _run_preflight(cand, ctrl, msg)
     assert result.exit_code != 0
-    assert "Commit Message 未绑定变更单" in result.output
+    assert "领卡占位" in result.output
 
 
 def test_td100_preflight_passes_a_content_only_change_with_a_valid_change_order(tmp_path: Path) -> None:
@@ -805,7 +897,7 @@ def test_td100_preflight_refuses_a_mode_only_change_without_a_change_order(tmp_p
     _no_chg_message(msg)
     result = _run_preflight(cand, ctrl, msg)
     assert result.exit_code != 0
-    assert "Commit Message 未绑定变更单" in result.output
+    assert "领卡占位" in result.output
 
 
 def test_td100_preflight_refuses_a_linked_worktree_given_itself_as_control_root(tmp_path: Path) -> None:

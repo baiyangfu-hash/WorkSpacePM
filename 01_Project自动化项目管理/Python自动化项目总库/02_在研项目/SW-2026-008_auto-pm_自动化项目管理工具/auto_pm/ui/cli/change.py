@@ -428,8 +428,6 @@ def cmd_show(ctx: click.Context, change_number: str, pid: str | None) -> None:
 @click.option("--references", "references", default="", help="参考依据")
 @click.option("--planned-date", default=None, help="预计实施日期（YYYY-MM-DD，默认今天）")
 @click.option("--urgency", type=click.Choice(_URGENCY_CHOICES), default="normal", help="紧急程度")
-@click.option("--retrofit", "retrofit", is_flag=True, default=False,
-              help="CHG-108 缺陷3: 先实施后补模式——直接创建 closed 状态变更单（跳过状态流转）")
 @click.pass_context
 def cmd_create(
     ctx: click.Context,
@@ -443,7 +441,6 @@ def cmd_create(
     references: str,
     planned_date: str | None,
     urgency: str,
-    retrofit: bool,
 ) -> None:
     """创建变更单（生成 CHG-*.md 文件并更新台帐）"""
     require_runtime_identity(ctx, project_id)
@@ -462,7 +459,6 @@ def cmd_create(
             references=references,
             planned_date=planned_date,
             urgency=urgency,
-            retrofit=retrofit,
         )
         track = ChangeTrackClassifier.classify(
             domain=domain,
@@ -471,11 +467,9 @@ def cmd_create(
         )
         console.print(f"[green]变更单创建成功: {cr.change_number}[/green]")
         if track == ChangeTrack.QUICK:
-            console.print("  [cyan]通道: Quick Track (轻量通道) ⚡ - 局部改动，推荐简化审批/先实施后补[/cyan]")
+            console.print("  [cyan]通道: Quick Track (轻量通道) ⚡ - 局部改动，推荐简化审批[/cyan]")
         else:
             console.print("  [blue]通道: Full Track (完整通道) 🛡️ - 架构/全局改动，需走完整 12 态门禁流转[/blue]")
-        if retrofit:
-            console.print("  [yellow]模式: retrofit（先实施后补，直接 closed）[/yellow]")
         console.print(f"  领域: {domain} ({DOMAINS[domain]})")
         console.print(f"  性质: {business_nature} ({BUSINESS_NATURES[business_nature]})")
         console.print(f"  范围: {','.join(impact_scope)}")

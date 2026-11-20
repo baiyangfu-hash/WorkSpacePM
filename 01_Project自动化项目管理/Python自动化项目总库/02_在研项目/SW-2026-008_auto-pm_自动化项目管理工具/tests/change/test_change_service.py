@@ -239,64 +239,6 @@ class TestChangeService:
                 necessity="必要性",
             )
 
-    def test_create_change_request_retrofit(self, tmp_path: Path) -> None:
-        """CHG-108 缺陷3: retrofit 模式直接创建 closed 状态变更单
-
-        验证：
-          1. 返回的 cr.status == "closed"（而非 draft）
-          2. 生成的 CHG 文件 §3.4 状态字段 == "closed"
-          3. 台账记录状态 == "✅已关闭" + 完成日期
-
-        使用独立的 tmp_path 构造完整项目结构（含完整台账骨架），
-        避免依赖 workspace_root fixture 的简化台账。
-        """
-        workspace_root = str(tmp_path)
-        project_id = "TEST-2026-001"
-        project_path = os.path.join(workspace_root, project_id)
-        # 项目标志文件
-        os.makedirs(project_path, exist_ok=True)
-        with open(os.path.join(project_path, f"PM_SESSION_{project_id}.md"), "w", encoding="utf-8") as f:
-            f.write("# PM_SESSION\n")
-        # 完整台账骨架（含 ## 变更单索引 标题 + 8列结构）
-        ledger_dir = os.path.join(project_path, "04_监控", "01_变更管理", "02_变更记录")
-        os.makedirs(ledger_dir, exist_ok=True)
-        ledger_path = os.path.join(ledger_dir, "01_版本变更台帐.md")
-        with open(ledger_path, "w", encoding="utf-8") as f:
-            f.write(
-                "# 版本变更台帐\n\n"
-                "## 变更单索引\n\n"
-                "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |\n"
-                "|------|----------|------|--------|----------|----------|----------|------|\n"
-            )
-
-        svc = ChangeService(workspace_root)
-        cr = svc.create_change_request(
-            project_id=project_id,
-            domain="PLC",
-            business_nature="DEF",
-            impact_scope=["LOCAL"],
-            applicant="retrofit测试人员",
-            background="retrofit模式测试背景",
-            necessity="retrofit模式测试必要性",
-            retrofit=True,
-        )
-
-        # 1. 返回状态为 closed
-        assert cr.change_number.startswith("CHG-PLC-")
-        assert cr.status == "closed", f"retrofit 模式应返回 closed，实际: {cr.status}"
-        assert os.path.isfile(cr.file_path)
-
-        # 2. CHG 文件 §3.4 状态字段为 closed
-        with open(cr.file_path, encoding="utf-8") as f:
-            chg_content = f.read()
-        assert "| 变更状态 | closed |" in chg_content, "CHG 文件 §3.4 状态字段应为 closed"
-
-        # 3. 台账记录状态为 ✅已关闭 + 完成日期
-        with open(ledger_path, encoding="utf-8") as f:
-            ledger_content = f.read()
-        assert cr.change_number in ledger_content, "台账应包含 retrofit 创建的变更编号"
-        assert "✅已关闭" in ledger_content, "台账状态应为 ✅已关闭"
-
 
 class TestValidationFunctions:
     """变更管理规范校验函数测试"""

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import re
 import subprocess
@@ -37,6 +38,34 @@ _PROJECT_ID_ROW_PATTERN = re.compile(
     re.MULTILINE,
 )
 _VALID_CHANGE_STATUSES = change_status_guard.APPROVED_OR_LATER
+# FLOW-001“要你点头”那一类的生产代码：提交时仍要绑定一个已批准的变更单。
+# 规则文件清单与 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS 同一份，
+# 由 tests/infrastructure/test_git_hook_enforcer.py 的漂移测试钉住，避免两处各写一套。
+PROTECTED_PROD_PATTERNS = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".trae/*",
+    ".cursor/rules/*",
+    ".agent/rules/*",
+    ".claude/*",
+    ".agents/skills.json",
+    "SYS-2026-001_WorkspaceGovernance/approvers.json",
+    "00_Obsidian_Base*",
+    "roles/*",
+    ".github/*",
+    "reviews/tools/*",
+    "0100_PLC自动化/*",
+    "*/templates/plc-*",
+    "*/scripts/pm_merge.py",
+    "*/auto_pm/infrastructure/git_hook_enforcer.py",
+    "*/auto_pm/infrastructure/change_status_guard.py",
+    "*/auto_pm/domain/change/change_service.py",
+    "*/auto_pm/domain/change/status_journal.py",
+    "*/auto_pm/domain/change/guard_checker.py",
+    "*/auto_pm/ui/cli/change.py",
+)
+# FLOW-001“直接做”那一类：提交说明里单独一行卡号即可放行，与 pm_merge.py 认的是同一行。
+CARD_LINE = re.compile(r"^领卡占位:\s*(\S+)\s*$", re.MULTILINE)
 CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
 # 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
 # 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
@@ -412,6 +441,12 @@ def filter_production_files(files: list[str]) -> list[str]:
         for f in files
         if f.replace("\\", "/").lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
     ]
+
+
+def is_protected_production_file(path: str) -> bool:
+    """FLOW-001“要你点头”那一类的生产代码：仍要绑定已批准的变更单，不能只凭卡号放行。"""
+    normalised = path.replace("\\", "/")
+    return any(fnmatch.fnmatchcase(normalised, pattern) for pattern in PROTECTED_PROD_PATTERNS)
 
 
 def _project_bindings(workspace_root: Path, projects: list[object]) -> tuple[ProjectBinding, ...]:
@@ -1094,8 +1129,9 @@ def enforce_commit_msg(
     control_root: Path | None = None,
 ) -> int:
     """commit-msg 阶段拦截检查：
-    1. 若暂存区包含生产代码（.py, .scl 等），强制 Commit Message 必须注明关联单号；
-    2. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态。
+    1. 暂存区包含“要你点头”那一类的生产代码（PLC、规则、钩子等），强制 Commit Message 绑定一个已批准变更单；
+    2. 其余生产代码（驾驶舱代码等“直接做”那一类）认 ``领卡占位: <卡号>`` 一行，不再要变更单；
+    3. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态。
 
     ``staged_snapshot`` 由提交前预检调用方一次捕获后直接注入，确保
     pre-commit 与 commit-msg 对同一份不可变 index 证据作出判断。
@@ -1136,6 +1172,24 @@ def enforce_commit_msg(
             f"为防止绕过门禁已拒绝提交: {exc}"
         )
         return 1
+
+    protected_files = [path for path in prod_files if is_protected_production_file(path)]
+    if not protected_files and not chg_matches:
+        card_match = CARD_LINE.search(msg_content)
+        if card_match is None:
+            print("=" * 70)
+            print("❌ [auto-pm commit-msg] 物理拦截：暂存区包含驾驶舱生产代码，但提交说明没有“领卡占位: <卡号>”这一行！")
+            print("📄 涉及生产文件:")
+            for pf in prod_files[:5]:
+                print(f"   - {pf}")
+            if len(prod_files) > 5:
+                print(f"   ... (共 {len(prod_files)} 个文件)")
+            print("\n👉 规程要求（FLOW-001“直接做”那一类）：提交说明里单独一行写卡号，例如:")
+            print("   领卡占位: 20261120-hookfix")
+            print("=" * 70)
+            return 1
+        print(f"✅ [auto-pm commit-msg] 直接做类生产代码已绑定卡号 {card_match.group(1)}，不要求变更单。")
+        return _enforce_staged_change_status(cand_root, gov_root, snapshot)
 
     if not chg_matches:
         print("=" * 70)
