@@ -68,6 +68,8 @@ Codex 从 Trae 的候选提交 `78c8acbc` 接手。首轮独立审计发现卡�
 
 同卡补充的测试夹具路径为 `tests/cli/test_git_hook.py` 和 `tests/infrastructure/test_change_status_guard.py`。两处只给已有提交说明补卡号，原状态、快照和拒绝断言照旧验证。
 
+首轮全量门禁绑定 `788b7bf4`，9 组通过，基础设施组和剩余组各退出 1。漂移测试读取项目外规则文件，移到已有外部读取标记的 `tests/core/test_cockpit_rules_approval.py`，沿用该文件加载真实规则脚本的入口。`tests/e2e/test_pmf_gate_failures.py` 的真实钩子 CHG 正反例改为暂存受保护生产路径，保留原退出码、拒绝理由、索引和 HEAD 断言。这两处仅补同卡测试接线。
+
 ## 验收
 
 - 钩子新用例：直接做类带 `领卡占位` 放行、缺卡号拒绝、受保护路径只带卡号仍拒绝；

@@ -11,7 +11,6 @@ from click.testing import Result
 from auto_pm.infrastructure.git_hook_enforcer import (
     CONTROL_ROOT_FILE_BINDINGS,
     CONTROL_ROOT_PREFIX_BINDINGS,
-    PROTECTED_PROD_PATTERNS,
     ProjectBinding,
     StagedIndexEntry,
     StagedSnapshot,
@@ -823,27 +822,6 @@ def test_flow001_protected_production_code_passes_with_an_approved_change_order(
 )
 def test_flow001_protected_classification(path: str, expected: bool) -> None:
     assert is_protected_production_file(path) is expected
-
-
-def test_flow001_protected_patterns_cover_the_rules_approval_list() -> None:
-    """钩子里的清单必须覆盖 rules_approval_check.RULE_PATTERNS，两处不能各写一套。"""
-    repo_root = Path(__file__).resolve().parents[6]
-    rules_file = repo_root / "reviews" / "tools" / "rules_approval_check.py"
-    if not rules_file.is_file():
-        pytest.skip("当前检出里没有 reviews/tools/rules_approval_check.py")
-    import importlib.util
-    import sys
-
-    spec = importlib.util.spec_from_file_location("rules_approval_check_probe", rules_file)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclass 反射要求模块已注册
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-    missing = [pattern for pattern in module.RULE_PATTERNS if pattern not in PROTECTED_PROD_PATTERNS]
-    assert missing == [], f"钩子受保护清单缺少规则文件模式: {missing}"
 
 
 def test_td100_first_commit_without_head_is_all_additions(tmp_path: Path) -> None:
