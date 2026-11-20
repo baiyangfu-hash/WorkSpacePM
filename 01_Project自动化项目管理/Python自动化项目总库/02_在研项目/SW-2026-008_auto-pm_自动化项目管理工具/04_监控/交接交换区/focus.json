@@ -1,0 +1,24 @@
+{
+  "schema": "local-handoff-focus.v1",
+  "project_id": "SW-2026-008",
+  "updated_at": "2026-11-19T22:08:12Z",
+  "updated_by": "antigravity",
+  "stage_goal": "完成单机本地优先驾驶舱收口与轻轨交接契约落地，后续可直接转入 PLC 业务项目",
+  "priorities": [
+    {
+      "rank": 1,
+      "item": "将 CHG-SCPT-2026-726 推到完成并收工位",
+      "ref": "CHG-SCPT-2026-726"
+    },
+    {
+      "rank": 2,
+      "item": "按需推进 PLC 工程项目与 TIA 实测联调",
+      "ref": "0100_PLC自动化/DJ-2026-005"
+    }
+  ],
+  "active_work": null,
+  "waiting_for_user": [
+    "请用户确认将 CHG-SCPT-2026-726 推到完成并同意收工位 antigravity-c31800"
+  ],
+  "next_action": "先运行 pm_flows.py entry SW-2026-008 向用户汇报当前状态，并请用户定夺后续业务排期"
+}

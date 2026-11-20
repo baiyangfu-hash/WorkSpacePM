@@ -105,7 +105,7 @@ PLAN = f"""# 项目计划表 - {PID}
 class Repos:
     """一个裸的“远程”、一个往里推东西的作者克隆、一个只用来算状态的控制根克隆。"""
 
-    def __init__(self, tmp_path: Path, plan: str = PLAN) -> None:
+    def __init__(self, tmp_path: Path, plan: str = PLAN, *, github_mode: str | None = "多机") -> None:
         self.remote = tmp_path / "remote.git"
         self.author = tmp_path / "author"
         self.root = tmp_path / "root"
@@ -116,6 +116,7 @@ class Repos:
             capture_output=True,
         )
         git(self.author, "checkout", "-q", "-b", "main")
+        self.write(".gitignore", ".auto-pm/\n")
         self.write(
             "SYS-2026-001_WorkspaceGovernance/workspace_registry.json",
             json.dumps({"projects": [{"project_id": PID, "project_root": PROJECT_DIR}]}),
@@ -130,6 +131,15 @@ class Repos:
             ["git", "clone", "-q", str(self.remote), str(self.root)],
             check=True,
             capture_output=True,
+        )
+        if github_mode is not None:
+            self.set_github_mode(github_mode)
+
+    def set_github_mode(self, mode: str) -> None:
+        folder = self.root / ".auto-pm" / "reports" / "local_merge"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "github_mode.json").write_text(
+            json.dumps({"mode": mode}, ensure_ascii=False), encoding="utf-8"
         )
 
     def write(self, path: str, text: str) -> None:
@@ -207,7 +217,11 @@ def repos(tmp_path: Path) -> Repos:
 
 def _run(ps: ModuleType, repos: Repos, *extra: str, pid: str = PID) -> tuple[int, str]:
     lines: list[str] = []
-    options = {"offline": "--offline" in extra, "as_json": "--json" in extra}
+    options = {
+        "offline": "--offline" in extra,
+        "online": "--online" in extra,
+        "as_json": "--json" in extra,
+    }
     code = ps.run(pid, root=repos.root, out=lines.append, **options)
     return code, "\n".join(lines)
 
@@ -682,3 +696,29 @@ def test_the_command_line_runs_and_has_no_write_switch(repos: Repos) -> None:
         "cat-file",
         "ls-tree",
     }, used
+
+
+@pytest.mark.parametrize("mode", [None, "备份", "关"])
+def test_single_machine_mode_evaluates_local_main_without_network(
+    ps: ModuleType, tmp_path: Path, mode: str | None
+) -> None:
+    """卡 318：单机模式（默认未配置、备份、关）下断网或删掉 origin 仍直接按本机 main 算，退出 0。"""
+    repos = Repos(tmp_path, github_mode=mode)
+    git(repos.root, "remote", "remove", "origin")
+
+    # 在本机 main 上做一个带领卡占位标记的提交和证据文件，不推任何远程
+    evidence = repos.root / PROJECT_DIR / "05_测试与验证" / "立项表核对.md"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text(f"{CARD1} 本地验证通过\n", encoding="utf-8")
+    git(repos.root, "add", "-A")
+    git(repos.root, "commit", "-q", "-m", f"完成立项表\n\n领卡占位: {CARD1}")
+
+    code, text = _run(ps, repos)
+    assert code == 0, text
+    assert "本机单机模式数据（未联网）" in text
+    assert _status(text, "L1.1") == "已完成"
+
+    # 显式 --online 强制联网：无远程时仍报没查到并退出 1
+    code_online, text_online = _run(ps, repos, "--online")
+    assert code_online == 1 and "没查到" in text_online
+

@@ -48,6 +48,9 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = PROJECT_ROOT.parents[3]
 REGISTRY = "SYS-2026-001_WorkspaceGovernance/workspace_registry.json"
+GITHUB_MODE_FILE = ".auto-pm/reports/local_merge/github_mode.json"
+GITHUB_MODES = ("关", "备份", "多机")
+DEFAULT_GITHUB_MODE = "备份"
 PLAN_DIR = "00_项目管理/01_立项与需求"
 PLAN_SUFFIX = "_{pid}_项目计划表.md"
 PID_PATTERN = re.compile(r"^[A-Z]{2,4}-\d{4}-\d{3}$")
@@ -272,6 +275,17 @@ def parse_plan(text: str, pid: str) -> Plan:
     return plan
 
 
+def read_github_mode(root: Path) -> str:
+    """读取本机 GitHub 档位（与 pm_merge.py 同一口径）；未配置时默认为「备份」（单机本地优先）。"""
+    path = root / GITHUB_MODE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        mode = data.get("mode", DEFAULT_GITHUB_MODE) if isinstance(data, dict) else DEFAULT_GITHUB_MODE
+    except (OSError, ValueError):
+        return DEFAULT_GITHUB_MODE
+    return mode if mode in GITHUB_MODES else DEFAULT_GITHUB_MODE
+
+
 def project_root_of(root: Path, pid: str) -> str | None:
     """项目登记表里这个项目的目录（相对控制根，正斜杠）；查不到返回 None。"""
     try:
@@ -403,6 +417,7 @@ def run(
     *,
     root: Path,
     offline: bool = False,
+    online: bool = False,
     as_json: bool = False,
     plan_file: Path | None = None,
     facts: Any = None,
@@ -416,7 +431,8 @@ def run(
         out(f"项目登记表里查不到 {pid}（{root / REGISTRY}），什么都没算")
         return 2
     source = facts if facts is not None else card_status.GitFacts(root)
-    snapshot = source.refresh(offline=offline)
+    use_local = (not offline) and (not online) and read_github_mode(root) in ("关", "备份")
+    snapshot = source.refresh(offline=True, local=True) if use_local else source.refresh(offline=offline)
     if plan_file is not None:
         try:
             text: str | None = plan_file.read_text(encoding="utf-8-sig")
@@ -427,9 +443,12 @@ def run(
     elif not snapshot.ok:
         out(f"【项目计划状态】{pid}")
         out(f"✗ {snapshot.describe()}")
-        out(
-            "没查到：远程读不到，计划表和各卡状态都没法算。联网后再跑；要用本机旧数据就加 --offline。"
-        )
+        if snapshot.local:
+            out("没查到：本机 main 分支不可读，计划表和各卡状态都没法算。请确认控制根仓库完整且存在 main 分支。")
+        else:
+            out(
+                "没查到：远程读不到，计划表和各卡状态都没法算。联网后再跑；要用本机旧数据就加 --offline。"
+            )
         return 1
     else:
         suffix = PLAN_SUFFIX.format(pid=pid)
@@ -479,7 +498,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--json", dest="as_json", action="store_true", help="只输出 JSON")
     parser.add_argument(
-        "--offline", action="store_true", help="不联网，用本机上次取回的数据算（结果里会写明）"
+        "--offline", action="store_true", help="不联网，用本机上次取回的远程跟踪数据算（结果里会写明）"
+    )
+    parser.add_argument(
+        "--online", action="store_true", help="即使在单机模式下也强制联网拉远程计算"
     )
     parser.add_argument("--plan-file", type=Path, default=None, help="合并前试一张本机的计划表")
     options = parser.parse_args(argv)
@@ -491,6 +513,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         options.pid,
         root=options.root.resolve(),
         offline=options.offline,
+        online=options.online,
         as_json=options.as_json,
         plan_file=options.plan_file,
     )

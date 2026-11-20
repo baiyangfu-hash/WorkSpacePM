@@ -50,6 +50,15 @@ class FakeRunner:
         return [" ".join(call["command"][3:]) for call in self.calls]
 
 
+def _set_mode(root: Path, mode: str) -> Path:
+    folder = root / ".auto-pm" / "reports" / "local_merge"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "github_mode.json").write_text(
+        json.dumps({"mode": mode}, ensure_ascii=False), encoding="utf-8"
+    )
+    return root
+
+
 def _root(
     tmp_path: Path, pid: str = "DJ-2026-005", project_root: str = "0100_PLC自动化/DJ-2026-005"
 ) -> Path:
@@ -503,7 +512,7 @@ _CLAIMS = [
 def test_entry_runs_the_checkup_then_the_claims_then_each_card_of_the_project(
     flows: ModuleType, tmp_path: Path
 ) -> None:
-    root = _root(tmp_path)
+    root = _set_mode(_root(tmp_path), "多机")
     runner = EntryRunner(_CLAIMS, {"trial-a": _LOG_A, "old-b": _LOG_B})
     lines: list[str] = []
 
@@ -520,8 +529,9 @@ def test_entry_runs_the_checkup_then_the_claims_then_each_card_of_the_project(
         "plc docs check DJ-2026-005",
         "prototype check --pid DJ-2026-005",
     ]
-    # 体检之后看占位表；只有路径落在本项目目录里、还没放下的卡才读交接记录
+    # 体检之后先读本机交接交换区，多机档再看占位表；只有路径落在本项目目录里、还没放下的卡才读交接记录
     # （DJ-2026-0050 不算 005 的；只占号没路径的不算；已放下的 done-e 不读；租约到期没放下的 old-b 照读）
+    assert runner.calls[-4]["command"][2].endswith("pm_handoff.py")
     assert ran[-3:] == ["claim list --json", "claim log old-b", "claim log trial-a"]
     text = "\n".join(lines)
     assert "另有 1 张已放下的卡（PR 已合、卡已收），不读交接记录" in text
@@ -549,7 +559,7 @@ def test_entry_runs_the_checkup_then_the_claims_then_each_card_of_the_project(
 
 
 def test_entry_without_a_card_of_the_project_says_so(flows: ModuleType, tmp_path: Path) -> None:
-    root = _root(tmp_path)
+    root = _set_mode(_root(tmp_path), "多机")
     runner = EntryRunner([_CLAIMS[2]])
     lines: list[str] = []
 
@@ -559,7 +569,7 @@ def test_entry_without_a_card_of_the_project_says_so(flows: ModuleType, tmp_path
 
 
 def test_entry_keeps_going_when_the_claim_list_is_red(flows: ModuleType, tmp_path: Path) -> None:
-    root = _root(tmp_path)
+    root = _set_mode(_root(tmp_path), "多机")
     runner = EntryRunner(_CLAIMS, fail={"claim list": 2})
     lines: list[str] = []
 
@@ -569,7 +579,7 @@ def test_entry_keeps_going_when_the_claim_list_is_red(flows: ModuleType, tmp_pat
 
 
 def test_entry_turns_red_when_the_claim_list_is_not_json(flows: ModuleType, tmp_path: Path) -> None:
-    root = _root(tmp_path)
+    root = _set_mode(_root(tmp_path), "多机")
     runner = EntryRunner("not json")
     lines: list[str] = []
 
@@ -581,7 +591,7 @@ def test_entry_turns_red_when_the_claim_list_is_not_json(flows: ModuleType, tmp_
 def test_entry_reads_no_log_when_the_project_is_not_registered(
     flows: ModuleType, tmp_path: Path
 ) -> None:
-    root = _root(tmp_path, "DJ-2026-009", "0100_PLC自动化/DJ-2026-009")
+    root = _set_mode(_root(tmp_path, "DJ-2026-009", "0100_PLC自动化/DJ-2026-009"), "多机")
     runner = EntryRunner(_CLAIMS)
     lines: list[str] = []
 
@@ -666,7 +676,7 @@ def test_entry_says_plainly_when_the_release_has_no_claim_log(
                 )
             return super().__call__(command, **kwargs)
 
-    root = _root(tmp_path)
+    root = _set_mode(_root(tmp_path), "多机")
     runner = OldRelease(_CLAIMS)
     lines: list[str] = []
 
@@ -786,7 +796,7 @@ def test_packs_for_paths_matches_the_owned_path_patterns(flows: ModuleType, tmp_
 
 
 def test_entry_ends_with_the_role_pack_hint_per_card(flows: ModuleType, tmp_path: Path) -> None:
-    root = _packs_root(tmp_path)
+    root = _set_mode(_packs_root(tmp_path), "多机")
     claims = [
         {"card": "scl-a", "owner": "x", "paths": ["0100_PLC自动化/DJ-2026-005/FB_1.scl"], "free": False},
         {"card": "doc-b", "owner": "x", "paths": ["0100_PLC自动化/DJ-2026-005/018.md"], "free": False},
@@ -944,3 +954,69 @@ def test_steps_of_the_pr_closeout_lists_the_user_only_step(flows: ModuleType) ->
     assert "`main.py change transition <变更单号> --to completed --pid <项目编号>`" in text
     assert "`main.py claim release <占位卡号>`" in text
     assert "只有用户本人" in text and "退出码 1 只说明有等收口的卡" in text
+
+
+# ---- 卡 318：单机模式进门跳过远程占位、展示本机交接摘要、体检同样抑制命令目录刷屏 ----
+
+
+@pytest.mark.parametrize("mode", [None, "备份", "关"])
+def test_entry_in_single_machine_mode_runs_local_handoff_and_skips_remote_claims(
+    flows: ModuleType, tmp_path: Path, mode: str | None
+) -> None:
+    root = _root(tmp_path)
+    if mode is not None:
+        _set_mode(root, mode)
+
+    class LocalHandoffRunner(FakeRunner):
+        def __call__(self, command: list[str], **kwargs: Any) -> SimpleNamespace:
+            reply = super().__call__(command, **kwargs)
+            if command[2].endswith("pm_handoff.py"):
+                reply.stdout = (
+                    "【本机交接交换区】DJ-2026-005（目录：0100_PLC自动化/DJ-2026-005/11_监控/交接交换区）\n"
+                    "更新：2026-11-19T22:00:00Z（antigravity）\n"
+                    "阶段目标：推进 PLC 联调收口\n"
+                    "当前在干：无\n"
+                    "待用户确认：\n"
+                    "  - 请确认 TIA 导入结果\n"
+                    "下一步：核对 025 点表后汇报用户\n"
+                    "最近交接记录（共 1 条，展示最后 1 条）：\n"
+                    "  - [2026-11-19T22:00:00Z] merged | antigravity\n"
+                    "    摘要：初始化交换区\n"
+                    "    先读：AGENTS.md、0100_PLC自动化/DJ-2026-005/INT.md\n"
+                )
+            return reply
+
+    runner = LocalHandoffRunner()
+    lines: list[str] = []
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 0
+
+    assert not any(call.startswith("claim ") for call in runner.ran()), "单机模式不查远程占位表"
+    assert runner.calls[-1]["command"][2].endswith("pm_handoff.py")
+    text = "\n".join(lines)
+    assert "跳过（单机模式：" in text
+    assert "【本机交接摘要】" in text
+    assert "- 阶段目标：推进 PLC 联调收口" in text
+    assert "- 待用户确认：请确认 TIA 导入结果" in text
+    assert "本机交接先读文件" in text and "0100_PLC自动化/DJ-2026-005/INT.md" in text
+
+
+def test_entry_turns_red_when_local_handoff_fails_closed(flows: ModuleType, tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    runner = FakeRunner(fail={"show DJ-2026-005": 1})
+    lines: list[str] = []
+
+    assert flows.run_flow("entry", "DJ-2026-005", root=root, runner=runner, out=lines.append) == 1
+    text = "\n".join(lines)
+    assert "「本机交接状态」" in text and "红" in text
+    assert "本机交接交换区校验未通过（失败关闭）" in text
+
+
+def test_checkup_also_suppresses_command_catalog_stdout_flood(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    root = _root(tmp_path)
+    lines: list[str] = []
+    assert flows.run_flow("checkup", "DJ-2026-005", root=root, runner=FakeRunner(), out=lines.append) == 0
+    assert "  ran --print" not in lines, "体检时命令目录也不刷屏"
+    assert sum(line.startswith("  命令目录全文存在 ") for line in lines) == 1
+

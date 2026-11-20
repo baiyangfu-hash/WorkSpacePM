@@ -11,9 +11,10 @@
 （凭已批准的变更单、领卡占位和 PR 干活，CHG-SCPT-2026-717）：PR 合进 main 后把变更单推到验收中、请用户推到完成、
 对账、放下占位、收工位。
 
-“进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``claim list`` 看占位表，再对登记路径落在
-本项目目录里的每张卡跑 ``claim log``，最后列出交接记录的最后三行和“先读”的文件，再按卡类型提示该读哪个角色包
-（控制根 ``roles/`` 下每个有 ``role.json`` 的包；本项目的卡按登记路径对上包里的 ``owned_paths_patterns``）。
+“进门”（新对话、换班接手时跑，全程只读）＝项目体检的每一步，加 ``pm_handoff.py show`` 读本机交接交换区
+（PM-056 V2.0.0）；处于“多机”档时再跑 ``claim list`` 看占位表并对本项目每张卡跑 ``claim log``（单机模式跳过
+远程占位表），最后列出本机交接摘要、先读文件并按卡类型提示该读哪个角色包（控制根 ``roles/`` 下每个有
+``role.json`` 的包；本项目的卡按登记路径对上包里的 ``owned_paths_patterns``）。
 “steps”只列出一个流程的每一步和整条命令，一条都不跑，也不写运行记录。
 
 规矩（协调者 2026-11-14 01:35Z 裁定的做法，这里照做）：
@@ -56,8 +57,12 @@ DEFAULT_ROOT = PROJECT_ROOT.parents[3]
 CATALOG_SCRIPT = PROJECT_ROOT / "scripts" / "command_catalog.py"
 PLAN_SCRIPT = PROJECT_ROOT / "scripts" / "plan_status.py"
 MERGE_SCRIPT = PROJECT_ROOT / "scripts" / "pm_merge.py"
+HANDOFF_SCRIPT = PROJECT_ROOT / "scripts" / "pm_handoff.py"
 REGISTRY = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
 REPORTS = Path(".auto-pm") / "reports" / "flows"
+GITHUB_MODE_FILE = Path(".auto-pm") / "reports" / "local_merge" / "github_mode.json"
+GITHUB_MODES = ("关", "备份", "多机")
+DEFAULT_GITHUB_MODE = "备份"
 PLC_ROOT = "0100_PLC自动化/"
 STEP_TIMEOUT = 900
 OUTPUT_TAIL = 60
@@ -105,7 +110,8 @@ class Step:
     args 里的 ``{pid}``、``{mission}``、``{chg}``、``{card}`` 运行时换成项目号、Mission 号、变更单号和占位卡号；
     ``{catalog}`` 表示运行命令目录脚本而不是 main.py；
     ``{plan}`` 表示运行项目计划状态脚本（WBS 8.8，只算只显示，控制根由本脚本补上）；
-    ``{merge}`` 表示运行本机合并脚本 ``pm_merge.py``（卡 311，控制根由本脚本补上）。
+    ``{merge}`` 表示运行本机合并脚本 ``pm_merge.py``（卡 311，控制根由本脚本补上）；
+    ``{handoff}`` 表示运行本机轻轨交接脚本 ``pm_handoff.py``（卡 318，控制根由本脚本补上）。
     ``ok`` 是这条命令算“通过”的退出码：默认只有 0；``pr settle-scan`` 用 1 表示“有等收口的卡”，那是收口时的常态，不是红。
     """
 
@@ -157,14 +163,20 @@ CHECKUP: tuple[Step, ...] = (
     ),
 )
 
-# 进门：体检全部步骤，再看占位表；占位表之后对本项目的每张卡跑 claim log（运行时按占位表补上）。
+# 进门：体检全部步骤，再读本机交接交换区（PM-056 V2.0.0），多机档再看远程占位表并逐卡跑 claim log。
+LOCAL_HANDOFF = Step(
+    "local_handoff",
+    "本机交接状态",
+    ("{handoff}", "show", "{pid}"),
+    note="读取项目交接交换区 focus.json 与最近 5 条 journal.jsonl，并核对陈旧与 Git 漂移（PM-056 V2.0.0）",
+)
 CLAIM_LIST = Step(
     "claims",
     "占位表",
     ("claim", "list", "--json"),
-    note="找出登记路径落在本项目目录里、还没放下的卡（租约到期但没放下的也算，交接记录照样要读）",
+    note="多机档时找出登记路径落在本项目目录里、还没放下的卡（单机模式跳过，不联网读远程占位表）",
 )
-ENTRY: tuple[Step, ...] = (*CHECKUP, CLAIM_LIST)
+ENTRY: tuple[Step, ...] = (*CHECKUP, LOCAL_HANDOFF, CLAIM_LIST)
 
 # pr settle-scan：0＝没有等收口的；1＝有（说明里写了下一步）；2＝判断不了（没有账本、没有基线分支）。
 # 收口时正好就是“有等收口的”，所以 1 不算红；2 照样算红。
@@ -321,6 +333,17 @@ def resolve_python(root: Path, os_name: str | None = None) -> Path:
     return candidate if candidate.is_file() else Path(sys.executable)
 
 
+def read_github_mode(root: Path) -> str:
+    """读取本机 GitHub 档位（与 pm_merge.py 同一口径）；未配置时默认为「备份」（单机本地优先）。"""
+    path = root / GITHUB_MODE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        mode = data.get("mode", DEFAULT_GITHUB_MODE) if isinstance(data, dict) else DEFAULT_GITHUB_MODE
+    except (OSError, ValueError):
+        return DEFAULT_GITHUB_MODE
+    return mode if mode in GITHUB_MODES else DEFAULT_GITHUB_MODE
+
+
 def project_root_of(root: Path, pid: str) -> str | None:
     """项目登记表里这个项目的目录（仓库根起，正斜杠，不带末尾斜杠）；读不到登记表或查不到项目返回 None。"""
     try:
@@ -468,6 +491,90 @@ def handover_lines(text: str) -> dict[str, str]:
     return found
 
 
+def local_handoff_summary(text: str) -> dict[str, Any]:
+    """从 ``pm_handoff.py show`` 的人类可读输出里提取关键字段，供进门尾段汇总展示。"""
+    summary: dict[str, Any] = {
+        "established": "尚未建立本机交接交换区" not in text,
+        "updated": "",
+        "stage_goal": "",
+        "active_work": "",
+        "next_action": "",
+        "waiting": [],
+        "warnings": [],
+        "read_first": [],
+    }
+    section = ""
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        if stripped.startswith("更新："):
+            summary["updated"] = stripped[len("更新：") :]
+            section = ""
+        elif stripped.startswith("阶段目标："):
+            summary["stage_goal"] = stripped[len("阶段目标：") :]
+            section = ""
+        elif stripped.startswith("当前在干："):
+            summary["active_work"] = stripped[len("当前在干：") :]
+            section = ""
+        elif stripped.startswith("下一步："):
+            summary["next_action"] = stripped[len("下一步：") :]
+            section = ""
+        elif stripped == "待用户确认：":
+            section = "waiting"
+        elif stripped == "⚠ 提醒：":
+            section = "warnings"
+        elif stripped.startswith(("当前优先级：", "最近交接记录", "待用户确认：无")):
+            section = ""
+        elif stripped.startswith("先读："):
+            for path in stripped[len("先读：") :].split("、"):
+                clean = path.strip()
+                if clean and clean != "无" and clean not in summary["read_first"]:
+                    summary["read_first"].append(clean)
+        elif section in ("waiting", "warnings") and stripped.startswith("- "):
+            summary[section].append(stripped[2:].strip())
+    return summary
+
+
+def _print_local_handoff(
+    summary: Mapping[str, Any] | None,
+    red: bool,
+    out: Callable[[str], None],
+) -> None:
+    """进门尾段第一块：本机交接交换区摘要（不覆盖 Git/账本，不构成授权）。"""
+    out("\n【本机交接摘要】（来自项目交接交换区，不是授权，状态以上方体检和 Git 事实为准）")
+    if red:
+        out("✗ 本机交接交换区校验未通过（失败关闭），请先看上方「本机交接状态」步骤报错并修复。")
+        return
+    if not summary or not summary.get("established"):
+        out("本项目尚未建立本机交接交换区（可用 scripts/pm_handoff.py set-focus 在工位初始化）。")
+        return
+    if (
+        not summary.get("stage_goal")
+        and not summary.get("next_action")
+        and not summary.get("warnings")
+        and not summary.get("read_first")
+    ):
+        out("已读取本机交接交换区（详见上方「本机交接状态」步骤输出）。")
+        return
+    if summary.get("updated"):
+        out(f"- 更新：{summary['updated']}")
+    if summary.get("stage_goal"):
+        out(f"- 阶段目标：{summary['stage_goal']}")
+    if summary.get("active_work"):
+        out(f"- 当前在干：{summary['active_work']}")
+    if summary.get("waiting"):
+        out("- 待用户确认：" + "；".join(summary["waiting"]))
+    if summary.get("next_action"):
+        out(f"- 下一步：{summary['next_action']}")
+    if summary.get("warnings"):
+        for warning in summary["warnings"]:
+            out(f"- ⚠ {warning}")
+    if summary.get("read_first"):
+        out("本机交接先读文件（接手前先读完再向用户报告）：")
+        for path in summary["read_first"]:
+            out(f"  {path}")
+
+
 def _fill(args: Sequence[str], pid: str, mission: str, chg: str = "", card: str = "") -> list[str]:
     return [
         arg.replace("{pid}", pid)
@@ -489,6 +596,8 @@ def command_of(
         return [str(python), "-B", str(CATALOG_SCRIPT), *args[1:]]
     if args and args[0] == "{merge}":
         return [str(python), "-B", str(MERGE_SCRIPT), "--root", str(root), *args[1:]]
+    if args and args[0] == "{handoff}":
+        return [str(python), "-B", str(HANDOFF_SCRIPT), *args[1:], "--root", str(root)]
     return [str(python), "-B", str(root / "main.py"), *args]
 
 
@@ -563,6 +672,10 @@ def print_steps(flow: str, out: Callable[[str], None] = print) -> int:
             command = (
                 f"scripts/command_catalog.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
             )
+        elif args[0] == "{merge}":
+            command = f"scripts/pm_merge.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
+        elif args[0] == "{handoff}":
+            command = f"scripts/pm_handoff.py {' '.join(args[1:])}（驾驶舱项目的 scripts 目录）"
         elif args[0] == "{rootclean}":
             command = "（脚本自己看控制根顶层）"
         else:
@@ -624,6 +737,7 @@ def run_flow(
         return EXIT_USAGE
     python = resolve_python(root)
     plc = is_plc_project(root, pid)
+    github_mode = read_github_mode(root)
     record: dict[str, Any] = {
         "flow": flow,
         "flow_name": FLOW_NAMES[flow],
@@ -634,6 +748,7 @@ def run_flow(
         "done": done,
         "started": _now(),
         "root": str(root),
+        "github_mode": github_mode,
         "interpreter": str(python),
         "entry": str(root / "main.py"),
         "steps": [],
@@ -648,7 +763,7 @@ def run_flow(
         + (f"，卡 {mission}" if mission else "")
         + (f"，变更单 {chg}" if chg else "")
         + (f"，占位 {card}" if card else "")
-        + f"；解释器 {python}"
+        + f"；GitHub 档位 {github_mode}；解释器 {python}"
     )
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     code = EXIT_DONE
@@ -657,6 +772,8 @@ def run_flow(
     finished = True
     handover: list[dict[str, Any]] = []
     project_claims: list[dict[str, Any]] = []
+    local_handoff: dict[str, Any] | None = None
+    local_handoff_red = False
     while queue:
         step = queue.pop(0)
         number += 1
@@ -704,6 +821,12 @@ def run_flow(
                 if plc is False
                 else "跳过（登记表里查不到这个项目，没法判断是不是 PLC 项目）"
             )
+            record["steps"].append(result.__dict__)
+            out(f"\n· 第 {number} 步「{step.label}」{result.status}")
+            continue
+        if step.key == "claims" and github_mode in ("关", "备份"):
+            result.command = "（单机模式跳过，不读远程占位表）"
+            result.status = f"跳过（单机模式：{github_mode}，多机档才查远程占位表）"
             record["steps"].append(result.__dict__)
             out(f"\n· 第 {number} 步「{step.label}」{result.status}")
             continue
@@ -776,9 +899,14 @@ def run_flow(
             )
             for item in handover:
                 item.setdefault("note", "发布版本没有 claim log，没读")
+        if step.key == "local_handoff":
+            if result.rc == 0:
+                local_handoff = local_handoff_summary(stdout)
+            else:
+                local_handoff_red = True
         result.output_tail = lines[-OUTPUT_TAIL:]
-        # 进门时命令目录不刷屏：全文照样存进运行记录目录，屏幕上只说存在哪。
-        quiet = flow == "entry" and step.key == "catalog" and result.rc == 0
+        # 进门与体检时命令目录不刷屏：全文照样存进运行记录目录，屏幕上只说存在哪。
+        quiet = flow in ("entry", "checkup") and step.key == "catalog" and result.rc == 0
         for line in [] if quiet else lines:
             out(f"  {line}")
         if step.key == "catalog" and result.rc == 0:
@@ -834,8 +962,15 @@ def run_flow(
                 else "✓ 没有红的步骤。"
             )
             if flow == "entry":
+                record["local_handoff"] = local_handoff
+                _print_local_handoff(local_handoff, local_handoff_red, out)
                 record["handover"] = handover
-                _print_handover(handover, out)
+                if github_mode == "多机":
+                    _print_handover(handover, out)
+                else:
+                    out(
+                        f"\n【交接记录】（当前为单机模式「{github_mode}」，已跳过远程占位表，交接以上方【本机交接摘要】为准）"
+                    )
                 record["role_hints"] = _print_role_hints(role_packs(root), project_claims, out)
         else:
             record["result"] = "走完"
