@@ -92,6 +92,7 @@ def _rule_patterns() -> tuple[str, ...]:
 # “要你点头”那一类：规则文件、PLC 项目文件、PLC 模板、本机合并命令与提交钩子自己（改它们就能把这道闸关掉）。
 USER_PATTERNS: tuple[str, ...] = (
     *_rule_patterns(),
+    "00_Infrastructure/auto_pm/releases/*",
     "0100_PLC自动化/*",
     "*/templates/plc-*",
     "*/scripts/pm_merge.py",

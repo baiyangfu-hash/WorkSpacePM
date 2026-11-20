@@ -38,6 +38,7 @@ _PROJECT_ID_ROW_PATTERN = re.compile(
     re.MULTILINE,
 )
 _VALID_CHANGE_STATUSES = change_status_guard.APPROVED_OR_LATER
+RELEASE_TREE_PREFIX = "00_Infrastructure/auto_pm/releases/"
 # FLOW-001“要你点头”那一类的生产代码：提交时仍要绑定一个已批准的变更单。
 # 规则文件清单与 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS 同一份，
 # 由 tests/infrastructure/test_git_hook_enforcer.py 的漂移测试钉住，避免两处各写一套。
@@ -54,6 +55,7 @@ PROTECTED_PROD_PATTERNS = (
     "roles/*",
     ".github/*",
     "reviews/tools/*",
+    f"{RELEASE_TREE_PREFIX}*",
     "0100_PLC自动化/*",
     "*/templates/plc-*",
     "*/scripts/pm_merge.py",
@@ -70,7 +72,7 @@ CONTROL_ROOT_FILE_BINDINGS = {"main.py": "SW-2026-008"}
 # 控制根下不属于任何注册项目目录、但随 SW-2026-008 发版的目录树：发布树（发版同步指针时会暂存其中的 .py）。
 # 归到 SW-2026-008 而不是豁免：这些文件仍要跟着 SW-2026-008 的变更单走，钩子的判定没有放松。
 # reviews/ 是裁判与审计脚本（reviews/tools/*.py）和审计报告，同属 SW-2026-008 的治理面，改它们也要跟变更单走（反重力审计 BUG-003，用户授权协调者裁决）。
-CONTROL_ROOT_PREFIX_BINDINGS = {"00_Infrastructure/auto_pm/releases/": "SW-2026-008", "reviews/": "SW-2026-008"}
+CONTROL_ROOT_PREFIX_BINDINGS = {RELEASE_TREE_PREFIX: "SW-2026-008", "reviews/": "SW-2026-008"}
 
 
 class StagedSnapshotError(RuntimeError):
@@ -1159,8 +1161,8 @@ def enforce_commit_msg(
             print(f"❌ [auto-pm commit-msg] 未找到提交信息文件: {commit_msg_file}")
             return 1
 
-        # 提交说明的编码归用户的编辑器/终端管：这里只认其中的 ASCII 变更单号，严格解码会把合法的 GBK 说明整条拒掉。
-        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: only the ASCII change id is read; a strict decode would reject a valid GBK message
+        # 保留对旧提交说明中 ASCII 变更单号的识别；新卡号行使用 UTF-8。
+        msg_content = commit_msg_file.read_text(encoding="utf-8", errors="replace").strip()  # lenient-decode: preserve ASCII change IDs in legacy non-UTF-8 messages
 
         # 匹配变更单号，如 CHG-SCPT-2026-170, CHG-PLC-2026-012
         chg_matches = tuple(
@@ -1173,25 +1175,10 @@ def enforce_commit_msg(
         )
         return 1
 
-    protected_files = [path for path in prod_files if is_protected_production_file(path)]
-    if not protected_files and not chg_matches:
-        card_match = CARD_LINE.search(msg_content)
-        if card_match is None:
-            print("=" * 70)
-            print("❌ [auto-pm commit-msg] 物理拦截：暂存区包含驾驶舱生产代码，但提交说明没有“领卡占位: <卡号>”这一行！")
-            print("📄 涉及生产文件:")
-            for pf in prod_files[:5]:
-                print(f"   - {pf}")
-            if len(prod_files) > 5:
-                print(f"   ... (共 {len(prod_files)} 个文件)")
-            print("\n👉 规程要求（FLOW-001“直接做”那一类）：提交说明里单独一行写卡号，例如:")
-            print("   领卡占位: 20261120-hookfix")
-            print("=" * 70)
-            return 1
-        print(f"✅ [auto-pm commit-msg] 直接做类生产代码已绑定卡号 {card_match.group(1)}，不要求变更单。")
-        return _enforce_staged_change_status(cand_root, gov_root, snapshot)
+    requires_change = any(is_protected_production_file(path) for path in prod_files)
+    card_match = CARD_LINE.search(msg_content)
 
-    if not chg_matches:
+    if requires_change and not chg_matches:
         print("=" * 70)
         print("❌ [auto-pm commit-msg] 物理拦截：检测到暂存区包含生产代码变更，但 Commit Message 未绑定变更单！")
         print("📄 涉及生产文件:")
@@ -1204,14 +1191,17 @@ def enforce_commit_msg(
         print("=" * 70)
         return 1
 
-    if len(chg_matches) != 1:
+    if len(chg_matches) > 1:
         print(
             "❌ [auto-pm commit-msg] 物理拦截：生产代码提交必须且只能绑定一个变更单，"
             "为防止快照关联歧义已拒绝提交！"
         )
         return 1
 
-    chg_id = chg_matches[0]
+    if not requires_change and card_match is None:
+        print("❌ [auto-pm commit-msg] 直接做类生产代码的提交说明必须单独写一行“领卡占位: <卡号>”。")
+        return 1
+
     try:
         from auto_pm.core.project_service import ProjectService
 
@@ -1229,7 +1219,15 @@ def enforce_commit_msg(
         if len(matched_bindings) != 1:
             raise StagedSnapshotError(f"项目 PID 映射不唯一: {project_ids[0]}")
         binding = matched_bindings[0]
+    except Exception as exc:
+        print(f"❌ [auto-pm commit-msg] 暂存生产代码的项目归属无法确认，已拒绝提交: {exc}")
+        return 1
 
+    if not chg_matches:
+        return _enforce_staged_change_status(cand_root, gov_root, snapshot)
+
+    chg_id = chg_matches[0]
+    try:
         if cand_root.resolve() == gov_root.resolve():
             # 单根场景：校验暂存快照内的证据
             change_path = _validate_staged_change_evidence(

@@ -45,7 +45,7 @@ def _order(tmp_path: Path) -> tuple[Path, Path, Path, str]:
     # The fixture's ledger is a two-column stub the service cannot index into; the hook only needs the number to be listed.
     ledger = next(ctrl.rglob("01_版本变更台账.md"))
     ledger.write_text(f"# 版本变更台账\n\n| 变更编号 | 状态 |\n| --- | --- |\n| {number} | draft |\n", encoding="utf-8")
-    msg.write_text(f"feat: [{number}] e2e\n", encoding="utf-8")
+    msg.write_text(f"feat: [{number}] e2e\n\n领卡占位: hook-e2e\n", encoding="utf-8")
     return cand, ctrl, msg, number
 
 
