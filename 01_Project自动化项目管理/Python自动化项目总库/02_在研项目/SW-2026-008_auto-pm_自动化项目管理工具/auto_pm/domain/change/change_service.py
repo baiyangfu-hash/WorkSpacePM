@@ -221,7 +221,6 @@ class ChangeService:
         references: str = "",
         planned_date: str | None = None,
         urgency: str = "normal",
-        retrofit: bool = False,
         change_number: str | None = None,
     ) -> ChangeRequest:
         """创建变更单
@@ -231,11 +230,8 @@ class ChangeService:
         3. 保存 Markdown 文件
         4. 更新版本变更台帐
 
-        Args:
-            retrofit: CHG-108 缺陷 3 修复——"先实施后补"工作流。
-                True 时直接创建 closed 状态变更单（跳过状态流转），
-                §3.4 写入 closed，台账写入 ✅已关闭 + 完成日期。
-                适用于已实施的变更事后补单场景。
+        新单一律以 draft 落地；先做后补（retrofit）已退役（CHG-SCPT-2026-729），
+        批准必须在实施之前，没有“直接生成 closed”的入口。
         """
         project_path = self._locator.get_project_path(project_id)
         if not project_path:
@@ -253,12 +249,12 @@ class ChangeService:
         resolved_change_number = change_number or self._locator.generate_change_number(
             project_path, domain
         )
-        log.info("创建变更单: %s, 项目=%s, 领域=%s, 性质=%s, 范围=%s, retrofit=%s",
-                 resolved_change_number, project_id, domain, business_nature, impact_scope, retrofit)
+        log.info("创建变更单: %s, 项目=%s, 领域=%s, 性质=%s, 范围=%s",
+                 resolved_change_number, project_id, domain, business_nature, impact_scope)
 
-        # 构造 ChangeRequest（CHG-108 缺陷 3：retrofit 模式直接 closed）
+        # 构造 ChangeRequest；新单一律 draft，批准与实施由状态流转命令推进
         today = datetime.date.today().isoformat()
-        initial_status = "closed" if retrofit else "draft"
+        initial_status = "draft"
         cr = ChangeRequest(
             change_number=resolved_change_number,
             project_id=project_id,
@@ -308,9 +304,6 @@ class ChangeService:
 
         # 渲染并保存
         content = self._get_generator().render(cr)
-        if retrofit:
-            # retrofit 直接以 closed 落地，不经流转命令：这一条就是它的流转记录（先记录、后写文件，记录失败即终止）
-            self._record_transition(cr.project_id, resolved_change_number, "", initial_status, applicant, "retrofit")
         write_file(file_path, content)
         cr.file_path = file_path
         log.info("变更单文件已保存: %s", file_path)
@@ -318,7 +311,6 @@ class ChangeService:
         # 更新台帐
         # V0.2.1-P2-8: 台帐文件不存在时自动创建（含变更单索引表格骨架）
         # CHG-085：调用 update() 时传入 applicant/apply_date，避免台账字段空缺
-        # CHG-108 缺陷 3：retrofit 模式下追加记录后立即更新状态为 ✅已关闭 + 完成日期
         ledger_path = get_or_create_ledger_file(project_path)
         if ledger_path:
             apply_date = planned_date or datetime.date.today().isoformat()
@@ -329,17 +321,6 @@ class ChangeService:
                 applicant=applicant,
                 apply_date=apply_date,
             )
-            if retrofit:
-                # retrofit 模式：台账状态直接写 ✅已关闭 + 完成日期
-                self._get_ledger_updater().update_status(
-                    ledger_path,
-                    resolved_change_number,
-                    "✅已关闭",
-                    complete_date=today,
-                    applicant=applicant,
-                    apply_date=apply_date,
-                )
-                log.info("retrofit 模式: 台账状态直接置为 ✅已关闭: %s", resolved_change_number)
             log.info("台帐已更新: %s", ledger_path)
         else:
             log.warning("台帐文件创建失败，跳过更新: %s", project_path)

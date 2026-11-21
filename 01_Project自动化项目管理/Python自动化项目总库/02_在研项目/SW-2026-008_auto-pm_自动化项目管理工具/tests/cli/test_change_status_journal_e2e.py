@@ -45,7 +45,7 @@ def _order(tmp_path: Path) -> tuple[Path, Path, Path, str]:
     # The fixture's ledger is a two-column stub the service cannot index into; the hook only needs the number to be listed.
     ledger = next(ctrl.rglob("01_版本变更台账.md"))
     ledger.write_text(f"# 版本变更台账\n\n| 变更编号 | 状态 |\n| --- | --- |\n| {number} | draft |\n", encoding="utf-8")
-    msg.write_text(f"feat: [{number}] e2e\n", encoding="utf-8")
+    msg.write_text(f"feat: [{number}] e2e\n\n领卡占位: hook-e2e\n", encoding="utf-8")
     return cand, ctrl, msg, number
 
 
@@ -169,13 +169,15 @@ def test_a_file_write_that_loses_a_race_puts_the_old_status_back_into_the_journa
     assert last_recorded_status(ctrl, number, PID) == "draft"  # the journal ends where the file still is
 
 
-def test_a_retrofit_order_is_recorded_as_closed(tmp_path: Path) -> None:
+def test_a_new_order_starts_as_draft_without_a_journal_row(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-729：retrofit 已退役，新单一律 draft，且不经流转命令就没有状态记录。"""
     _cand, ctrl, _msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
     created = ChangeService(str(ctrl)).create_change_request(
         project_id=PID, domain="SCPT", business_nature="DEF", impact_scope=["LOCAL"], applicant="user",
-        background="b", necessity="n", retrofit=True,
+        background="b", necessity="n",
     )
-    assert last_recorded_status(ctrl, created.change_number, PID) == "closed"
+    assert last_recorded_status(ctrl, created.change_number, PID) is None
+    assert created.status == "draft"
 
 
 def test_the_pm_saga_writes_the_journal_before_it_changes_the_status_line(tmp_path: Path) -> None:

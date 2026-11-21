@@ -26,6 +26,7 @@ from auto_pm.infrastructure.git_hook_enforcer import (
     get_staged_snapshot,
     independent_staged_changes,
     is_excluded_from_production,
+    is_protected_production_file,
 )
 from auto_pm.ui.cli.__main__ import (
     cli,  # noqa: F401  # D-153: load every command module BEFORE ``identity_guard_off`` runs
@@ -285,7 +286,10 @@ def _make_dual_root_fixture(
         _git(primary_repo, "add", f"{project_rel}/src/service.py")
 
     msg_file = worktree_dir / "COMMIT_EDITMSG"
-    msg_file.write_text(f"feat: [{chg_id}] candidate implementation\n", encoding="utf-8")
+    msg_file.write_text(
+        f"feat: [{chg_id}] candidate implementation\n\n领卡占位: hook-test\n",
+        encoding="utf-8",
+    )
 
     return worktree_dir, primary_repo, msg_file
 
@@ -502,7 +506,7 @@ def test_real_hook_in_linked_worktree_uses_candidate_index_and_control_governanc
 
     # 候选台账是旧快照（已暂存），控制根台账为当前真源：真实 Hook 必须放行。
     ok = subprocess.run(
-        ["git", "commit", "-m", "feat: [CHG-SCPT-2026-346] candidate implementation"],
+        ["git", "commit", "-m", "feat: [CHG-SCPT-2026-346] candidate implementation", "-m", "领卡占位: hook-test"],
         cwd=cand,
         capture_output=True,
         text=True,
@@ -721,6 +725,105 @@ def test_td100_independent_comparison_covers_add_modify_delete_and_mode(tmp_path
     assert set(changes) == {SERVICE, "01_Project/SW-2026-008/src/new.py"}
 
 
+# ---- FLOW-001：直接做认“领卡占位”，受保护路径仍要已批准变更单 ----
+
+PROTECTED_PROBE = "01_Project/SW-2026-008/auto_pm/infrastructure/git_hook_enforcer.py"
+
+
+def test_flow001_direct_production_code_passes_with_a_card_line_and_no_change_order(
+    tmp_path: Path,
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    msg.write_text("fix(core): 驾驶舱小修\n\n领卡占位: 20261120-hookfix\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+def test_flow001_direct_production_code_without_a_card_line_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    msg.write_text("fix(core): 驾驶舱小修\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "领卡占位" in capsys.readouterr().out
+
+
+def test_flow001_approved_change_order_does_not_replace_the_direct_card_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path)
+    msg.write_text("fix(core): [CHG-SCPT-2026-346] 驾驶舱小修\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "领卡占位" in capsys.readouterr().out
+
+
+def test_flow001_direct_card_line_does_not_allow_multiple_projects(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    other = Path("01_Project/SW-2026-009")
+    (ctrl / other).mkdir()
+    (ctrl / other / ".copier-answers.yml").write_text(
+        "project_id: SW-2026-009\nproject_name: second project\nstack: python\n",
+        encoding="utf-8",
+    )
+    (cand / other).mkdir()
+    (cand / other / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(cand, "add", (other / "service.py").as_posix())
+    msg.write_text("fix(core): multiple projects\n\n领卡占位: hook-test\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "暂存生产代码归属项目不唯一: SW-2026-008, SW-2026-009" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("protected_path", [PROTECTED_PROBE, f"{RELEASE_TREE}/auto_pm/__init__.py"])
+def test_flow001_protected_production_code_with_only_a_card_line_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], protected_path: str
+) -> None:
+    cand, ctrl, msg = _make_dual_root_fixture(tmp_path, chg_in_control=False)
+    protected = cand / protected_path
+    protected.parent.mkdir(parents=True, exist_ok=True)
+    protected.write_text("VALUE = 1\n", encoding="utf-8")
+    _git(cand, "add", protected_path)
+    msg.write_text("fix(core): 钩子小修\n\n领卡占位: 20261120-hookfix\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "未绑定变更单" in capsys.readouterr().out
+
+
+def test_flow001_protected_production_code_passes_with_an_approved_change_order(
+    tmp_path: Path,
+) -> None:
+    cand, ctrl, _msg = _make_dual_root_fixture(tmp_path)
+    protected = cand / PROTECTED_PROBE
+    protected.parent.mkdir(parents=True, exist_ok=True)
+    protected.write_text("VALUE = 1\n", encoding="utf-8")
+    _git(cand, "add", PROTECTED_PROBE)
+    msg = cand / "COMMIT_EDITMSG"
+    msg.write_text("fix(core): [CHG-SCPT-2026-346] 钩子小修\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("01_Project/SW-2026-008/src/service.py", False),
+        ("01_Project/SW-2026-008/tests/test_service.py", False),
+        (PROTECTED_PROBE, True),
+        ("01_Project/SW-2026-008/scripts/pm_merge.py", True),
+        ("01_Project/SW-2026-008/auto_pm/infrastructure/change_status_guard.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/change_service.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/status_journal.py", True),
+        ("01_Project/SW-2026-008/auto_pm/domain/change/guard_checker.py", True),
+        ("01_Project/SW-2026-008/auto_pm/ui/cli/change.py", True),
+        ("0100_PLC自动化/DJ-2026-005/src/OB1.scl", True),
+        ("01_Project/SW-2026-008/templates/plc-standard/main.scl", True),
+        ("reviews/tools/audit_pr.py", True),
+        (f"{RELEASE_TREE}/auto_pm/__init__.py", True),
+        ("00_Infrastructure/auto_pm/releases_extra/package.py", False),
+    ],
+)
+def test_flow001_protected_classification(path: str, expected: bool) -> None:
+    assert is_protected_production_file(path) is expected
+
+
 def test_td100_first_commit_without_head_is_all_additions(tmp_path: Path) -> None:
     repo = tmp_path / "fresh"
     repo.mkdir()
@@ -781,14 +884,14 @@ def _run_preflight(cand: Path, ctrl: Path, msg: Path, *, control_root: Path | No
 
 
 def test_td100_preflight_refuses_a_content_only_change_of_a_production_file(tmp_path: Path) -> None:
-    """同名生产文件只改内容、提交说明又不绑变更单：整条 preflight 链路必须拒绝。"""
+    """同名生产文件只改内容、提交说明又没绑变更单也没写卡号：整条 preflight 链路必须拒绝。"""
     cand, ctrl, msg = _delete_scene(tmp_path)
     (cand / SERVICE).write_text("def changed():\n    return 9\n", encoding="utf-8")
     _git(cand, "add", SERVICE)
     _no_chg_message(msg)
     result = _run_preflight(cand, ctrl, msg)
     assert result.exit_code != 0
-    assert "Commit Message 未绑定变更单" in result.output
+    assert "领卡占位" in result.output
 
 
 def test_td100_preflight_passes_a_content_only_change_with_a_valid_change_order(tmp_path: Path) -> None:
@@ -805,7 +908,7 @@ def test_td100_preflight_refuses_a_mode_only_change_without_a_change_order(tmp_p
     _no_chg_message(msg)
     result = _run_preflight(cand, ctrl, msg)
     assert result.exit_code != 0
-    assert "Commit Message 未绑定变更单" in result.output
+    assert "领卡占位" in result.output
 
 
 def test_td100_preflight_refuses_a_linked_worktree_given_itself_as_control_root(tmp_path: Path) -> None:

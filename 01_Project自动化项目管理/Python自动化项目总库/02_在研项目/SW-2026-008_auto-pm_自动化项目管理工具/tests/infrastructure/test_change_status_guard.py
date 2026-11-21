@@ -265,7 +265,7 @@ def test_a_bound_order_staged_in_a_single_root_with_a_hand_written_status_is_ref
     (ctrl / CODE_REL).write_text("VALUE = 3\n", encoding="utf-8")
     _git(ctrl, "add", CODE_REL)
     message = ctrl / "MSG2"
-    message.write_text(f"feat: [{CHG}] code\n", encoding="utf-8")
+    message.write_text(f"feat: [{CHG}] code\n\n领卡占位: status-guard-test\n", encoding="utf-8")
     assert enforce_commit_msg(ctrl, message) == 1
 
 

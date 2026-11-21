@@ -89,12 +89,19 @@ def _rule_patterns() -> tuple[str, ...]:
     return tuple(RULE_PATTERNS)
 
 
-# “要你点头”那一类：规则文件、PLC 项目文件、PLC 模板、本机合并命令自己（改它就能把这道闸关掉）。
+# “要你点头”那一类：规则文件、PLC 项目文件、PLC 模板、本机合并命令与提交钩子自己（改它们就能把这道闸关掉）。
 USER_PATTERNS: tuple[str, ...] = (
     *_rule_patterns(),
+    "00_Infrastructure/auto_pm/releases/*",
     "0100_PLC自动化/*",
     "*/templates/plc-*",
     "*/scripts/pm_merge.py",
+    "*/auto_pm/infrastructure/git_hook_enforcer.py",
+    "*/auto_pm/infrastructure/change_status_guard.py",
+    "*/auto_pm/domain/change/change_service.py",
+    "*/auto_pm/domain/change/status_journal.py",
+    "*/auto_pm/domain/change/guard_checker.py",
+    "*/auto_pm/ui/cli/change.py",
 )
 
 

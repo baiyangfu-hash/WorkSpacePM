@@ -29,6 +29,7 @@ pytestmark = pytest.mark.usefixtures("identity_guard_off")
 
 PID = "SW-2026-901"
 OTHER_PID = "SW-2026-902"
+PROTECTED_PRODUCTION_PATH = Path("auto_pm/infrastructure/git_hook_enforcer.py")
 LAUNCHER = """from auto_pm.cli.__main__ import cli
 
 if __name__ == "__main__":
@@ -85,9 +86,10 @@ def _build(tmp_path: Path, final_state: str = "implementing") -> Scene:
     """A repository with one registered project, a real change request moved to ``final_state``, a reconciled ledger and a staged production change."""
 
     repo = tmp_path / "gate-repo"
-    (repo / f"{PID}_fixture" / "src").mkdir(parents=True)
+    code_file = repo / f"{PID}_fixture" / PROTECTED_PRODUCTION_PATH
+    code_file.parent.mkdir(parents=True)
     (repo / f"{PID}_fixture" / ".copier-answers.yml").write_text(f"project_id: {PID}\nproject_name: gate fixture\nstack: python\n", encoding="utf-8")
-    (repo / f"{PID}_fixture" / "src" / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+    code_file.write_text("VALUE = 1\n", encoding="utf-8")
     register_project(repo, PID, f"{PID}_fixture")
     (repo / "main.py").write_text(LAUNCHER, encoding="utf-8")
     (repo / ".gitignore").write_text("main.py\n.auto-pm/\n", encoding="utf-8")
@@ -111,7 +113,7 @@ def _build(tmp_path: Path, final_state: str = "implementing") -> Scene:
     assert reconciled.returncode == 0 and "台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条" in reconciled.stdout, reconciled.stdout
     installed = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
     assert installed.exit_code == 0, installed.output
-    (scene.project / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
+    code_file.write_text("VALUE = 2\n", encoding="utf-8")
     scene.git("add", "-A")
     return Scene(repo, chg)
 
@@ -122,9 +124,10 @@ def _build_two(tmp_path: Path) -> tuple[Scene, str]:
 
     repo = tmp_path / "gate-repo"
     for pid, folder in ((PID, f"{PID}_fixture"), (OTHER_PID, f"{OTHER_PID}_other")):
-        (repo / folder / "src").mkdir(parents=True)
+        code_file = repo / folder / PROTECTED_PRODUCTION_PATH
+        code_file.parent.mkdir(parents=True)
         (repo / folder / ".copier-answers.yml").write_text(f"project_id: {pid}\nproject_name: gate fixture {pid}\nstack: python\n", encoding="utf-8")
-        (repo / folder / "src" / "service.py").write_text("VALUE = 1\n", encoding="utf-8")
+        code_file.write_text("VALUE = 1\n", encoding="utf-8")
     for pid, folder in ((PID, f"{PID}_fixture"), (OTHER_PID, f"{OTHER_PID}_other")):
         register_project(repo, pid, folder)
     (repo / "main.py").write_text(LAUNCHER, encoding="utf-8")
@@ -152,7 +155,7 @@ def _build_two(tmp_path: Path) -> tuple[Scene, str]:
     installed = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
     assert installed.exit_code == 0, installed.output
     assert not list((repo / f"{PID}_fixture").rglob(f"{created_ids[2]}.md")), "the foreign change request must not exist in project 901"
-    (repo / f"{PID}_fixture" / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (scene.project / PROTECTED_PRODUCTION_PATH).write_text("VALUE = 2\n", encoding="utf-8")
     scene.git("add", "-A")
     return Scene(repo, created_ids[0]), created_ids[2]
 
@@ -257,7 +260,7 @@ def test_g10_a_ledger_that_is_empty_or_garbage_is_refused_by_pre_commit(scene: S
 
 def test_g11_production_files_of_two_registered_projects_in_one_commit_are_refused_by_commit_msg(tmp_path: Path) -> None:
     scene, _foreign = _build_two(tmp_path)
-    (scene.repo / f"{OTHER_PID}_other" / "src" / "service.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (scene.repo / f"{OTHER_PID}_other" / PROTECTED_PRODUCTION_PATH).write_text("VALUE = 2\n", encoding="utf-8")
     scene.git("add", "-A")
     head, staged = scene.head(), scene.staged()
     _refused(scene, scene.commit(f"feat: [{scene.chg}] change both services"), "commit-msg", "归属项目不唯一", head, staged)
@@ -278,11 +281,11 @@ def test_g13_the_two_projects_fixture_commits_when_the_evidence_is_good(tmp_path
 
 def test_g14_the_staged_state_comparison_sees_a_changed_blob_and_a_changed_mode_not_only_a_changed_name(scene: Scene) -> None:
     names_before, state_before = scene.git("diff", "--cached", "--name-only"), scene.staged()
-    (scene.project / "src" / "service.py").write_text("VALUE = 3\n", encoding="utf-8")
+    (scene.project / PROTECTED_PRODUCTION_PATH).write_text("VALUE = 3\n", encoding="utf-8")
     scene.git("add", "-A")  # the same path, another blob
     state_other_blob = scene.staged()
     assert scene.git("diff", "--cached", "--name-only") == names_before, "the name list alone cannot tell these two states apart"
     assert state_other_blob != state_before
-    scene.git("update-index", "--chmod=+x", f"{PID}_fixture/src/service.py")  # the same path, the same blob, another mode
+    scene.git("update-index", "--chmod=+x", (Path(f"{PID}_fixture") / PROTECTED_PRODUCTION_PATH).as_posix())
     assert scene.git("diff", "--cached", "--name-only") == names_before
     assert scene.staged() != state_other_blob

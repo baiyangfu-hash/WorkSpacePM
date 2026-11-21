@@ -701,3 +701,10 @@ def test_d154_change_edit_file_is_refused_with_exit_one_once_work_has_started(cl
     assert refused.exit_code == 1
     assert "实施中不能改文件清单" in refused.output and "另开变更单" in refused.output
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_change_create_help_no_longer_offers_retrofit() -> None:
+    """先做后补入口已退役（CHG-SCPT-2026-729）：帮助里不能再出现 --retrofit。"""
+    result = CliRunner().invoke(cli, ["change", "create", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--retrofit" not in result.output

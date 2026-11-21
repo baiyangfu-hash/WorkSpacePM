@@ -429,7 +429,7 @@ def _staged_snapshot_fixture(
         )
 
     message_file = repo / "COMMIT_EDITMSG"
-    message_file.write_text(f"feat: [{_FIXTURE_CHG_ID}] snapshot test\n", encoding="utf-8")
+    message_file.write_text(f"feat: [{_FIXTURE_CHG_ID}] snapshot test\n\n领卡占位: snapshot-test\n", encoding="utf-8")
     return repo, message_file
 
 

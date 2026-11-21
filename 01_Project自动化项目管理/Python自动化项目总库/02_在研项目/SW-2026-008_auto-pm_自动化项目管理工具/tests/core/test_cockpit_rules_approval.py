@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from auto_pm.infrastructure.git_hook_enforcer import PROTECTED_PROD_PATTERNS
 from tests.core import test_github_collector as g
 
 pytestmark = pytest.mark.external_reads  # D-200: reads real files outside the project
@@ -93,6 +94,11 @@ def _by_number(snap: gh.Snapshot) -> dict[int, gh.PullInfo]:
 
 
 # ---------------------------------------------------------------- 采集：状态
+
+
+def test_flow001_protected_patterns_cover_the_rules_approval_list() -> None:
+    missing = sorted(set(checker.RULE_PATTERNS) - set(PROTECTED_PROD_PATTERNS))
+    assert not missing, f"钩子受保护清单缺少规则文件模式: {missing}"
 
 
 def test_rules_state_per_pull(tmp_path: Path) -> None:

@@ -551,7 +551,6 @@ class WorkbenchUseCases:
                     applicant=applicant,
                     background="项目 PM 连续性基础文档与变更管理机制初始化。",
                     necessity="对齐规范管理，启用变更管理与对账自愈系统。",
-                    retrofit=True,
                 )
             self.project_service.sync_to_cache(force_full=True)
             return CommandOutcome(
