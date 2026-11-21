@@ -184,6 +184,7 @@ def test_close_a_station_clean_an_off_roster_dir_and_a_leftover_record_on_the_pa
     screen.open()
     assert set(screen.station_names()) == {"claude-1b7302", "gate-formal", "trae"}, screen.page.view.notes
     # trae 有未提交的改动：按钮灰着，旁边是命令自己的原话（清理清单里那一项的原因，和 worktree close 拒绝时同一句）
+    screen.qtbot.waitUntil(lambda: "close:trae" in screen.buttons(), timeout=10_000)
     assert not screen.buttons()["close:trae"].isEnabled()
     assert screen.reasons()["trae"].startswith("有未提交的改动"), screen.reasons()
 
