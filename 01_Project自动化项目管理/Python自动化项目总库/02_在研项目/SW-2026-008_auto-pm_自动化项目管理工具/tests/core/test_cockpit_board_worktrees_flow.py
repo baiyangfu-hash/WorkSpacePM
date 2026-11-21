@@ -108,6 +108,16 @@ class Screen:
         self.idle()
         self.window.page_buttons["worktrees"].click()
         self.idle()
+        expected = {"close:claude-1b7302", "close:trae", "sweep_one:gate-formal", "reclaim:", "registry:"}
+
+        def controls_ready() -> None:
+            missing = expected.difference(self.buttons())
+            assert self.window.current == "worktrees" and not missing, (
+                f"工位页按钮尚未显示：{sorted(missing)}。当前页：{self.window.current}。"
+                f"读取状态：{self.page.status}。提示：{self.page.view.notes}"
+            )
+
+        self.qtbot.waitUntil(controls_ready, timeout=10_000)
 
     def buttons(self) -> dict[str, QPushButton]:
         return {f"{b.property('worktree_action')}:{b.property('target') or ''}": b

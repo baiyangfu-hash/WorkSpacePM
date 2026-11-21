@@ -63,6 +63,7 @@ class PrecheckReport:
     related_tests: list[str]
     scope_note: str
     steps: list[StepResult] = field(default_factory=list)
+    full_gate_required: bool = False
     outside_changes: list[str] = field(default_factory=list)  # changed files outside the project folder: no step of this check looks at them
 
     @property
@@ -70,7 +71,7 @@ class PrecheckReport:
         verdicts = {step.verdict for step in self.steps}
         if "FAIL" in verdicts:
             return "FAIL"
-        if self.outside_changes:
+        if self.outside_changes or self.full_gate_required:
             return "UNVERIFIED"
         return "PASS" if verdicts <= {"PASS", "SKIPPED"} and "PASS" in verdicts else "UNVERIFIED"
 
@@ -434,6 +435,7 @@ class PrecheckService:
         out_dir: Path | None = None,
         jobs: int = 4,
         timeout_seconds: int = STEP_TIMEOUT_SECONDS,
+        defer_full: bool = False,
     ) -> PrecheckReport:
         worktree = worktree.resolve()
         project = project_dir_in(worktree)
@@ -454,10 +456,13 @@ class PrecheckService:
             ("ruff", [python, "-B", "-m", "ruff", "check", "--no-cache", "auto_pm", "tests"]),
             (
                 "mypy",
-                [python, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--cache-dir=/dev/null", "auto_pm", "tests"],
+                [python, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-sqlite-cache", "--cache-dir=/dev/null", "auto_pm", "tests"],
             ),
         ]
-        if tests:
+        report.full_gate_required = defer_full and (tests == ["tests"] or len(tests) >= PARALLEL_FROM)
+        if report.full_gate_required:
+            report.steps.append(StepResult("pytest", "SKIPPED", None, "交给托管全量门禁", [], ""))
+        elif tests:
             # the project's addopts write coverage/junit/test-results.xml into the worktree and --no-cov does not stop that: point it at the logs
             junit = f"--junitxml={logs / 'pytest-junit.xml'}"
             pytest_argv = [python, "-B", "-m", "pytest", *tests, "-p", "no:cacheprovider", "--no-cov", "-q", junit]

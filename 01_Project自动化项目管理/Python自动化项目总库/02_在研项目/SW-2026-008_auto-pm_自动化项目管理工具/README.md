@@ -264,6 +264,7 @@ uv run pre-commit run --all-files
 | `AUTO_PM_EXECUTION_LEASE_TOKEN` | 驾驶舱启动执行端时放进环境的租约令牌，执行命令读取一次后立即从环境里移除；手工不要设 | 驾驶舱生成的令牌 | 未设：需要令牌的命令报“环境变量不存在” |
 | `AUTO_PM_QUALITY_GATE_TIMEOUT_SECONDS` | 验收时每道进程内质量门（Python、PLC）的墙钟时限，超时判该门“未运行”，不会卡住整个验证 | 大于 0 的有限数字；空、非数字、0、负数、`nan`、`inf`、`1e400` 一律改用默认值（不会变成“永不超时”） | 1800 秒 |
 | `AUTO_PM_SIEMENS_LSP` | 指定 Siemens 语言服务可执行文件，PLC 检查优先用它 | 可执行文件的路径；路径不是文件则视为没找到，不会再往下找 | 未设：在 `~/.vscode/extensions` 下找版本号最高的 Siemens 语言服务插件；找不到算“未验证” |
+| `AUTO_PM_REQUIRE_SIEMENS_LSP` | 全量门禁的插件检查必须使用真实 Siemens LSP | `1`：插件缺失时测试失败 | 未设：普通测试允许跳过插件检查 |
 | `AUTO_PM_AUDIT_DIR` | 审计日志目录 | 目录路径；`off`、`disabled`、`none`、`0`、`false` 或空串表示关闭审计 | 未设：`~/.auto-pm/audit/`；目录建不出来时静默关闭审计，不影响退出码 |
 
 ### 项目结构

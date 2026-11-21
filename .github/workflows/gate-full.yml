@@ -1,18 +1,23 @@
 name: gate-full
+run-name: ${{ inputs.task_id && format('gate-full {0} {1}', inputs.task_id, inputs.candidate_sha) || format('gate-full {0}', github.sha) }}
 
 on:
   workflow_dispatch:
-  # CHG-SCPT-2026-705: every merge into main runs the full gate on that commit by itself; nobody has to press "Run".
+    inputs:
+      task_id:
+        type: string
+        description: 驾驶舱任务号
+      candidate_sha:
+        type: string
+        description: 候选完整提交号
+      base_sha:
+        type: string
+        description: 当前 main 完整提交号
   push:
     branches: [main]
 
-# CHG-SCPT-2026-713: one run per branch at a time.  正在跑的一轮跑完；同组排队的只留最新一个。  A run that has started is
-# never cancelled by a newer merge, so several merges a day still each end with a verdict on some commit.  While it runs,
-# GitHub keeps at most one run waiting in this group: a newer merge replaces the waiting one, which never starts.  A run
-# that is cancelled (by hand, or replaced while waiting) leaves no verdict and no commit status (the verdict and
-# commit-status jobs below skip on cancel), so a commit never shows a half-run result.
 concurrency:
-  group: gate-full-${{ github.ref }}
+  group: gate-full-${{ inputs.task_id || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -24,7 +29,95 @@ env:
   PYTHONUTF8: "1"
 
 jobs:
+
+  identity:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      statuses: read
+    outputs:
+      candidate: ${{ steps.check.outputs.candidate }}
+      reuse: ${{ steps.check.outputs.reuse }}
+      digest: ${{ steps.check.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm candidate and check for reusable evidence
+        id: check
+        env:
+          TASK_ID: ${{ inputs.task_id }}
+          REQUESTED_SHA: ${{ inputs.candidate_sha }}
+          REQUESTED_BASE: ${{ inputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -n "${TASK_ID}${REQUESTED_SHA}${REQUESTED_BASE}" ]]; then
+            [[ "$TASK_ID" =~ ^[0-9a-f]{32}$ && "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$GITHUB_REF" == refs/heads/main && "$REQUESTED_BASE" == "$GITHUB_SHA" ]]
+            git cat-file -e "$REQUESTED_SHA^{commit}"
+            git merge-base --is-ancestor "$REQUESTED_BASE" "$REQUESTED_SHA"
+            candidate="$REQUESTED_SHA"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+
+          reuse() {
+            [[ "$GITHUB_EVENT_NAME" == push ]] || return 1
+            local base prior tree prior_tree status run id digest artifact
+            read -r merge base prior extra < <(git rev-list --parents -n 1 "$GITHUB_SHA")
+            [[ -n "$base" && -n "$prior" && -z "$extra" ]] || return 1
+            git diff --quiet "$base" "$GITHUB_SHA" -- .github/workflows/gate-full.yml || return 1
+            tree=$(git rev-parse "$GITHUB_SHA^{tree}") || return 1
+            prior_tree=$(git rev-parse "$prior^{tree}") || return 1
+            [[ "$tree" == "$prior_tree" ]] || return 1
+            status=$(gh api "repos/$GITHUB_REPOSITORY/commits/$prior/statuses" --paginate --slurp |
+              jq -c '[.[][] | select(.context == "gate-full" and .creator.login == "github-actions[bot]")][0]') || return 1
+            jq -e 'type == "object" and .state == "success"' <<< "$status" >/dev/null || return 1
+            run=$(jq -r '.target_url' <<< "$status")
+            id=${run##*/}
+            [[ "$run" == "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id" && "$id" =~ ^[0-9]+$ ]] || return 1
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" |
+              jq -e --arg base "$base" --arg prior "$prior" '
+                .event == "workflow_dispatch" and .path == ".github/workflows/gate-full.yml"
+                and .head_branch == "main" and .head_sha == $base and .conclusion == "success"
+                and (.display_title | test("^gate-full [0-9a-f]{32} " + $prior + "$"))' >/dev/null || return 1
+            artifact="$RUNNER_TEMP/reuse-verdict"
+            gh run download --repo "$GITHUB_REPOSITORY" "$id" --name "gate-verdict-${prior::12}" --dir "$artifact" || return 1
+            jq -e --arg prior "$prior" '
+              .commit == $prior and .verdict == "PASS" and .complete and
+              (.manifest_sha256 | test("^[0-9a-f]{64}$"))' "$artifact/gate_summary.json" >/dev/null || return 1
+            digest=$(sha256sum "$artifact/gate_summary.json" | cut -d' ' -f1) || return 1
+            jq -e --arg desc "PASS: verdict PASS sha256 ${digest}, plugin success" \
+              '.description == $desc' <<< "$status" >/dev/null || return 1
+            mv "$artifact/gate_summary.json" "$artifact/candidate_gate_summary.json" || return 1
+            jq --arg merge "$GITHUB_SHA" --arg prior "$prior" --arg base "$base" \
+              --arg tree "$tree" --arg run "$run" --arg digest "$digest" '
+                .commit = $merge | .commit_end = $merge |
+                .reused_from = {commit: $prior, first_parent: $base, tree: $tree, run_url: $run, sha256: $digest}
+              ' "$artifact/candidate_gate_summary.json" > "$artifact/gate_summary.json" || return 1
+            digest=$(sha256sum "$artifact/gate_summary.json" | cut -d' ' -f1) || return 1
+            echo "artifact=gate-verdict-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "reuse=$run" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "复用同树候选 $prior 的 GitHub 门禁 $run（第一父提交 $base）" >> "$GITHUB_STEP_SUMMARY"
+          }
+          reuse || true
+      - name: Upload evidence for the same-tree merge
+        if: steps.check.outputs.reuse != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.check.outputs.artifact }}
+          path: ${{ runner.temp }}/reuse-verdict
+          if-no-files-found: error
+          overwrite: true
+
   group:
+    needs: identity
+    if: ${{ !needs.identity.outputs.reuse }}
     runs-on: windows-latest
     timeout-minutes: 100
     strategy:
@@ -51,8 +144,14 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.identity.outputs.candidate }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the checked out commit
+        env:
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE"
 
       - uses: actions/setup-python@v5
         with:
@@ -84,6 +183,8 @@ jobs:
   # pinned SHA256 before use, and it lives only in $RUNNER_TEMP of this one job: never committed, never cached, never uploaded, gone with
   # the runner.  Only this job sets AUTO_PM_SIEMENS_LSP; the eleven groups above keep the "no plugin" default of tests/conftest.py.
   plugin:
+    needs: identity
+    if: ${{ !needs.identity.outputs.reuse }}
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -100,8 +201,14 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.identity.outputs.candidate }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the checked out commit
+        env:
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE"
 
       - uses: actions/setup-python@v5
         with:
@@ -153,10 +260,8 @@ jobs:
           done
 
   verdict:
-    needs: group
-    # CHG-SCPT-2026-705: a red group still gets judged (FAIL with the reasons), but a cancelled run (CHG-SCPT-2026-713: only
-    # by hand now) does not: always() would also run on cancel and publish a "groups incomplete" verdict for that commit.
-    if: ${{ !cancelled() }}
+    needs: [identity, group, plugin]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && !needs.identity.outputs.reuse }}
     # D-223: the judge imports the cockpit package (the same judging code the groups ran), so it needs the same locked
     # dependencies as the groups.  The lock file is the Windows one, hence the same runner image and the same install step.
     runs-on: windows-latest
@@ -170,15 +275,23 @@ jobs:
     steps:
       - name: Name the verdict after the commit
         id: name
-        run: echo "artifact=gate-verdict-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        env:
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
+        run: echo "artifact=gate-verdict-${CANDIDATE::12}" >> "$GITHUB_OUTPUT"
 
       - name: Long paths
         run: git config --system core.longpaths true
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.identity.outputs.candidate }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the checked out commit
+        env:
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE"
 
       - uses: actions/setup-python@v5
         with:
@@ -197,11 +310,14 @@ jobs:
 
       - name: Merge and judge
         working-directory: ${{ env.PROJ }}
+        env:
+          PLUGIN_RESULT: ${{ needs.plugin.result }}
         run: |
           # gate-* also matches a verdict an earlier attempt of this run uploaded (re-run): it is not a group record
           rm -rf "$RUNNER_TEMP"/parts/gate-verdict*
           "$RUNNER_TEMP/venv/Scripts/python.exe" tests/tools/sw008_ci/gate_run_ci.py merge \
-            --in "$RUNNER_TEMP"/parts/gate-* --out "$RUNNER_TEMP/gate-final" --worktree "$GITHUB_WORKSPACE"
+            --in "$RUNNER_TEMP"/parts/gate-* --out "$RUNNER_TEMP/gate-final" --worktree "$GITHUB_WORKSPACE" \
+            --plugin-result "$PLUGIN_RESULT"
 
       # CHG-SCPT-2026-705: the commit number and the verdict file's SHA-256 always go into the job summary and the job's
       # outputs (the commit-status job reads them), also when the merge step above failed or left no verdict file.
@@ -210,6 +326,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           ARTIFACT: ${{ steps.name.outputs.artifact }}
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
         run: |
           summary="$RUNNER_TEMP/gate-final/gate_summary.json"
           if [ -f "$summary" ]; then
@@ -223,7 +340,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "## gate-full 判决记录"
-            echo "- 提交号: $GITHUB_SHA"
+            echo "- 提交号: $CANDIDATE"
             echo "- 判决: $verdict"
             echo "- gate_summary.json SHA-256: $digest"
             echo "- 判决产物: $ARTIFACT"
@@ -241,8 +358,8 @@ jobs:
   # FAIL next to it without anyone opening the run.  PASS needs both halves of this workflow: the merged verdict of the eleven
   # groups is PASS and the plugin job succeeded.  Only this job may write statuses; it checks nothing out and runs no repo code.
   commit-status:
-    needs: [verdict, plugin]
-    if: ${{ !cancelled() }}
+    needs: [identity, verdict, plugin]
+    if: ${{ !cancelled() && needs.identity.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -254,6 +371,9 @@ jobs:
           VERDICT: ${{ needs.verdict.outputs.verdict }}
           DIGEST: ${{ needs.verdict.outputs.digest }}
           PLUGIN: ${{ needs.plugin.result }}
+          CANDIDATE: ${{ needs.identity.outputs.candidate }}
+          REUSED: ${{ needs.identity.outputs.reuse }}
+          REUSED_DIGEST: ${{ needs.identity.outputs.digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -264,7 +384,11 @@ jobs:
             state=failure
             word=FAIL
           fi
-          description="$word: verdict ${VERDICT:-MISSING} sha256 ${DIGEST:0:12}, plugin $PLUGIN"
-          echo "$GITHUB_SHA -> $state ($description)"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+          description="$word: verdict ${VERDICT:-MISSING} sha256 ${DIGEST}, plugin $PLUGIN"
+          if [ -n "$REUSED" ]; then
+            state=success
+            description="PASS: reused exact candidate tree, sha256 ${REUSED_DIGEST:0:12}"
+          fi
+          echo "$CANDIDATE -> $state ($description)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$CANDIDATE" \
             -f state="$state" -f context=gate-full -f description="$description" -f target_url="$RUN_URL"

@@ -85,6 +85,10 @@ class GateError(Exception):
     pass
 
 
+class ScheduleRegistrationError(GateError):
+    """Task Scheduler explicitly declined registration before any /Run call."""
+
+
 class GitCallError(GateError):
     """A git call of the fingerprint returned non-zero (D-225: the message carries the exit code, stdout and stderr)."""
 
@@ -134,6 +138,12 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if not isinstance(out_dir, str) or not Path(fill(out_dir)).is_absolute():
         raise GateError("config.out_dir must be an absolute path")
     cfg["out_dir"] = fill(out_dir)
+
+    allowed = cfg.get("env_allow")
+    if allowed is not None and (
+        not isinstance(allowed, list) or not all(isinstance(key, str) for key in allowed)
+    ):
+        raise GateError("config.env_allow must be a list of environment variable names")
 
     steps = cfg.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -243,6 +253,10 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if not isinstance(fp, dict) or not isinstance(fp.get("git_worktree"), str) or not fp["git_worktree"]:
         raise GateError("fingerprint.git_worktree (the candidate worktree) is required")
     fp["git_worktree"] = fill(fp["git_worktree"])
+    if "expected_commit" in fp and (
+        not isinstance(fp["expected_commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", fp["expected_commit"])
+    ):
+        raise GateError("fingerprint.expected_commit must be a full commit SHA")
     cfg.setdefault("round_timeout_s", 10 * 3600)
     if not isinstance(cfg["round_timeout_s"], int) or not 10 <= cfg["round_timeout_s"] <= 11 * 3600:
         raise GateError("round_timeout_s must be 10..39600 (the scheduled task stops at 12 h)")
@@ -353,8 +367,17 @@ def tree_fingerprint(cfg: dict[str, Any]) -> str | None:
     if not wt:
         return None
     wtp = Path(wt)
-    h = hashlib.sha256(git_bytes(wtp, "rev-parse", "HEAD"))
+    head = git_bytes(wtp, "rev-parse", "HEAD")
+    expected = cfg["fingerprint"].get("expected_commit")
+    if expected and head.strip() != expected.encode("ascii"):
+        raise GateError("candidate commit no longer matches the scheduled task")
+    h = hashlib.sha256(head)
     status = git_bytes(wtp, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if expected and status:
+        raise GateError("managed gate candidate is no longer clean")
+    plugin = cfg["fingerprint"].get("plugin")
+    if plugin and hashlib.sha256(Path(plugin["path"]).read_bytes()).hexdigest() != plugin["sha256"]:
+        raise GateError("Siemens LSP no longer matches its pinned SHA-256")
     h.update(status)
     entries = status.split(b"\0")
     i = 0
@@ -812,7 +835,8 @@ class Runner:
             self._hold_for_closing()
         self.stop_all.set()
         self.write_status()
-        if result in FINAL and self.task_name:
+        managed_stop = result == "STOPPED" and self.cfg["fingerprint"].get("expected_commit")
+        if (result in FINAL or managed_stop) and self.task_name:
             # Last act: the one-off task has done its job (audit 109 ③). Everything is already on disk.
             try:
                 r = subprocess.run(["schtasks", "/Delete", "/TN", self.task_name, "/F"], capture_output=True,
@@ -893,7 +917,10 @@ class Runner:
         try:
             return self._run_locked()
         except Exception as error:  # noqa: BLE001 - the record must say why
-            self.log(f"runner crashed: {type(error).__name__}: {error}")
+            reason = f"runner crashed: {type(error).__name__}: {error}"
+            self.log(reason)
+            if self.cfg["fingerprint"].get("expected_commit"):
+                return self.finish("FAILED", reason)
             raise
         finally:
             self.stop_all.set()
@@ -901,6 +928,8 @@ class Runner:
     def _run_locked(self) -> int:
         self.log(f"runner start pid={os.getpid()} config_sha256={self.sha}")
         stop = self.out / STOP_FILE
+        if stop.exists() and self.cfg["fingerprint"].get("expected_commit"):
+            return self.finish("STOPPED", "STOP requested before work started")
         if stop.exists():
             stop.rename(self.out / f"STOP.consumed.{int(time.time())}")
         sp = self._state_path()
@@ -967,6 +996,10 @@ class Runner:
             rec = self.state["steps"].get(_key(s))
             if rec and rec.get("status") == "done":
                 continue
+            if self.cfg["fingerprint"].get("expected_commit"):
+                if stop.exists():
+                    return self.finish("STOPPED", "STOP requested before next step")
+                fingerprint_with_retry(self.cfg, self.log, f"step {s['name']} starting")
             if self._round_elapsed_s() > self.cfg["round_timeout_s"]:
                 return self.finish("ROUND_TIMEOUT", f"the round ran past {self.cfg['round_timeout_s']} s before step {s['name']}")
             outcome = self._run_step(s)
@@ -1020,7 +1053,10 @@ class Runner:
             p["txt"].write_text(s["write"], encoding="utf-8", newline="\n")
             code = 0
         else:
-            env = dict(os.environ)
+            allowed = self.cfg.get("env_allow")
+            env = dict(os.environ) if allowed is None else {
+                key: value for key, value in os.environ.items() if key.upper() in allowed
+            }
             # "{PATH}" in a value is the runner's own PATH, so a config can prepend (e.g. Git Bash's usr/bin, as run_g2.sh does).
             env.update({k: v.replace("{PATH}", os.environ.get("PATH", "")) for k, v in s["env"].items()})
             env.pop(TOKEN_ENV, None)
@@ -1196,7 +1232,22 @@ def _launch_windows(cfg: dict[str, Any], config_path: Path) -> None:
         r = subprocess.run(argv, capture_output=True, check=False)
         if r.returncode != 0:
             msg = (r.stdout + r.stderr).decode("mbcs", errors="replace").strip()
-            raise GateError(f"{' '.join(argv[:2])} failed ({r.returncode}): {msg[:400]}")
+            reason = f"{' '.join(argv[:2])} failed ({r.returncode}): {msg[:400]}"
+            if cfg["fingerprint"].get("expected_commit"):
+                if argv[1] == "/Create":
+                    raise ScheduleRegistrationError(reason)
+                registered = scheduler_status(cfg)
+                if (
+                    registered.get("scheduler_state") in {"Ready", "Disabled"}
+                    and registered.get("scheduler_exit") == 0x41303
+                    and registered.get("scheduler_started") is False
+                ):
+                    removed = subprocess.run(
+                        ["schtasks", "/Delete", "/TN", name, "/F"], capture_output=True, check=False,
+                    )
+                    if removed.returncode == 0:
+                        raise ScheduleRegistrationError(reason)
+            raise GateError(reason)
 
 
 def _launch_posix(cfg: dict[str, Any], config_path: Path) -> None:
@@ -1296,6 +1347,27 @@ def cmd_launch(config_path: Path, wait_s: int) -> int:
     return 2
 
 
+def scheduler_status(cfg: dict[str, Any]) -> dict[str, Any]:
+    query = (
+        "$task = Get-ScheduledTask -TaskName $env:WSPM_GATE_TASK -ErrorAction Stop; "
+        "$info = Get-ScheduledTaskInfo -InputObject $task -ErrorAction Stop; "
+        "$task = Get-ScheduledTask -TaskName $env:WSPM_GATE_TASK -ErrorAction Stop; "
+        "@{scheduler_state=$task.State.ToString(); scheduler_exit=$info.LastTaskResult; "
+        "scheduler_started=($info.LastRunTime.Year -gt 2000)} | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", query],
+            env={**os.environ, "WSPM_GATE_TASK": task_name(cfg)},
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10, check=False,
+            creationflags=0x08000000,
+        )
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
 def cmd_status(config_path: Path) -> int:
     cfg, _ = load_config(config_path)
     out = Path(cfg["out_dir"])
@@ -1303,6 +1375,8 @@ def cmd_status(config_path: Path) -> int:
     st = out / STATUS_FILE
     status = json.loads(st.read_text(encoding="utf-8")) if st.exists() else {}
     status["runner_alive"] = alive
+    if IS_WINDOWS and cfg["fingerprint"].get("expected_commit") and not alive and not status.get("result"):
+        status.update(scheduler_status(cfg))
     print(json.dumps(status, ensure_ascii=False, indent=2))
     return 0
 
@@ -1328,6 +1402,12 @@ def main(argv: list[str] | None = None) -> int:
             # point (before anything is created or taken), so no way of starting a gate skips it.
             refusal = _memory_preflight_refusal()
             if refusal:
+                if a.task_name and a.task_name.startswith("WSPM-LongGate-gate-full-"):
+                    cfg, sha = load_config(config_path)
+                    if a.task_name == task_name(cfg) and cfg["fingerprint"].get("expected_commit"):
+                        runner = Runner(cfg, sha)
+                        runner.task_name = a.task_name
+                        return runner.finish("FAILED", refusal)
                 print(refusal)
                 return EXIT_CODES["REFUSED"]
             _arm_memory_gate()
@@ -1340,6 +1420,9 @@ def main(argv: list[str] | None = None) -> int:
         if a.command == "status":
             return cmd_status(config_path)
         return cmd_stop(config_path)
+    except ScheduleRegistrationError as error:
+        _say(f"REFUSED: {error}")
+        return EXIT_CODES["REFUSED"]
     except GateError as error:
         _say(f"ERROR: {error}")
         return 2

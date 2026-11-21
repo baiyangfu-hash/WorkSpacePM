@@ -6,12 +6,14 @@
 ``gate precheck`` the quick pre-push self check: ruff, mypy (win32) and the tests that belong to the change (read-only).
 
 Exit codes: 0 PASS; 1 the gate ran and did not pass (a failed group, a missing group, a dirty worktree); 2 it could not start.
-Run it detached with ``main.py long-run start --name <n> --cwd <control root> --worktree <W> -- python -B main.py gate run ...``.
+``gate start/status/stop/retry`` manage a durable full-gate task from the control root.
 """
 
 from __future__ import annotations
 
 import json
+import sqlite3
+import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
@@ -28,6 +30,12 @@ from auto_pm.application.core.gate_run_service import (
     GateRunService,
     GateSummary,
     sha256_file,
+)
+from auto_pm.application.core.gate_task_service import (
+    GateCandidate,
+    GateTaskService,
+    open_gate_task_service,
+    task_record,
 )
 from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job
 from auto_pm.ui.cli.caller_path import CallerPath
@@ -200,11 +208,12 @@ def _precheck_report(report: PrecheckReport) -> None:
     help="各步输出放哪（默认放系统临时目录）",
 )
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON")
-def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None, as_json: bool) -> None:
+@click.option("--defer-full", is_flag=True, help="遇到大范围选测时交给托管全量")
+def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None, as_json: bool, defer_full: bool) -> None:
     """只读：推送前一条命令跑 ruff + mypy(win32) + 与改动相关的 pytest；不写账本、不写工作树。"""
     arm_for_heavy_job("full-tests")  # D-168: mypy plus the related pytest is a heavy job; never raises
     try:
-        report = PrecheckService().run(worktree, base=base, out_dir=out_dir, jobs=jobs)
+        report = PrecheckService().run(worktree, base=base, out_dir=out_dir, jobs=jobs, defer_full=defer_full)
     except GateRunError as error:
         click.echo(f"无法自检: {error}", err=True)
         raise SystemExit(2) from error
@@ -213,3 +222,89 @@ def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None,
     else:
         _precheck_report(report)
     raise SystemExit(0 if report.verdict == "PASS" else 1)
+
+
+def _shared_gate(
+    ctx: click.Context, worktree: Path | None = None, plugin: Path | None = None
+) -> tuple[Path, GateTaskService]:
+    root = Path(ctx.find_root().obj.control_root).resolve()
+    return root, open_gate_task_service(root, worktree, plugin)
+
+
+_TASK_ERRORS = (GateRunError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError)
+
+
+def _task_json(record: dict[str, object]) -> None:
+    click.echo(json.dumps(record, ensure_ascii=False, indent=2))
+
+
+@gate_group.command(name="start")
+@click.option("--worktree", required=True, type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.pass_context
+def start_command(ctx: click.Context, worktree: Path) -> None:
+    """登记完整门禁，优先由 GitHub Actions 执行。同一候选返回已有任务。"""
+    require_runtime_identity_for_workspace(ctx)
+    root, service = _shared_gate(ctx)
+    try:
+        _task_json(task_record(service.start(GateCandidate.from_worktree(root, worktree.resolve()))))
+    except _TASK_ERRORS as error:
+        raise click.ClickException(str(error)) from error
+
+
+@gate_group.command(name="status")
+@click.argument("task_id", required=False)
+@click.option("--worktree", type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.pass_context
+def status_command(ctx: click.Context, task_id: str | None, worktree: Path | None) -> None:
+    """按任务号或当前候选查门禁，并与执行端对账。"""
+    if (task_id is None) == (worktree is None):
+        raise click.UsageError("请提供任务号或 --worktree")
+    require_runtime_identity_for_workspace(ctx)
+    root, service = _shared_gate(ctx)
+    try:
+        if worktree is not None:
+            candidate = GateCandidate.from_worktree(root, worktree.resolve())
+            attempt = service.current(candidate)
+            if attempt is None:
+                raise GateRunError("当前候选尚未登记全量门禁")
+        else:
+            assert task_id is not None
+            attempt = service.status(task_id)
+        _task_json(task_record(attempt))
+    except _TASK_ERRORS as error:
+        raise click.ClickException(str(error)) from error
+
+
+@gate_group.command(name="stop")
+@click.argument("task_id")
+@click.pass_context
+def stop_command(ctx: click.Context, task_id: str) -> None:
+    """向已确认的执行端发送停止请求，最终状态以执行端对账为准。"""
+    require_runtime_identity_for_workspace(ctx)
+    _, service = _shared_gate(ctx)
+    try:
+        _task_json(task_record(service.stop(task_id)))
+    except _TASK_ERRORS as error:
+        raise click.ClickException(str(error)) from error
+
+
+@gate_group.command(name="retry")
+@click.argument("task_id")
+@click.option("--worktree", required=True, type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.option("--local", is_flag=True, help="经用户确认，改用 Windows 计划任务")
+@click.option("--approval-evidence-ref", default="", help="user-confirmation:<用户消息编号>")
+@click.option("--siemens-lsp", type=CallerPath(exists=True, dir_okay=False, path_type=Path))
+@click.pass_context
+def retry_command(
+    ctx: click.Context, task_id: str, worktree: Path, local: bool, approval_evidence_ref: str,
+    siemens_lsp: Path | None,
+) -> None:
+    """为已结束的同一候选登记新一次尝试。"""
+    require_runtime_identity_for_workspace(ctx)
+    worktree = worktree.resolve()
+    root, service = _shared_gate(ctx, worktree, siemens_lsp.resolve() if siemens_lsp else None)
+    try:
+        candidate = GateCandidate.from_worktree(root, worktree)
+        _task_json(task_record(service.retry(task_id, candidate, local=local, approval=approval_evidence_ref)))
+    except _TASK_ERRORS as error:
+        raise click.ClickException(str(error)) from error

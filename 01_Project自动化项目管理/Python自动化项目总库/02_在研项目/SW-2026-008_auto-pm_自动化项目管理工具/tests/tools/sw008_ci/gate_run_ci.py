@@ -142,6 +142,9 @@ def cmd_merge(args: argparse.Namespace) -> int:
     )
     worktree = Path(args.worktree) if args.worktree else None
     judged = GateRunService().judge_dir(out, worktree=worktree)
+    if args.plugin_result and args.plugin_result != "success":
+        judged.verdict = "FAIL"
+        judged.reasons.append(f"Siemens LSP 插件检查：{args.plugin_result}")
     final = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
     final.update(
         {
@@ -187,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     merge.add_argument("--in", dest="inputs", nargs="+", required=True)
     merge.add_argument("--out", required=True)
     merge.add_argument("--worktree", default="")
+    merge.add_argument("--plugin-result", default="")
     args = parser.parse_args(argv)
     if args.cmd == "list":
         print(json.dumps([g.name for g in GROUPS]))

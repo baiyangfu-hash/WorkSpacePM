@@ -381,9 +381,10 @@ def test_run_gates_passes_jobs_and_verifies_root_tests_when_outside_changes_exis
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(pm.subprocess, "run", fake_run)
+    monkeypatch.setattr(pm, "managed_gate_receipt", lambda root, worktree: "托管凭证已核对")
     res = pm.run_gates(tmp_path, wt, True)
     assert res.ok
-    assert "--jobs" in calls[0] and "--json" in calls[0]
+    assert "--jobs" in calls[0] and "--json" in calls[0] and "--defer-full" in calls[0]
     assert len(calls) == 2 and str(wt / "tests") in calls[1]
 
 
@@ -419,3 +420,25 @@ def test_control_root_copies_chunks_git_status_calls_for_many_untracked_files(
     replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files))
     assert len(status_batches) >= 2
     assert replace == sorted(files)
+
+
+def test_managed_gate_refuses_changed_base(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def rev(_git: Any, ref: str) -> str:
+        return {"HEAD": "a" * 40, "HEAD^{tree}": "b" * 40, "main": "c" * 40}[ref]
+
+    record = {
+        "id": "task",
+        "backend": "github",
+        "state": "passed",
+        "handle": "12345",
+        "detail": "digest",
+        "candidate": {"commit": "a" * 40, "tree": "b" * 40, "base": "d" * 40},
+    }
+    monkeypatch.setattr(pm.Git, "rev", rev)
+    monkeypatch.setattr(
+        pm.subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, json.dumps(record), "")
+    )
+    with pytest.raises(pm.RefusedError, match="当前 main 不匹配"):
+        pm.managed_gate_receipt(tmp_path, tmp_path / "worktree")
