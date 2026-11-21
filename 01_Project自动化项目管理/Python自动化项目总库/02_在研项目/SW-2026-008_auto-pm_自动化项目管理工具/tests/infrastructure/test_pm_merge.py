@@ -352,6 +352,49 @@ def test_archive_restores_git_index_if_reference_transaction_refuses(
     assert pm.read_log(repo.root) == []
 
 
+def test_interrupted_archive_restores_only_archive_index_entries(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base, local, _ = _deployed_archive(repo)
+    initial_index = git(repo.root, "ls-files", "--stage").stdout
+    original_run = pm.Git.run
+    stage_calls = 0
+    source = f"--source={rev(repo.wt, 'HEAD')}"
+
+    def interrupt_after_one_batch(self: Any, *args: str, **kwargs: Any) -> Any:
+        nonlocal stage_calls
+        if args[:4] == ("--literal-pathspecs", "restore", "--staged", source):
+            stage_calls += 1
+            if stage_calls == 2:
+                raise KeyboardInterrupt
+        return original_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(pm, "_chunk_paths", lambda paths: [[path] for path in paths])
+    monkeypatch.setattr(pm.Git, "run", interrupt_after_one_batch)
+    assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 1
+    assert stage_calls == 2
+    assert rev(repo.root, "main") == base
+    assert git(repo.root, "ls-files", "--stage").stdout == initial_index
+    assert all((repo.root / path).read_bytes() == data for path, data in local.items())
+    assert pm.read_log(repo.root) == []
+
+
+def test_archive_does_not_overwrite_an_ignored_local_document(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    base, local, _ = _deployed_archive(repo)
+    card = "P/02_规划/311_归档_PM.md"
+    (repo.root / ".git" / "info" / "exclude").write_bytes(f"{card}\n".encode())
+    override = repo.root / card
+    override.parent.mkdir(parents=True, exist_ok=True)
+    override.write_bytes(b"keep locally ignored work\n")
+    assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 1
+    assert rev(repo.root, "main") == base
+    assert git(repo.root, "diff", "--cached", "--name-only").stdout == ""
+    assert override.read_bytes() == b"keep locally ignored work\n"
+    assert all((repo.root / path).read_bytes() == data for path, data in local.items())
+
+
 def test_unrelated_uncommitted_changes_in_the_control_root_are_refused(
     pm: ModuleType, repo: SimpleNamespace, capsys: Any
 ) -> None:

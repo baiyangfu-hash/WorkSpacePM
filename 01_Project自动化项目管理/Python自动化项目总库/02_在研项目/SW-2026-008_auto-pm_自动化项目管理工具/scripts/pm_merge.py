@@ -374,6 +374,7 @@ class Plan:
     replace: list[str]
     notes: list[str]
     archive_existing: bool = False
+    base: str = ""
 
 
 def _commits(git: Git, base: str, tip: str) -> list[str]:
@@ -461,16 +462,16 @@ def _control_root_copies(
         local = root / path
         if not local.is_file():
             raise RefusedError(f"控制根里 {path} 有未提交的改动（不是普通文件），先处理再合并")
-        blob = root_git.run("cat-file", "-p", f"{sha}:{path}")
-        if blob.returncode != 0:
-            raise RefusedError(f"控制根里 {path} 有未提交的改动，分支里却删了它，先处理再合并")
-        branch_bytes = subprocess.run(
+        blob = subprocess.run(
             ["git", "cat-file", "-p", f"{sha}:{path}"],
             cwd=root,
             capture_output=True,
-            check=True,
+            check=False,
             timeout=GIT_TIMEOUT,
-        ).stdout
+        )
+        if blob.returncode != 0:
+            raise RefusedError(f"控制根里 {path} 有未提交的改动，分支里却删了它，先处理再合并")
+        branch_bytes = blob.stdout
         working_bytes = local.read_bytes()
         matches = (
             working_bytes == branch_bytes
@@ -501,8 +502,12 @@ def _archive_ledger_preserves_rows(
         timeout=GIT_TIMEOUT,
         check=True,
     ).stdout
-    base = base_blob.decode("utf-8").splitlines()
-    incoming = candidate.decode("utf-8").splitlines()
+    try:
+        base = base_blob.decode("utf-8").splitlines()
+        incoming = candidate.decode("utf-8").splitlines()
+        local_rows = working.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return False
     rows = [line for line in incoming if line and line not in base]
     if not rows or [line for line in incoming if line not in rows and line] != [
         line for line in base if line
@@ -511,7 +516,6 @@ def _archive_ledger_preserves_rows(
     change_names = {
         Path(file).stem for file in paths if "/01_变更单/" in file and file.endswith(".md")
     }
-    local_rows = working.decode("utf-8").splitlines()
     return all(
         local_rows.count(row) == 1
         and row.startswith("| ")
@@ -520,10 +524,14 @@ def _archive_ledger_preserves_rows(
     )
 
 
-def _check_release_archive(root: Path, git: Git, base: str, paths: list[str], copies: list[str]) -> None:
+def _check_release_archive(
+    root: Path, git: Git, base: str, sha: str, paths: list[str], copies: list[str]
+) -> None:
     """确认这是现役发布入库，且三个发布文件和整个载荷都已有相同的本机副本。"""
     if not RELEASE_POINTERS.issubset(copies):
         raise RefusedError("发布归档需要三个本机现役发布文件的完整、相符副本")
+    if git.run("diff", "--no-renames", "--diff-filter=D", "--name-only", base, sha, check=True).stdout:
+        raise RefusedError("发布归档不能删除或改名已有文件")
     try:
         pointer = json.loads((root / RELEASE_ROOT / "active_release.json").read_text(encoding="utf-8"))
         name = pointer["release_id"]
@@ -550,6 +558,9 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
     head = root_git.run("symbolic-ref", "--quiet", "HEAD").stdout.strip()
     if head != MAIN_REF:
         raise RefusedError(f"控制根没停在 main（现在是 {head or '分离的 HEAD'}），不合并")
+    base = root_git.rev(MAIN_REF)
+    if archive_existing and not root_git.ok("diff", "--cached", "--quiet"):
+        raise RefusedError("控制根有已暂存内容，保留现场，不能归档")
     worktree = root / ".auto-pm" / "worktrees" / name
     if not (worktree / ".git").exists():
         raise RefusedError(f"找不到工位 {worktree}")
@@ -607,10 +618,10 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
     notes: list[str] = []
     replace = _control_root_copies(root_git, root, sha, paths, archive_existing=archive_existing)
     if archive_existing:
-        _check_release_archive(root, root_git, root_git.rev("main"), paths, replace)
+        _check_release_archive(root, root_git, base, sha, paths, replace)
     elif RELEASE_POINTERS.intersection(replace):
         raise RefusedError("控制根有现役发布指针，归档请使用 --archive-existing")
-    return Plan(branch, sha, cards[0], chgs, paths, user_paths, replace, notes, archive_existing)
+    return Plan(branch, sha, cards[0], chgs, paths, user_paths, replace, notes, archive_existing, base)
 
 
 def check_github(root: Path, mode: str, notes: list[str]) -> None:
@@ -631,6 +642,53 @@ def check_github(root: Path, mode: str, notes: list[str]) -> None:
         )
 
 
+def _restore_failed_archive(git: Git, plan: Plan, base: str, started_merge: bool) -> None:
+    staged = set(filter(None, git.run("diff", "--cached", "--name-only", "-z", check=True).stdout.split("\0")))
+    if staged - set(plan.paths) or any(
+        not git.ok("--literal-pathspecs", "diff", "--cached", "--quiet", plan.sha, "--", *batch)
+        for batch in _chunk_paths(sorted(staged))
+    ):
+        raise RefusedError("索引有归档候选以外的改动，已保留现场，不能自动恢复")
+    ordinary = sorted(set(plan.paths) - set(plan.replace))
+    ordinary_changes = {
+        entry[3:]
+        for batch in _chunk_paths(ordinary)
+        for entry in git.run(
+            "--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+            "--", *batch, check=True,
+        ).stdout.split("\0")
+        if len(entry) > 3
+    } if started_merge else set()
+    # read-tree 不加 -u，只恢复索引，从不写入现役文件。包含从未登记的新文件也可以完整回退。
+    git.run("read-tree", base, check=True)
+    if not started_merge:
+        return
+    overwritten = []
+    for path in sorted(ordinary_changes):
+        # 只有内容与失败的合并结果一致，才恢复这次 Git 写过的普通文件。
+        current = git.cwd / path
+        previous = subprocess.run(
+            ["git", "cat-file", "--filters", f"{base}:{path}"],
+            cwd=git.cwd, capture_output=True, timeout=GIT_TIMEOUT, check=False,
+        )
+        actual = current.read_bytes() if current.is_file() else None
+        if (not previous.returncode and actual == previous.stdout) or (
+            previous.returncode and actual is None
+        ):
+            continue
+        expected = subprocess.run(
+            ["git", "cat-file", "--filters", f"{plan.sha}:{path}"],
+            cwd=git.cwd, capture_output=True, timeout=GIT_TIMEOUT, check=False,
+        )
+        if expected.returncode or actual != expected.stdout:
+            overwritten.append(path)
+            continue
+        git.run("--literal-pathspecs", "restore", "--staged", f"--source={plan.sha}", "--", path, check=True)
+        git.run("--literal-pathspecs", "restore", "--staged", "--worktree", f"--source={base}", "--", path, check=True)
+    if overwritten:
+        raise RefusedError("有普通文件在合并时发生其他变动，已保留：" + "、".join(overwritten))
+
+
 def _archive_merge(git: Git, plan: Plan, base: str, title: str, body: str) -> None:
     """为现役副本只登记索引；用正常 fast-forward 安装其余文件并提交引用事务。"""
     if not git.ok("diff", "--cached", "--quiet"):
@@ -638,7 +696,6 @@ def _archive_merge(git: Git, plan: Plan, base: str, title: str, body: str) -> No
     if not git.ok("merge-base", "--is-ancestor", base, plan.sha):
         raise RefusedError("main 已变化，归档候选无效")
     merge_sha = git.out("commit-tree", f"{plan.sha}^{{tree}}", "-p", base, "-p", plan.sha, "-m", title, "-m", body)
-    unchanged_paths = set(plan.replace)
     started_merge = False
     try:
         for batch in _chunk_paths(plan.replace):
@@ -646,22 +703,16 @@ def _archive_merge(git: Git, plan: Plan, base: str, title: str, body: str) -> No
         if git.rev("main") != base:
             raise RefusedError("登记期间 main 已变动，保留现场")
         started_merge = True
-        git.run("merge", "--ff-only", "--no-verify", merge_sha, check=True)
-    except (RefusedError, OSError, subprocess.SubprocessError) as exc:
+        git.run("merge", "--ff-only", "--no-overwrite-ignore", "--no-verify", merge_sha, check=True)
+    except (RefusedError, OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
         head = git.rev("main")
         if head == merge_sha:
             return
         if head != base:
             raise RefusedError(f"归档期间 main 发生变化，保留现场：{exc}") from exc
-        for batch in _chunk_paths(plan.replace):
-            git.run("--literal-pathspecs", "restore", "--staged", f"--source={base}", "--", *batch, check=True)
-        if started_merge:
-            changed = set(_tracked_dirty(git))
-            merge_paths = sorted((set(plan.paths) - unchanged_paths) & changed)
-            for batch in _chunk_paths(merge_paths):
-                git.run("--literal-pathspecs", "restore", "--staged", "--worktree",
-                        f"--source={base}", "--", *batch, check=True)
-        raise RefusedError(f"发布归档合并失败，现役副本保留：{exc}") from exc
+        _restore_failed_archive(git, plan, base, started_merge)
+        reason = "操作中断" if isinstance(exc, KeyboardInterrupt) else str(exc)
+        raise RefusedError(f"发布归档合并失败，现役副本保留：{reason}") from exc
 
 
 def _merge_existing_copies(root: Path, plan: Plan, merge_git: Git, title: str, body: str) -> None:
@@ -706,9 +757,11 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
     title = f"Merge branch '{plan.branch}'（本机合并）"
     try:
         if plan.archive_existing:
-            base = root_git.rev("main")
+            base = plan.base
+            if root_git.rev(MAIN_REF) != base or root_git.rev(plan.branch) != plan.sha:
+                raise RefusedError("合并前 main 或候选已变动，请重新取得对应证据")
             copies = _control_root_copies(root_git, root, plan.sha, plan.paths, archive_existing=True)
-            _check_release_archive(root, root_git, base, plan.paths, copies)
+            _check_release_archive(root, root_git, base, plan.sha, plan.paths, copies)
             if copies != plan.replace:
                 raise RefusedError("控制根副本范围在检查后变化，请重新核对")
             _archive_merge(merge_git, plan, base, title, "\n".join(body))
