@@ -1402,11 +1402,12 @@ def main(argv: list[str] | None = None) -> int:
             # point (before anything is created or taken), so no way of starting a gate skips it.
             refusal = _memory_preflight_refusal()
             if refusal:
-                cfg, sha = load_config(config_path)
-                if cfg["fingerprint"].get("expected_commit"):
-                    runner = Runner(cfg, sha)
-                    runner.task_name = a.task_name
-                    return runner.finish("FAILED", refusal)
+                if a.task_name and a.task_name.startswith("WSPM-LongGate-gate-full-"):
+                    cfg, sha = load_config(config_path)
+                    if a.task_name == task_name(cfg) and cfg["fingerprint"].get("expected_commit"):
+                        runner = Runner(cfg, sha)
+                        runner.task_name = a.task_name
+                        return runner.finish("FAILED", refusal)
                 print(refusal)
                 return EXIT_CODES["REFUSED"]
             _arm_memory_gate()

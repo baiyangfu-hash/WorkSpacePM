@@ -360,14 +360,14 @@ def test_only_a_failed_git_call_is_asked_again(lab: dict[str, Path], monkeypatch
 
 
 def test_every_fingerprint_of_the_runner_goes_through_the_retry() -> None:
-    # Start (new round and resume check) and after each step: none of them calls tree_fingerprint directly (#820 audit WARN-1 ①).
+    # New round, resume, managed step start and step finish must all go through retry.
     import ast
 
     tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
     runner = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Runner")
     called = [n.func.id for n in ast.walk(runner) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
     assert "tree_fingerprint" not in called
-    assert called.count("fingerprint_with_retry") == 3
+    assert called.count("fingerprint_with_retry") == 4
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in git is a script on PATH, which Windows CreateProcess does not run as git")

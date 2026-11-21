@@ -31,10 +31,13 @@ from auto_pm.application.core.gate_run_service import (
     GateSummary,
     sha256_file,
 )
-from auto_pm.application.core.gate_task_service import GateCandidate, GateTaskService
+from auto_pm.application.core.gate_task_service import (
+    GateCandidate,
+    GateTaskService,
+    open_gate_task_service,
+    task_record,
+)
 from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job
-from auto_pm.infrastructure.gate_executors import GitHubGateExecutor, LocalGateExecutor
-from auto_pm.infrastructure.gate_task_store import GateAttempt, GateTaskStore
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
@@ -225,17 +228,13 @@ def _shared_gate(
     ctx: click.Context, worktree: Path | None = None, plugin: Path | None = None
 ) -> tuple[Path, GateTaskService]:
     root = Path(ctx.find_root().obj.control_root).resolve()
-    return root, GateTaskService(
-        GateTaskStore(root), GitHubGateExecutor(root), LocalGateExecutor(root, worktree, plugin)
-    )
+    return root, open_gate_task_service(root, worktree, plugin)
 
 
 _TASK_ERRORS = (GateRunError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError)
 
 
-def _task_json(attempt: GateAttempt) -> None:
-    record = asdict(attempt)
-    record["candidate"] = json.loads(record.pop("key"))
+def _task_json(record: dict[str, object]) -> None:
     click.echo(json.dumps(record, ensure_ascii=False, indent=2))
 
 
@@ -247,7 +246,7 @@ def start_command(ctx: click.Context, worktree: Path) -> None:
     require_runtime_identity_for_workspace(ctx)
     root, service = _shared_gate(ctx)
     try:
-        _task_json(service.start(GateCandidate.from_worktree(root, worktree.resolve())))
+        _task_json(task_record(service.start(GateCandidate.from_worktree(root, worktree.resolve()))))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
@@ -260,6 +259,7 @@ def status_command(ctx: click.Context, task_id: str | None, worktree: Path | Non
     """按任务号或当前候选查门禁，并与执行端对账。"""
     if (task_id is None) == (worktree is None):
         raise click.UsageError("请提供任务号或 --worktree")
+    require_runtime_identity_for_workspace(ctx)
     root, service = _shared_gate(ctx)
     try:
         if worktree is not None:
@@ -270,7 +270,7 @@ def status_command(ctx: click.Context, task_id: str | None, worktree: Path | Non
         else:
             assert task_id is not None
             attempt = service.status(task_id)
-        _task_json(attempt)
+        _task_json(task_record(attempt))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
@@ -283,7 +283,7 @@ def stop_command(ctx: click.Context, task_id: str) -> None:
     require_runtime_identity_for_workspace(ctx)
     _, service = _shared_gate(ctx)
     try:
-        _task_json(service.stop(task_id))
+        _task_json(task_record(service.stop(task_id)))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
@@ -305,6 +305,6 @@ def retry_command(
     root, service = _shared_gate(ctx, worktree, siemens_lsp.resolve() if siemens_lsp else None)
     try:
         candidate = GateCandidate.from_worktree(root, worktree)
-        _task_json(service.retry(task_id, candidate, local=local, approval=approval_evidence_ref))
+        _task_json(task_record(service.retry(task_id, candidate, local=local, approval=approval_evidence_ref)))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error
