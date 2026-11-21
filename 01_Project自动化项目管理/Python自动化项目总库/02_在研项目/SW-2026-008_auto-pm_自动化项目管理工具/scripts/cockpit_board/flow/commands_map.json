@@ -11,7 +11,7 @@
     "never": 13,
     "read": 69,
     "user_only": 24,
-    "write": 116
+    "write": 120
   },
   "commands": {
     "agent list": {
@@ -258,7 +258,20 @@
     "gate precheck": {
       "class": "write"
     },
+    "gate retry": {
+      "class": "write"
+    },
     "gate run": {
+      "class": "write"
+    },
+    "gate start": {
+      "class": "write"
+    },
+    "gate status": {
+      "class": "write",
+      "note": "与执行端对账并更新任务账本"
+    },
+    "gate stop": {
       "class": "write"
     },
     "git-hook commit-msg": {

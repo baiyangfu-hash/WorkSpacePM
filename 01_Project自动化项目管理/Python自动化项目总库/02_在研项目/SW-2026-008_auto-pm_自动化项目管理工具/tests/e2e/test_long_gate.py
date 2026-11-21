@@ -1242,3 +1242,36 @@ def test_run_started_by_hand_is_refused_by_the_memory_preflight_too(tmp_path: Pa
     code = mod.main(["run", "--config", str(tmp_path / "gate.json")])
 
     assert code == mod.EXIT_CODES["REFUSED"] and "拒绝启动" in capsys.readouterr().out
+
+
+def test_managed_scheduler_refuses_moved_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _module()
+    cfg = {"fingerprint": {"git_worktree": str(tmp_path), "expected_commit": "a" * 40}}
+    monkeypatch.setattr(mod, "git_bytes", lambda *args: b"b" * 40 + b"\n")
+    with pytest.raises(mod.GateError, match="candidate commit no longer matches"):
+        mod.tree_fingerprint(cfg)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Task Scheduler error path")
+def test_managed_scheduler_releases_a_registration_that_never_ran(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mod = _module()
+    cfg = {
+        "python": str(PY), "name": "managed-test", "out_dir": str(tmp_path),
+        "fingerprint": {"expected_commit": "a" * 40},
+    }
+    calls: list[str] = []
+
+    def command(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv[1])
+        return subprocess.CompletedProcess(argv, 1 if argv[1] == "/Run" else 0, b"", b"")
+
+    monkeypatch.setattr(mod, "task_user", lambda: "gate-test-user")
+    monkeypatch.setattr(mod, "scheduler_status", lambda _cfg: {
+        "scheduler_state": "Ready", "scheduler_exit": 0x41303, "scheduler_started": False,
+    })
+    monkeypatch.setattr(mod.subprocess, "run", command)
+    with pytest.raises(mod.ScheduleRegistrationError, match="/Run"):
+        mod._launch_windows(cfg, tmp_path / "task.json")
+    assert calls == ["/Create", "/Run", "/Delete"]

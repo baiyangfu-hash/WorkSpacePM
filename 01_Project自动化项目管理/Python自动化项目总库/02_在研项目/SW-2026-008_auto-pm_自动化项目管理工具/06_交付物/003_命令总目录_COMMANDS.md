@@ -7,11 +7,11 @@ title: "auto-pm 命令总目录（脚本生成）"
 # 命令总目录
 
 > 本页由 `scripts/command_catalog.py` 生成，不要手改。
-> 生成于提交 `b72a719245dc`。**本页可能落后**：之后改过命令或代码而没人重跑脚本，页上就是旧的；要最新的，运行 `python scripts/command_catalog.py --print`，以它的输出为准。
+> 生成于提交 `ab83409f697e`。**本页可能落后**：之后改过命令或代码而没人重跑脚本，页上就是旧的；要最新的，运行 `python scripts/command_catalog.py --print`，以它的输出为准。
 > 什么能用、什么不能用，看仓库根 `docs/功能清单.md`；本页只回答“有哪些命令、谁能跑、会不会写文件”。
 > “谁能跑”“会不会写”取自 `scripts/cockpit_board/flow/commands_map.json` 的分类；“有没有记录”指 AGENTS.md、36 号操作手册、本项目 README 里有没有写到这条命令，生成时查的，只作参考。
 
-## 驾驶舱命令（222 条）
+## 驾驶舱命令（226 条）
 
 | 命令 | 干什么 | 谁能跑 | 会不会写文件 | 有没有记录 |
 |---|---|---|---|---|
@@ -92,7 +92,11 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `gate judge` | 只读：按日志重新判一遍 OUT_DIR 里的那一轮（不重新生成任何文件）。 | 任何人 | 不写 | 没有 |
 | `gate plan` | 只读：列出每组的命令和工作目录。 | 任何人 | 不写 | 没有 |
 | `gate precheck` | 只读：推送前一条命令跑 ruff + mypy(win32) + 与改动相关的 pytest；不写账本、不写工作树。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 有 |
+| `gate retry` | 为已结束的同一候选登记新一次尝试。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `gate run` | 依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
+| `gate start` | 登记完整门禁，优先由 GitHub Actions 执行。同一候选返回已有任务。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
+| `gate status` | 按任务号或当前候选查门禁，并与执行端对账。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
+| `gate stop` | 向已确认的执行端发送停止请求，最终状态以执行端对账为准。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `git-hook commit-msg` | 执行 commit-msg 生产代码关联单据强校验。 | 看板不放（钩子调用或规则禁止单独跑） | 写 | 没有 |
 | `git-hook install` | 安装/激活工作区 Git 物理门禁钩子 (.git/hooks/pre-commit 与 commit-msg)。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `git-hook pre-commit` | 执行 pre-commit 台账一致性校验。 | 看板不放（钩子调用或规则禁止单独跑） | 写 | 没有 |
@@ -205,7 +209,7 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `python repair` | 修复 Python 项目规范问题 | agent 可跑（看板经白名单按钮、先预览） | 写 | 有 |
 | `release deploy` | 部署前预检；加 --no-check-only 才真部署：预检全绿 → 建账 → 构建 → 切换 → 自检 → 失败自动回退，成功才收口并写回执。 | 只有用户本人 | 写 | 有 |
 | `release rollback` | 用切换前的指针备份把有效版本退回去：先核对备份校验和，只还原指针，不动数据库、不回滚已装发布。 | 只有用户本人 | 写 | 有 |
-| `release ship` | 一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本和预检卡跑预检； | 只有用户本人 | 写 | 没有 |
+| `release ship` | 一条命令发版（CHG-SCPT-2026-706）：自动下载这个提交的云端门禁判决、找审计签字、用仓库里的演练脚本跑预检； | 只有用户本人 | 写 | 没有 |
 | `release status` | 配置的有效版本与上一版、已装发布、发布记录是否互相一致、最近一次部署回执。 | 任何人 | 不写 | 没有 |
 | `release trial` | 把生效发布拷一份到工作区外的临时目录，用来复现问题；不动 releases/、不写账本，副本用完请自行删除（D-05）。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `role check` | 检查角色包：文件齐全、角色号合法、规范编号存在、指针不死链、与旧技能逐字一致 | 任何人 | 不写 | 没有 |
@@ -232,13 +236,13 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `worktree close` | 收 AGENT 的工位：无未提交改动、提交都已推送才删；已并进 main 的再删本地分支 | agent 可跑（看板经白名单按钮、先预览） | 写 | 有 |
 | `worktree heartbeat` | 刷新本对话工位的心跳（给 Claude Code 的 Stop / PreToolUse 钩子调用；没有本对话的工位就什么都不做） | 看板不放（钩子调用或规则禁止单独跑） | 写 | 没有 |
 | `worktree list` | 列出 .auto-pm/worktrees 下每个工位；默认只列名字、分支、路径，加 --deep 才逐个检查 | 任何人 | 不写 | 没有 |
-| `worktree open` | 为 AGENT 开工位，分支 <前缀><CARD>，从最新 origin/main 起 | agent 可跑（看板经白名单按钮、先预览） | 写 | 有 |
+| `worktree open` | 为 AGENT 开工位，分支 <前缀><CARD>，从最新 main 起 | agent 可跑（看板经白名单按钮、先预览） | 写 | 有 |
 | `worktree reclaim` | 快捷回收：列出（加 --apply 则回收）持有对话已不在的会话别名工位；回收前一样先存救援引用，分支保留 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `worktree release` | 回收一个会话别名工位（对话结束时用）：先把未提交和未跟踪的内容存成救援引用，再收目录；分支保留 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 | `worktree sweep` | 清理已并进 main 的工位、名册外已并进 main 且干净的目录、远程已删的本地分支、已结束 Run 的 run-plan-* 残留；默认只列 | 任何人 | 不写；带 `--apply` 时写 | 没有 |
 | `worktree who` | 只读：本机控制根上现在有哪些会话在场（来源、所在位置、多久没动静、疑似孤儿）。 | agent 可跑（看板经白名单按钮、先预览） | 写 | 没有 |
 
-## scripts 下的独立脚本（18 个）
+## scripts 下的独立脚本（20 个）
 
 | 脚本 | 干什么 |
 |---|---|
@@ -254,7 +258,9 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `scripts/plan_status.py` | 项目计划状态（WBS 8.8 第一版）：读项目计划表，按实施卡号去 Git 里算每个任务、每个里程碑的状态，只显示。 |
 | `scripts/pm_dashboard.py` | 多项目安灯板（只读原型）- 从账本和项目文件夹读数据，生成一张 HTML 看板 |
 | `scripts/pm_dashboard_gui.py` | 驾驶舱总控屏入口（PySide6）。 |
-| `scripts/pm_flows.py` | 自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”和“进门”，只按顺序调现有的驾驶舱命令。 |
+| `scripts/pm_flows.py` | 自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”“PR 线收口”和“进门”，只按顺序调现有的驾驶舱命令。 |
+| `scripts/pm_handoff.py` | 本机轻轨交接交换区读写与核验工具（PM-056 V2.0.0，local-handoff.v1，卡 318）。 |
+| `scripts/pm_merge.py` | 本机合并：日常改动在本机合进 main，GitHub 按需使用（CHG-SCPT-2026-718，卡 311）。 |
 | `scripts/pmf_build.py` | PMF 可复现构建入口（WBS D02）。 |
 | `scripts/release_event_chain_drill.py` | Event-chain drill for a release candidate (release deploy self-check, D-146 card 4; moved into the repo by CHG-SCPT-2026-706). |
 | `scripts/release_selfcheck_dryrun.py` | D-146 card 6a: read-only dry run of the release self-check set against a real control root. |

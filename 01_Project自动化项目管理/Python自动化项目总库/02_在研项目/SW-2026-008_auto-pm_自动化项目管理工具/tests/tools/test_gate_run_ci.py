@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -63,3 +64,18 @@ def test_missing_group_is_listed_in_failures(tmp_path: Path) -> None:
 def test_merge_without_inputs_is_refused(tmp_path: Path) -> None:
     args = argparse.Namespace(inputs=[str(tmp_path / "none")], out=str(tmp_path / "o"), worktree="")
     assert ci.cmd_merge(args) == 2
+
+
+def test_plugin_failure_keeps_the_published_verdict_red(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auto_pm.application.core.gate_run_service import SUMMARY_FILE, GateRunService, GateSummary
+
+    source = tmp_path / "core"
+    source.mkdir()
+    (source / SUMMARY_FILE).write_text(json.dumps(part("core")), encoding="utf-8")
+    monkeypatch.setattr(GateRunService, "judge_dir", lambda *_args, **_kwargs: GateSummary(verdict="PASS"))
+    out = tmp_path / "out"
+    result = ci.main(["merge", "--in", str(source), "--out", str(out), "--plugin-result", "failure"])
+    assert result == 1
+    published = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
+    assert published["verdict"] == "FAIL"
+    assert "Siemens LSP" in published["reasons"][0]

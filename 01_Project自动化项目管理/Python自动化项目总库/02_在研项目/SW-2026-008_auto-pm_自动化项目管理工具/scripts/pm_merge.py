@@ -14,11 +14,11 @@
 2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己，以及删除或改名驾驶舱项目目录以外
    的已入库文件），提交说明里引用、又写在分支里本卡实施卡（``02_规划/<卡号>_*.md``）里的变更单，至少一张已被用户
    批准、还没推到完成（变更单原件里的状态是已批准到验收中之间）。
-3. GitHub 不是“关”档、而且连得上时，``origin/main`` 必须已在本机 main 里；连不上就跳过这一条并说明。
+3. GitHub 开启且可达时，``origin/main`` 必须已在本机 main 里；多机档无法对账时拒绝合并。
 4. 控制根里和分支改到的路径重叠的未提交文件，只允许是和分支内容一样的副本（只差行尾）；合并前先备份再换掉，
    合并失败就放回去。别的未提交改动一律拒绝。
-5. 本机门禁：``main.py gate precheck``（对照本机 main）退出 0；“要你点头”那一类或带 ``--full-gate`` 的，
-   再跑 ``main.py gate run``，退出 0 才算过。
+5. 适用的轻量自检与根目录检查通过。受保护改动、``--full-gate`` 或预检扩大为大范围选测时，
+   核对驾驶舱持久任务里的全量门禁凭证。
 都过了才 ``git merge --no-ff``，在 ``.auto-pm/reports/local_merge/merge_log.jsonl`` 记一笔；“备份”“多机”档
 再把 main 推到 GitHub，推不上只记“待推送”，不算失败。
 
@@ -243,8 +243,40 @@ def _parse_precheck_json(stdout: str) -> dict[str, Any] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
+def managed_gate_receipt(root: Path, worktree: Path) -> str:
+    command = [
+        _python(root), "-B", str(root / "main.py"), "gate", "status",
+        "--worktree", str(worktree),
+    ]
+    try:
+        result = subprocess.run(
+            command, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RefusedError(f"托管门禁凭证无法读取：{exc}") from exc
+    record = _parse_precheck_json(result.stdout or "")
+    if result.returncode or not record:
+        raise RefusedError(
+            "没有可核验的托管全量门禁凭证，请先用 gate start 登记候选。"
+            + (result.stderr or "").strip()
+        )
+    if record.get("state") != "passed":
+        raise RefusedError(f"托管门禁 {record.get('id')} 当前为 {record.get('state')}，请用 gate status 查状态")
+    identity = record.get("candidate") or {}
+    if (
+        identity.get("commit") != Git(worktree).rev("HEAD")
+        or identity.get("tree") != Git(worktree).rev("HEAD^{tree}")
+        or identity.get("base") != Git(root).rev("main")
+        or not record.get("handle")
+        or not record.get("detail")
+    ):
+        raise RefusedError("托管全量门禁凭证与候选或当前 main 不匹配")
+    return f"托管全量门禁 PASS：{record['id']}（{record['backend']}，运行 {record['handle']}）"
+
+
 def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
-    """本机门禁：跑 ``gate precheck``（带 ``--jobs`` 与 ``--json``）；有项目外改动或 ``full`` 时再跑根目录 ``tests/``。"""
+    """核对托管全量凭证，再跑轻量自检与适用的根目录检查。"""
     python = _python(root)
     wt_entry = (worktree / COCKPIT_PREFIX / "main.py") if COCKPIT_PREFIX else (worktree / "main.py")
     entry = str(wt_entry if wt_entry.is_file() else (root / "main.py"))
@@ -261,8 +293,11 @@ def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
         "--jobs",
         str(PRECHECK_JOBS),
         "--json",
+        "--defer-full",
     ]
     lines: list[str] = []
+    if full:
+        lines.append(managed_gate_receipt(root, worktree))
     try:
         result = subprocess.run(
             precheck_cmd,
@@ -280,6 +315,9 @@ def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
     report = _parse_precheck_json(result.stdout or "")
     steps = (report.get("steps") or []) if report else []
     outside = (report.get("outside_changes") or []) if report else []
+    deferred = bool(report and report.get("full_gate_required"))
+    if deferred and not full:
+        lines.append(managed_gate_receipt(root, worktree))
     steps_ok = (
         bool(steps)
         and all(isinstance(s, dict) and s.get("verdict") in ("PASS", "SKIPPED") for s in steps)
@@ -287,8 +325,8 @@ def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
     )
     if result.returncode == 0:
         lines.append("gate precheck：退出码 0")
-    elif steps_ok and outside:
-        lines.append("gate precheck：项目内步骤 PASS（含项目外改动，续跑根目录 tests）")
+    elif steps_ok and (outside or deferred):
+        lines.append("gate precheck：轻量步骤 PASS，继续核对适用检查")
     else:
         detail = ""
         for s in steps:
@@ -507,6 +545,8 @@ def check_github(root: Path, mode: str, notes: list[str]) -> None:
     git = Git(root)
     fetch = git.run("fetch", "--quiet", "origin", "main", timeout=NET_TIMEOUT)
     if fetch.returncode != 0:
+        if mode == "多机":
+            raise RefusedError("多机档无法核对远端 main，请在恢复连接后重试")
         notes.append("连不上 GitHub，跳过“另一台电脑有没有新改动”这一条")
         return
     if not git.ok("merge-base", "--is-ancestor", "origin/main", "main"):
@@ -590,6 +630,7 @@ def _tracked_dirty(git: Git) -> list[str]:
 def cmd_merge(root: Path, name: str, pid: str, full_gate: bool) -> int:
     mode = read_mode(root)
     try:
+        base = Git(root).rev("main")
         plan = plan_merge(root, name, pid)
         check_github(root, mode, plan.notes)
         gates = run_gates(
@@ -597,6 +638,8 @@ def cmd_merge(root: Path, name: str, pid: str, full_gate: bool) -> int:
         )
         if not gates.ok:
             raise RefusedError("本机门禁没过：" + "；".join(gates.lines))
+        if Git(root).rev("main") != base or Git(root).rev(plan.branch) != plan.sha:
+            raise RefusedError("检查期间 main 或候选已变更，请核对最新候选再合并")
         entry = do_merge(root, plan, gates, mode)
     except RefusedError as exc:
         print(f"拒绝合并：{exc}")
