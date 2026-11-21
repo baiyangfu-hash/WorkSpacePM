@@ -279,6 +279,79 @@ def test_a_different_uncommitted_copy_is_refused_and_kept(
     assert copy.read_bytes() == b"something else\n"
 
 
+def _deployed_archive(repo: SimpleNamespace) -> tuple[str, dict[str, bytes], str]:
+    infra = "00_Infrastructure/auto_pm"
+    release = "1.3.3-a123456"
+    number = "CHG-SCPT-2026-999"
+    ledger = "P/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    record = f"P/04_监控/01_变更管理/01_变更单/CHG-SCPT/{number}.md"
+    pointers = ("active_release.json", "previous_release.json", "deployment_manifest.json")
+    base = commit(
+        repo.root, {f"{infra}/{name}": "{}\n" for name in pointers} | {ledger: "base\n"},
+        "existing published metadata",
+    )
+    git(repo.wt, "merge", "--quiet", "main")
+    row = f"| [→ {number}](../01_变更单/CHG-SCPT/{number}.md) |\n"
+    files = {
+        f"{infra}/active_release.json": json.dumps({"release_id": release}) + "\n",
+        f"{infra}/previous_release.json": '{"saved":"old"}\n',
+        f"{infra}/deployment_manifest.json": '{"releases":{}}\n',
+        f"{infra}/releases/{release}/payload.txt": "unchanged\n",
+        ledger: row + "base\n",
+        record: "| 变更状态 | approved |\n",
+        "P/02_规划/311_归档_PM.md": f"{number}\n",
+    }
+    commit(repo.wt, files, f"{number} 归档\n\n{CARD}")
+    _change_order(repo.root, number, "approved")
+    local = {
+        path: (repo.root / path).read_bytes() for path in (record,)
+    }
+    for path, value in files.items():
+        if path.startswith(f"{infra}/") or path == ledger:
+            local[path] = (
+                (row + "unrelated local row\nbase\n") if path == ledger
+                else value.replace("\n", "\r\n") if path.endswith(".json")
+                else value
+            ).encode("utf-8")
+    local["README.md"] = b"unrelated local work\n"
+    for path, data in local.items():
+        target = repo.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    return base, local, ledger
+
+
+def test_archive_adopts_existing_files_and_leaves_unrelated_edits(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    base, local, ledger = _deployed_archive(repo)
+    assert run(pm, repo.root, "install-hook") == 0
+    assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 0
+    assert rev(repo.root, "main^1") == base
+    assert rev(repo.root, "main^2") == rev(repo.wt, "HEAD")
+    assert rev(repo.root, "main^{tree}") == rev(repo.wt, "HEAD^{tree}")
+    assert all((repo.root / path).read_bytes() == data for path, data in local.items())
+    assert "unrelated local row" not in git(repo.root, "show", f"main:{ledger}").stdout
+    assert pm.read_log(repo.root)[-1]["replaced"] == []
+    assert any(path.endswith("/active_release.json") for path in pm.read_log(repo.root)[-1]["adopted"])
+
+
+def test_archive_restores_git_index_if_reference_transaction_refuses(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    base, local, _ = _deployed_archive(repo)
+    index = git(repo.root, "ls-files", "--stage").stdout
+    hook = repo.root / ".git" / "hooks" / "reference-transaction"
+    hook.write_bytes(b'#!/bin/sh\n[ "$1" != prepared ]\n')
+    hook.chmod(0o755)
+    assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 1
+    assert rev(repo.root, "main") == base
+    assert git(repo.root, "ls-files", "--stage").stdout == index
+    assert all((repo.root / path).read_bytes() == data for path, data in local.items())
+    assert not (repo.root / "P/02_规划/311_归档_PM.md").exists()
+    assert pm.read_log(repo.root) == []
+
+
 def test_unrelated_uncommitted_changes_in_the_control_root_are_refused(
     pm: ModuleType, repo: SimpleNamespace, capsys: Any
 ) -> None:
