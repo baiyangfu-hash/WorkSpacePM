@@ -1,0 +1,11 @@
+{
+  "schema_version": "release_metadata.v1",
+  "release_id": "1.3.3-9703dfb",
+  "source_commit": "9703dfbc74b73a94b5bf37600f6411929846cf1a",
+  "version": "1.3.3",
+  "built_at": "2026-11-21T19:31:28+00:00",
+  "builder": {
+    "interpreter": "3.12.14",
+    "description": "PMF D02 deterministic export: git archive <commit>:<project root> auto_pm templates; built_at = commit time; payload from git objects only"
+  }
+}
