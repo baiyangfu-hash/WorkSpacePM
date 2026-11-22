@@ -40,21 +40,29 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from cockpit_board import actions, flowgraph, readers, shell, snapshot, theme  # noqa: E402
+from cockpit_board import (  # noqa: E402
+    actions,
+    flowgraph,
+    local_data,
+    readers,
+    shell,
+    snapshot,
+    theme,
+)
 from cockpit_board import viewmodel as vm
 from cockpit_board.decision_controller import DecisionController  # noqa: E402
 from cockpit_board.release_controller import ReleaseController  # noqa: E402
 from cockpit_board.widgets import common as c  # noqa: E402
 from cockpit_board.widgets.attention import AttentionPage  # noqa: E402
 from cockpit_board.widgets.commands import CommandsPage  # noqa: E402
+from cockpit_board.widgets.console import GlobalConsoleDrawer, GlobalFailureBar  # noqa: E402
 from cockpit_board.widgets.flow import FlowPage  # noqa: E402
-from cockpit_board.widgets.home import HomePage  # noqa: E402
+from cockpit_board.widgets.home import HomePage, lamp_of_github  # noqa: E402
 from cockpit_board.widgets.issues import IssuesPage  # noqa: E402
 from cockpit_board.widgets.project_page import ProjectPage  # noqa: E402
 from cockpit_board.widgets.projects import ProjectsPage  # noqa: E402
 from cockpit_board.widgets.prs import PrsPage  # noqa: E402
 from cockpit_board.widgets.release import ReleasePage  # noqa: E402
-from cockpit_board.widgets.spine import SpinePage  # noqa: E402
 from cockpit_board.widgets.station import StationPage  # noqa: E402
 from cockpit_board.widgets.tasks import TasksPage  # noqa: E402
 from cockpit_board.widgets.tools import ToolsPage  # noqa: E402
@@ -245,6 +253,8 @@ class CockpitWindow(QMainWindow):
         self.online: bool | None = None if not options.no_net else False
         self.net_note: str = "" if not options.no_net else "按 --no-net 启动，没探测网络"
         self.mode = "pm"
+        inst = QApplication.instance()
+        self.theme_mode = "dark" if isinstance(inst, QApplication) and _dark_mode(inst) else "light"
         self.bc_digest: str | None = None  # 预览那一刻 02_业务变更记录.md 的指纹
         self._threads: list[QThread] = []
         self.setWindowTitle(WINDOW_TITLE)
@@ -268,6 +278,8 @@ class CockpitWindow(QMainWindow):
         main.setSpacing(0)
         self.scope = c.label("", "scope", wrap=False)
         main.addWidget(self.scope)
+        self.failure_bar = GlobalFailureBar()
+        main.addWidget(self.failure_bar)
         self.stack = QStackedWidget()
         self.router = shell.Router(self.stack)
         # 首页（CHG-SCPT-2026-655）：能点的东西只换页。大卡的“去办”和 GitHub 灯 → goto；三个数 → 问题页带筛选；卡行 → 流程图页选中这张卡
@@ -277,47 +289,49 @@ class CockpitWindow(QMainWindow):
         self.project = ProjectPage(lambda: self.goto("home"), self.copy_text)
         self.station = StationPage(self.open_project, self.copy_text)
         self.station.action.connect(self.run_action)
-        # “决定”页：每个按钮背后是同一条 main.py pm … 命令，见 decisions.py / DECISIONS.md；
+        # “决定与待办”页：每个按钮背后是同一条 main.py pm … 命令，见 decisions.py / DECISIONS.md；
         # 命令成功后让窗口重读账本，页面本身只在被打开或手动重读时才去读待批准卡和收件箱（每个项目起 2 条只读命令，较慢）。
         self.decisions = DecisionController(options.root, self.copy_text, self.reload)
         self.flow = FlowPage()
-        self.tools = ToolsPage(options.root)
+        self.flow.set_tokens_override(theme.DARK if self.theme_mode == "dark" else theme.LIGHT)
+        self.tools = ToolsPage(options.root, on_copy=self.copy_text)
         # 项目生命周期入口（CHG-SCPT-2026-654）：项目详情页借“决定”控制器跑预演、弹确认框；工具页“项目”页签借它的探测结果
         self.project.set_lifecycle(self.decisions)
         self.tools.on_project_tab = self.decisions.probe_lifecycle
         self.decisions.lifecycle_listeners.append(lambda: self.tools.set_register_kind(*self.decisions.register_kind()))
         self._flow_tools_key: object = None  # 上次喂给流程图页和工具页的数据；没变就不重填，免得打断正在填的表单
-        # 骨架 D：4 个读命令的页 + PR 与审计（用窗口的 GitHub 采集）+ 两个只读数据文件的页
+        # 保留兼容引用，同时将“决定与待办”“项目舱”“流程与状态机”主路径收敛进新布局
         self.attention, self.tasks = AttentionPage(), TasksPage()
-        # 发版页（CHG-SCPT-2026-707）：候选版本各跑一遍只看的 release ship，用户本人点“同意切换到 <发布号>”才真换；
-        # 规矩见 policy.RELEASE_BUTTONS，命令在后台跑（release_controller），批准人默认取“决定”页填的名字。
         self.release = ReleasePage(options.root, actions.board_agent_markers, self.copy_text, self.decisions.page.approver)
         self.release_actions = ReleaseController(self.release, options.root, getattr(options, "read_runner", None))
-        # 工作树与分支页（看板工位管理单）：每行“收工位”“清理”，另有“清残留持有记录”“清理全部可清项”；按钮背后的命令见 stations.py，
-        # 规矩见 policy.WORKTREE_BUTTONS。命令在后台跑（worktree_controller），跑成了这一页自己重读一遍。
         self.worktrees = WorktreesPage(options.root, actions.board_agent_markers, self.copy_text)
         self.worktree_actions = WorktreeController(self.worktrees, options.root, lambda: self._refresh_reads("worktrees"))
-        self.prs, self.spine, self.commands = PrsPage(), SpinePage(), CommandsPage()
+        self.prs, self.spine, self.commands = PrsPage(), self.flow.spine_page, CommandsPage()
         self.read_pages: dict[str, c.ReadPage] = {p.key: p for p in (self.attention, self.tasks, self.worktrees, self.release)}
         self.page_reads = shell.page_reads()
         self._reading_pages: set[str] = set()
         self._reread_pages: set[str] = set()  # 读的过程中又要求重读（比如刚收掉一个工位）：这一轮读完马上再读一次
+        self._tasks_target_pid: str = ""
         self.current = "home"
         for key, page in (("home", self.home), ("issues", self.issues), ("projects", self.projects), ("project", self.project),
                           ("decisions", self.decisions.page), ("flow", self.flow), ("tools", self.tools),
-                          ("attention", self.attention), ("tasks", self.tasks), ("worktrees", self.worktrees),
-                          ("release", self.release), ("prs", self.prs), ("spine", self.spine), ("commands", self.commands)):
+                          ("worktrees", self.worktrees), ("release", self.release), ("prs", self.prs), ("commands", self.commands)):
             self.router.register(key, page)
         self.stack.addWidget(self.station)  # 工程工位模式下“今天”换成这一页（goto 里换）
         main.addWidget(self.stack, 1)
         body.addLayout(main, 1)
         outer.addLayout(body, 1)
+        self.console_drawer = GlobalConsoleDrawer(self.copy_text)
+        outer.addWidget(self.console_drawer)
+        for src_widget in (self.decisions.page, self.worktrees, self.release, self.tools, self.station):
+            src_widget.receipt_added.connect(self._on_any_receipt)
         self.setCentralWidget(central)
 
         self.timer = QTimer(self)
         self.timer.setInterval(AUTO_REFRESH_MINUTES * 60 * 1000)
         self.timer.timeout.connect(self.auto_reload)
         self._legacy_this_round = False  # 本轮读完后要不要再接老后台：只有首次加载和手动“重新读取”才要
+        self._update_identity_ui()
         self.goto("home")  # 侧栏点亮“今天”，范围标记写上
 
     def _topbar(self) -> QFrame:
@@ -326,7 +340,6 @@ class CockpitWindow(QMainWindow):
         row = QHBoxLayout(bar)
         row.setContentsMargins(theme.SPACE * 2, theme.SPACE, theme.SPACE * 2, theme.SPACE)
         row.addWidget(c.label("驾驶舱", "title", wrap=False))
-        # 页面按钮在左侧栏（shell.Sidebar，按 shell.PAGES 分三组）；顶栏只留模式、网络和重新读取
         row.addSpacing(theme.SPACE * 2)
         mode_group = QButtonGroup(self)
         self.mode_buttons = {}
@@ -338,7 +351,14 @@ class CockpitWindow(QMainWindow):
             mode_group.addButton(item)
             row.addWidget(item)
             self.mode_buttons[key] = item
-        row.addSpacing(theme.SPACE * 2)
+        row.addSpacing(theme.SPACE)
+        self.version_pill = QFrame()
+        self.version_pill.setObjectName("version_pill")
+        self.version_pill_lay = QHBoxLayout(self.version_pill)
+        self.version_pill_lay.setContentsMargins(6, 2, 6, 2)
+        self.version_pill_lay.setSpacing(6)
+        row.addWidget(self.version_pill)
+        row.addSpacing(theme.SPACE)
         net_group = QButtonGroup(self)
         self.net_buttons = {}
         for key, text in (("on", "在线"), ("off", "离线")):
@@ -348,23 +368,108 @@ class CockpitWindow(QMainWindow):
             net_group.addButton(item)
             row.addWidget(item)
             self.net_buttons[key] = item
+        self.gh_mode_pill = c.ClickBox("gh_mode_pill", "本机 GitHub 档位", "点开查看「PR 与审计」与档位说明")
+        self.gh_mode_pill.activated.connect(lambda: self.goto("prs"))
+        self.gh_mode_lay = QHBoxLayout(self.gh_mode_pill)
+        self.gh_mode_lay.setContentsMargins(4, 2, 4, 2)
+        self.gh_mode_lay.setSpacing(3)
+        row.addWidget(self.gh_mode_pill)
         row.addStretch(1)
         self.status = c.label("正在读取账本和项目文件夹……", "small", wrap=False)
         row.addWidget(self.status)
+        dark_now = self.theme_mode == "dark"
+        self.theme_button = c.button("浅色" if dark_now else "深色", "mode",
+                                     "使用浅色图纸外观" if dark_now else "使用深色控制室外观")
+        self.theme_button.clicked.connect(
+            lambda _checked=False: self.set_theme("light" if self.theme_mode == "dark" else "dark")
+        )
+        row.addWidget(self.theme_button)
         self.refresh_button = c.button("重新读取", "refresh", "把账本和项目文件夹再读一遍，不写任何东西")
         self.refresh_button.clicked.connect(self.reload)
         row.addWidget(self.refresh_button)
         return bar
 
+    def set_theme(self, mode: str) -> None:
+        self.theme_mode = "dark" if mode == "dark" else "light"
+        tokens = theme.DARK if self.theme_mode == "dark" else theme.LIGHT
+        qss = theme.build_qss(tokens)
+        inst = QApplication.instance()
+        if isinstance(inst, QApplication):
+            inst.setStyleSheet(qss)
+        else:
+            self.setStyleSheet(qss)
+        self.flow.set_tokens_override(tokens)
+        dark_now = self.theme_mode == "dark"
+        self.theme_button.setText("浅色" if dark_now else "深色")
+        self.theme_button.setToolTip("使用浅色图纸外观" if dark_now else "使用深色控制室外观")
+
+    def _on_any_receipt(self, receipt: actions.Receipt) -> None:
+        self.console_drawer.add_receipt(receipt)
+        if receipt.rc not in (0,) and receipt.rc is not None and not receipt.preview:
+            self.failure_bar.show_failure(receipt)
+        elif receipt.rc == 0:
+            self.failure_bar.dismiss()
+
+    def _update_identity_ui(self) -> local_data.GithubModeInfo:
+        src = self.options.source_version or "—"
+        eff = self.options.effective_version or "—"
+        ctrl_ok = (self.options.root / pd.REGISTRY_RELATIVE).is_file()
+        drift = bool(src != "—" and eff != "—" and src not in eff)
+        self.version_pill.setProperty("warn", "true" if (drift or not ctrl_ok) else "false")
+        self.version_pill.style().unpolish(self.version_pill)
+        self.version_pill.style().polish(self.version_pill)
+        c.clear(self.version_pill_lay)
+        led = c.quiet("●" if not drift and ctrl_ok else ("●" if src != "—" or eff != "—" else "○"), "led")
+        led.setProperty("sev", "block" if not ctrl_ok else ("risk" if drift else ("ok" if eff != "—" else "na")))
+        self.version_pill_lay.addWidget(led)
+        txt = f"现役 {eff} · HEAD {src}" + (" · 版本不一致" if drift else "")
+        self.version_pill_lay.addWidget(c.quiet(txt, "small"))
+
+        gh_info = local_data.read_github_mode(self.options.root)
+        c.clear(self.gh_mode_lay)
+        self.gh_mode_lay.addWidget(c.quiet("GitHub", "small"))
+        for m in ("关", "备份", "多机"):
+            seg = c.quiet(m, "gh_seg")
+            seg.setProperty("active", "true" if gh_info.mode == m else "false")
+            self.gh_mode_lay.addWidget(seg)
+        self.prs.set_github_mode(gh_info)
+        self.release.set_identity(
+            self.options.source_version,
+            self.options.effective_version,
+            "是" if ctrl_ok else "否",
+        )
+        return gh_info
+
     # ------------------------------------------------ 导航
 
     def goto(self, key: str) -> None:
+        if key == "attention":
+            self.goto("decisions")
+            return
+        if key == "spine":
+            self.flow.select_subview("spine")
+            self.goto("flow")
+            return
+        if key == "tasks":
+            if self.board is not None and self.home_vm is not None:
+                cards = self.home_vm.hot + self.home_vm.rest
+                target = self.options.station_project or (cards[0].project_id if cards else "")
+                if target:
+                    self._tasks_target_pid = target
+                    self.project.set_tab("board")
+                    self.open_project(target)
+                    self._refresh_reads("tasks")
+                    return
+            self._refresh_reads("tasks")
+            self.goto("projects")
+            return
         self.current = key
         self.router.show(key, self.station if key == "home" and self.mode == "ws" else None)
         self.sidebar.select(key)
         self.scope.setText(shell.scope_text(key) + (" · 工程工位" if key == "home" and self.mode == "ws" else ""))
         if key == "decisions":
             self._refresh_decisions()
+            self._refresh_reads("attention")
         if key in self.read_pages:
             self._refresh_reads(key)
         if key == "release":
@@ -379,7 +484,7 @@ class CockpitWindow(QMainWindow):
             self._reread_pages.add(key)
             return
         self._reading_pages.add(key)
-        pid = self.options.station_project
+        pid = self._tasks_target_pid if key == "tasks" and self._tasks_target_pid else self.options.station_project
         pids = ask_project_ids(self.board, pid) if key == "attention" else ([pid] if pid else [])
         scope = f"项目：{'、'.join(pids) or '（没有）'}" if any(r.needs_project for r in reads) else "范围：本机控制根"
         self.read_pages[key].project_line.setText(scope + " · 正在读……")
@@ -397,7 +502,15 @@ class CockpitWindow(QMainWindow):
             self._refresh_reads(key)
             return
         if key == "attention":  # 只重画明细并写明读取时间；“计入”块只跟首页走（_render），这里不碰（D-342）
-            self.attention.show_results(scope, results, (self.options.now or datetime.now(UTC)).astimezone(self.offset))
+            stamp = (self.options.now or datetime.now(UTC)).astimezone(self.offset)
+            self.attention.show_results(scope, results, stamp)
+            self.decisions.page.show_attention_results(scope, results, stamp)
+            return
+        if key == "tasks":
+            self.tasks.show_results(scope, results)
+            target_pid = self._tasks_target_pid or self.options.station_project
+            if target_pid:
+                self.project.set_tasks_results(target_pid, results)
             return
         self.read_pages[key].show_results(scope, results)
 
@@ -437,7 +550,8 @@ class CockpitWindow(QMainWindow):
         if card is None:
             return
         self.decisions.probe_lifecycle()  # 本机有没有归档、重新激活这两条命令：这个窗口里只探测一次，点“重新读取”才重探
-        self.project.show_view(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github),
+        self.project.show_view(vm.project_vm(self.board, card, self.offset, self.online, self.home_vm.github,
+                                             root=self.options.root),
                             self.board.generated_at, self.online)
         self.goto("project")
 
@@ -480,6 +594,8 @@ class CockpitWindow(QMainWindow):
         self._start(use_legacy=False)
         if self.current in self.read_pages:  # 正开着骨架页：连它的命令一起重读
             self._refresh_reads(self.current)
+        elif self.current == "decisions":
+            self._refresh_reads("attention")
         if not self.options.no_net:
             self.probe()
         if not self.options.no_github:
@@ -540,22 +656,51 @@ class CockpitWindow(QMainWindow):
         if self.board is None:
             return
         board = self.board
-        self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github)
+        self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github,
+                                  root=self.options.root)
         now = board.generated_at
+        gh_info = self._update_identity_ui()
+        self.worktrees.set_context(self.home_vm.handoffs, [p.project_id for p in board.projects])
         self.home.show_board(self.home_vm, now)
-        # D-342：“要你出手”分页的“计入”块和首页同一轮、同一份 HomeVM，首页一重算就重画，不等下一轮读取
-        self.attention.show_counted(vm.attention_count(self.home_vm, ask_project_ids(board, self.options.station_project)))
+        # D-342：“决定与待办”“要你出手”两处“计入”块与首页同一轮、同一份 HomeVM（D-342）
+        counted = vm.attention_count(self.home_vm, ask_project_ids(board, self.options.station_project))
+        self.attention.show_counted(counted)
+        self.decisions.page.show_counted(counted)
         self.issues.show_view(vm.all_issues(self.home_vm), now, self.home_vm.issue_notes,
                               self.home_vm.decisions_total, self.home_vm.decisions_without_issue)
         self.projects.show_view(self.home_vm.hot + self.home_vm.rest)
+        ctrl_ok = (self.options.root / pd.REGISTRY_RELATIVE).is_file()
         identity = {
             "source": self.options.source_version, "configured": self.options.source_version,
-            "effective": self.options.effective_version, "control_root": "是" if (self.options.root / pd.REGISTRY_RELATIVE).is_file() else "否",
+            "effective": self.options.effective_version, "control_root": "是" if ctrl_ok else "否",
             "collected": vm.fmt(now, self.offset),
         }
         self.station.set_bc_time((self.options.now or datetime.now(UTC)).astimezone(self.offset).strftime("%Y-%m-%d %H:%M"))
         self.station.show_view(vm.station_vm(board, self.home_vm.hot + self.home_vm.rest, self.online, identity,
                                           self.options.manual_branch, [], DECISION_BUTTONS_WIRED, self.net_note))
+        src, eff = self.options.source_version, self.options.effective_version
+        drift = bool(src and eff and src not in eff)
+        lock_state = ("没检查", "na", "○") if (not src and not eff) else (
+            ("不一致", "risk", "●") if (drift or not ctrl_ok) else ("已对齐", "ok", "●")
+        )
+        gh_val, gh_sev, gh_st = lamp_of_github(self.home_vm.github)
+        if gh_info.mode == "关":
+            gh_row = ("GitHub", "已关闭", "na", "○")
+        elif self.github is None:
+            gh_row = ("GitHub", "没检查", "na", "○")
+        else:
+            gh_row = ("GitHub", gh_val, gh_sev, "●" if gh_st == "number" else "○")
+        markers = actions.board_agent_markers()
+        ai_row = ("AI 标记", "本人模式", "ok", "●") if markers == () else (
+            ("AI 标记", "未核出", "na", "○") if markers is None else ("AI 标记", "已锁定", "risk", "●")
+        )
+        self.sidebar.set_telemetry([
+            ("账本", "正常" if self.home_vm.ledger_ok else "没检查", "ok" if self.home_vm.ledger_ok else "na",
+             "●" if self.home_vm.ledger_ok else "○"),
+            ("版本锁", *lock_state),
+            gh_row,
+            ai_row,
+        ])
         for key, button in self.net_buttons.items():
             button.setChecked((key == "on") == bool(self.online))
         self._feed_flow_and_tools(board)
@@ -710,10 +855,14 @@ def main(argv: list[str] | None = None) -> int:
         window.resize(1360, 1600)
         target = Path(options.screenshot)
         for key, name in (("home", "项目经理"), ("issues", "问题"), ("projects", "全部项目"), ("flow", "流程图"), ("tools", "工具"),
-                          ("prs", "PR与审计"), ("spine", "脊柱图"), ("commands", "命令与契约")):
+                          ("prs", "PR与审计"), ("commands", "命令与契约")):
             window.goto(key)
             app.processEvents()
             window.grab().save(str(target.with_name(f"{target.stem}_{name}{target.suffix}")))
+        window.flow.select_subview("spine")
+        window.goto("flow")
+        app.processEvents()
+        window.grab().save(str(target.with_name(f"{target.stem}_脊柱图{target.suffix}")))
         window.set_mode("ws")
         app.processEvents()
         window.grab().save(str(target.with_name(f"{target.stem}_工程工位{target.suffix}")))

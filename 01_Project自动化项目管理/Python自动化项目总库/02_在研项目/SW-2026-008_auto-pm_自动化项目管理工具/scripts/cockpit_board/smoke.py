@@ -70,8 +70,15 @@ def nav_pages() -> list[tuple[str, str]]:
 
 
 def _busy(window: Any) -> bool:
-    jobs = [*window._threads, *window.decisions._jobs]
-    return bool(window._reading_pages or window.decisions._reading or any(t.isRunning() for t in jobs))
+    jobs = [
+        *window._threads,
+        *window.decisions._jobs,
+        *getattr(getattr(window, "release_actions", None), "_jobs", ()),
+        *getattr(getattr(window, "worktree_actions", None), "_jobs", ()),
+        *getattr(getattr(window, "tools", None), "_jobs", ()),
+    ]
+    release_checking = bool(getattr(getattr(window, "release_actions", None), "_checking", False))
+    return bool(window._reading_pages or window.decisions._reading or release_checking or any(t.isRunning() for t in jobs))
 
 
 def settle(qt: QApplication, window: Any, wait: float, sleep: Callable[[float], None] = time.sleep) -> bool:

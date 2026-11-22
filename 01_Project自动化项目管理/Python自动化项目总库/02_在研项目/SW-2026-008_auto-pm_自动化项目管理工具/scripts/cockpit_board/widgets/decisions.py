@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 
 from cockpit_board import theme
 from cockpit_board.actions import Receipt
@@ -25,6 +26,8 @@ from cockpit_board.decisions import (
     needs_approver,
     split_approver,
 )
+from cockpit_board.viewmodel import AttentionCount
+from cockpit_board.widgets import attention
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -150,6 +153,7 @@ class ConfirmDialog(QDialog):
 
 class DecisionsPage(QWidget):
     run_requested = Signal(object, object, object, bool)  # Decision, Target, values, 是否改走终端窗口
+    receipt_added = Signal(object)
 
     def __init__(self, on_copy: Callable[[str], None],
                  preview: Callable[[Decision, Target, Mapping[str, str], str, bool], str]) -> None:
@@ -161,6 +165,10 @@ class DecisionsPage(QWidget):
         self.receipts: list[Receipt] = []
         self.failure: Receipt | None = None
         self.last_dialog: ConfirmDialog | None = None
+        self._attention_count: AttentionCount | None = None
+        self._attention_scope = ""
+        self._attention_results: list[c.ReadResult] = []
+        self._attention_at = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -176,12 +184,52 @@ class DecisionsPage(QWidget):
     def approver(self) -> str:
         return self.approver_input.text().strip()
 
+    def show_counted(self, count: AttentionCount | None) -> None:
+        """同步首页 D-342「计入（和首页同一口径）」件数，不动下方决定卡。"""
+        self._attention_count = count
+        self.show_view(self.vm)
+
+    def show_attention_results(self, scope: str, results: Sequence[c.ReadResult], when: datetime | None = None) -> None:
+        """接收 pm pending / pm inbox list 只读明细。"""
+        self._attention_at = when.strftime("%H:%M") if when is not None else ""
+        self._attention_scope = scope + (f" · 明细读于 {self._attention_at}" if self._attention_at else "")
+        self._attention_results = list(results)
+        self.show_view(self.vm)
+
+    def _attention_block(self) -> QWidget:
+        holder = QWidget()
+        box = QVBoxLayout(holder)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(theme.SPACE // 2)
+        box.addWidget(c.section("待办同源计入与只读核对（D-342）", "与「今天」页同一份账本口径，不重算、不漏项"))
+        counted_frame, counted_lay = c.card()
+        counted_frame.setProperty("counted", "true")
+        counted_lay.addWidget(c.kv(attention.counted_lines(self._attention_count)))
+        if self._attention_results:
+            counted_lay.addWidget(c.label(attention.DETAIL_NOTE, "small"))
+        box.addWidget(counted_frame)
+        if self._attention_results:
+            fold = c.Fold("各项目待办只读明细（" + (self._attention_scope or "本机") + "）", opened=False, key="att_detail")
+            for result in self._attention_results:
+                sub, sub_lay = c.card()
+                sub_lay.addWidget(c.label(result.command, "heading"))
+                state, status = c.read_state(result)
+                rows: list[tuple[str, str]] = []
+                if c.shows_values(result):
+                    rows = attention.summarize(result.reader, result.parsed.data)
+                    if rows:
+                        sub_lay.addWidget(c.kv(rows))
+                sub_lay.addWidget(c.state_line(state, status))
+                fold.box.addWidget(sub)
+            box.addWidget(fold)
+        return holder
+
     def show_view(self, vm: DecisionsVM) -> None:
         self.vm = vm
         lay = self.layout_
         self.approver_input.setParent(None)
         c.clear(lay)
-        lay.addWidget(c.label("决定", "title", wrap=False))
+        lay.addWidget(c.label("决定与待办", "title", wrap=False))
         lay.addWidget(c.label("这里每个按钮背后都是同一条命令行；点开能看到命令，运行后退出码和原文留在下面。"
                               "命令自己判门禁、租约和口令，这里不替它放行。", "muted"))
         if self.failure is not None:
@@ -203,6 +251,8 @@ class DecisionsPage(QWidget):
                 column = card.column
                 lay.addWidget(c.section(column))
             lay.addWidget(self._card(card))
+        if self._attention_count is not None or self._attention_results:
+            lay.addWidget(self._attention_block())
         lay.addWidget(c.section("刚才运行过的命令", f"最近 {RECEIPT_LIMIT} 条，命令、退出码和原文输出"))
         if not self.receipts:
             lay.addWidget(c.label("还没有运行过。", "muted"))
@@ -284,6 +334,7 @@ class DecisionsPage(QWidget):
         self.receipts = self.receipts[-RECEIPT_LIMIT * 2:]
         self.failure = receipt if receipt.rc not in (0,) and receipt.rc is not None else None
         self.show_view(self.vm)
+        self.receipt_added.emit(receipt)
 
     def dismiss_failure(self) -> None:
         self.failure = None

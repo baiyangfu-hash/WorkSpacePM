@@ -49,6 +49,7 @@ from tests.core import test_pm_dashboard_gui as gui_tests  # noqa: E402 - 复用
 NOW = datetime(2026, 11, 11, 18, 0, tzinfo=UTC)
 READ_PAGE_KEYS = ("attention", "tasks", "worktrees", "release")
 NEW_PAGE_KEYS = (*READ_PAGE_KEYS, "prs", "spine", "commands")
+NAV_NEW_PAGE_KEYS = ("worktrees", "release", "prs", "commands")
 # 读法 → 正常样本
 SAMPLES = {
     "orient": "orient.json", "missions": "pm_missions.json", "pending": "pm_pending.json", "inbox": "pm_inbox.json",
@@ -92,7 +93,8 @@ def _runner(mode: str, seen: list[list[str]] | None = None) -> Callable[..., sub
 
 def test_new_pages_are_registered_and_reads_come_from_pages_json() -> None:
     keys = {p.key for p in shell.PAGES}
-    assert set(NEW_PAGE_KEYS) <= keys
+    assert set(NAV_NEW_PAGE_KEYS) <= keys
+    assert {"decisions", "project", "flow"} <= keys
     declared = shell.page_reads()
     assert set(declared) == {"tasks", "prs", "worktrees", "release", "spine", "commands", "attention"}
     for key in READ_PAGE_KEYS:
@@ -340,7 +342,10 @@ def test_opening_a_read_page_reads_its_commands_in_the_background(qapp: QApplica
     window = gui_tests._window(qapp, root, db, read_runner=_runner("ok", seen))
     window._refresh_decisions = lambda: None
     for key in READ_PAGE_KEYS:
-        window.sidebar.buttons[key].click()
+        if key in window.sidebar.buttons:
+            window.sidebar.buttons[key].click()
+        else:
+            window.goto(key)
         _wait(qapp, window)
         page = window.read_pages[key]
         assert page.results and all(c.read_state(r)[0] == "" for r in page.results), key
@@ -354,7 +359,7 @@ def test_opening_a_read_page_reads_its_commands_in_the_background(qapp: QApplica
     # 打开没有命令的页不起命令
     before = len(seen)
     for key in ("prs", "spine", "commands"):
-        window.sidebar.buttons[key].click()
+        window.sidebar.buttons["flow" if key == "spine" else key].click()
     assert len(seen) == before
     window.close()
 
@@ -375,7 +380,8 @@ def test_new_pages_have_no_buttons(qapp: QApplication, tmp_path: Path) -> None:
     它的按钮只能取自 policy.WORKTREE_BUTTONS，见下一条测试和 test_cockpit_board_worktrees.py。"""
     root, db = base._workspace(tmp_path, [("DJ-2026-101", "ACTIVE", "写通讯层", 0.1)])
     window = gui_tests._window(qapp, root, db, read_runner=_runner("ok"))
-    for key in NEW_PAGE_KEYS:
+    window._refresh_decisions = lambda: None
+    for key in NAV_NEW_PAGE_KEYS:
         window.goto(key)
         _wait(qapp, window)
         buttons = window.router.pages[key].findChildren(QAbstractButton)
@@ -383,6 +389,8 @@ def test_new_pages_have_no_buttons(qapp: QApplication, tmp_path: Path) -> None:
             assert buttons and {b.text() for b in buttons} <= policy.WORKTREE_BUTTONS, [b.text() for b in buttons]
             continue
         assert not buttons, key
+    for extra in (window.attention, window.tasks, window.spine):
+        assert not extra.findChildren(QAbstractButton)
     window.close()
 
 
@@ -576,7 +584,7 @@ def test_attention_page_reads_the_project_that_has_the_card(qapp: QApplication, 
     window = gui_tests._window(qapp, root, db, read_runner=_runner("ok", seen))
     window._refresh_decisions = lambda: None
     window.options.station_project = station
-    window.sidebar.buttons["attention"].click()
+    window.sidebar.buttons["decisions"].click()
     _wait(qapp, window)
     asked = [command[3:] for command in seen]
     assert ["pm", "pending", "--project-id", "SW-2026-008"] in asked

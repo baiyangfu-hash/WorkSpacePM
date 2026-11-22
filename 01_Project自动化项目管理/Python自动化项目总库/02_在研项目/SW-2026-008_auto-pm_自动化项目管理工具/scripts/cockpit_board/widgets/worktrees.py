@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cockpit_board import decisions, shell, stations, theme
+from cockpit_board import decisions, local_data, shell, stations, theme
 from cockpit_board.actions import Receipt
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import Signal
@@ -216,11 +216,12 @@ class WorktreesPage(c.ReadPage):
     run_requested = Signal(object)  # stations.Action：用户在确认框里点了“确认并运行”
     reclaim_requested = Signal()  # 点了“清残留持有记录”：控制器先跑只列命令，再回来弹确认框
     registry_requested = Signal()  # 点了“登记新 AI”：控制器先跑 agent list --json（只读），再回来弹登记框
+    receipt_added = Signal(object)
 
     def __init__(self, root: Path | None = None, markers: Callable[[], Sequence[str] | None] | None = None,
                  on_copy: Callable[[str], None] | None = None, now: Callable[[], datetime] | None = None) -> None:
         empty_text, error_text = shell.page_texts()["worktrees"]
-        super().__init__("worktrees", "工作树与分支", "每个 AI 的工位谁开的、在干什么、干不干净，能收的就在这里收", (), empty_text, error_text)
+        super().__init__("worktrees", "项目工位与分支", "每个 AI 的工位属于哪个项目、在干什么、干不干净，能收的就在这里收", (), empty_text, error_text)
         self.root = root
         self.markers = markers or (lambda: None)
         self.on_copy = on_copy or (lambda _text: None)
@@ -232,6 +233,12 @@ class WorktreesPage(c.ReadPage):
         self.pending_reclaim: stations.Action | None = None  # “清残留持有记录”只列出来的那几条，确认框用的就是它
         self.last_registry: RegistryDialog | None = None
         self.pending_registry: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None
+        self._handoffs: dict[str, local_data.ProjectHandoff] = {}
+        self._known_pids: tuple[str, ...] = ()
+
+    def set_context(self, handoffs: dict[str, local_data.ProjectHandoff] | None, known_pids: Sequence[str] = ()) -> None:
+        self._handoffs = dict(handoffs or {})
+        self._known_pids = tuple(known_pids)
 
     def summary(self, reader: str, data: dict[str, Any]) -> list[tuple[str, str]]:
         return summarize(reader, data)
@@ -255,6 +262,8 @@ class WorktreesPage(c.ReadPage):
             stations.read_holders(self.root),
             human_block=self.human_block, now=self.now(),
             long_runs=None if runs is None else runs.get("tasks") or [],
+            handoffs=self._handoffs,
+            known_pids=self._known_pids,
         )
         if listed is None:
             self.view.notes.insert(0, "工位列表这次没读到：收工位的按钮先不放，原因见下面那条命令的原文")
@@ -265,13 +274,25 @@ class WorktreesPage(c.ReadPage):
         lay = QVBoxLayout(holder)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(theme.SPACE)
-        lay.addWidget(c.section("工位", "每行一个工位；按钮灰着时旁边写着差哪一条"))
+        lay.addWidget(c.section("项目总线与 AI 工位", "按所属项目挂载工位舱（claims → focus.json → 分支编号解析）；按钮灰着时旁边写着差哪一条"))
         if self.human_block:
             lay.addWidget(c.label(self.human_block, "small"))
         for note in self.view.notes:
             lay.addWidget(c.label(note, "small"))
+        by_proj: dict[str, list[stations.StationRow]] = {}
+        unmounted: list[stations.StationRow] = []
         for row in self.view.rows:
-            lay.addWidget(self._row(row))
+            is_agent = row.kind == "agent" or bool(stations.base_agent(row.name))
+            if is_agent and row.project != stations.UNKNOWN:
+                by_proj.setdefault(row.project, []).append(row)
+            else:
+                unmounted.append(row)
+        for pid, proj_rows in by_proj.items():
+            lay.addWidget(self._project_bay(pid, proj_rows))
+        if unmounted:
+            lay.addWidget(c.section("公用 / 未挂载工位与目录", "名册外目录（gate 等）或暂时认不出归属项目的工位"))
+            for row in unmounted:
+                lay.addWidget(self._row(row))
         if self.view.sweep or self.view.sweep_all is not None:
             lay.addWidget(c.section("可清理的其他项", "远程已删的本地分支等；已并进 main 的才放进整批清理"))
             for item in self.view.sweep:
@@ -310,6 +331,7 @@ class WorktreesPage(c.ReadPage):
         register.setEnabled(not self.human_block)
         register.clicked.connect(self.registry_requested.emit)
         lay.addWidget(c.hrow(register, 1))
+        self._add_merge_history(lay)
         lay.addWidget(c.section("刚才运行过的命令", f"最近 {RECEIPT_LIMIT} 条，命令、退出码和原文输出"))
         if not self.receipts:
             lay.addWidget(c.label("还没有运行过。", "muted"))
@@ -317,10 +339,72 @@ class WorktreesPage(c.ReadPage):
             lay.addWidget(self._receipt(receipt))
         return holder
 
-    def _row(self, row: stations.StationRow) -> QFrame:
-        frame, inner = c.card("block" if row.blocked and not self.human_block else "")
+    def _project_bay(self, pid: str, rows: list[stations.StationRow]) -> QFrame:
+        bay, bay_lay = c.inner("project_bay")
+        head_items: list[QWidget | int] = [c.label(pid, "mono", wrap=False), c.chip(f"{len(rows)} 个挂载工位", "hint"), 1]
+        bay_lay.addWidget(c.hrow(*head_items))
+        rail = QFrame()
+        rail.setObjectName("bus_rail")
+        rail.setFixedWidth(4)
+        pods_col = QWidget()
+        pods_lay = QVBoxLayout(pods_col)
+        pods_lay.setContentsMargins(0, 0, 0, 0)
+        pods_lay.setSpacing(theme.SPACE // 2)
+        for row in rows:
+            pods_lay.addWidget(self._row(row, mounted=True))
+        bus_row = QHBoxLayout()
+        bus_row.setContentsMargins(theme.SPACE // 2, 0, 0, 0)
+        bus_row.setSpacing(theme.SPACE)
+        bus_row.addWidget(rail)
+        bus_row.addWidget(pods_col, 1)
+        bay_lay.addLayout(bus_row)
+        return bay
+
+    def _add_merge_history(self, lay: QVBoxLayout) -> None:
+        records, err = local_data.read_merge_log(self.root, limit=6)
+        lay.addWidget(c.section("近期本机收口记录（pm_merge）", "只读：每次本机合入 main 的编号与一键撤销命令"))
+        if err:
+            lay.addWidget(c.label(err, "small"))
+        if not records:
+            lay.addWidget(c.label("本机还没有 pm_merge 记录。", "muted"))
+            return
+        for rec in records:
+            frame, inner = c.card("ok" if rec.pushed or rec.mode == "关" else "risk")
+            push_chip = c.chip("仅本机" if rec.mode == "关" else ("已推备份" if rec.pushed else "待推送"),
+                               "na" if rec.mode == "关" else ("ok" if rec.pushed else "risk"))
+            inner.addWidget(c.hrow(c.label(rec.time, "mono", wrap=False), c.label(rec.branch, "section"),
+                                   c.chip(rec.card or "无卡号", "hint"), push_chip, 1))
+            if rec.revert_command:
+                copy_btn = c.button("复制命令", "", "把这条撤销记录命令放进剪贴板")
+                copy_btn.clicked.connect(lambda _checked=False, cmd=rec.revert_command: self.on_copy(cmd))
+                inner.addWidget(c.hrow(c.label(f"提交 {rec.merge_sha[:8]} · 退回：{rec.revert_command}", "mono"), 1, copy_btn))
+            lay.addWidget(frame)
+
+    def _leds(self, row: stations.StationRow) -> QWidget:
+        if not row.checked:
+            chips = [c.chip("○ 工作树 没检查", "na"), c.chip("○ 推送 没检查", "na"), c.chip("○ 进主线 没检查", "na")]
+            return c.hrow(*chips, 1)
+        d_txt, d_sev = ("✓ 工作树干净", "ok") if row.dirty == 0 else (
+            (f"■ 未提交 {row.dirty}", "block") if row.dirty else ("○ 工作树 没检查", "na")
+        )
+        u_txt, u_sev = ("✓ 已推送", "ok") if row.unpushed == 0 else (
+            (f"● 未推送 {row.unpushed}", "risk") if row.unpushed else ("○ 推送 没检查", "na")
+        )
+        m_txt, m_sev = ("✓ 已进 main", "ok") if row.merged is True else (
+            ("● 未进 main", "risk") if row.merged is False else ("○ 进主线 没检查", "na")
+        )
+        return c.hrow(c.chip(d_txt, d_sev), c.chip(u_txt, u_sev), c.chip(m_txt, m_sev), 1)
+
+    def _row(self, row: stations.StationRow, *, mounted: bool = False) -> QFrame:
+        sev = "block" if row.blocked and not self.human_block else ("risk" if row.unpushed or row.dirty else "")
+        if mounted:
+            frame, inner = c.inner("station_pod")
+            frame.setProperty("sev", sev)
+        else:
+            frame, inner = c.card("block" if row.blocked and not self.human_block else "")
         frame.setProperty("station", row.name)
         inner.addWidget(c.label(f"{row.name} · {row.branch}", "section"))
+        inner.addWidget(self._leds(row))
         inner.addWidget(c.kv([("谁开的", row.who), ("在干哪张卡", row.card), ("属于哪个项目", row.project),
                               ("最后动静", row.last_seen), ("检查结果", row.checks)]))
         if row.warning:
@@ -383,3 +467,4 @@ class WorktreesPage(c.ReadPage):
         self.receipts = self.receipts[-RECEIPT_LIMIT * 2:]
         if self.results:
             self.show_results(self.project_line.text(), self.results)
+        self.receipt_added.emit(receipt)

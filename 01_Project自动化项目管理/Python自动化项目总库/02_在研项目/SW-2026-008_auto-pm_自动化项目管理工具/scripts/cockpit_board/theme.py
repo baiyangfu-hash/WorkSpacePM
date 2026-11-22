@@ -10,7 +10,7 @@ from dataclasses import dataclass, fields
 
 # 字体：系统中文字体优先，不引外网字体（内网 / 断网也要能看）。
 FONT_STACK = ("Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI")
-MONO_STACK = ("Consolas", "Menlo", "SF Mono", "DejaVu Sans Mono")
+MONO_STACK = ("Cascadia Mono", "Consolas", "Menlo", "SF Mono", "DejaVu Sans Mono")
 FONT_SIZE_PT = 10
 FONT_SIZE_TITLE_PT = 15
 FONT_SIZE_SMALL_PT = 9
@@ -21,7 +21,7 @@ FONT_LADDER_PT = {"small": FONT_SIZE_SMALL_PT, "body": FONT_SIZE_PT, "section": 
 
 SPACE = 8  # 基本间距，其余都是它的倍数
 RADIUS = 6
-SIDEBAR_WIDTH = SPACE * 22  # 侧栏宽度（176 像素），1366×768 下右边还能放下整页
+SIDEBAR_WIDTH = SPACE * 25  # 侧栏宽度（200 像素），1366×768 下右边还能放下整页 + 遥测面板
 
 
 @dataclass(frozen=True)
@@ -50,51 +50,51 @@ class Tokens:
 
 
 LIGHT = Tokens(
-    bg="#f3f4f6",
+    bg="#f3f5f8",
     card="#ffffff",
-    card2="#f8f9fb",
-    line="#e2e5ea",
-    line2="#cfd4db",
-    fg="#17191d",
-    fg2="#5c6470",
-    fg3="#626a79",
+    card2="#f7f9fc",
+    line="#dfe4ec",
+    line2="#c5cedb",
+    fg="#151a22",
+    fg2="#445062",
+    fg3="#586477",
     accent="#1d5c8f",
     accent_soft="#e3eef7",
-    block="#c6262e",
-    block_soft="#fbe9ea",
-    risk="#b7700a",
-    risk_soft="#fdf1dc",
-    hint="#2f6db3",
-    hint_soft="#e6eef9",
-    ok="#3b7d4f",
-    ok_soft="#e5f2e8",
-    na="#8b93a0",
-    na_soft="#eef0f3",
-    side="#e9ebef",
+    block="#c62828",
+    block_soft="#fdebec",
+    risk="#b4690e",
+    risk_soft="#fef3dc",
+    hint="#2563a6",
+    hint_soft="#e7f0fb",
+    ok="#2e7d4f",
+    ok_soft="#e6f4eb",
+    na="#7a8494",
+    na_soft="#eef1f5",
+    side="#e9edf3",
 )
 
 DARK = Tokens(
-    bg="#17191d",
-    card="#1f2228",
-    card2="#24282f",
-    line="#2f343c",
-    line2="#3d434d",
-    fg="#e8eaed",
-    fg2="#a9b0ba",
-    fg3="#8f97a3",
-    accent="#7fb3e0",
-    accent_soft="#1f3346",
-    block="#ef6b6b",
-    block_soft="#3a2224",
-    risk="#e2a73a",
-    risk_soft="#3a2f1a",
-    hint="#7fb3e0",
-    hint_soft="#1f3346",
-    ok="#7cc48f",
-    ok_soft="#1f3326",
-    na="#7c8491",
-    na_soft="#262a31",
-    side="#1b1e23",
+    bg="#0e131b",
+    card="#171f2b",
+    card2="#1d2736",
+    line="#283446",
+    line2="#394960",
+    fg="#ecf1f8",
+    fg2="#a8b4c4",
+    fg3="#8998ab",
+    accent="#60a5fa",
+    accent_soft="#172840",
+    block="#f87171",
+    block_soft="#3b1d23",
+    risk="#f59e0b",
+    risk_soft="#362712",
+    hint="#38bdf8",
+    hint_soft="#132c3d",
+    ok="#34d399",
+    ok_soft="#122e27",
+    na="#8b97a8",
+    na_soft="#202834",
+    side="#121923",
 )
 
 # 三态标签（没检查 / 断网未知 / 读不懂）的语义色：前两种是灰（不知道），读不懂是风险色（读到了但看不懂，要人看）。
@@ -204,6 +204,30 @@ QLabel#cell[at="done"] {{ color: {t.fg2}; background: {t.card2}; }}
 QLabel#cell[at="current"] {{ color: {t.fg}; font-weight: 600; border: 1px solid {t.line2}; }}
 QLabel#cell[at="current"][sev="block"] {{ background: {t.block_soft}; border: 1px solid {t.block}; }}
 QLabel#cell[at="current"][sev="risk"] {{ background: {t.risk_soft}; border: 1px solid {t.risk}; }}
+QFrame#version_pill {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: {RADIUS}px; padding: 2px 8px; }}
+QFrame#version_pill[warn="true"] {{ background: {t.risk_soft}; border-color: {t.risk}; }}
+QFrame#gh_mode_pill {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: {RADIUS}px; padding: 1px 4px; }}
+QLabel#gh_seg {{ padding: 2px 6px; border-radius: 4px; color: {t.fg2}; font-size: {FONT_SIZE_SMALL_PT}pt; }}
+QLabel#gh_seg[active="true"] {{ background: {t.accent_soft}; color: {t.accent}; font-weight: 600; }}
+QFrame#telemetry_panel {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: {RADIUS}px; padding: 6px; }}
+QLabel#led[sev="ok"] {{ color: {t.ok}; font-weight: 700; }}
+QLabel#led[sev="risk"] {{ color: {t.risk}; font-weight: 700; }}
+QLabel#led[sev="block"] {{ color: {t.block}; font-weight: 700; }}
+QLabel#led[sev="hint"] {{ color: {t.hint}; font-weight: 700; }}
+QLabel#led[sev="na"] {{ color: {t.na}; }}
+QFrame#project_bay {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: {RADIUS + 2}px; }}
+QFrame#bus_rail {{ background: {t.accent_soft}; border: 1px solid {t.accent}; border-radius: 3px; }}
+QFrame#station_pod {{ background: {t.card2}; border: 1px solid {t.line}; border-radius: {RADIUS}px; }}
+QFrame#station_pod[sev="block"] {{ border-left: 4px solid {t.block}; }}
+QFrame#station_pod[sev="risk"] {{ border-left: 4px solid {t.risk}; }}
+QFrame#console_drawer {{ background: {t.card2}; border-top: 1px solid {t.line2}; }}
+QFrame#global_failure_bar {{ background: {t.block_soft}; border-bottom: 1px solid {t.block}; }}
+QLabel#phase_pill {{ background: {t.card2}; color: {t.fg3}; border: 1px solid {t.line}; border-radius: 4px; padding: 2px 8px; font-size: {FONT_SIZE_SMALL_PT}pt; }}
+QLabel#phase_pill[at="done"] {{ background: {t.ok_soft}; color: {t.ok}; border-color: {t.ok}; }}
+QLabel#phase_pill[at="current"] {{ background: {t.accent_soft}; color: {t.accent}; border-color: {t.accent}; font-weight: 600; }}
+QFrame#pill_filter {{ background: {t.card}; border: 1px solid {t.line}; border-radius: {RADIUS}px; padding: 2px 8px; }}
+QFrame#pill_filter[active="true"] {{ background: {t.accent_soft}; border-color: {t.accent}; }}
+QFrame#commands_filter QLineEdit {{ background: {t.card}; border: 1px solid {t.line2}; border-radius: 4px; padding: 4px 8px; color: {t.fg}; }}
 {"".join(sem)}{states}"""
 
 

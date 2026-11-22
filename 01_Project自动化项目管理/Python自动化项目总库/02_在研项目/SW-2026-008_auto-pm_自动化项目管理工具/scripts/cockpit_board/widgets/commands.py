@@ -12,7 +12,7 @@ from typing import Any
 
 from cockpit_board import shell
 from cockpit_board.widgets import common as c
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
 
 COMMANDS_MAP = Path(__file__).resolve().parents[1] / "flow" / "commands_map.json"
 CLASS_ZH = {"read": "只读", "write": "写", "user_only": "只听用户本人", "never": "永不放进界面"}
@@ -49,25 +49,78 @@ class CommandsPage(QWidget):
     def __init__(self, path: Path = COMMANDS_MAP) -> None:
         super().__init__()
         self.setObjectName("page")
+        self.class_filter = "all"
+        self.search_text = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll, body = c.page()
         outer.addWidget(scroll)
-        body.addWidget(c.section("命令与契约", "每条命令界面能不能碰、谁能按"))
+        body.addWidget(c.section("命令与契约", "每条命令界面能不能碰、谁能按；支持分类与关键字过滤"))
         data = load(path)
         self.data = data
         if data is None:
             body.addWidget(c.state_line("unreadable", shell.page_texts()["commands"][1]))
             return
-        groups = grouped(data)
-        body.addWidget(c.kv([(CLASS_ZH[key], f"{len(groups[key])} 条 · {CLASS_TIP[key]}") for key in CLASS_ZH]))
+        self.groups = grouped(data)
+        body.addWidget(c.kv([(CLASS_ZH[key], f"{len(self.groups[key])} 条 · {CLASS_TIP[key]}") for key in CLASS_ZH]))
+        filter_bar, filter_lay = c.inner("commands_filter")
+        self.pill_boxes: dict[str, c.ClickBox] = {}
+        pills: list[QWidget | int] = []
+        for fkey, flabel in (("all", "全部"), *CLASS_ZH.items()):
+            pill = c.click_row("pill_filter", f"筛选 {flabel}", "按命令分类过滤", c.quiet(flabel, "small"))
+            pill.setProperty("active", "true" if fkey == "all" else "false")
+            pill.activated.connect(lambda k=fkey: self.set_filter(k))
+            self.pill_boxes[fkey] = pill
+            pills.append(pill)
+        self.search_input = QLineEdit()
+        self.search_input.setObjectName("commands_search")
+        self.search_input.setPlaceholderText("按命令关键字搜索，例如 worktree、release、--fix……")
+        self.search_input.textChanged.connect(self._on_search)
+        pills.append(1)
+        pills.append(self.search_input)
+        filter_lay.addWidget(c.hrow(*pills))
+        body.addWidget(filter_bar)
+        self.cards_holder = QWidget()
+        self.cards_layout = QVBoxLayout(self.cards_holder)
+        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(self.cards_holder)
+        self._render_groups()
+
+    def set_filter(self, key: str) -> None:
+        self.class_filter = key
+        for k, box in self.pill_boxes.items():
+            box.setProperty("active", "true" if k == key else "false")
+            box.style().unpolish(box)
+            box.style().polish(box)
+        self._render_groups()
+
+    def _on_search(self, text: str) -> None:
+        self.search_text = text.strip().lower()
+        self._render_groups()
+
+    def _render_groups(self) -> None:
+        c.clear(self.cards_layout)
+        q = self.search_text
+        any_shown = False
         for key, label in CLASS_ZH.items():
+            if self.class_filter != "all" and self.class_filter != key:
+                continue
+            rows = [
+                (name, note)
+                for name, note in self.groups[key]
+                if not q or q in name.lower() or q in note.lower()
+            ]
+            if not rows and q:
+                continue
+            any_shown = True
             frame, layout = c.card()
-            layout.addWidget(c.label(f"{label}（{len(groups[key])} 条）", "heading", wrap=False))
-            noted = [(name, note) for name, note in groups[key] if note]
-            plain = [name for name, note in groups[key] if not note]
+            layout.addWidget(c.label(f"{label}（{len(rows)} 条）", "heading", wrap=False))
+            noted = [(name, note) for name, note in rows if note]
+            plain = [name for name, note in rows if not note]
             if plain:
                 layout.addWidget(c.label("、".join(plain), "mono"))
             if noted:
                 layout.addWidget(c.kv(noted))
-            body.addWidget(frame)
+            self.cards_layout.addWidget(frame)
+        if not any_shown:
+            self.cards_layout.addWidget(c.label("没有匹配过滤条件的命令。", "muted"))

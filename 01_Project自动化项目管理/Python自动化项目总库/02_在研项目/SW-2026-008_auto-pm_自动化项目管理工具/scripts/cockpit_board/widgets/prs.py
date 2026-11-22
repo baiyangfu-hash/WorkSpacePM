@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from cockpit_board import shell
+from cockpit_board import local_data, shell
 from cockpit_board.widgets import common as c
 from cockpit_board.widgets.delivery import github_block
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -48,9 +48,13 @@ def audit_rows(snapshot: Any, dirs: Sequence[Path] = ()) -> list[tuple[str, str]
     audits = list(snapshot.audits)
     problems = list(getattr(snapshot, "audit_problems", []) or [])
     pulls = list(snapshot.pulls)
-    current = [p.audit for p in pulls if p.audit is not None]
+    deduped = []
     seen: set[str] = set()
-    current = [a for a in current if not (a.file in seen or seen.add(a.file))]
+    for audit in pulls:
+        if audit.audit is not None and audit.audit.file not in seen:
+            seen.add(audit.audit.file)
+            deduped.append(audit.audit)
+    current = deduped
     rows: list[tuple[str, str]] = []
     if problems:
         rows.append(("读不到", "；".join(problems)))
@@ -83,6 +87,10 @@ class PrsPage(QWidget):
         scroll, body = c.page()
         outer.addWidget(scroll)
         body.addWidget(c.section("PR 与审计", "哪些 PR 开着、审计怎么说"))
+        self.mode_holder = QWidget()
+        self.mode_box = QVBoxLayout(self.mode_holder)
+        self.mode_box.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(self.mode_holder)
         holder = QWidget()
         self.box = QVBoxLayout(holder)
         self.box.setContentsMargins(0, 0, 0, 0)
@@ -98,6 +106,22 @@ class PrsPage(QWidget):
         body.addWidget(delivery)
         self.show_github(None, disabled=False)
         self.show_delivery(None)
+
+    def set_github_mode(self, info: local_data.GithubModeInfo) -> None:
+        c.clear(self.mode_box)
+        sev = "ok" if info.mode == "多机" else ("hint" if info.mode == "备份" else ("risk" if info.mode == "读不懂" else "na"))
+        frame, layout = c.card()
+        layout.addWidget(
+            c.hrow(
+                c.label("本机 GitHub 联动档位", "section", wrap=False),
+                c.chip(info.mode, sev),
+                c.label(info.note or "关=纯本机不碰 GitHub；备份=本机合并后尝试推送 main；多机=PR 协作", "small"),
+                1,
+            )
+        )
+        if info.mode == "关":
+            layout.addWidget(c.label("提示：当前处于「关」档，本机日常合并与收口不依赖 GitHub PR。", "small"))
+        self.mode_box.addWidget(frame)
 
     def show_delivery(self, github: Any) -> None:
         """github＝viewmodel.GithubVM（首页那一份 HomeVM.github）；还没有就写一行“还没读”。只调用 delivery.github_block，没有按钮。"""

@@ -101,12 +101,12 @@ def test_every_page_is_reachable_from_the_sidebar_with_its_scope(qapp: QApplicat
     window.set_mode("ws")
     assert window.stack.currentWidget() is window.station
     assert window.scope.text().endswith("工程工位")
-    # 项目详情从别的页点进去：侧栏全灭，范围标记写“受管项目 · 项目详情”
+    # 项目详情从别的页点进去：侧栏全灭，范围标记写“产线主控 · 项目详情”
     window.set_mode("pm")
     window.open_project("DJ-2026-101")
     assert window.stack.currentWidget() is window.project
     assert not any(b.isChecked() for b in window.sidebar.buttons.values())
-    assert window.scope.text() == "受管项目 · 项目详情"
+    assert window.scope.text() == "产线主控 · 项目详情"
     # 顶栏不再放页面按钮
     topbar = next(w for w in window.findChildren(QWidget) if w.objectName() == "topbar")
     assert not [b for b in topbar.findChildren(QAbstractButton) if b.objectName() in ("tab", "nav")]
@@ -163,12 +163,12 @@ def test_tokens_v2_cover_sidebar_and_states_with_token_colors_only() -> None:
 
 
 def test_655_decisions_sits_right_below_today_in_the_sidebar(qapp: QApplication) -> None:
-    """侧栏“决定”排到“今天”下面第一位；“今天”的说明讲的是新首页。"""
-    daily = [p.text for p in shell.PAGES if p.group == "日常" and p.nav]
-    assert daily == ["今天", "决定", "问题", "要你出手"]
+    """侧栏按“产线主控 / 排查与诊断”两组排布；“今天”的说明讲的是新首页与产线舱。"""
+    main_group = [p.text for p in shell.PAGES if p.group == "产线主控" and p.nav]
+    assert main_group == ["今天", "项目工位与分支", "决定与待办", "全部项目", "发版中心", "工程工具箱"]
     bar = shell.Sidebar()
     shown = [b.text() for b in bar.findChildren(QAbstractButton) if b.objectName() == "nav"]
-    assert shown[:4] == daily
+    assert shown[:6] == main_group
     tip = shell.spec("home").tip
     assert "最该你办的一件" in tip and "灯" in tip
     assert not any(word in tip.lower() for word in policy.PM_FORBIDDEN_WORDS)

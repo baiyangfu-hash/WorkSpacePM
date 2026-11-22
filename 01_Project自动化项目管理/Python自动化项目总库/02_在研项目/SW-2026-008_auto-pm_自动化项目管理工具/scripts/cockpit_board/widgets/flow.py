@@ -11,6 +11,7 @@ import math
 from cockpit_board import theme
 from cockpit_board.flowgraph import CardPosition, Edge, Graph, GraphError, load_graphs
 from cockpit_board.widgets import common as c
+from cockpit_board.widgets.spine import SpinePage
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -29,6 +30,8 @@ PARALLEL_OFFSET = 9.0  # 来回两条线之间错开的距离（画布单位）
 
 
 def _tokens_for(widget: QWidget) -> theme.Tokens:
+    if isinstance(widget, FlowGraphWidget) and widget.tokens_override is not None:
+        return widget.tokens_override
     return theme.DARK if widget.palette().color(widget.backgroundRole()).lightness() < 128 else theme.LIGHT
 
 
@@ -42,6 +45,7 @@ class FlowGraphWidget(QWidget):
         self.graph: Graph | None = None
         self.current: str | None = None
         self.focus: str | None = None
+        self.tokens_override: theme.Tokens | None = None
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setObjectName("flow_graph")
         if graph is not None:
@@ -273,6 +277,7 @@ class FlowPage(QWidget):
         self.graphs: tuple[Graph, ...] = ()
         self.cards: list[CardPosition] = []
         self.graph_id = ""
+        self.subview = "graphs"
         self.error = ""
         try:
             self.graphs = load_graphs()
@@ -283,24 +288,54 @@ class FlowPage(QWidget):
         self.scroll_area, self.layout_ = c.page()
         outer.addWidget(self.scroll_area)
         self.picker_buttons: dict[str, object] = {}
+        self.sub_pills: dict[str, c.ClickBox] = {}
         self.card_box = QComboBox()
         self.card_box.setObjectName("flow_card_box")
         self.card_box.currentIndexChanged.connect(self._card_changed)
         self.widget = FlowGraphWidget()
         self.widget.node_clicked.connect(lambda _node: self._render_panel())
+        self.spine_page = SpinePage()
+        self.spine_page.setVisible(False)
         self._build()
 
     # ------------------------------------------------ 搭
 
+    def set_tokens_override(self, tokens: theme.Tokens) -> None:
+        self.widget.tokens_override = tokens
+        self.widget.update()
+
+    def select_subview(self, key: str) -> None:
+        self.subview = key
+        for k, box in self.sub_pills.items():
+            box.setProperty("active", "true" if k == key else "false")
+            box.style().unpolish(box)
+            box.style().polish(box)
+        if hasattr(self, "graphs_host"):
+            self.graphs_host.setVisible(key == "graphs")
+        self.spine_page.setVisible(key == "spine")
+
     def _build(self) -> None:
         lay = self.layout_
         c.clear(lay)
-        lay.addWidget(c.section("流程图", "各条线的状态怎么流转，当前在哪一步就亮哪一步；点一个状态看它的下一步"))
+        lay.addWidget(c.section("流程与状态机", "四套状态机图与十步治理脊柱图；点状态看下一步能去哪"))
+        sub_row: list[QWidget | int] = []
+        for skey, slabel in (("graphs", "状态机图（4 套）"), ("spine", "十步脊柱图")):
+            pill = c.click_row("pill_filter", slabel, f"展示{slabel}", c.quiet(slabel, "small"))
+            pill.setProperty("active", "true" if skey == "graphs" else "false")
+            pill.activated.connect(lambda k=skey: self.select_subview(k))
+            self.sub_pills[skey] = pill
+            sub_row.append(pill)
+        sub_row.append(1)
+        lay.addWidget(c.hrow(*sub_row))
         if self.error:
             frame, inner = c.card("block")
             inner.addWidget(c.label("状态图数据读不了，本页不画图：" + self.error))
             lay.addWidget(frame)
             return
+        self.graphs_host = QWidget()
+        glay = QVBoxLayout(self.graphs_host)
+        glay.setContentsMargins(0, 0, 0, 0)
+        glay.setSpacing(theme.SPACE)
         group = QButtonGroup(self)
         row_items: list[QWidget | int] = []
         for graph in self.graphs:
@@ -311,21 +346,24 @@ class FlowPage(QWidget):
             row_items.append(item)
             self.picker_buttons[graph.id] = item
         row_items.append(1)
-        lay.addWidget(c.hrow(*row_items))
+        glay.addWidget(c.hrow(*row_items))
         self.intro = c.label("", "muted")
-        lay.addWidget(self.intro)
+        glay.addWidget(self.intro)
         self.card_row = c.hrow(c.label("看哪张卡", "muted", wrap=False), self.card_box, 1)
-        lay.addWidget(self.card_row)
+        glay.addWidget(self.card_row)
         frame, inner = c.card()
         inner.addWidget(self.widget)
-        lay.addWidget(frame)
+        glay.addWidget(frame)
         self.panel_holder = QWidget()
         self.panel_layout = QVBoxLayout(self.panel_holder)
         self.panel_layout.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self.panel_holder)
+        glay.addWidget(self.panel_holder)
         self.foot = c.label("", "small")
-        lay.addWidget(self.foot)
+        glay.addWidget(self.foot)
+        lay.addWidget(self.graphs_host)
+        lay.addWidget(self.spine_page)
         self.select_graph(self.graphs[0].id)
+        self.select_subview(self.subview)
 
     # ------------------------------------------------ 数据进来
 
