@@ -42,7 +42,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,6 +78,8 @@ AUDIT_SCHEMA = "local-merge-audit.v1"
 AUDIT_SESSION = re.compile(r"([a-z][a-z0-9]*)-([0-9a-f]{6})")
 STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
 CHANGE_FILES_ROW = re.compile(r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|", re.MULTILINE)
+CARD_TIER = re.compile(r"^>\s*档次[：:]\s*[*`\s]*(文档|测试|产品|核心)", re.MULTILINE)
+TIERS = {"文档": "docs", "测试": "tests", "产品": "product", "核心": "core"}
 APPROVED_STATES = frozenset(
     {"approved", "conditionally_approved", "implementing", "pending_acceptance", "accepting"}
 )
@@ -457,9 +460,11 @@ def _card_precheck(
     """复用现役驾驶舱预检，确认读取的是候选里的实施卡。"""
     file = worktree / path
     try:
+        if file.resolve() != file.absolute():
+            raise RefusedError(f"工位实施卡不能是转向其他路径的链接：{path}")
         raw = file.read_bytes()
         blob = bytes(git.run("show", f"{sha}:{path}", check=True).stdout, "utf-8")
-        if file.resolve() != file.absolute() or not _same_ignoring_cr(raw, blob):
+        if not _same_ignoring_cr(raw, blob):
             raise RefusedError(f"工位实施卡和提交里的版本不同：{path}")
         result = subprocess.run(
             [_python(git.cwd), "-B", str(git.cwd / "main.py"), "implementation-card",
@@ -498,7 +503,36 @@ def _card_precheck(
         or not git.ok("merge-base", "--is-ancestor", baseline, base)
     ):
         raise RefusedError("实施卡的隔离基线必须是当前 main 的历史提交")
-    return [item["path"] for item in report["paths"] if item["state"] != "运行态"]
+    entries = report["paths"]
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("path"), str)
+        or item.get("state") not in ("存在", "计划新增", "运行态")
+        for item in entries
+    ):
+        raise RefusedError("实施卡预检没有返回有效的路径表")
+    return [item["path"] for item in entries if item["state"] != "运行态"]
+
+
+def _check_card_tier(root: Path, text: str, base: str, sha: str) -> None:
+    """用驾驶舱现有分类器核对真实差异，包含卡片声明目录下的实际子文件。"""
+    declared = CARD_TIER.search(text)
+    if not declared:
+        raise RefusedError("实施卡没有可核对的档次")
+    classifier = root / COCKPIT_PREFIX / "tests" / "tools" / "tier_classifier.py"
+    try:
+        result = subprocess.run(
+            [_python(root), "-X", "utf8", "-B", str(classifier), "--diff", base, sha,
+             "--declared", TIERS[declared[1]]],
+            cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RefusedError(f"实施卡档次无法核验：{exc}") from exc
+    if result.returncode:
+        report = _parse_precheck_json(result.stdout) or {}
+        problems = "、".join(report.get("problems") or []) or report.get("error") or result.stderr.strip()
+        raise RefusedError(f"实施卡档次核验未过：{problems}")
 
 
 def _check_card(
@@ -545,6 +579,8 @@ def _check_card(
     outside = _outside_scope(paths, allowed)
     if outside:
         raise RefusedError("超出实施卡可改范围：" + "、".join(outside[:10]))
+    if standard:
+        _check_card_tier(git.cwd, text, base, sha)
 
 
 def _outside_scope(paths: list[str], allowed: list[str]) -> list[str]:
@@ -857,37 +893,46 @@ def _merge_existing_copies(root: Path, plan: Plan, merge_git: Git, title: str, b
         )
 
 
-def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, Any]:
-    root_git = Git(root)
+@contextmanager
+def _main_transaction(root: Path, base: str, sha: str) -> Iterator[Git]:
+    """合并与同步串行；引用钩子同时核对令牌和变更前的 main。"""
     token = secrets.token_hex(16)
     token_file = state_dir(root) / TOKEN_NAME
     token_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with token_file.open("x", encoding="utf-8", errors="replace") as handle:
-            json.dump({"token": token, "sha": plan.sha}, handle)
+        handle = token_file.open("x", encoding="utf-8", errors="replace")
     except FileExistsError as exc:
-        raise RefusedError("已有合并令牌（可能另一次合并仍在运行），保留现场") from exc
+        raise RefusedError("已有 main 更新令牌（可能正在合并或同步），保留现场") from exc
+    try:
+        with handle:
+            json.dump({"token": token, "base": base, "sha": sha}, handle)
+        yield Git(root, env={**os.environ, TOKEN_ENV: token})
+    finally:
+        token_file.unlink(missing_ok=True)
+
+
+def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, Any]:
+    root_git = Git(root)
     body = [f"领卡占位: {plan.card}"]
     if plan.chgs:
         body.append("变更单: " + "、".join(plan.chgs))
     body.append(MERGE_MARK + "（本机门禁通过）")
-    merge_git = Git(root, env={**os.environ, TOKEN_ENV: token})
     title = f"Merge branch '{plan.branch}'（本机合并）"
-    try:
+    base = plan.base
+    with _main_transaction(root, base, plan.sha) as merge_git:
+        if root_git.rev(MAIN_REF) != base or root_git.rev(plan.branch) != plan.sha:
+            raise RefusedError("合并前 main 或候选已变动，请重新取得对应证据")
+        copies = _control_root_copies(
+            root_git, root, plan.sha, plan.paths, archive_existing=plan.archive_existing,
+        )
+        if copies != plan.replace:
+            raise RefusedError("控制根副本范围在检查后变化，请重新核对")
         if plan.archive_existing:
-            base = plan.base
-            if root_git.rev(MAIN_REF) != base or root_git.rev(plan.branch) != plan.sha:
-                raise RefusedError("合并前 main 或候选已变动，请重新取得对应证据")
-            copies = _control_root_copies(root_git, root, plan.sha, plan.paths, archive_existing=True)
             _check_release_archive(root, root_git, base, plan.sha, plan.paths, copies)
-            if copies != plan.replace:
-                raise RefusedError("控制根副本范围在检查后变化，请重新核对")
             _archive_merge(merge_git, plan, base, title, "\n".join(body))
         else:
             _merge_existing_copies(root, plan, merge_git, title, "\n".join(body))
-    finally:
-        token_file.unlink(missing_ok=True)
-    merge_sha = root_git.rev("HEAD")
+        merge_sha = root_git.rev("HEAD")
     entry: dict[str, Any] = {
         "time": _now(),
         "branch": plan.branch,
@@ -906,7 +951,7 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
     if plan.audit is not None:
         entry["audit"] = plan.audit
     if mode != "关":
-        push = root_git.run("push", "--quiet", "origin", "main", timeout=NET_TIMEOUT * 2)
+        push = root_git.run("push", "--quiet", "origin", f"{merge_sha}:{MAIN_REF}", timeout=NET_TIMEOUT * 2)
         entry["pushed"] = push.returncode == 0
         if push.returncode != 0:
             entry["push_error"] = push.stderr.strip()[:300]
@@ -959,7 +1004,8 @@ def audit_receipt(root: Path, name: str, plan: Plan) -> dict[str, Any]:
     if (
         receipt.get("verdict") != "PASS"
         or not isinstance(report, str)
-        or not report.strip()
+        or plan.base not in report
+        or plan.sha not in report
         or receipt.get("report_sha256") != hashlib.sha256(report.encode("utf-8")).hexdigest()
     ):
         raise RefusedError("独立审计未放行，或报告缺失、摘要不符")
@@ -989,8 +1035,8 @@ def cmd_audit_record(
         if not session or not _reviewer_is_independent(reviewer, name, branch):
             raise RefusedError("请由另一审计会话登记，携带 AUTO_PM_AGENT 和实际会话 ID")
         report = report_file.read_text(encoding="utf-8", errors="replace")
-        if not report.strip():
-            raise RefusedError("审计报告为空")
+        if base not in report or sha not in report:
+            raise RefusedError("审计报告须写明核对过的 main 和候选完整提交号")
         receipt = {
             **_audit_identity(root, name, base, sha),
             "reviewer": reviewer,
@@ -1071,15 +1117,23 @@ def cmd_sync(root: Path) -> int:
     if git.run("fetch", "--quiet", "origin", "main", timeout=NET_TIMEOUT).returncode != 0:
         print("连不上 GitHub，这次没同步，本机照常能用")
         return 1
-    if git.rev("main") == git.rev("origin/main"):
+    base, remote = git.rev(MAIN_REF), git.rev(ORIGIN_REF)
+    if base == remote:
         print("本机 main 已和 GitHub 一样")
         return 0
-    if git.ok("merge-base", "--is-ancestor", "main", "origin/main"):
-        result = git.run("merge", "--ff-only", "origin/main")
+    if git.ok("merge-base", "--is-ancestor", base, remote):
+        try:
+            with _main_transaction(root, base, remote) as sync_git:
+                if git.rev(MAIN_REF) != base or git.rev(ORIGIN_REF) != remote:
+                    raise RefusedError("同步前 main 或 origin/main 已变化，请重新核对")
+                result = sync_git.run("merge", "--ff-only", remote)
+        except RefusedError as exc:
+            print(f"拒绝同步：{exc}")
+            return 1
         if result.returncode != 0:
             print(f"快进没成功：{result.stderr.strip()[:300]}")
             return 1
-        print(f"已从 GitHub 同步到 {git.rev('main')[:8]}")
+        print(f"已从 GitHub 同步到 {remote[:8]}")
         return 0
     if git.ok("merge-base", "--is-ancestor", "origin/main", "main"):
         print("本机 main 比 GitHub 新：跑 push 推上去（“备份”“多机”档合并时也会自动推）")
@@ -1153,21 +1207,26 @@ def cmd_install_hook(root: Path) -> int:
 def hook_allows(root: Path, lines: Sequence[str], token: str | None) -> list[str]:
     """返回被拒的那些行（空＝全放行）。只管 refs/heads/main。"""
     denied = []
-    expected = ""
     token_file = state_dir(root) / TOKEN_NAME
-    if token and token_file.exists():
+    transaction = None
+    if token_file.exists():
         try:
-            expected = json.loads(token_file.read_text(encoding="utf-8", errors="replace")).get(
-                "token", ""
-            )
-        except ValueError:
-            expected = ""
+            loaded = json.loads(token_file.read_text(encoding="utf-8", errors="replace"))
+            transaction = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError):
+            transaction = {}
     origin = ""
     for line in lines:
         parts = line.split()
         if len(parts) != 3 or parts[2] != MAIN_REF or parts[0] == parts[1]:
             continue
-        if token and expected and secrets.compare_digest(token, expected):
+        if transaction is not None:
+            expected = transaction.get("token")
+            if (
+                not token or not isinstance(expected, str) or not secrets.compare_digest(token, expected)
+                or parts[0] != transaction.get("base")
+            ):
+                denied.append(line)
             continue
         origin = origin or Git(root).rev(ORIGIN_REF)
         if parts[1] != ZERO and parts[1] == origin:

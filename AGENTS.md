@@ -156,7 +156,7 @@
 1. 做的和审的分开：写 PR 的 agent 或会话不能审它。
 2. 本机审计先记下 `main` 和工位候选的完整提交号，再审这两个提交的差异。PR 审计先在仓库根运行 `reviews/tools/audit_pr.py <PR号>`，再做人工核查。脚本退出码 1 有 FAIL、2 表示用法或 Git 出错；WARN 在报告中点名，UNVERIFIED 人工补查。
 3. 再照 `reviews/21_audit_checklist.md` 逐项人工核（范围、受保护路径、内容是否属实），脚本不代替这一步。
-4. 本机审计报告按清单第 4 节写到 `.auto-pm/reports/`，审计者用自己的会话身份运行 `pm_merge.py audit-record <工位> --base <main提交> --candidate <候选提交> --verdict <PASS|FAIL> --report <报告>`。作者合并时驾驶舱核对记录，任何一个提交变化后由审计者核对新候选。PR 审计报告写到 `reviews/`，推审计者自己的分支，结论贴 PR 评论。
+4. 本机审计报告按清单第 4 节写到 `.auto-pm/reports/`，审计者用自己的会话身份运行 `pm_merge.py audit-record <工位> --base <main提交> --candidate <候选提交> --verdict <PASS|FAIL> --report <报告>`。驾驶舱核对登记身份、报告摘要和两个提交。共用同一个操作系统账号时，会话身份由调用方声明，审计者仍须亲自复核和登记。任一提交变化后重新核对候选。PR 审计报告写到 `reviews/`，推审计者自己的分支，结论贴 PR 评论。
 5. 开了 PR 的：审计通过、CI 全绿、评审对话全部解决才合并，只用 Merge commit。
 
 ## GitHub 按需使用 (GH-001，用户 2026-11-17 定)

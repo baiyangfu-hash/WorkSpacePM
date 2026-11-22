@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -161,10 +162,11 @@ def _audit(
     monkeypatch.setenv("AUTO_PM_AGENT", "codex")
     monkeypatch.setenv("AUTO_PM_SESSION_ID", "abcdefffffffff")
     report = repo.tmp / "audit.md"
-    report.write_text("Independent review of the exact diff.\n", encoding="utf-8")
+    base, candidate = rev(repo.root, "main"), rev(repo.wt, "HEAD")
+    report.write_text(f"Independent review of {base}..{candidate}.\n", encoding="utf-8")
     return run(
-        pm, repo.root, "audit-record", "w1", "--base", rev(repo.root, "main"),
-        "--candidate", rev(repo.wt, "HEAD"), "--verdict", verdict, "--report", str(report),
+        pm, repo.root, "audit-record", "w1", "--base", base,
+        "--candidate", candidate, "--verdict", verdict, "--report", str(report),
     )
 
 
@@ -196,6 +198,7 @@ def test_rule_files_need_an_approved_change_order_named_in_this_card(
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "超出实施卡可改范围：AGENTS.md" in capsys.readouterr().out
     monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "AGENTS.md"])
+    monkeypatch.setattr(pm, "_check_card_tier", lambda *_: None)
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "缺少对应当前 main 和候选提交的独立审计凭证" in capsys.readouterr().out
     assert not repo.gates
@@ -212,6 +215,35 @@ def test_rule_files_need_an_approved_change_order_named_in_this_card(
     assert entry["user_paths"] == ["AGENTS.md"] and entry["chgs"] == ["CHG-SCPT-2026-999"]
     assert entry["audit"]["candidate"] == rev(repo.wt, "HEAD")
     assert repo.gates[-1] is True, "要用户点头的那一类要跑全量门禁"
+
+
+def test_card_tier_is_checked_against_the_actual_diff(pm: ModuleType, repo: SimpleNamespace) -> None:
+    tools = repo.root / pm.COCKPIT_PREFIX / "tests" / "tools"
+    tools.mkdir(parents=True)
+    for name in ("tier_classifier.py", "tier_core_list.json"):
+        shutil.copyfile(PROJECT / "tests" / "tools" / name, tools / name)
+    base = rev(repo.root, "main")
+    candidate = commit(repo.wt, {"AGENTS.md": "rules\n"}, f"rules\n\n{CARD}")
+    with pytest.raises(pm.RefusedError, match="实施卡档次核验未过"):
+        pm._check_card_tier(repo.root, "> 档次：文档档", base, candidate)
+    pm._check_card_tier(repo.root, "> 档次：核心档", base, candidate)
+
+
+def test_main_transaction_rechecks_the_reviewed_base(pm: ModuleType, repo: SimpleNamespace) -> None:
+    pm.write_mode(repo.root, "关")
+    commit(repo.wt, {"candidate.md": "ready\n"}, f"candidate\n\n{CARD}")
+    plan = pm.plan_merge(repo.root, "w1")
+    latest = commit(repo.root, {"other.md": "synced\n"}, "other main update")
+    with pytest.raises(pm.RefusedError, match="main 或候选已变动"):
+        pm.do_merge(repo.root, plan, pm.GateResult(True), "关")
+    assert rev(repo.root, "main") == latest
+    assert not (repo.root / "candidate.md").exists()
+    with pm._main_transaction(repo.root, latest, plan.sha) as transaction:
+        token = transaction.env[pm.TOKEN_ENV]
+        correct = f"{latest} {plan.sha} {pm.MAIN_REF}"
+        stale = f"{plan.base} {plan.sha} {pm.MAIN_REF}"
+        assert pm.hook_allows(repo.root, [correct, stale], token) == [stale]
+        assert pm.hook_allows(repo.root, [correct], None) == [correct]
 
 
 def test_deleting_files_outside_the_cockpit_needs_the_user(
