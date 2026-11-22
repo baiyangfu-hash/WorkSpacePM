@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -155,26 +156,137 @@ def _change_order(root: Path, number: str, state: str) -> None:
     (folder / f"{number}.md").write_text(f"| 变更状态 | {state} |\n", encoding="utf-8")
 
 
+def _audit(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, verdict: str = "PASS",
+) -> int:
+    monkeypatch.setenv("AUTO_PM_AGENT", "codex")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "abcdefffffffff")
+    report = repo.tmp / "audit.md"
+    base, candidate = rev(repo.root, "main"), rev(repo.wt, "HEAD")
+    report.write_text(f"Independent review of {base}..{candidate}.\n", encoding="utf-8")
+    return run(
+        pm, repo.root, "audit-record", "w1", "--base", base,
+        "--candidate", candidate, "--verdict", verdict, "--report", str(report),
+    )
+
+
 def test_rule_files_need_an_approved_change_order_named_in_this_card(
-    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    commit(repo.wt, {"AGENTS.md": "rules\n"}, f"docs(rules)：[CHG-SCPT-2026-999] 改规则\n\n{CARD}")
+    message = f"docs(rules)：[CHG-SCPT-2026-999] 改规则\n\n{CARD}"
+    commit(repo.wt, {"AGENTS.md": "rules\n"}, message)
     _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "没有本卡的实施卡" in capsys.readouterr().out
-    card = "P/02_规划/311_别的单_PM.md"
-    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-111\n"}, f"docs(card)\n\n{CARD}")
+    card = "SW-2026-008/04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-311_实施卡.md"
+    commit(repo.wt, {card: "> 变更单：`CHG-SCPT-2026-111`\n"}, f"docs(card)\n\n{CARD}")
     assert run(pm, repo.root, "merge", "w1") == 1, "提交说明引用的单没写在本卡里（拿别的旧单顶）"
     assert "写在本卡实施卡里" in capsys.readouterr().out
-    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-999\n"}, f"docs(card)\n\n{CARD}")
+    commit(repo.wt, {card: "> 变更单：`CHG-SCPT-2026-999`\n"}, f"docs(card)\n\n{CARD}")
+    orders = pm.find_change_orders(repo.root, "CHG-SCPT-2026-999")
+    assert len(orders) == 1
+    monkeypatch.setattr(pm, "find_change_orders", lambda _root, _number, _pid="": orders)
     for state in ("draft", "completed"):
         _change_order(repo.root, "CHG-SCPT-2026-999", state)
         assert run(pm, repo.root, "merge", "w1") == 1, state
     _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card])
+    orders[0].write_text(
+        f"| 变更状态 | approved |\n| 涉及文件/交付物 | {card}<br>AGENTS.md |\n",
+        encoding="utf-8",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "超出实施卡可改范围：AGENTS.md" in capsys.readouterr().out
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "AGENTS.md"])
+    monkeypatch.setattr(pm, "_check_card_tier", lambda *_: None)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "缺少对应当前 main 和候选提交的独立审计凭证" in capsys.readouterr().out
+    assert not repo.gates
+    assert _audit(pm, repo, monkeypatch, "FAIL") == 0
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "独立审计未放行" in capsys.readouterr().out
+    assert _audit(pm, repo, monkeypatch) == 0
+    commit(repo.wt, {"AGENTS.md": "updated rules\n"}, message)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "缺少对应当前 main 和候选提交的独立审计凭证" in capsys.readouterr().out
+    assert _audit(pm, repo, monkeypatch) == 0
     assert run(pm, repo.root, "merge", "w1") == 0
     entry = pm.read_log(repo.root)[-1]
     assert entry["user_paths"] == ["AGENTS.md"] and entry["chgs"] == ["CHG-SCPT-2026-999"]
+    assert entry["audit"]["candidate"] == rev(repo.wt, "HEAD")
     assert repo.gates[-1] is True, "要用户点头的那一类要跑全量门禁"
+
+
+def test_card_tier_is_checked_against_the_actual_diff(pm: ModuleType, repo: SimpleNamespace) -> None:
+    tools = repo.root / pm.COCKPIT_PREFIX / "tests" / "tools"
+    tools.mkdir(parents=True)
+    for name in ("tier_classifier.py", "tier_core_list.json"):
+        shutil.copyfile(PROJECT / "tests" / "tools" / name, tools / name)
+    base = rev(repo.root, "main")
+    candidate = commit(repo.wt, {"AGENTS.md": "rules\n"}, f"rules\n\n{CARD}")
+    with pytest.raises(pm.RefusedError, match="实施卡档次核验未过"):
+        pm._check_card_tier(repo.root, "> 档次：文档档", base, candidate)
+    pm._check_card_tier(repo.root, "> 档次：核心档", base, candidate)
+
+
+def test_formal_change_with_historical_branch_alias_checks_scope_and_audit(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = "CHG-SCPT-2026-733"
+    message = f"feat(board): [{change}] improve board\n\n领卡占位: {change}"
+    card = "SW-2026-008/04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-733_看板.md"
+    commit(repo.wt, {"docs/a.md": "prototype\n"}, f"docs(board): prototype\n\n{CARD}")
+    commit(repo.wt, {"docs/b.md": "board\n"}, message)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "没有本卡的实施卡" in capsys.readouterr().out
+    commit(repo.wt, {card: f"> 变更单：`{change}`\n"}, message)
+    order = repo.root / "SW-2026-008" / "04_监控" / "01_变更管理" / "01_变更单" / f"{change}.md"
+    order.parent.mkdir(parents=True)
+    order.write_text(
+        f"| 变更状态 | approved |\n| 涉及文件/交付物 | {card}<br>docs |\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "docs/b.md"])
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "超出实施卡可改范围：docs/a.md" in capsys.readouterr().out
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "docs"])
+    monkeypatch.setattr(pm, "_check_card_tier", lambda *_: None)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "独立审计凭证" in capsys.readouterr().out
+    assert not repo.gates
+    assert _audit(pm, repo, monkeypatch) == 0
+    assert run(pm, repo.root, "merge", "w1") == 0
+    saved = pm.read_log(repo.root)[-1]
+    assert saved["card"] == change
+    assert saved["user_paths"] == []
+    assert saved["audit"]["candidate"] == rev(repo.wt, "HEAD")
+    assert repo.gates == [False]
+
+
+def test_historical_change_reference_keeps_direct_merge(pm: ModuleType, repo: SimpleNamespace) -> None:
+    commit(
+        repo.wt, {"docs/example.md": "example\n"},
+        f"docs: add example\n\n参见历史 CHG-SCPT-2026-733。\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert "audit" not in pm.read_log(repo.root)[-1]
+
+
+def test_main_transaction_rechecks_the_reviewed_base(pm: ModuleType, repo: SimpleNamespace) -> None:
+    pm.write_mode(repo.root, "关")
+    commit(repo.wt, {"candidate.md": "ready\n"}, f"candidate\n\n{CARD}")
+    plan = pm.plan_merge(repo.root, "w1")
+    latest = commit(repo.root, {"other.md": "synced\n"}, "other main update")
+    with pytest.raises(pm.RefusedError, match="main 或候选已变动"):
+        pm.do_merge(repo.root, plan, pm.GateResult(True), "关")
+    assert rev(repo.root, "main") == latest
+    assert not (repo.root / "candidate.md").exists()
+    with pm._main_transaction(repo.root, latest, plan.sha) as transaction:
+        token = transaction.env[pm.TOKEN_ENV]
+        correct = f"{latest} {plan.sha} {pm.MAIN_REF}"
+        stale = f"{plan.base} {plan.sha} {pm.MAIN_REF}"
+        assert pm.hook_allows(repo.root, [correct, stale], token) == [stale]
+        assert pm.hook_allows(repo.root, [correct], None) == [correct]
 
 
 def test_deleting_files_outside_the_cockpit_needs_the_user(
@@ -299,8 +411,10 @@ def _deployed_archive(repo: SimpleNamespace) -> tuple[str, dict[str, bytes], str
         f"{infra}/releases/{release}/payload.txt": "unchanged\n",
         ledger: row + "base\n",
         record: "| 变更状态 | approved |\n",
-        "P/02_规划/311_归档_PM.md": f"{number}\n",
     }
+    card = "P/02_规划/311_归档_PM.md"
+    table = "\n".join(f"| `{path}` | 计划新增 |" for path in [*files, card])
+    files[card] = f"{number}\n\n| 路径 | 基线状态 |\n|---|---|\n{table}\n"
     commit(repo.wt, files, f"{number} 归档\n\n{CARD}")
     _change_order(repo.root, number, "approved")
     local = {
@@ -322,9 +436,10 @@ def _deployed_archive(repo: SimpleNamespace) -> tuple[str, dict[str, bytes], str
 
 
 def test_archive_adopts_existing_files_and_leaves_unrelated_edits(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, ledger = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     assert run(pm, repo.root, "install-hook") == 0
     assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 0
     assert rev(repo.root, "main^1") == base
@@ -337,9 +452,10 @@ def test_archive_adopts_existing_files_and_leaves_unrelated_edits(
 
 
 def test_archive_restores_git_index_if_reference_transaction_refuses(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     index = git(repo.root, "ls-files", "--stage").stdout
     hook = repo.root / ".git" / "hooks" / "reference-transaction"
     hook.write_bytes(b'#!/bin/sh\n[ "$1" != prepared ]\n')
@@ -356,6 +472,7 @@ def test_interrupted_archive_restores_only_archive_index_entries(
     pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     initial_index = git(repo.root, "ls-files", "--stage").stdout
     original_run = pm.Git.run
     stage_calls = 0
@@ -380,9 +497,10 @@ def test_interrupted_archive_restores_only_archive_index_entries(
 
 
 def test_archive_does_not_overwrite_an_ignored_local_document(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     card = "P/02_规划/311_归档_PM.md"
     (repo.root / ".git" / "info" / "exclude").write_bytes(f"{card}\n".encode())
     override = repo.root / card
@@ -402,6 +520,64 @@ def test_unrelated_uncommitted_changes_in_the_control_root_are_refused(
     (repo.root / "README.md").write_text("edited in the control root\n", encoding="utf-8")
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "控制根有未提交的改动" in capsys.readouterr().out
+
+
+def _local_governance_records(pm: ModuleType, repo: SimpleNamespace) -> tuple[str, str, str]:
+    ledger = pm.GOVERNANCE_LEDGER
+    completed = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-732.md"
+    active = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-733.md"
+    commit(repo.root, {ledger: "tracked ledger\n", completed: "tracked order\n"}, "existing governance")
+    git(repo.wt, "merge", "--quiet", "main")
+    for path in (ledger, completed, active):
+        (repo.root / path).write_bytes(b"local record\r\n")
+    return ledger, completed, active
+
+
+def test_merge_preserves_unrelated_governance_records(pm: ModuleType, repo: SimpleNamespace) -> None:
+    paths = _local_governance_records(pm, repo)
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert all((repo.root / path).read_bytes() == b"local record\r\n" for path in paths)
+    assert git(repo.root, "ls-tree", "--name-only", "main", "--", paths[2]).stdout == ""
+    assert git(repo.root, "diff", "--name-only", "main^1", "main").stdout.strip() == "docs/new.md"
+    entry = pm.read_log(repo.root)[-1]
+    assert set(entry["preserved_governance"]) == set(paths)
+    assert entry["governance_drift"] == []
+
+
+@pytest.mark.parametrize("problem", ["overlap", "staged"])
+def test_governance_preservation_refuses_overlap_or_a_staged_index(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, problem: str,
+) -> None:
+    ledger, _completed, _active = _local_governance_records(pm, repo)
+    base = rev(repo.root, "main")
+    path = ledger if problem == "overlap" else "other.md"
+    commit(repo.wt, {path: "incoming\n"}, f"docs\n\n{CARD}")
+    if problem == "staged":
+        (repo.root / path).write_bytes(b"incoming\n")
+        git(repo.root, "add", "--", path)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    expected = "未提交的变更记录重叠" if problem == "overlap" else "有已暂存内容"
+    assert expected in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / ledger).read_bytes() == b"local record\r\n"
+
+
+def test_governance_change_during_precheck_leaves_main_and_new_bytes_intact(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger, _completed, _active = _local_governance_records(pm, repo)
+    base = rev(repo.root, "main")
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+
+    def concurrent_status_update(_root: Path, _worktree: Path, _full: bool) -> Any:
+        (repo.root / ledger).write_bytes(b"new local record\n")
+        return pm.GateResult(True)
+
+    monkeypatch.setattr(pm, "run_gates", concurrent_status_update)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert rev(repo.root, "main") == base
+    assert (repo.root / ledger).read_bytes() == b"new local record\n"
 
 
 def test_the_hook_blocks_direct_changes_to_main(pm: ModuleType, repo: SimpleNamespace) -> None:
@@ -533,7 +709,7 @@ def test_control_root_copies_chunks_git_status_calls_for_many_untracked_files(
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(root_git, "run", spy_run)
-    replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files))
+    replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files)).replace
     assert len(status_batches) >= 2
     assert replace == sorted(files)
 

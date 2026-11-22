@@ -140,13 +140,14 @@ def create_card(
     "--card-file",
     required=True,
     type=CallerPath(exists=True, dir_okay=False, path_type=Path),
-    help="Markdown implementation card to precheck (read-only)",
+    help="Markdown implementation card in the control root or a managed worktree (read-only)",
 )
 @click.option("--pid", "project_id", default=None, help="Project the Work will be created for")
 @click.pass_context
 def precheck_card(ctx: click.Context, card_file: Path, project_id: str | None) -> None:
     """Card 027 §5.3: commands, paths and baseline; new-format cards also basis and change order.
 
+    A managed worktree supplies the card. Paths and governance references are resolved in the control root.
     Exit 0 only when every check passes."""
     app_ctx: AppContext = ctx.find_root().obj
     report = precheck_markdown_card(

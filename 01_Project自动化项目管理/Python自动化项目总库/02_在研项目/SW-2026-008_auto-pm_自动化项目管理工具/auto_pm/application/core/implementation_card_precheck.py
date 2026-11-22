@@ -30,7 +30,12 @@ from auto_pm.application.core import implementation_card_baseline as card_baseli
 from auto_pm.application.core import implementation_card_basis as basis
 from auto_pm.application.core import implementation_card_tier as card_tier
 from auto_pm.contracts.implementation_card import ImplementationCard
-from auto_pm.infrastructure.control_root_guard import clean_git_environment
+from auto_pm.infrastructure.control_root_guard import (
+    ControlRootGuardError,
+    clean_git_environment,
+    require_governed_worktree,
+    require_safe_workspace_path,
+)
 
 BASELINE_EXISTS = "存在"
 BASELINE_PLANNED = "计划新增"
@@ -364,8 +369,16 @@ def precheck_markdown_card(
     """Precheck one hand-written Markdown card; pure read, fail-closed findings.
 
     ``project_id`` (the Work's ``--pid``) is compared with the project a new-format card lives in.
+    Cards from a managed worktree use its repository-relative project path.
     """
 
+    try:
+        card_file, control_card = _card_locations(card_file, workspace_root)
+    except ControlRootGuardError as error:
+        return PrecheckReport(
+            str(card_file), "", "", "", (), (),
+            (PrecheckFinding("location", str(card_file), str(error)),),
+        )
     raw = card_file.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     findings: list[PrecheckFinding] = []
@@ -389,7 +402,7 @@ def precheck_markdown_card(
     header = _machine_header(lines)
     basis_header = basis.parse_header(lines)
     new_format = basis.is_new_format(card_file, basis_header)
-    project_root = _project_root(card_file, workspace_root) if new_format else None
+    project_root = _project_root(control_card, workspace_root) if new_format else None
     for key, values in header.items():
         if len(values) > 1:
             findings.append(PrecheckFinding("header", key, f"头部字段 `{key}：` 重复出现 {len(values)} 次"))
@@ -441,7 +454,7 @@ def precheck_markdown_card(
         findings.extend(
             PrecheckFinding(item.rule, item.subject, item.message)
             for item in basis.basis_findings(
-                card_file,
+                control_card,
                 basis_header,
                 workspace_root=workspace_root,
                 paths=card_paths,
@@ -463,6 +476,24 @@ def precheck_markdown_card(
         basis=basis_header.basis,
         change=basis_header.change_id,
     )
+
+
+def _card_locations(card_file: Path, workspace_root: Path) -> tuple[Path, Path]:
+    """Resolve candidate bytes separately from the control root's governance files."""
+    root = workspace_root.resolve()
+    managed = root / ".auto-pm" / "worktrees"
+    requested = card_file.absolute()
+    if not requested.is_relative_to(managed):
+        return card_file, card_file
+    relative = requested.relative_to(managed)
+    if len(relative.parts) < 2:
+        raise ControlRootGuardError("实施卡必须位于受管工位内")
+    worktree = require_governed_worktree(root, managed / relative.parts[0])
+    source = require_safe_workspace_path(worktree, requested, label="工位实施卡")
+    control_card = require_safe_workspace_path(
+        root, root / source.relative_to(worktree), label="实施卡对应控制根路径",
+    )
+    return source, control_card
 
 
 def _machine_header(lines: Sequence[str]) -> dict[str, list[str]]:
