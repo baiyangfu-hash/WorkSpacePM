@@ -774,7 +774,10 @@ def test_flow001_direct_card_line_does_not_allow_multiple_projects(
     assert "暂存生产代码归属项目不唯一: SW-2026-008, SW-2026-009" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("protected_path", [PROTECTED_PROBE, f"{RELEASE_TREE}/auto_pm/__init__.py"])
+@pytest.mark.parametrize(
+    "protected_path",
+    [PROTECTED_PROBE, f"{RELEASE_TREE}/auto_pm/__init__.py", "AGENTS.md", ".github/workflows/gate.yml"],
+)
 def test_flow001_protected_production_code_with_only_a_card_line_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], protected_path: str
 ) -> None:
@@ -788,14 +791,15 @@ def test_flow001_protected_production_code_with_only_a_card_line_is_refused(
     assert "未绑定变更单" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("protected_path", [PROTECTED_PROBE, "AGENTS.md", ".github/workflows/gate.yml"])
 def test_flow001_protected_production_code_passes_with_an_approved_change_order(
-    tmp_path: Path,
+    tmp_path: Path, protected_path: str,
 ) -> None:
     cand, ctrl, _msg = _make_dual_root_fixture(tmp_path)
-    protected = cand / PROTECTED_PROBE
+    protected = cand / protected_path
     protected.parent.mkdir(parents=True, exist_ok=True)
     protected.write_text("VALUE = 1\n", encoding="utf-8")
-    _git(cand, "add", PROTECTED_PROBE)
+    _git(cand, "add", protected_path)
     msg = cand / "COMMIT_EDITMSG"
     msg.write_text("fix(core): [CHG-SCPT-2026-346] 钩子小修\n", encoding="utf-8")
     assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0
@@ -1061,7 +1065,6 @@ def test_td194_production_files_with_lookalike_names_are_not_exempt(path: str) -
         "proj/scratch/try.py",
         "proj/src/test_parser.py",
         ".auto-pm/worktrees/x/a.py",
-        "00_Obsidian_Base全局规范文件仓库/tools/x.py",
         "PM_SESSION_20261001.py",
     ],
 )
@@ -1072,6 +1075,19 @@ def test_td194_real_test_doc_scratch_paths_stay_exempt(path: str) -> None:
 
 def test_td194_only_production_extensions_count() -> None:
     assert filter_production_files(["src/a.md", "src/b.py", "src/c.txt", "src/d.qml"]) == ["src/b.py", "src/d.qml"]
+
+
+def test_protected_paths_override_generic_production_exclusions() -> None:
+    paths = ["roles/test-engineer/SKILL.md", "00_Obsidian_Base全局规范文件仓库/tools/x.py"]
+    assert filter_production_files(paths) == paths
+
+
+def test_plc_documentation_keeps_its_dedicated_hook() -> None:
+    project = "0100_PLC自动化/DJ-TEST-001"
+    document = f"{project}/02_PLC程序/接口契约_INT.md"
+    source = f"{project}/02_PLC程序/FB_Pump.scl"
+    assert is_protected_production_file(document)
+    assert filter_production_files([document, source, "AGENTS.md"]) == [source, "AGENTS.md"]
 
 
 def test_production_extension_match_ignores_case() -> None:

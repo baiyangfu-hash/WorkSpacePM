@@ -86,6 +86,55 @@ def _messages(report: PrecheckReport) -> str:
     return " | ".join(f"{item.rule}:{item.subject}:{item.message}" for item in report.findings)
 
 
+@pytest.mark.parametrize("monitor", ["04_监控", "11_监控"])
+def test_managed_worktree_card_uses_project_paths_and_control_root_evidence(
+    tmp_path: Path, monitor: str,
+) -> None:
+    project = "SW-2099-001_测试"
+    repo_path = f"{project}/src/service.py"
+    requirement = f"{project}/需求说明_REQ.md"
+    baseline = _repository(tmp_path, (repo_path, requirement))
+    (tmp_path / requirement).write_text("| A3 | 核对工位实施卡 |\n", encoding="utf-8")
+    worktree = tmp_path / ".auto-pm" / "worktrees" / "codex-abc123"
+    _git(tmp_path, "worktree", "add", "--detach", str(worktree), baseline)
+    cabinet = Path(project) / monitor / "01_变更管理"
+    change = cabinet / "01_变更单" / "CHG-SCPT" / "CHG-SCPT-2099-001.md"
+    control_order = tmp_path / change
+    control_order.parent.mkdir(parents=True)
+    control_order.write_text("# 已登记的控制根变更单\n", encoding="utf-8")
+    card = worktree / cabinet / "03_实施卡" / "CARD-SW-2099-001-001_测试.md"
+    card.parent.mkdir(parents=True)
+    card.write_text(
+        "# 工位实施卡\n\n"
+        "> 依据：`需求说明_REQ.md`、`A3`\n"
+        "> 变更单：`CHG-SCPT-2099-001`\n"
+        f"> 隔离基线：`{baseline}`\n\n"
+        "| 路径 | 基线状态 |\n|---|---|\n| `src/service.py` | 存在 |\n",
+        encoding="utf-8",
+    )
+    report = _check(tmp_path, card)
+    assert report.passed, _messages(report)
+    assert report.card == str(card)
+    assert report.path_root == project
+    assert [item.path for item in report.paths] == [repo_path]
+
+    worktree_order = worktree / change
+    worktree_order.parent.mkdir(parents=True)
+    control_order.rename(worktree_order)
+    report = _check(tmp_path, card)
+    assert [item.rule for item in report.findings] == ["change"], _messages(report)
+
+
+def test_card_under_worktree_directory_must_be_in_a_real_linked_worktree(tmp_path: Path) -> None:
+    _repository(tmp_path)
+    directory = tmp_path / ".auto-pm" / "worktrees" / "unregistered"
+    directory.mkdir(parents=True)
+    card = directory / "card.md"
+    card.write_text("# 临时文件\n", encoding="utf-8")
+    report = _check(tmp_path, card)
+    assert [item.rule for item in report.findings] == ["location"]
+
+
 # ---- G2: the two historical incidents, with inputs equivalent to the real cards ----------------
 
 
