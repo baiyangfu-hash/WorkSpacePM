@@ -15,6 +15,7 @@ import pytest
 from auto_pm.application.core import release_deploy as rd
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core import release_wiring as rw
+from auto_pm.application.core.release_deploy_check import Preflight
 from auto_pm.application.core.release_ledger import LedgerError
 
 NEW, OLD, OLDER = "1.3.3-abcdef0", "1.3.3-1234567", "1.3.3-7654321"
@@ -426,7 +427,7 @@ def test_real_deploy_hands_each_pointer_to_the_right_slot(tmp_path: Path, monkey
     card, drill = tmp_path / "card.md", tmp_path / "drill.py"
     card.write_text("c", encoding="utf-8")
     drill.write_text("d", encoding="utf-8")
-    report = rw.Preflight(release_id=NEW, commit="b" * 40, active_release=OLD)
+    report = Preflight(release_id=NEW, commit="b" * 40, active_release=OLD)
 
     result = rw.real_deploy(tmp_path, report, approver="fubai", confirm_ref="user-confirmation:cmsg_001", card_file=card, drill_script=drill)
 
@@ -452,7 +453,7 @@ def test_the_backup_a_real_deploy_makes_is_one_a_rollback_will_accept(tmp_path: 
     card.write_text("c", encoding="utf-8")
     drill.write_text("d", encoding="utf-8")
 
-    report = rw.Preflight(release_id=NEW, commit="c" * 40, active_release=OLD)
+    report = Preflight(release_id=NEW, commit="c" * 40, active_release=OLD)
     rw.real_deploy(tmp_path, report, approver="fubai", confirm_ref="user-confirmation:cmsg_001", card_file=card, drill_script=drill)
 
     ops._check_backup_inside_reports(tmp_path, seen["deploy"]["backup"])  # noqa: SLF001 - the contract between the two modules
@@ -461,7 +462,7 @@ def test_the_backup_a_real_deploy_makes_is_one_a_rollback_will_accept(tmp_path: 
 def test_real_deploy_stops_on_a_bad_hook_before_opening_its_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _capture_real_deploy(tmp_path, monkeypatch)
     monkeypatch.setattr(rw, "hook_dry_run", lambda _root: (False, "wrong tools"))
-    report = rw.Preflight(release_id=NEW, commit="b" * 40, active_release=OLD)
+    report = Preflight(release_id=NEW, commit="b" * 40, active_release=OLD)
 
     with pytest.raises(rd.DeployError, match="切换前提交钩子干跑失败"):
         rw.real_deploy(
