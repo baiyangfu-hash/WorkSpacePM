@@ -207,6 +207,10 @@ def read_page(root: Path, reads: tuple[shell.PageRead, ...], project_id: str, ru
         if read.needs_project and not project_id:
             results.append(c.ReadResult(read.reader, shown, skipped="没有受管项目可读（工程工位默认项目是空的）"))
             continue
+        if runner is None and not (root / "main.py").is_file():
+            results.append(c.ReadResult(read.reader, shown,
+                                        actions.ReadOutcome("spawn_failed", shown, None, detail="控制根里没有 main.py")))
+            continue
         try:
             outcome = actions.run_read(root, argv, runner) if runner else actions.run_read(root, argv)
             try:

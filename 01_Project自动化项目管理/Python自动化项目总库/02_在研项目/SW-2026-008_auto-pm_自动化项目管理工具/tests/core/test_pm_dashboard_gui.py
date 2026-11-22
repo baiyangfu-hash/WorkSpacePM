@@ -737,6 +737,8 @@ def test_lifecycle_buttons_only_appear_on_their_own_page(qapp: QApplication, tmp
         window.goto(key)
         qapp.processEvents()
         count()
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
     assert seen["project"] & LIFECYCLE_WORDS == LIFECYCLE_WORDS  # 五个键都真的画出来过，不是空清点
     for key in ("home", "issues", "projects"):
         assert not seen[key] & LIFECYCLE_WORDS, (key, seen[key] & LIFECYCLE_WORDS)
