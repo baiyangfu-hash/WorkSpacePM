@@ -71,6 +71,7 @@ OUTPUT_TAIL = 60
 CHG_ID_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
 CHG_STATE_RE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
 LEDGER_SEP_RE = re.compile(r"^\|[\s\-:|]+\|$")
+COMPLETED_LEDGER_MARKERS = ("已关闭", "已完成", "completed")
 SKIP_CHANGE_DIRS = frozenset({".git", ".auto-pm", ".venv", "node_modules", "__pycache__"})
 
 # 只在 PLC 项目上跑的步骤（项目登记表里 project_root 在 0100_PLC自动化/ 下）。
@@ -605,6 +606,9 @@ def _print_change_archive_summary(summary: Mapping[str, Any], out: Callable[[str
             f"- ⚠ {item['note']}：{item['chg']}（历史合并 {item['merge_sha'][:8]}，"
             f"当前本机状态 {item['status']}）"
         )
+    duplicates = summary.get("duplicate_chgs") or {}
+    for chg, paths in sorted(duplicates.items()):
+        out(f"- ⚠ 存在重复变更单文件（archive-changes 将拒绝归档）：{chg}（{'、'.join(paths)}）")
 
 
 def _git_read_bytes(root: Path, *args: str) -> tuple[int, bytes]:
@@ -620,9 +624,47 @@ def _git_read_bytes(root: Path, *args: str) -> tuple[int, bytes]:
     return int(done.returncode), done.stdout
 
 
+def _index_table_bounds(lines: Sequence[str]) -> tuple[int, int, int] | None:
+    heading_idx: int | None = None
+    sep_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if sep_idx is None:
+            if stripped.startswith("#") and "变更单索引" in stripped:
+                heading_idx = idx
+                continue
+            if heading_idx is None:
+                continue
+            if not stripped:
+                continue
+            if stripped.startswith("|"):
+                if LEDGER_SEP_RE.match(stripped):
+                    sep_idx = idx
+                continue
+            heading_idx = None
+        else:
+            if stripped and not stripped.startswith("|"):
+                assert heading_idx is not None
+                return heading_idx, sep_idx, idx
+    if heading_idx is not None and sep_idx is not None:
+        return heading_idx, sep_idx, len(lines)
+    return None
+
+
+def _is_completed_ledger_row(line: str) -> bool:
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    status_cell = cells[-1] if cells else ""
+    return any(marker in status_cell for marker in COMPLETED_LEDGER_MARKERS)
+
+
 def _ledger_row_map(text: str) -> dict[str, list[str]]:
+    lines = text.splitlines()
+    bounds = _index_table_bounds(lines)
+    if bounds is None:
+        return {}
+    _, sep_idx, end_idx = bounds
     rows: dict[str, list[str]] = {}
-    for line in text.splitlines():
+    for line in lines[sep_idx + 1 : end_idx]:
         stripped = line.strip()
         if not stripped.startswith("|") or LEDGER_SEP_RE.match(stripped):
             continue
@@ -673,12 +715,18 @@ def change_archive_summary(root: Path, pid: str, *, github_mode: str = "") -> di
     ledger_rel = ledger_path.relative_to(root).as_posix()
 
     disk_chgs: dict[str, tuple[Path, str]] = {}
+    duplicate_chgs: dict[str, list[str]] = {}
     for folder, dirs, files in os.walk(chg_dir):
         dirs[:] = sorted(name for name in dirs if name not in SKIP_CHANGE_DIRS)
         for name in sorted(files):
             if name.endswith(".md") and CHG_ID_RE.fullmatch(Path(name).stem):
+                stem = Path(name).stem
                 file_path = Path(folder) / name
-                disk_chgs[Path(name).stem] = (file_path, file_path.relative_to(root).as_posix())
+                rel_path = file_path.relative_to(root).as_posix()
+                if stem in disk_chgs:
+                    duplicate_chgs.setdefault(stem, [disk_chgs[stem][1]]).append(rel_path)
+                else:
+                    disk_chgs[stem] = (file_path, rel_path)
 
     rc_diff, out_diff = _git_read_bytes(
         root, "diff", "--name-only", "-z", "--no-renames", "main", "--", chg_rel
@@ -728,11 +776,24 @@ def change_archive_summary(root: Path, pid: str, *, github_mode: str = "") -> di
         if not file_missing and not file_modified and not ledger_diff:
             continue
         if state == "completed":
-            reason = (
-                "原件未入主线"
-                if file_missing
-                else ("原件待同步到主线" if file_modified else "台账已完成行待同步到主线")
-            )
+            local_list = local_rows.get(chg, [])
+            ledger_ready = len(local_list) == 1 and _is_completed_ledger_row(local_list[0])
+            if not ledger_ready:
+                reason = (
+                    "原件未入主线且本机台账未对齐，请先对账"
+                    if file_missing
+                    else (
+                        "原件待同步且本机台账未对齐，请先对账"
+                        if file_modified
+                        else "本机台账未对齐完成态，请先对账"
+                    )
+                )
+            else:
+                reason = (
+                    "原件未入主线"
+                    if file_missing
+                    else ("原件待同步到主线" if file_modified else "台账已完成行待同步到主线")
+                )
             completed_pending.append({"chg": chg, "path": rel_path, "reason": reason})
         else:
             in_progress_untracked.append(
@@ -780,6 +841,7 @@ def change_archive_summary(root: Path, pid: str, *, github_mode: str = "") -> di
         "completed_pending": completed_pending,
         "in_progress_untracked": in_progress_untracked,
         "historical_off_main": sorted(historical_off_main, key=lambda item: item["chg"]),
+        "duplicate_chgs": duplicate_chgs,
     }
 
 

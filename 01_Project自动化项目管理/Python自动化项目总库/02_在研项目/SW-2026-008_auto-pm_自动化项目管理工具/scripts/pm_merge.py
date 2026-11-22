@@ -1553,6 +1553,33 @@ def _git_blob(root: Path, ref: str, rel_path: str) -> bytes | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def _index_table_bounds(lines: Sequence[str]) -> tuple[int, int, int] | None:
+    heading_idx: int | None = None
+    sep_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if sep_idx is None:
+            if stripped.startswith("#") and "变更单索引" in stripped:
+                heading_idx = idx
+                continue
+            if heading_idx is None:
+                continue
+            if not stripped:
+                continue
+            if stripped.startswith("|"):
+                if LEDGER_SEP_RE.match(stripped):
+                    sep_idx = idx
+                continue
+            heading_idx = None
+        else:
+            if stripped and not stripped.startswith("|"):
+                assert heading_idx is not None
+                return heading_idx, sep_idx, idx
+    if heading_idx is not None and sep_idx is not None:
+        return heading_idx, sep_idx, len(lines)
+    return None
+
+
 def _ledger_row_change(line: str) -> str | None:
     stripped = line.strip()
     if not stripped.startswith("|") or LEDGER_SEP_RE.match(stripped):
@@ -1565,9 +1592,14 @@ def _ledger_row_change(line: str) -> str | None:
 
 
 def _ledger_entries(text: str) -> tuple[list[str], dict[str, list[str]]]:
+    lines = text.splitlines()
+    bounds = _index_table_bounds(lines)
+    if bounds is None:
+        return [], {}
+    _, sep_idx, end_idx = bounds
     order: list[str] = []
     rows: dict[str, list[str]] = {}
-    for line in text.splitlines():
+    for line in lines[sep_idx + 1 : end_idx]:
         chg = _ledger_row_change(line)
         if chg is None:
             continue
@@ -1583,12 +1615,18 @@ def _is_completed_ledger_row(line: str) -> bool:
     return any(marker in status_cell for marker in COMPLETED_LEDGER_MARKERS)
 
 
-def _uses_blank_row_spacing(lines: Sequence[str], sep_idx: int) -> bool:
-    non_empty = [idx for idx in range(sep_idx + 1, len(lines)) if lines[idx].strip()]
+def _uses_blank_row_spacing(lines: Sequence[str], sep_idx: int, end_idx: int) -> bool:
+    non_empty = [idx for idx in range(sep_idx + 1, end_idx) if lines[idx].strip()]
     return len(non_empty) >= 2 and any(not lines[k].strip() for k in range(non_empty[0] + 1, non_empty[1]))
 
 
 def _project_ledger(base_text: str, local_text: str, selected: Sequence[str]) -> str:
+    local_lines = local_text.splitlines()
+    local_bounds = _index_table_bounds(local_lines)
+    if local_bounds is None:
+        raise RefusedError("本机版本变更台账缺少「变更单索引」表，请先运行 main.py ledger reconcile 对齐")
+    local_heading, local_sep, local_end = local_bounds
+
     local_order, local_rows_map = _ledger_entries(local_text)
     selected_set = set(selected)
     local_rows: dict[str, str] = {}
@@ -1598,48 +1636,63 @@ def _project_ledger(base_text: str, local_text: str, selected: Sequence[str]) ->
             raise RefusedError(f"变更单 {chg} 在本机台账缺少唯一完成态记录，无法归档")
         local_rows[chg] = rows[0]
 
-    local_lines = local_text.splitlines()
-    local_sep = next((i for i, line in enumerate(local_lines) if LEDGER_SEP_RE.match(line.strip())), None)
+    use_local_blank = _uses_blank_row_spacing(local_lines, local_sep, local_end)
     if base_text.strip():
         base_lines = base_text.splitlines()
+        orig_base_bounds = _index_table_bounds(base_lines)
+        if orig_base_bounds is None:
+            working_lines = list(base_lines)
+            if working_lines and working_lines[-1].strip():
+                working_lines.append("")
+            working_lines.extend(local_lines[local_heading : local_sep + 1])
+            base_bounds = _index_table_bounds(working_lines)
+            if base_bounds is None:
+                raise RefusedError("无法在主线版本变更台账定位「变更单索引」表，无法投影")
+        else:
+            working_lines = list(base_lines)
+            base_bounds = orig_base_bounds
+        _, base_sep, base_end = base_bounds
+        prefix = list(working_lines[: base_sep + 1])
+        suffix = list(working_lines[base_end:])
         updated: set[str] = set()
-        out_lines: list[str] = []
-        for line in base_lines:
+        body: list[str] = []
+        for line in working_lines[base_sep + 1 : base_end]:
             row_chg = _ledger_row_change(line)
             if row_chg is not None and row_chg in selected_set:
-                out_lines.append(local_rows[row_chg])
+                body.append(local_rows[row_chg])
                 updated.add(row_chg)
             else:
-                out_lines.append(line)
+                body.append(line)
         to_insert = [chg for chg in local_order if chg in selected_set and chg not in updated]
+        insert_block: list[str] = []
         if to_insert:
-            sep_idx = next((i for i, line in enumerate(out_lines) if LEDGER_SEP_RE.match(line.strip())), None)
-            if sep_idx is None:
-                raise RefusedError("主线版本变更台账缺少表头分隔行，无法投影")
-            use_blank = _uses_blank_row_spacing(out_lines, sep_idx) or (
-                local_sep is not None and _uses_blank_row_spacing(local_lines, local_sep)
-            )
-            insert_block: list[str] = []
+            use_blank = _uses_blank_row_spacing(working_lines, base_sep, base_end) or use_local_blank
             for chg in to_insert:
                 insert_block.append(local_rows[chg])
                 if use_blank:
                     insert_block.append("")
-            after_sep = out_lines[sep_idx + 1 :]
-            if use_blank and insert_block and (not after_sep or not after_sep[0].strip()):
+            if use_blank and insert_block and (not body or not body[0].strip()):
                 insert_block.pop()
-            out_lines = [*out_lines[: sep_idx + 1], *insert_block, *after_sep]
+        out_lines = [*prefix, *insert_block, *body, *suffix]
     else:
-        if local_sep is None:
-            raise RefusedError("本机版本变更台账缺少表头分隔行，无法投影")
-        use_blank = _uses_blank_row_spacing(local_lines, local_sep)
-        out_lines = list(local_lines[: local_sep + 1])
+        prefix = list(local_lines[: local_sep + 1])
+        suffix = list(local_lines[local_end:])
         chosen = [chg for chg in local_order if chg in selected_set]
+        chosen_block: list[str] = []
         for idx, chg in enumerate(chosen):
-            out_lines.append(local_rows[chg])
-            if use_blank and idx + 1 < len(chosen):
-                out_lines.append("")
+            chosen_block.append(local_rows[chg])
+            if use_local_blank and idx + 1 < len(chosen):
+                chosen_block.append("")
+        out_lines = [*prefix, *chosen_block, *suffix]
 
     projected = "\n".join(out_lines) + "\n"
+    proj_lines = projected.splitlines()
+    proj_bounds = _index_table_bounds(proj_lines)
+    if proj_bounds is None:
+        raise RefusedError("台账投影结果缺少「变更单索引」表，已保留现场")
+    _, proj_sep, proj_end = proj_bounds
+    if proj_lines[: proj_sep + 1] != prefix or proj_lines[proj_end:] != suffix:
+        raise RefusedError("台账投影意外改动了「变更单索引」之外的章节，已保留现场")
     _, proj_rows_map = _ledger_entries(projected)
     _, base_rows_map = _ledger_entries(base_text)
     for chg in selected_set:
@@ -1806,8 +1859,8 @@ def _execute_archive_plan(root: Path, plan: ArchivePlan, mode: str) -> dict[str,
                 root_git.run("read-tree", base, check=True)
             reason = "操作中断" if isinstance(exc, KeyboardInterrupt) else str(exc)
             raise RefusedError(f"归档变更单失败，控制根记录已保持：{reason}") from exc
-        if _file_snapshots(root, sorted(plan.snapshots)) != plan.snapshots:
-            raise RefusedError("归档后发现本机变更记录与归档前不一致，请核对控制根")
+        post_snaps = _file_snapshots(root, sorted(plan.snapshots))
+        drift = sorted(path for path, digest in post_snaps.items() if plan.snapshots.get(path) != digest)
 
     entry: dict[str, Any] = {
         "time": _now(),
@@ -1821,6 +1874,8 @@ def _execute_archive_plan(root: Path, plan: ArchivePlan, mode: str) -> dict[str,
         "mode": mode,
         "pushed": False,
     }
+    if drift:
+        entry["governance_drift"] = drift
     if mode != "关":
         push = root_git.run(
             "push", "--quiet", "origin", f"{commit_sha}:{MAIN_REF}", timeout=NET_TIMEOUT * 2
@@ -1870,7 +1925,10 @@ def cmd_archive_changes(
         f"已归档 {pid} 的 {len(plan.selected)} 张已完成变更单（{'、'.join(plan.selected)}）进 main："
         f"提交 {entry['merge_sha'][:8]}"
     )
-    print("未选中变更单与本机台账工作区副本均逐字节保留")
+    if entry.get("governance_drift"):
+        print("归档后发现本机变更记录有并发更新，请核对：" + "、".join(entry["governance_drift"]))
+    else:
+        print("未选中变更单与本机台账工作区副本均逐字节保留")
     if mode == "关":
         print("GitHub 关着，没有推送")
     elif entry["pushed"]:
@@ -1891,7 +1949,8 @@ def utf8_output() -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     utf8_output()
     parser = argparse.ArgumentParser(
-        prog="pm_merge.py", description="本机合并，GitHub 按需使用（卡 311）"
+        prog="pm_merge.py",
+        description="本机合并与受控变更单归档，GitHub 按需使用（CHG-SCPT-2026-718 / 735）",
     )
     parser.add_argument(
         "--root", type=Path, default=DEFAULT_ROOT, help="控制根（默认按本脚本位置推出）"

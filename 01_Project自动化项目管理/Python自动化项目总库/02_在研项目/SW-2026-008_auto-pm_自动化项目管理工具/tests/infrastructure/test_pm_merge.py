@@ -794,6 +794,8 @@ def _ledger_doc(rows: list[str], *, blank_between: bool = True, eol: str = "\n")
     head = [
         "# 版本变更台账",
         "",
+        "## 变更单索引",
+        "",
         "| 序号 | 变更单 | 说明 | 日期 | 状态 |",
         "|------|--------|------|------|------|",
     ]
@@ -1043,3 +1045,126 @@ def test_archive_changes_rejects_uncompleted_explicit_chg_and_missing_ledger_row
     assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--chg", "CHG-SCPT-2026-727") == 1
     assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--chg", "CHG-SCPT-2026-702") == 1
     assert rev(repo.root, "main") == before_main
+
+
+def test_project_ledger_anchors_index_section_on_multitable_ledger(pm: ModuleType) -> None:
+    base_text = "\n".join(
+        [
+            "# 版本变更台帐 - DJ-2026-009",
+            "",
+            "## 1. 变更统计一览",
+            "",
+            "| 变更类型 | 累计数量 | 待处理 | 已验证/关闭 |",
+            "|:---|:---:|:---:|:---:|",
+            "| **CHG-PLC** | 1 | 0 | 1 |",
+            "",
+            "## 2. 变更明细台账 (引用模式)",
+            "",
+            "| 变更编号 | 变更标题 | 状态 |",
+            "|:---|:---|:---:|",
+            "| CHG-PLC-2026-001 | 历史记录 | 已关闭 |",
+            "",
+            "## 变更单索引",
+            "",
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |",
+            "|------|----------|------|--------|----------|----------|----------|------|",
+            "| 002 | [→ CHG-PLC-2026-006](./01_变更单/CHG-PLC/CHG-PLC-2026-006.md) | PLC | u | 2026-11-06 | 描述6 | | 🔄实施中 |",
+            "",
+            "| 001 | [→ CHG-PLC-2026-005](./01_变更单/CHG-PLC/CHG-PLC-2026-005.md) | PLC | u | 2026-11-05 | 描述5 | 2026-11-06 | ✅已关闭 |",
+            "",
+            "## 3. 备注",
+            "",
+            "保留尾部注释。",
+            "",
+        ]
+    )
+    local_text = "\n".join(
+        [
+            "# 版本变更台帐 - DJ-2026-009",
+            "",
+            "## 1. 变更统计一览",
+            "",
+            "| 变更类型 | 累计数量 | 待处理 | 已验证/关闭 |",
+            "|:---|:---:|:---:|:---:|",
+            "| **CHG-PLC** | 1 | 0 | 1 |",
+            "",
+            "## 2. 变更明细台账 (引用模式)",
+            "",
+            "| 变更编号 | 变更标题 | 状态 |",
+            "|:---|:---|:---:|",
+            "| CHG-PLC-2026-001 | 历史记录 | 已关闭 |",
+            "",
+            "## 变更单索引",
+            "",
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |",
+            "|------|----------|------|--------|----------|----------|----------|------|",
+            "| 004 | [→ CHG-PLC-2026-008](./01_变更单/CHG-PLC/CHG-PLC-2026-008.md) | PLC | u | 2026-11-10 | 未选实施中 | | 🔄实施中 |",
+            "",
+            "| 003 | [→ CHG-PLC-2026-007](./01_变更单/CHG-PLC/CHG-PLC-2026-007.md) | PLC | u | 2026-11-09 | 描述7 | 2026-11-09 | ✅已关闭 |",
+            "",
+            "| 002 | [→ CHG-PLC-2026-006](./01_变更单/CHG-PLC/CHG-PLC-2026-006.md) | PLC | u | 2026-11-06 | 描述6 | 2026-11-09 | ✅已关闭 |",
+            "",
+            "| 001 | [→ CHG-PLC-2026-005](./01_变更单/CHG-PLC/CHG-PLC-2026-005.md) | PLC | u | 2026-11-05 | 描述5 | 2026-11-06 | ✅已关闭 |",
+            "",
+            "## 3. 备注",
+            "",
+            "保留尾部注释。",
+            "",
+        ]
+    )
+
+    projected = pm._project_ledger(base_text, local_text, ["CHG-PLC-2026-006", "CHG-PLC-2026-007"])
+    lines = projected.splitlines()
+    stats_sep = lines.index("|:---|:---:|:---:|:---:|")
+    assert lines[stats_sep + 1] == "| **CHG-PLC** | 1 | 0 | 1 |"
+    assert "CHG-PLC-2026-001 | 历史记录" in projected
+    assert lines[-2:] == ["## 3. 备注", ""] or lines[-3:] == ["## 3. 备注", "", "保留尾部注释。"]
+    idx_sep = lines.index("|------|----------|------|--------|----------|----------|----------|------|")
+    assert "CHG-PLC-2026-007" in lines[idx_sep + 1]
+    assert "CHG-PLC-2026-006" in projected and "✅已关闭" in projected
+    assert "CHG-PLC-2026-008" not in projected
+
+    base_without_index = "\n".join(base_text.splitlines()[:14]) + "\n"
+    projected_boot = pm._project_ledger(base_without_index, local_text, ["CHG-PLC-2026-007"])
+    boot_lines = projected_boot.splitlines()
+    boot_stats_sep = boot_lines.index("|:---|:---:|:---:|:---:|")
+    assert boot_lines[boot_stats_sep + 1] == "| **CHG-PLC** | 1 | 0 | 1 |"
+    assert "## 变更单索引" in boot_lines
+    assert "CHG-PLC-2026-007" in projected_boot
+    assert "CHG-PLC-2026-008" not in projected_boot
+
+
+def test_archive_changes_logs_entry_even_when_post_merge_snapshot_drifts(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    chg_dir, ledger, proj_rel = _setup_archive_project(repo.root)
+    ledger_rel = f"{proj_rel}/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    (chg_dir / "CHG-SCPT-2026-702.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-702", "completed"), encoding="utf-8"
+    )
+    ledger.write_text(
+        _ledger_doc([_ledger_row(1, "CHG-SCPT-2026-702", "✅已关闭")]), encoding="utf-8"
+    )
+
+    real_snaps = pm._file_snapshots
+    calls = 0
+
+    def flaky_snaps(root: Path, rel_paths: list[str] | tuple[str, ...]) -> dict[str, str]:
+        nonlocal calls
+        calls += 1
+        result: dict[str, str] = dict(real_snaps(root, rel_paths))
+        if calls == 3:
+            result[ledger_rel] = "e" * 64
+        return result
+
+    monkeypatch.setattr(pm, "_file_snapshots", flaky_snaps)
+    before_main = rev(repo.root, "main")
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 0
+    assert rev(repo.root, "main") != before_main
+    out = capsys.readouterr().out
+    assert "归档后发现本机变更记录有并发更新，请核对：" in out
+    entries = pm.read_log(repo.root)
+    assert len(entries) == 1
+    assert entries[0]["governance_drift"] == [ledger_rel]
+    assert run(pm, repo.root, "verify-log") == 0

@@ -1040,6 +1040,8 @@ def test_entry_and_checkup_print_change_archive_summary_and_flag_off_main_histor
         encoding="utf-8",
     )
     ledger.write_text(
+        "# 版本变更台账\n\n"
+        "## 变更单索引\n\n"
         "| 序号 | 变更单 | 说明 | 日期 | 状态 |\n"
         "|------|--------|------|------|------|\n"
         "| 1 | [→ CHG-SCPT-2026-700](../01_变更单/CHG-SCPT/CHG-SCPT-2026-700.md) | 基线 | 2026-11-22 | ✅已关闭 |\n",
@@ -1085,6 +1087,8 @@ def test_entry_and_checkup_print_change_archive_summary_and_flag_off_main_histor
         encoding="utf-8",
     )
     ledger.write_text(
+        "# 版本变更台账\n\n"
+        "## 变更单索引\n\n"
         "| 序号 | 变更单 | 说明 | 日期 | 状态 |\n"
         "|------|--------|------|------|------|\n"
         "| 3 | [→ CHG-SCPT-2026-734](../01_变更单/CHG-SCPT/CHG-SCPT-2026-734.md) | 已完成待入库 | 2026-11-22 | ✅已关闭 |\n\n"
@@ -1117,4 +1121,69 @@ def test_entry_and_checkup_print_change_archive_summary_and_flag_off_main_histor
         assert [item["chg"] for item in summary["in_progress_untracked"]] == ["CHG-SCPT-2026-727"]
         assert [item["chg"] for item in summary["historical_off_main"]] == ["CHG-SCPT-2026-727"]
         assert "CHG-SCPT-2026-727" not in [item["chg"] for item in summary["completed_pending"]]
+
+
+def test_change_archive_summary_ignores_non_index_tables_flags_duplicates_and_unaligned_ledger(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    import subprocess
+
+    root = _root(tmp_path, pid="DJ-2026-009", project_root="0100_PLC自动化/DJ-2026-009")
+    _set_mode(root, "关")
+    mgmt = root / "0100_PLC自动化" / "DJ-2026-009" / "11_监控" / "01_变更管理"
+    chg_dir = mgmt / "01_变更单"
+    (chg_dir / "CHG-PLC").mkdir(parents=True, exist_ok=True)
+    (chg_dir / "dup").mkdir(parents=True, exist_ok=True)
+    ledger = mgmt / "02_变更记录" / "01_版本变更台账.md"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+
+    (chg_dir / "CHG-PLC" / "CHG-PLC-2026-002.md").write_text(
+        "# 002\n\n| 字段 | 值 |\n|---|---|\n| 变更状态 | completed |\n",
+        encoding="utf-8",
+    )
+    ledger_base = (
+        "# 版本变更台帐 - DJ-2026-009\n\n"
+        "## 2. 变更明细台账\n\n"
+        "| 变更编号 | 状态 |\n"
+        "|---|---|\n"
+        "| CHG-PLC-2026-001 | 已关闭 |\n\n"
+        "## 变更单索引\n\n"
+        "| 序号 | 变更编号 | 状态 |\n"
+        "|---|---|---|\n"
+        "| 002 | [→ CHG-PLC-2026-002](../01_变更单/CHG-PLC/CHG-PLC-2026-002.md) | ✅已关闭 |\n"
+    )
+    ledger.write_text(ledger_base, encoding="utf-8")
+
+    def run_git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+    run_git("init", "-b", "main")
+    run_git("config", "user.name", "Test")
+    run_git("config", "user.email", "test@example.com")
+    run_git("add", ".")
+    run_git("commit", "-m", "baseline")
+
+    ledger.write_text(
+        ledger_base.replace("✅已关闭", "🔄实施中"),
+        encoding="utf-8",
+    )
+    (chg_dir / "dup" / "CHG-PLC-2026-002.md").write_text(
+        "# dup\n\n| 字段 | 值 |\n|---|---|\n| 变更状态 | completed |\n",
+        encoding="utf-8",
+    )
+
+    summary = flows.change_archive_summary(root, "DJ-2026-009", github_mode="关")
+    assert summary["available"] is True
+    assert summary["completed_pending"] == [
+        {
+            "chg": "CHG-PLC-2026-002",
+            "path": "0100_PLC自动化/DJ-2026-009/11_监控/01_变更管理/01_变更单/CHG-PLC/CHG-PLC-2026-002.md",
+            "reason": "本机台账未对齐完成态，请先对账",
+        }
+    ]
+    assert "CHG-PLC-2026-002" in summary["duplicate_chgs"]
+    assert len(summary["duplicate_chgs"]["CHG-PLC-2026-002"]) == 2
+    lines: list[str] = []
+    flows._print_change_archive_summary(summary, lines.append)
+    assert any("⚠ 存在重复变更单文件" in line for line in lines)
 
