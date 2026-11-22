@@ -59,6 +59,20 @@ def test_every_leaf_command_and_script_gets_exactly_one_row(catalog: ModuleType)
     assert "未分类" not in page, "有命令没在 commands_map.json 里分类"
 
 
+def test_task_catalog_reuses_flows_and_covers_the_whole_catalog(
+    catalog: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert catalog.main(["--by-task"]) == 0
+    page = capsys.readouterr().out
+    expected = sorted(catalog.leaf_commands()) + [row.path for row in catalog.script_rows()]
+    assert sorted(_rows(page)) == sorted(expected)
+    assert "## 待归类" not in page
+    assert "【进门】的步骤（只列不跑）" in page
+    assert "【交卷到收口】的步骤（只列不跑）" in page
+    reclaim_row = next(line for line in page.splitlines() if line.startswith("| `claim reclaim` |"))
+    assert reclaim_row.endswith("| 只有用户本人 · 写 |")
+
+
 @pytest.fixture()
 def pages_in_tmp(
     catalog: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
