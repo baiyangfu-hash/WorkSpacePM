@@ -522,6 +522,64 @@ def test_unrelated_uncommitted_changes_in_the_control_root_are_refused(
     assert "控制根有未提交的改动" in capsys.readouterr().out
 
 
+def _local_governance_records(pm: ModuleType, repo: SimpleNamespace) -> tuple[str, str, str]:
+    ledger = pm.GOVERNANCE_LEDGER
+    completed = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-732.md"
+    active = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-733.md"
+    commit(repo.root, {ledger: "tracked ledger\n", completed: "tracked order\n"}, "existing governance")
+    git(repo.wt, "merge", "--quiet", "main")
+    for path in (ledger, completed, active):
+        (repo.root / path).write_bytes(b"local record\r\n")
+    return ledger, completed, active
+
+
+def test_merge_preserves_unrelated_governance_records(pm: ModuleType, repo: SimpleNamespace) -> None:
+    paths = _local_governance_records(pm, repo)
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert all((repo.root / path).read_bytes() == b"local record\r\n" for path in paths)
+    assert git(repo.root, "ls-tree", "--name-only", "main", "--", paths[2]).stdout == ""
+    assert git(repo.root, "diff", "--name-only", "main^1", "main").stdout.strip() == "docs/new.md"
+    entry = pm.read_log(repo.root)[-1]
+    assert set(entry["preserved_governance"]) == set(paths)
+    assert entry["governance_drift"] == []
+
+
+@pytest.mark.parametrize("problem", ["overlap", "staged"])
+def test_governance_preservation_refuses_overlap_or_a_staged_index(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, problem: str,
+) -> None:
+    ledger, _completed, _active = _local_governance_records(pm, repo)
+    base = rev(repo.root, "main")
+    path = ledger if problem == "overlap" else "other.md"
+    commit(repo.wt, {path: "incoming\n"}, f"docs\n\n{CARD}")
+    if problem == "staged":
+        (repo.root / path).write_bytes(b"incoming\n")
+        git(repo.root, "add", "--", path)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    expected = "未提交的变更记录重叠" if problem == "overlap" else "有已暂存内容"
+    assert expected in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / ledger).read_bytes() == b"local record\r\n"
+
+
+def test_governance_change_during_precheck_leaves_main_and_new_bytes_intact(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger, _completed, _active = _local_governance_records(pm, repo)
+    base = rev(repo.root, "main")
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+
+    def concurrent_status_update(_root: Path, _worktree: Path, _full: bool) -> Any:
+        (repo.root / ledger).write_bytes(b"new local record\n")
+        return pm.GateResult(True)
+
+    monkeypatch.setattr(pm, "run_gates", concurrent_status_update)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert rev(repo.root, "main") == base
+    assert (repo.root / ledger).read_bytes() == b"new local record\n"
+
+
 def test_the_hook_blocks_direct_changes_to_main(pm: ModuleType, repo: SimpleNamespace) -> None:
     assert run(pm, repo.root, "install-hook") == 0
     before = rev(repo.root, "main")
@@ -651,7 +709,7 @@ def test_control_root_copies_chunks_git_status_calls_for_many_untracked_files(
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(root_git, "run", spy_run)
-    replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files))
+    replace = pm._control_root_copies(root_git, repo.root, sha, sorted(files)).replace
     assert len(status_batches) >= 2
     assert replace == sorted(files)
 
