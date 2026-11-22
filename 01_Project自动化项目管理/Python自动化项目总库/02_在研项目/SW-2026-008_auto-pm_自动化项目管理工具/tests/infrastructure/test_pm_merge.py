@@ -538,23 +538,31 @@ def test_control_root_copies_chunks_git_status_calls_for_many_untracked_files(
     assert replace == sorted(files)
 
 
-def test_managed_gate_refuses_changed_base(
-    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("changed_field", [None, "commit", "tree", "base"])
+def test_managed_gate_checks_real_git_identity(
+    pm: ModuleType, repo: SimpleNamespace, changed_field: str | None
 ) -> None:
-    def rev(_git: Any, ref: str) -> str:
-        return {"HEAD": "a" * 40, "HEAD^{tree}": "b" * 40, "main": "c" * 40}[ref]
-
+    commit(repo.wt, {"docs/candidate.md": "candidate\n"}, f"candidate\n\n{CARD}")
+    identity = {
+        "commit": rev(repo.wt, "HEAD"),
+        "tree": rev(repo.wt, "HEAD^{tree}"),
+        "base": rev(repo.root, "main"),
+    }
+    if changed_field is not None:
+        identity[changed_field] = "d" * 40
     record = {
         "id": "task",
         "backend": "github",
         "state": "passed",
         "handle": "12345",
         "detail": "digest",
-        "candidate": {"commit": "a" * 40, "tree": "b" * 40, "base": "d" * 40},
+        "candidate": identity,
     }
-    monkeypatch.setattr(pm.Git, "rev", rev)
-    monkeypatch.setattr(
-        pm.subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, json.dumps(record), "")
+    (repo.root / "main.py").write_text(
+        f"print({json.dumps(record)!r})\n", encoding="utf-8", errors="replace"
     )
-    with pytest.raises(pm.RefusedError, match="当前 main 不匹配"):
-        pm.managed_gate_receipt(tmp_path, tmp_path / "worktree")
+    if changed_field is None:
+        assert pm.managed_gate_receipt(repo.root, repo.wt) == "托管全量门禁 PASS：task（github，运行 12345）"
+    else:
+        with pytest.raises(pm.RefusedError, match="当前 main 不匹配"):
+            pm.managed_gate_receipt(repo.root, repo.wt)

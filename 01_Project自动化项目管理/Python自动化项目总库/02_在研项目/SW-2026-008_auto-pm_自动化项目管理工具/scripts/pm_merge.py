@@ -271,7 +271,7 @@ def managed_gate_receipt(root: Path, worktree: Path) -> str:
     identity = record.get("candidate") or {}
     if (
         identity.get("commit") != Git(worktree).rev("HEAD")
-        or identity.get("tree") != Git(worktree).rev("HEAD^{tree}")
+        or identity.get("tree") != Git(worktree).out("rev-parse", "--verify", "HEAD^{tree}")
         or identity.get("base") != Git(root).rev("main")
         or not record.get("handle")
         or not record.get("detail")
