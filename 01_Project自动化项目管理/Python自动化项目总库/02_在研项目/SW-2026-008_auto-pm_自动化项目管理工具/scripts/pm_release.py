@@ -61,7 +61,7 @@ def audit_candidate(root: Path, station: Path, verify_gates: bool) -> None:
                 logs = root / ".auto-pm" / "reports" / f"release-bootstrap-{head[:12]}"
                 code, output = release_wiring.run_process(
                     [sys.executable, "-B", str(PROJECT / "main.py"), "gate", "precheck", "--worktree", str(station),
-                     "--base", "main", "--jobs", "2", "--out", str(logs)],
+                     "--base", "main", "--jobs", "1", "--out", str(logs)],
                     root, timeout=merge.GATE_TIMEOUT,
                 )
                 print(output, flush=True)
