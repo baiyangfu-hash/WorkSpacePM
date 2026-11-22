@@ -457,7 +457,7 @@ def _legacy_card_scope(text: str) -> list[str]:
 def _card_precheck(
     git: Git, worktree: Path, base: str, sha: str, path: str, pid: str, change: str,
 ) -> list[str]:
-    """复用现役驾驶舱预检，确认读取的是候选里的实施卡。"""
+    """按与本合并脚本同一份源码的驾驶舱预检核对候选实施卡。"""
     file = worktree / path
     try:
         if file.resolve() != file.absolute():
@@ -467,7 +467,8 @@ def _card_precheck(
         if not _same_ignoring_cr(raw, blob):
             raise RefusedError(f"工位实施卡和提交里的版本不同：{path}")
         result = subprocess.run(
-            [_python(git.cwd), "-B", str(git.cwd / "main.py"), "implementation-card",
+            [_python(git.cwd), "-X", "utf8", "-B", str(PROJECT_ROOT / "main.py"),
+             "--control-root", str(git.cwd), "implementation-card",
              "precheck", "--card-file", str(file), "--pid", pid],
             cwd=git.cwd, capture_output=True, encoding="utf-8", errors="replace",
             timeout=120, check=False,
@@ -486,15 +487,7 @@ def _card_precheck(
     ):
         raise RefusedError(f"读不到与候选匹配的实施卡预检结果：{path} {result.stderr.strip()}")
     findings = report["findings"]
-    # 本机变更单原件在控制根，由本流程核准。工位在合并前可以没有该纸面副本。
-    missing_copy = {
-        "rule": "change", "subject": change,
-        "message": "本项目变更管理柜的 01_变更单/ 里找不到这张变更单",
-    }
-    if not (
-        result.returncode == 0 and report.get("passed") is True and not findings
-        or result.returncode == 1 and report.get("passed") is False and findings == [missing_copy]
-    ):
+    if result.returncode or report.get("passed") is not True or findings:
         raise RefusedError(f"实施卡预检未通过：{json.dumps(findings, ensure_ascii=False)}")
     baseline = report.get("baseline")
     if (
