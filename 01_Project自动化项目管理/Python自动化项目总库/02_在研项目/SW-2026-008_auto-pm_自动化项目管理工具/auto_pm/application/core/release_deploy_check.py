@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from auto_pm.application.core.release_consistency import check_release_consistency
+from auto_pm.contracts.user_evidence import is_user_confirmation
 from auto_pm.infrastructure.process_probe import windows_command_lines
 
 PROJECT_DIR = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
@@ -37,7 +38,7 @@ HEAVY_GATES_MARKER = Path(".auto-pm") / "reports" / "HEAVY_GATES_RUNNING"
 # Part of the one-command release that later cards add; printed so a green preflight is not read as the whole safety net.
 NOT_COVERED = (
     "四个项目的台账对账 0/0/0（卡3，需要账本）",
-    "真实 pre-commit 钩子干跑（卡4，在切换后的新运行时下才有意义）",
+    "真实 pre-commit 钩子干跑（正式部署在切换前后各查一次）",
     "数据库副本上的事件链演练（卡4）",
     "用户确认引用与批准口令（真部署才需要，卡4）",
 )
@@ -58,6 +59,8 @@ class Preflight:
     commit: str = ""
     release_id: str = ""
     checks: list[Check] = field(default_factory=list)
+    resume_from: str = ""
+    active_release: str = ""
 
     def add(self, name: str, status: str, detail: str) -> None:
         self.checks.append(Check(name, status, detail))
@@ -141,7 +144,8 @@ def _check_commit(root: Path, spec: str, report: Preflight) -> None:
     report.add("已在主线上", UNVERIFIED, "找不到 origin/main 或 main，没法判断")
 
 
-def _check_slot(base: Path, report: Preflight) -> None:
+def check_release_slot(root: Path, report: Preflight) -> None:
+    base = root / CONTAINER
     manifest = _json(base / "deployment_manifest.json")
     if manifest is None or not isinstance(manifest.get("releases"), dict):
         report.add("发布槽位空闲", FAIL, "读不出 deployment_manifest.json（不是控制根或清单坏了）")
@@ -149,8 +153,69 @@ def _check_slot(base: Path, report: Preflight) -> None:
     if not report.release_id:
         report.add("发布槽位空闲", FAIL, "读不出该提交的 pyproject 版本，算不出发布号")
         return
-    taken = report.release_id in manifest["releases"] or (base / "releases" / report.release_id).exists()
-    report.add("发布槽位空闲", FAIL if taken else PASS, f"{report.release_id} 已存在（清单或目录），build 会拒绝重装" if taken else report.release_id)
+    installed = manifest["releases"].get(report.release_id)
+    folder = base / "releases" / report.release_id
+    if report.release_id not in manifest["releases"] and not folder.exists():
+        report.add("发布槽位空闲", PASS, report.release_id)
+        return
+    if isinstance(installed, dict) and installed.get("source_commit") == report.commit and folder.is_dir():
+        if original := _rolled_back_release(root, base, report):
+            good, detail = exact_tree_ok(base, report.release_id)
+            report.add("已装候选逐文件校验", PASS if good else FAIL, detail)
+            if good:
+                report.resume_from = original
+                report.add("发布槽位空闲", PASS, f"{report.release_id} 可续办已回退的发布，复用已装载荷")
+            return
+    report.add("发布槽位空闲", FAIL, f"{report.release_id} 已存在，未核实为同一次回退后的可续办发布")
+
+
+def _rolled_back_release(root: Path, base: Path, report: Preflight) -> str:
+    """An occupied slot is reusable only with the original approval and recorded rollback."""
+    from auto_pm.domain.change.change_service import ChangeService
+
+    evidence = root / ".auto-pm" / "reports" / f"{EVIDENCE_PREFIX}{report.release_id}"
+    state = _json(evidence / "state.json") or {}
+    failed_ref = state.get("rolled_back_with")
+    if (
+        not isinstance(failed_ref, str)
+        or not is_user_confirmation(failed_ref)
+        or state.get("backup") != ""
+        or (evidence / "receipt.json").exists()
+    ):
+        return ""
+    change_id = state.get("change_id")
+    decision_id = state.get("decision_id")
+    if not isinstance(change_id, str) or not re.fullmatch(r"CHG-SCPT-\d{4}-\d+", change_id):
+        return ""
+    if not isinstance(decision_id, str) or not re.fullmatch(r"DEC-\d{8}-D" + report.commit[:7].upper(), decision_id):
+        return ""
+    decision = _json(root / ".auto-pm" / "decisions" / f"{decision_id}.json") or {}
+    approved_paths = (
+        CONTAINER / "releases" / report.release_id,
+        CONTAINER / "deployment_manifest.json",
+        CONTAINER / "active_release.json",
+        CONTAINER / "previous_release.json",
+    )
+    approved_files = decision.get("approved_files")
+    if (
+        decision.get("decision_id") != decision_id
+        or decision.get("change_id") != change_id
+        or decision.get("project_id") != "SW-2026-008"
+        or decision.get("decision_conclusion") != "approved"
+        or not isinstance(approved_files, list)
+        or any(path.as_posix() not in approved_files for path in approved_paths)
+    ):
+        return ""
+    active = str((_json(base / "active_release.json") or {}).get("release_id") or "")
+    previous = (_json(base / "previous_release.json") or {}).get("release_id")
+    if not active or report.release_id in (active, previous):
+        return ""
+    change = ChangeService(str(root)).get_change_request(change_id, project_id="SW-2026-008")
+    if change is None or str(change.status) != "implementing":
+        return ""
+    references = {item.strip() for item in str(change.references or "").split(";")}
+    expected = {f"RELEASE={report.release_id}", f"COMMIT={report.commit}", f"PREVIOUS={active}"}
+    return active if expected <= references else ""
 
 
 def _check_pointers(base: Path, report: Preflight) -> list[str]:
@@ -167,6 +232,7 @@ def _check_pointers(base: Path, report: Preflight) -> list[str]:
         ids.append(release)
         notes.append(f"{name.split('_')[0]}={release} sha256={_sha256(base / name)[:16]}")
     if len(ids) == 2:
+        report.active_release = ids[0]
         report.add("指针已记录", PASS, "；".join(notes))
     return ids
 
@@ -350,7 +416,7 @@ def preflight(
     _check_commit(root, commit_spec, report)
     if report.commit:
         report.release_id = release_id_for(root, report.commit)
-    _check_slot(base, report)
+    check_release_slot(root, report)
     ids = _check_pointers(base, report)
     _check_consistency(root, report)
     _check_exact_trees(base, ids, report)

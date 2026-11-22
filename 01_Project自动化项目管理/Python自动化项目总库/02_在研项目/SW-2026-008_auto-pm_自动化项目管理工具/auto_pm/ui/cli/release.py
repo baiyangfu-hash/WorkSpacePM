@@ -75,7 +75,7 @@ def release_deploy(
     ctx: click.Context, commit: str, check_only: bool, gate_verdict: Path | None, audit_signoff: Path | None,
     confirm_ref: str, approver: str, card_file: Path | None, drill_script: Path | None, as_json: bool,
 ) -> None:
-    """部署前预检；加 --no-check-only 才真部署：预检全绿 → 建账 → 构建 → 切换 → 自检 → 失败自动回退，成功才收口并写回执。"""
+    """部署预检。加 --no-check-only 才部署。已核实的回退候选可沿原发布单续办。"""
 
     if not check_only:
         missing = [flag for flag, value in (("--confirm-ref", confirm_ref), ("--approver", approver), ("--drill-script", drill_script)) if not value]

@@ -263,6 +263,7 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `scripts/pm_merge.py` | 本机合并：日常改动在本机合进 main，GitHub 按需使用（CHG-SCPT-2026-718，卡 311）。 |
 | `scripts/pmf_build.py` | PMF 可复现构建入口（WBS D02）。 |
 | `scripts/release_event_chain_drill.py` | Event-chain drill for a release candidate (release deploy self-check, D-146 card 4; moved into the repo by CHG-SCPT-2026-706). |
+| `scripts/pm_release.py` | 控制根旧版发版续办。默认只预检，带 `--no-check-only` 和新的用户确认引用才执行，复用原判决、原独立审计与原发布单。已支持续办的现役版直接用 `release deploy`。 |
 | `scripts/release_selfcheck_dryrun.py` | D-146 card 6a: read-only dry run of the release self-check set against a real control root. |
 | `scripts/run_tests.py` | 统一测试运行脚本 |
 | `scripts/sample_drill.py` | 样件联调：一条命令跑完整条收口线（发版前门槛）。 |

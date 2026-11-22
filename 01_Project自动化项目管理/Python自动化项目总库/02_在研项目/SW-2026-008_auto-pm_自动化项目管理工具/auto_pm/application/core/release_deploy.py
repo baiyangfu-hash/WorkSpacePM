@@ -93,7 +93,7 @@ def _ensure_complete(checks: Mapping[str, SelfCheck]) -> None:
         raise DeployError(f"自检清单缺 {len(missing)} 项，不能部署：{'；'.join(missing[:5])}{'…' if len(missing) > 5 else ''}", pointers_moved=False)
 
 
-def _refuse_reused_confirmation(plan: DeployPlan) -> None:
+def require_new_confirmation(plan: DeployPlan) -> None:
     try:
         failed = json.loads(plan.state_file.read_text(encoding="utf-8")).get("rolled_back_with", "")
     except (OSError, ValueError):
@@ -157,7 +157,7 @@ def deploy(
     if not preflight.ok:
         raise DeployError("预检没通过，什么都没写：" + "；".join(f"{c.name}={c.status}" for c in preflight.checks if c.status != "PASS"), pointers_moved=False)
     _ensure_complete(checks)
-    _refuse_reused_confirmation(plan)
+    require_new_confirmation(plan)
     backup = _first_backup(plan, backup)
     steps: list[str] = []
     try:

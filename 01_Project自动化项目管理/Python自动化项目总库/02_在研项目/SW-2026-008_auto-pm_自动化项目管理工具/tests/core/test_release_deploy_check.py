@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -151,6 +152,48 @@ def test_a_manifest_entry_alone_also_takes_the_slot(repo: Repo, tmp_path: Path) 
     (repo.container / "deployment_manifest.json").write_text(json.dumps({"releases": {rid: {}}}), encoding="utf-8")
 
     assert _by_name(_happy(repo, tmp_path))["发布槽位空闲"].status == rdc.FAIL
+
+
+@pytest.mark.parametrize("problem", ["", "decision", "commit", "receipt", "baseline"])
+def test_only_the_original_rolled_back_release_can_reuse_its_slot(
+    repo: Repo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, problem: str,
+) -> None:
+    rid = f"1.3.3-{repo.merge[:7]}"
+    folder = repo.container / "releases" / rid
+    folder.mkdir()
+    change_id = "CHG-SCPT-2026-736"
+    decision_id = f"DEC-20261122-D{repo.merge[:7].upper()}"
+    evidence = repo.root / ".auto-pm" / "reports" / f"release-deploy-{rid}"
+    evidence.mkdir(parents=True)
+    (evidence / "state.json").write_text(json.dumps({
+        "backup": "", "decision_id": decision_id, "change_id": change_id,
+        "rolled_back_with": "user-confirmation:cmsg_roll_back",
+    }), encoding="utf-8")
+    if problem == "receipt":
+        (evidence / "receipt.json").write_text("{}", encoding="utf-8")
+    decisions = repo.root / ".auto-pm" / "decisions"
+    decisions.mkdir()
+    (decisions / f"{decision_id}.json").write_text(json.dumps({
+        "decision_id": decision_id, "change_id": change_id, "project_id": "SW-2026-008",
+        "decision_conclusion": "rejected" if problem == "decision" else "approved",
+        "approved_files": [
+            (rdc.CONTAINER / name).as_posix()
+            for name in (f"releases/{rid}", "active_release.json", "previous_release.json", "deployment_manifest.json")
+        ],
+    }), encoding="utf-8")
+    (repo.container / "deployment_manifest.json").write_text(json.dumps({
+        "releases": {rid: {"source_commit": repo.side if problem == "commit" else repo.merge}},
+    }), encoding="utf-8")
+    before_release = "1.3.1-bbbbbbb" if problem == "baseline" else "1.3.2-aaaaaaa"
+    change = SimpleNamespace(status="implementing", references=f"RELEASE={rid}; COMMIT={repo.merge}; PREVIOUS={before_release}")
+    monkeypatch.setattr("auto_pm.domain.change.change_service.ChangeService.get_change_request", lambda *_args, **_kwargs: change)
+
+    report = _happy(repo, tmp_path)
+    if problem:
+        assert not report.ok and not report.resume_from
+    else:
+        assert report.ok and report.resume_from == before_release
+        assert _by_name(report)["已装候选逐文件校验"].status == rdc.PASS
 
 
 @pytest.mark.parametrize("case", ["missing", "other_commit", "short_commit", "not_pass", "unreadable"])

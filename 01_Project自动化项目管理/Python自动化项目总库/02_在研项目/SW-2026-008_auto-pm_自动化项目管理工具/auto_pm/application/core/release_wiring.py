@@ -22,7 +22,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,9 +32,14 @@ from auto_pm.application.core import release_deploy as rd
 from auto_pm.application.core import release_ops as ops
 from auto_pm.application.core.memory_gate_arming import disarm_this_process
 from auto_pm.application.core.release_deploy import REQUIRED_SELF_CHECKS, DeployError, SelfCheck
-from auto_pm.application.core.release_deploy_check import CONTAINER, EVIDENCE_PREFIX, exact_tree_ok
+from auto_pm.application.core.release_deploy_check import (
+    CONTAINER,
+    EVIDENCE_PREFIX,
+    Preflight,
+    check_release_slot,
+    exact_tree_ok,
+)
 from auto_pm.application.core.release_ledger import PROJECT_ID, DeployPlan, LedgerError, pick_change
-from auto_pm.infrastructure.executable_lookup import find_on_path
 
 COMMAND_TIMEOUT_SECONDS = 300
 LEDGER_PROJECTS = ("SW-2026-008", "SYS-2026-001", "SW-2026-009", "DJ-2026-005")
@@ -48,38 +54,6 @@ Exec = Callable[[Sequence[str], Path], tuple[int, str]]
 LEDGER_CLEAN = "台账缺失: 0 条, 台账多余(孤儿): 0 条, 状态不一致: 0 条"
 
 
-_WINDOWS_GIT_SH_FALLBACKS: tuple[Path, ...] = (
-    Path(r"C:\Program Files\Git\usr\bin\sh.exe"),
-    Path(r"C:\Program Files\Git\bin\sh.exe"),
-    Path(r"C:\Program Files (x86)\Git\usr\bin\sh.exe"),
-)
-
-
-def resolve_sh_executable(*, platform: str | None = None, fallbacks: Sequence[Path] | None = None) -> str:
-    """Locate POSIX ``sh`` safely via ``find_on_path``; on Windows PowerShell where ``Git\\usr\\bin`` is off ``PATH``, fall back to Git's ``sh.exe``."""
-
-    found = find_on_path("sh")
-    if found:
-        return found
-    if (platform or sys.platform) == "win32":
-        git_exe = find_on_path("git")
-        candidates: list[Path] = []
-        if git_exe:
-            git_dir = Path(git_exe).resolve().parent
-            candidates.extend(
-                (
-                    git_dir.parent / "usr" / "bin" / "sh.exe",
-                    git_dir.parent / "bin" / "sh.exe",
-                    git_dir / "sh.exe",
-                )
-            )
-        candidates.extend(_WINDOWS_GIT_SH_FALLBACKS if fallbacks is None else fallbacks)
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-    return "sh"
-
-
 def run_process(argv: Sequence[str], cwd: Path, *, timeout: int = COMMAND_TIMEOUT_SECONDS) -> tuple[int, str]:
     """Run any program in ``cwd``; returns ``(exit code, stdout + stderr)``."""
 
@@ -92,6 +66,16 @@ def run_process(argv: Sequence[str], cwd: Path, *, timeout: int = COMMAND_TIMEOU
     except (OSError, subprocess.SubprocessError) as error:
         return 255, str(error)
     return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+
+def hook_dry_run(root: Path, execute: Exec = run_process) -> tuple[bool, str]:
+    """Ask Git to run the real hook with Git's own tool environment."""
+    code, staged = execute(["git", "diff", "--cached", "--name-only"], root)
+    if code != 0 or staged.strip():
+        return False, "控制根暂存区不是空的（或读不出），钩子干跑不可信"
+    code, output = execute(["git", "hook", "run", "pre-commit"], root)
+    return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-240:]}"
 
 
 def first_json_object(output: str) -> dict[str, Any] | None:
@@ -306,16 +290,6 @@ def build_self_checks(
         code, output = run(["implementation-card", "precheck", "--card-file", str(card_file)])
         return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-120:]}"
 
-    def hook_dry_run() -> tuple[bool, str]:
-        hook = Path(root) / ".git" / "hooks" / "pre-commit"
-        if not hook.is_file():
-            return False, "控制根没有 pre-commit 钩子，没法干跑"
-        code, staged = execute(["git", "diff", "--cached", "--name-only"], Path(root))
-        if code != 0 or staged.strip():
-            return False, "控制根暂存区不是空的（或读不出），钩子干跑不可信"
-        code, output = execute([resolve_sh_executable(), ".git/hooks/pre-commit"], Path(root))
-        return code == 0, f"exit={code}" if code == 0 else f"exit={code} {output.strip()[-120:]}"
-
     def event_chain_drill() -> tuple[bool, str]:
         db = Path(root) / ".auto-pm" / "continuity.db"
         if not db.is_file():
@@ -358,7 +332,7 @@ def build_self_checks(
     checks["exact-tree old"] = tree_check(old_release)
     checks["exact-tree older"] = tree_check(older_release)
     checks["card precheck"] = precheck
-    checks["pre-commit hook dry run"] = hook_dry_run
+    checks["pre-commit hook dry run"] = lambda: hook_dry_run(Path(root), execute)
     checks["event chain drill"] = event_chain_drill
     absent = [name for name in REQUIRED_SELF_CHECKS if name not in checks]
     if absent:
@@ -411,19 +385,56 @@ def plan_for(
     return plan, evidence / f"pointer_backup_{stamp}"
 
 
+@contextmanager
+def _deployment_lock(root: Path) -> Iterator[None]:
+    """Serialize deployments on this control root, including work after a rollback."""
+    path = root / ".auto-pm" / "reports" / "release-deploy.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:  # pragma: no cover - platform specific lock
+                import fcntl
+
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise rd.DeployError("控制根已有发布在执行", pointers_moved=False) from error
+        yield
+
+
 def real_deploy(
-    root: Path, report: Any, *, approver: str, confirm_ref: str, card_file: Path | None, drill_script: Path,
+    root: Path, report: Preflight, *, approver: str, confirm_ref: str, card_file: Path | None, drill_script: Path,
 ) -> rd.DeployResult:
-    """Assemble the real ports and run the whole deploy.  Reached only from ``release deploy --no-check-only`` after a green preflight.
+    """Assemble the real ports and run a release only after a green preflight."""
+    if not report.ok:
+        raise rd.DeployError("发布预检未通过", pointers_moved=False)
+    with _deployment_lock(root):
+        return _deploy_locked(
+            root, report, approver=approver, confirm_ref=confirm_ref, card_file=card_file, drill_script=drill_script
+        )
 
-    Without ``card_file`` the cockpit writes this release's intake card (``release_card``, CHG-SCPT-2026-709) and books the Work with it.
-    """
 
+def _deploy_locked(
+    base: Path, report: Preflight, *, approver: str, confirm_ref: str, card_file: Path | None, drill_script: Path,
+) -> rd.DeployResult:
     from auto_pm.application.core import release_card
     from auto_pm.domain.change.change_service import ChangeService
-    from auto_pm.infrastructure.continuity_store import ContinuityStore
+    from auto_pm.infrastructure.continuity_store import ContinuityStore, ContinuityStoreError
 
-    base = Path(root)
+    hook_ok, hook_detail = hook_dry_run(base)
+    if not hook_ok:
+        raise rd.DeployError(f"切换前提交钩子干跑失败：{hook_detail}", pointers_moved=False)
+    try:
+        current = ops.pointer_release(ops.container_of(base), "active_release.json")
+    except ops.ReleaseOpsError as error:
+        raise rd.DeployError(f"部署前读不到原现役版本：{error}", pointers_moved=False) from error
+    observed = Preflight(commit=report.commit, release_id=report.release_id)
+    check_release_slot(base, observed)
+    if current != report.active_release or not observed.ok or observed.resume_from != report.resume_from:
+        raise rd.DeployError("发布槽位或现役版本在预检后变化，请重新预检", pointers_moved=False)
     if card_file is None:
         try:
             card_file = release_card.ensure_card(
@@ -436,7 +447,23 @@ def real_deploy(
     older = ops.pointer_release(container, "previous_release.json")
     identity: ops.Identity = cockpit_identity
     run = cockpit_runner(base)
-    ledger = CockpitLedgerPort(base, run=run, changes=ChangeService(str(base)), store=ContinuityStore(base))
+    store = ContinuityStore(base)
+    ledger = CockpitLedgerPort(base, run=run, changes=ChangeService(str(base)), store=store)
+    if report.resume_from:
+        rd.require_new_confirmation(plan)
+        try:
+            lease = store.get_lease(plan.run_id)
+        except ContinuityStoreError as error:
+            raise rd.DeployError(f"续办前读不到原发布租约：{error}", pointers_moved=False) from error
+        finally:
+            store.close_read_snapshot()
+        if lease.owner_id != plan.owner or datetime.fromisoformat(lease.expires_at) <= datetime.now(UTC):
+            raise rd.DeployError("原发布租约已失效，请先恢复相同发布的 Run 租约", pointers_moved=False)
+        ledger.cli(
+            "continuity", "lease", "renew", "--run-id", plan.run_id, "--owner", plan.owner, "--lease-wallet",
+            "--expected-version", str(lease.version), "--lease-seconds", "3600",
+            "--idempotency-key", f"{plan.slug}-resume-v{lease.version}",
+        )
     adapter = ReleaseOpsAdapter(base, base, plan.commit, plan.release_id, identity)
     checks = build_self_checks(
         root=base, release_id=plan.release_id, old_release=plan.old_release, older_release=older, run=run, identity=identity,
