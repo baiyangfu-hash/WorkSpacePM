@@ -229,6 +229,49 @@ def test_card_tier_is_checked_against_the_actual_diff(pm: ModuleType, repo: Simp
     pm._check_card_tier(repo.root, "> 档次：核心档", base, candidate)
 
 
+def test_formal_change_with_historical_branch_alias_checks_scope_and_audit(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = "CHG-SCPT-2026-733"
+    message = f"feat(board): [{change}] improve board\n\n领卡占位: {change}"
+    card = "SW-2026-008/04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-733_看板.md"
+    commit(repo.wt, {"docs/a.md": "prototype\n"}, f"docs(board): prototype\n\n{CARD}")
+    commit(repo.wt, {"docs/b.md": "board\n"}, message)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "没有本卡的实施卡" in capsys.readouterr().out
+    commit(repo.wt, {card: f"> 变更单：`{change}`\n"}, message)
+    order = repo.root / "SW-2026-008" / "04_监控" / "01_变更管理" / "01_变更单" / f"{change}.md"
+    order.parent.mkdir(parents=True)
+    order.write_text(
+        f"| 变更状态 | approved |\n| 涉及文件/交付物 | {card}<br>docs |\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "docs/b.md"])
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "超出实施卡可改范围：docs/a.md" in capsys.readouterr().out
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "docs"])
+    monkeypatch.setattr(pm, "_check_card_tier", lambda *_: None)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "独立审计凭证" in capsys.readouterr().out
+    assert not repo.gates
+    assert _audit(pm, repo, monkeypatch) == 0
+    assert run(pm, repo.root, "merge", "w1") == 0
+    saved = pm.read_log(repo.root)[-1]
+    assert saved["card"] == change
+    assert saved["user_paths"] == []
+    assert saved["audit"]["candidate"] == rev(repo.wt, "HEAD")
+    assert repo.gates == [False]
+
+
+def test_historical_change_reference_keeps_direct_merge(pm: ModuleType, repo: SimpleNamespace) -> None:
+    commit(
+        repo.wt, {"docs/example.md": "example\n"},
+        f"docs: add example\n\n参见历史 CHG-SCPT-2026-733。\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert "audit" not in pm.read_log(repo.root)[-1]
+
+
 def test_main_transaction_rechecks_the_reviewed_base(pm: ModuleType, repo: SimpleNamespace) -> None:
     pm.write_mode(repo.root, "关")
     commit(repo.wt, {"candidate.md": "ready\n"}, f"candidate\n\n{CARD}")

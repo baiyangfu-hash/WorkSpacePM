@@ -12,7 +12,8 @@
 1. 控制根停在 main；工位 ``.auto-pm/worktrees/<工位名>`` 已全部提交，main 是工位分支的祖先，
    分支上至少一个提交带 ``领卡占位: <卡号>`` 这一行。
 2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己，以及删除或改名驾驶舱项目目录以外
-   的已入库文件），核对实施卡、变更单、实际路径和独立审计凭证。审计绑定候选提交和当前 main。
+   的已入库文件），以及明确绑定变更单的分支，核对实施卡、变更单、实际路径和独立审计凭证。
+   审计绑定候选提交和当前 main。
 3. GitHub 开启且可达时，``origin/main`` 必须已在本机 main 里；多机档无法对账时拒绝合并。
 4. 控制根里和分支改到的路径重叠的未提交文件，只允许是和分支内容一样的副本（只差行尾）；合并前先备份再换掉，
    合并失败就放回去。别的未提交改动一律拒绝。
@@ -70,6 +71,8 @@ RELEASE_POINTERS = frozenset(
 GITHUB_MERGE = re.compile(r"^Merge pull request #\d+ ")
 CARD_LINE = re.compile(r"^领卡占位:\s*(\S+)\s*$", re.MULTILINE)
 CHG_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
+CHANGE_LINE = re.compile(rf"^变更单[:：][ \t]*({CHG_RE.pattern})[ \t]*$", re.MULTILINE)
+CHANGE_SUBJECT = re.compile(rf"^(?:[^:：\[\]\r\n]+[:：][ \t]*)?\[({CHG_RE.pattern})\](?=\s|$)")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 STANDARD_CARD = re.compile(
     r"/(?:04|11)_监控/01_变更管理/03_实施卡/(CARD-([A-Z]+-\d{4}-\d{3})-(\d{3}))_[^/]+\.md$"
@@ -386,11 +389,29 @@ class Plan:
     archive_existing: bool = False
     base: str = ""
     audit: dict[str, Any] | None = None
+    formal_change: str = ""
+
+    @property
+    def requires_audit(self) -> bool:
+        return bool(self.user_paths or self.formal_change)
 
 
 def _commits(git: Git, base: str, tip: str) -> list[str]:
     raw = git.out("log", "--format=%B%x1e", f"{base}..{tip}")
     return [message.strip() for message in raw.split("\x1e") if message.strip()]
+
+
+def _formal_change(branch_card: str, cards: list[str], messages: list[str]) -> str:
+    """Recognize deliberate bindings while leaving prose references as ordinary text."""
+    numbers = {value for value in [branch_card, *cards] if CHG_RE.fullmatch(value)}
+    for message in messages:
+        numbers.update(CHANGE_LINE.findall(message))
+        subject = CHANGE_SUBJECT.match(message.partition("\n")[0])
+        if subject:
+            numbers.add(subject[1])
+    if len(numbers) > 1:
+        raise RefusedError("分支正式绑定了多张变更单：" + "、".join(sorted(numbers)))
+    return next(iter(numbers), "")
 
 
 # 记录类文件：驾驶舱目录里的也不能随手删（变更单原件、台账、批准记录、WBS），删它们算“要你点头”。
@@ -748,27 +769,38 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
     cards = [match.group(1) for message in messages for match in CARD_LINE.finditer(message)]
     if not cards:
         raise RefusedError("分支上没有一个提交带“领卡占位: <卡号>”这一行")
-    chgs = sorted({number for message in messages for number in CHG_RE.findall(message)})
+    branch_card = branch.rsplit("/", 1)[-1]
+    formal_change = _formal_change(branch_card, cards, messages)
+    card = formal_change if formal_change in cards else cards[0]
     paths = _changed_paths(root_git, base, sha)
     user_paths = [path for path in paths if needs_user(path)]
     user_paths += [
         path for path in removed_outside_cockpit(root_git, base, sha) if path not in user_paths
     ]
-    if user_paths:
-        if len(set(cards)) != 1:
-            raise RefusedError("受保护改动只能用一个领卡占位号")
+    chgs: list[str] = []
+    if user_paths or formal_change:
+        allowed_cards = {card, branch_card} if formal_change == card else {card}
+        if set(cards) - allowed_cards:
+            raise RefusedError("只能使用本卡的领卡占位号；历史短名应与本分支名一致")
+        chgs = [formal_change] if formal_change else sorted({
+            number for message in messages for number in CHG_RE.findall(message)
+        })
         try:
-            _check_card(root_git, worktree, base, sha, cards[0], chgs, paths, pid,
+            _check_card(root_git, worktree, base, sha, card, chgs, paths, pid,
                         archive_existing=archive_existing)
         except RefusedError as exc:
-            raise RefusedError(f"受保护变更（{'、'.join(user_paths[:5])}）：{exc}") from exc
+            scope = "、".join(user_paths[:5]) or formal_change
+            raise RefusedError(f"需核对实施卡的变更（{scope}）：{exc}") from exc
     notes: list[str] = []
     replace = _control_root_copies(root_git, root, sha, paths, archive_existing=archive_existing)
     if archive_existing:
         _check_release_archive(root, root_git, base, sha, paths, replace)
     elif RELEASE_POINTERS.intersection(replace):
         raise RefusedError("控制根有现役发布指针，归档请使用 --archive-existing")
-    return Plan(branch, sha, cards[0], chgs, paths, user_paths, replace, notes, archive_existing, base)
+    return Plan(
+        branch, sha, card, chgs, paths, user_paths, replace, notes,
+        archive_existing=archive_existing, base=base, formal_change=formal_change,
+    )
 
 
 def check_github(root: Path, mode: str, notes: list[str]) -> None:
@@ -1058,7 +1090,7 @@ def cmd_merge(root: Path, name: str, pid: str, full_gate: bool, *, archive_exist
     mode = read_mode(root)
     try:
         plan = plan_merge(root, name, pid, archive_existing=archive_existing)
-        if plan.user_paths:
+        if plan.requires_audit:
             plan.audit = audit_receipt(root, name, plan)
         check_github(root, mode, plan.notes)
         gates = run_gates(
@@ -1079,9 +1111,9 @@ def cmd_merge(root: Path, name: str, pid: str, full_gate: bool, *, archive_exist
     print(
         f"已合并 {plan.branch}（{plan.sha[:8]}）进 main：合并提交 {entry['merge_sha'][:8]}，卡 {plan.card}"
     )
-    if plan.user_paths:
+    if plan.requires_audit:
         print(
-            "这次改到了要用户点头的文件，变更单："
+            "已核对变更单和独立审计："
             + "、".join(plan.chgs)
             + "；推到完成仍只有用户本人做"
         )
