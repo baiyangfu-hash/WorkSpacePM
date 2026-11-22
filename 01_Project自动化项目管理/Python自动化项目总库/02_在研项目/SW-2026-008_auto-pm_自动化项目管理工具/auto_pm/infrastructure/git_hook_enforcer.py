@@ -440,13 +440,18 @@ def is_excluded_from_production(path: str) -> bool:
 
 
 def filter_production_files(files: list[str]) -> list[str]:
-    """从暂存区筛选受保护文件及普通生产代码。"""
+    """筛选规则文件和生产代码。PLC 纯文档由专用文档钩子处理。"""
     return [
         f
         for f in files
-        if is_protected_production_file(f)
+        if _is_rule_file(f)
         or (f.lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f))
     ]
+
+
+def _is_rule_file(path: str) -> bool:
+    normalised = path.replace("\\", "/")
+    return any(fnmatch.fnmatchcase(normalised, pattern) for pattern in RULE_FILE_PATTERNS)
 
 
 def is_protected_production_file(path: str) -> bool:
@@ -495,7 +500,7 @@ def _binding_for_staged_file(
         control_root_project_id = next(
             (pid for prefix, pid in CONTROL_ROOT_PREFIX_BINDINGS.items() if path.startswith(prefix)), None
         )
-    if not control_root_project_id and any(fnmatch.fnmatchcase(path, pattern) for pattern in RULE_FILE_PATTERNS):
+    if not control_root_project_id and _is_rule_file(path):
         control_root_project_id = "SW-2026-008"
     if control_root_project_id:
         control_matches = [

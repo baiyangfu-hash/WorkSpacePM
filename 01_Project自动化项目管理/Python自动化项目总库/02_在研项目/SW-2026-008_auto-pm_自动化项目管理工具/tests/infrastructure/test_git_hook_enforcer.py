@@ -1082,6 +1082,14 @@ def test_protected_paths_override_generic_production_exclusions() -> None:
     assert filter_production_files(paths) == paths
 
 
+def test_plc_documentation_keeps_its_dedicated_hook() -> None:
+    project = "0100_PLC自动化/DJ-TEST-001"
+    document = f"{project}/02_PLC程序/接口契约_INT.md"
+    source = f"{project}/02_PLC程序/FB_Pump.scl"
+    assert is_protected_production_file(document)
+    assert filter_production_files([document, source, "AGENTS.md"]) == [source, "AGENTS.md"]
+
+
 def test_production_extension_match_ignores_case() -> None:
     """Windows 上 TIA 导出的文件常是 .SCL / .ST，大写扩展名也是生产代码。"""
     paths = ["FB/Motor.SCL", "FB/Seq.St", "src/App.PY", "ui/Main.QML"]
