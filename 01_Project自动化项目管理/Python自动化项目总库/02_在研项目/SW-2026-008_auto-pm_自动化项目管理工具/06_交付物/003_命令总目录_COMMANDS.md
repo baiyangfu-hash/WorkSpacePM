@@ -260,7 +260,7 @@ title: "auto-pm 命令总目录（脚本生成）"
 | `scripts/pm_dashboard_gui.py` | 驾驶舱总控屏入口（PySide6）。 |
 | `scripts/pm_flows.py` | 自动流程第一批（WBS 10.6）：“项目体检”“交卷到收口”“PR 线收口”和“进门”，只按顺序调现有的驾驶舱命令。 |
 | `scripts/pm_handoff.py` | 本机轻轨交接交换区读写与核验工具（PM-056 V2.0.0，local-handoff.v1，卡 318）。 |
-| `scripts/pm_merge.py` | 本机合并：日常改动在本机合进 main，GitHub 按需使用（CHG-SCPT-2026-718，卡 311）。 |
+| `scripts/pm_merge.py` | 本机合并与受控变更单归档：日常改动合进 main、受控归档已完成变更单，GitHub 按需使用（CHG-SCPT-2026-718 / 735）。 |
 | `scripts/pmf_build.py` | PMF 可复现构建入口（WBS D02）。 |
 | `scripts/release_event_chain_drill.py` | Event-chain drill for a release candidate (release deploy self-check, D-146 card 4; moved into the repo by CHG-SCPT-2026-706). |
 | `scripts/pm_release.py` | 控制根旧版发版续办。默认只预检，带 `--no-check-only` 和新的用户确认引用才执行，复用原判决、原独立审计与原发布单。已支持续办的现役版直接用 `release deploy`。 |

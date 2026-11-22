@@ -61,11 +61,17 @@ HANDOFF_SCRIPT = PROJECT_ROOT / "scripts" / "pm_handoff.py"
 REGISTRY = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
 REPORTS = Path(".auto-pm") / "reports" / "flows"
 GITHUB_MODE_FILE = Path(".auto-pm") / "reports" / "local_merge" / "github_mode.json"
+MERGE_LOG_FILE = Path(".auto-pm") / "reports" / "local_merge" / "merge_log.jsonl"
 GITHUB_MODES = ("关", "备份", "多机")
 DEFAULT_GITHUB_MODE = "备份"
 PLC_ROOT = "0100_PLC自动化/"
 STEP_TIMEOUT = 900
+GIT_READ_TIMEOUT = 30
 OUTPUT_TAIL = 60
+CHG_ID_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
+CHG_STATE_RE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
+LEDGER_SEP_RE = re.compile(r"^\|[\s\-:|]+\|$")
+SKIP_CHANGE_DIRS = frozenset({".git", ".auto-pm", ".venv", "node_modules", "__pycache__"})
 
 # 只在 PLC 项目上跑的步骤（项目登记表里 project_root 在 0100_PLC自动化/ 下）。
 PLC_ONLY = "plc"
@@ -575,6 +581,208 @@ def _print_local_handoff(
             out(f"  {path}")
 
 
+def _print_change_archive_summary(summary: Mapping[str, Any], out: Callable[[str], None]) -> None:
+    """进门与体检小结后展示只读变更单入库积压与主线同步状态。"""
+    if not summary.get("available"):
+        return
+    completed = summary.get("completed_pending") or []
+    in_progress = summary.get("in_progress_untracked") or []
+    historical = summary.get("historical_off_main") or []
+    out("\n【变更单入库积压摘要】（只读核对 main，不影响本步退出码）")
+    out(
+        f"- 本机已完成待入库 {len(completed)} 张 | 未完成未入库 {len(in_progress)} 张 | "
+        f"GitHub 同步：{summary.get('github_sync', '未知')}"
+    )
+    if completed:
+        items = "、".join(f"{item['chg']}（{item['reason']}）" for item in completed)
+        out(f"- 已完成待入库：{items}")
+        out(f"- 建议运行：scripts/pm_merge.py archive-changes {summary.get('pid', '')}")
+    if in_progress:
+        items = "、".join(f"{item['chg']}（{item['status']}）" for item in in_progress)
+        out(f"- 未完成未入库：{items}")
+    for item in historical:
+        out(
+            f"- ⚠ {item['note']}：{item['chg']}（历史合并 {item['merge_sha'][:8]}，"
+            f"当前本机状态 {item['status']}）"
+        )
+
+
+def _git_read_bytes(root: Path, *args: str) -> tuple[int, bytes]:
+    try:
+        done = subprocess.run(
+            ["git", "-c", "core.quotePath=false", "-C", str(root), *args],
+            capture_output=True,
+            check=False,
+            timeout=GIT_READ_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 1, b""
+    return int(done.returncode), done.stdout
+
+
+def _ledger_row_map(text: str) -> dict[str, list[str]]:
+    rows: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or LEDGER_SEP_RE.match(stripped):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        match = CHG_ID_RE.search(cells[1])
+        if match:
+            rows.setdefault(match.group(0), []).append(line)
+    return rows
+
+
+def change_archive_summary(root: Path, pid: str, *, github_mode: str = "") -> dict[str, Any]:
+    """只读比较项目本机变更单原件/台账与 Git main，输出积压与离主线历史合并提示。"""
+    project_root = project_root_of(root, pid)
+    if not project_root:
+        return {"available": False, "reason": "登记表里找不到项目目录"}
+    mgmt_dir: Path | None = None
+    for folder in ("04_监控", "11_监控"):
+        candidate = root / project_root / folder / "01_变更管理"
+        if candidate.is_dir() and (candidate / "01_变更单").is_dir():
+            mgmt_dir = candidate
+            break
+    if mgmt_dir is None:
+        return {"available": False, "reason": "项目还没有变更管理目录"}
+    if not (root / ".git").exists():
+        return {"available": False, "reason": "控制根不是 Git 仓库"}
+    rc_main, out_main = _git_read_bytes(root, "rev-parse", "--verify", "--quiet", "main^{commit}")
+    if rc_main != 0:
+        return {"available": False, "reason": "找不到本机 main 分支"}
+    main_sha = out_main.decode("utf-8", errors="replace").strip()
+    rc_origin, out_origin = _git_read_bytes(
+        root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}"
+    )
+    origin_sha = out_origin.decode("utf-8", errors="replace").strip() if rc_origin == 0 else ""
+    if github_mode == "关":
+        github_sync = "未启用同步（GitHub 关）"
+    elif origin_sha and origin_sha == main_sha:
+        github_sync = "已同步"
+    elif origin_sha:
+        github_sync = "GitHub 待同步"
+    else:
+        github_sync = "GitHub 未配置远端"
+
+    chg_dir = mgmt_dir / "01_变更单"
+    chg_rel = chg_dir.relative_to(root).as_posix()
+    ledger_path = mgmt_dir / "02_变更记录" / "01_版本变更台账.md"
+    ledger_rel = ledger_path.relative_to(root).as_posix()
+
+    disk_chgs: dict[str, tuple[Path, str]] = {}
+    for folder, dirs, files in os.walk(chg_dir):
+        dirs[:] = sorted(name for name in dirs if name not in SKIP_CHANGE_DIRS)
+        for name in sorted(files):
+            if name.endswith(".md") and CHG_ID_RE.fullmatch(Path(name).stem):
+                file_path = Path(folder) / name
+                disk_chgs[Path(name).stem] = (file_path, file_path.relative_to(root).as_posix())
+
+    rc_diff, out_diff = _git_read_bytes(
+        root, "diff", "--name-only", "-z", "--no-renames", "main", "--", chg_rel
+    )
+    rc_untracked, out_untracked = _git_read_bytes(
+        root, "ls-files", "--others", "--exclude-standard", "-z", "--", chg_rel
+    )
+    dirty_paths: set[str] = set()
+    if rc_diff == 0:
+        dirty_paths.update(p for p in out_diff.decode("utf-8", errors="replace").split("\0") if p)
+    if rc_untracked == 0:
+        dirty_paths.update(
+            p for p in out_untracked.decode("utf-8", errors="replace").split("\0") if p
+        )
+
+    local_ledger_text = (
+        ledger_path.read_text(encoding="utf-8", errors="replace") if ledger_path.is_file() else ""
+    )
+    rc_ledger, main_ledger_bytes = _git_read_bytes(root, "cat-file", "blob", f"main:{ledger_rel}")
+    main_ledger_text = (
+        main_ledger_bytes.decode("utf-8", errors="replace") if rc_ledger == 0 else ""
+    )
+    local_rows = _ledger_row_map(local_ledger_text)
+    main_rows = _ledger_row_map(main_ledger_text)
+
+    completed_pending: list[dict[str, str]] = []
+    in_progress_untracked: list[dict[str, str]] = []
+    non_completed_states: dict[str, str] = {}
+
+    for chg, (file_path, rel_path) in sorted(disk_chgs.items()):
+        try:
+            raw_bytes = file_path.read_bytes()
+        except OSError:
+            continue
+        state_match = CHG_STATE_RE.search(raw_bytes.decode("utf-8", errors="replace"))
+        state = state_match.group(1) if state_match else ""
+        if state != "completed":
+            non_completed_states[chg] = state or "unknown"
+        ledger_diff = local_rows.get(chg) != main_rows.get(chg)
+        if rel_path not in dirty_paths and not ledger_diff:
+            continue
+        rc_blob, main_blob = _git_read_bytes(root, "cat-file", "blob", f"main:{rel_path}")
+        file_missing = rc_blob != 0
+        file_modified = (
+            not file_missing and raw_bytes.replace(b"\r\n", b"\n") != main_blob.replace(b"\r\n", b"\n")
+        )
+        if not file_missing and not file_modified and not ledger_diff:
+            continue
+        if state == "completed":
+            reason = (
+                "原件未入主线"
+                if file_missing
+                else ("原件待同步到主线" if file_modified else "台账已完成行待同步到主线")
+            )
+            completed_pending.append({"chg": chg, "path": rel_path, "reason": reason})
+        else:
+            in_progress_untracked.append(
+                {"chg": chg, "status": state or "unknown", "path": rel_path}
+            )
+
+    historical_off_main: list[dict[str, str]] = []
+    log_path = root / MERGE_LOG_FILE
+    if log_path.is_file() and non_completed_states:
+        seen_history: set[tuple[str, str]] = set()
+        for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            merge_sha = str(entry.get("merge_sha", "")).strip()
+            if not re.fullmatch(r"[0-9a-f]{40}", merge_sha):
+                continue
+            for raw_chg in entry.get("chgs") or []:
+                chg = str(raw_chg)
+                if chg not in non_completed_states or (chg, merge_sha) in seen_history:
+                    continue
+                rc_obj, _ = _git_read_bytes(root, "cat-file", "-e", f"{merge_sha}^{{commit}}")
+                if rc_obj != 0:
+                    continue
+                rc_anc, _ = _git_read_bytes(root, "merge-base", "--is-ancestor", merge_sha, "main")
+                if rc_anc != 0:
+                    seen_history.add((chg, merge_sha))
+                    historical_off_main.append(
+                        {
+                            "chg": chg,
+                            "merge_sha": merge_sha,
+                            "status": non_completed_states[chg],
+                            "note": "历史合并不在当前主线，待核对替代提交",
+                        }
+                    )
+
+    return {
+        "available": True,
+        "pid": pid,
+        "main": main_sha,
+        "github_sync": github_sync,
+        "completed_pending": completed_pending,
+        "in_progress_untracked": in_progress_untracked,
+        "historical_off_main": sorted(historical_off_main, key=lambda item: item["chg"]),
+    }
+
+
 def _fill(args: Sequence[str], pid: str, mission: str, chg: str = "", card: str = "") -> list[str]:
     return [
         arg.replace("{pid}", pid)
@@ -961,6 +1169,9 @@ def run_flow(
                 if red
                 else "✓ 没有红的步骤。"
             )
+            archive_summary = change_archive_summary(root, pid, github_mode=github_mode)
+            record["change_archive_summary"] = archive_summary
+            _print_change_archive_summary(archive_summary, out)
             if flow == "entry":
                 record["local_handoff"] = local_handoff
                 _print_local_handoff(local_handoff, local_handoff_red, out)

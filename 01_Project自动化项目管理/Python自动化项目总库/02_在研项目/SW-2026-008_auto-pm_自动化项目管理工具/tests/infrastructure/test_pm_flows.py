@@ -1020,3 +1020,101 @@ def test_checkup_also_suppresses_command_catalog_stdout_flood(
     assert "  ran --print" not in lines, "体检时命令目录也不刷屏"
     assert sum(line.startswith("  命令目录全文存在 ") for line in lines) == 1
 
+
+def test_entry_and_checkup_print_change_archive_summary_and_flag_off_main_history(
+    flows: ModuleType, tmp_path: Path
+) -> None:
+    import json
+    import subprocess
+
+    root = _root(tmp_path, pid="SW-2026-008", project_root="01_Project/SW-2026-008")
+    _set_mode(root, "备份")
+    mgmt = root / "01_Project" / "SW-2026-008" / "04_监控" / "01_变更管理"
+    chg_dir = mgmt / "01_变更单" / "CHG-SCPT"
+    ledger = mgmt / "02_变更记录" / "01_版本变更台账.md"
+    chg_dir.mkdir(parents=True, exist_ok=True)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+
+    (chg_dir / "CHG-SCPT-2026-700.md").write_text(
+        "# 700\n\n| 字段 | 值 |\n|---|---|\n| 变更状态 | completed |\n",
+        encoding="utf-8",
+    )
+    ledger.write_text(
+        "| 序号 | 变更单 | 说明 | 日期 | 状态 |\n"
+        "|------|--------|------|------|------|\n"
+        "| 1 | [→ CHG-SCPT-2026-700](../01_变更单/CHG-SCPT/CHG-SCPT-2026-700.md) | 基线 | 2026-11-22 | ✅已关闭 |\n",
+        encoding="utf-8",
+    )
+
+    def run_git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return done.stdout.strip()
+
+    run_git("init", "-b", "main")
+    run_git("config", "user.name", "Test")
+    run_git("config", "user.email", "test@example.com")
+    run_git("add", ".")
+    run_git("commit", "-m", "baseline")
+
+    run_git("checkout", "-b", "side/727")
+    (root / "side727.txt").write_text("side\n", encoding="utf-8")
+    run_git("add", "side727.txt")
+    run_git("commit", "-m", "off main merge target")
+    off_main_sha = run_git("rev-parse", "HEAD")
+    run_git("checkout", "main")
+
+    log_path = root / flows.MERGE_LOG_FILE
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        json.dumps({"merge_sha": off_main_sha, "chgs": ["CHG-SCPT-2026-727"]}) + "\n",
+        encoding="utf-8",
+    )
+
+    (chg_dir / "CHG-SCPT-2026-734.md").write_text(
+        "# 734\n\n| 字段 | 值 |\n|---|---|\n| 变更状态 | completed |\n",
+        encoding="utf-8",
+    )
+    (chg_dir / "CHG-SCPT-2026-727.md").write_text(
+        "# 727\n\n| 字段 | 值 |\n|---|---|\n| 变更状态 | implementing |\n",
+        encoding="utf-8",
+    )
+    ledger.write_text(
+        "| 序号 | 变更单 | 说明 | 日期 | 状态 |\n"
+        "|------|--------|------|------|------|\n"
+        "| 3 | [→ CHG-SCPT-2026-734](../01_变更单/CHG-SCPT/CHG-SCPT-2026-734.md) | 已完成待入库 | 2026-11-22 | ✅已关闭 |\n\n"
+        "| 2 | [→ CHG-SCPT-2026-727](../01_变更单/CHG-SCPT/CHG-SCPT-2026-727.md) | 实施中 | 2026-11-22 | 🔄实施中 |\n\n"
+        "| 1 | [→ CHG-SCPT-2026-700](../01_变更单/CHG-SCPT/CHG-SCPT-2026-700.md) | 基线 | 2026-11-22 | ✅已关闭 |\n",
+        encoding="utf-8",
+    )
+
+    for flow_name in ("entry", "checkup"):
+        lines: list[str] = []
+        assert (
+            flows.run_flow(
+                flow_name, "SW-2026-008", root=root, runner=FakeRunner(), out=lines.append
+            )
+            == 0
+        )
+        text = "\n".join(lines)
+        assert "【变更单入库积压摘要】" in text
+        assert "CHG-SCPT-2026-734（原件未入主线）" in text
+        assert "CHG-SCPT-2026-727（implementing）" in text
+        assert "⚠ 历史合并不在当前主线，待核对替代提交：CHG-SCPT-2026-727" in text
+
+        reports = sorted((root / flows.REPORTS).glob(f"*_{flow_name}_SW-2026-008.json"))
+        assert reports
+        payload = json.loads(reports[-1].read_text(encoding="utf-8"))
+        summary = payload["change_archive_summary"]
+        assert summary["available"] is True
+        assert summary["github_sync"] == "GitHub 未配置远端"
+        assert [item["chg"] for item in summary["completed_pending"]] == ["CHG-SCPT-2026-734"]
+        assert [item["chg"] for item in summary["in_progress_untracked"]] == ["CHG-SCPT-2026-727"]
+        assert [item["chg"] for item in summary["historical_off_main"]] == ["CHG-SCPT-2026-727"]
+        assert "CHG-SCPT-2026-727" not in [item["chg"] for item in summary["completed_pending"]]
+
