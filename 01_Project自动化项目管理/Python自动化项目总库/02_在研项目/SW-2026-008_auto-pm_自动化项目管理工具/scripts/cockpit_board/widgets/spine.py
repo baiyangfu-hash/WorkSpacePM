@@ -28,13 +28,20 @@ def load(path: Path = SPINE) -> dict[str, Any] | None:
     return value
 
 
+_PAGE_ALIASES = {
+    "tasks": "项目详情（任务）",
+    "attention": "决定与待办",
+    "spine": "流程与状态机（十步脊柱图）",
+}
+
+
 def _page_names(keys: list[str]) -> str:
     names = []
     for key in keys:
         try:
             names.append(shell.spec(key).text)
         except KeyError:
-            names.append(key)
+            names.append(_PAGE_ALIASES.get(key, key))
     return "、".join(names)
 
 

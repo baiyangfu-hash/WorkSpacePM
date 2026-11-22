@@ -5,7 +5,7 @@
     {
       "key": "tasks",
       "title": "任务",
-      "group": "受管项目",
+      "group": "产线主控",
       "reads": [
         {
           "command": "pm missions",
@@ -33,7 +33,7 @@
     {
       "key": "prs",
       "title": "PR 与审计",
-      "group": "驾驶舱",
+      "group": "排查与诊断",
       "reads": [],
       "github": true,
       "empty_text": "没有开着的 PR",
@@ -42,7 +42,7 @@
     {
       "key": "worktrees",
       "title": "工作树与分支",
-      "group": "驾驶舱",
+      "group": "产线主控",
       "reads": [
         {
           "command": "worktree list",
@@ -81,7 +81,7 @@
     {
       "key": "release",
       "title": "发版",
-      "group": "驾驶舱",
+      "group": "产线主控",
       "reads": [
         {
           "command": "long-run status",
@@ -95,7 +95,7 @@
     {
       "key": "spine",
       "title": "脊柱图",
-      "group": "驾驶舱",
+      "group": "排查与诊断",
       "reads": [],
       "data_files": [
         "spine.json"
@@ -106,7 +106,7 @@
     {
       "key": "commands",
       "title": "命令与契约",
-      "group": "驾驶舱",
+      "group": "排查与诊断",
       "reads": [],
       "data_files": [
         "commands_map.json"
@@ -117,7 +117,7 @@
     {
       "key": "attention",
       "title": "要你出手",
-      "group": "日常",
+      "group": "产线主控",
       "reads": [
         {
           "command": "pm pending",

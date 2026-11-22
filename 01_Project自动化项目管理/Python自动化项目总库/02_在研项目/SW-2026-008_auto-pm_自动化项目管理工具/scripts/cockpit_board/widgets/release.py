@@ -132,6 +132,7 @@ def _facts(check: Check) -> list[tuple[str, str]]:
 class ReleasePage(c.ReadPage):
     check_requested = Signal()  # 点了“重新检查候选版本”
     switch_requested = Signal(str, str)  # （发布号，批准人）：用户在确认框里点了“确认并运行”
+    receipt_added = Signal(object)
 
     def __init__(self, root: Path | None = None, markers: Callable[[], Sequence[str] | None] | None = None,
                  on_copy: Callable[[str], None] | None = None, approver: Callable[[], str] | None = None) -> None:
@@ -150,6 +151,7 @@ class ReleasePage(c.ReadPage):
         self.human_block = ""
         self.check_block = ""  # 这次没跑检查的原因（看板带 AI 标记时只看那条也不跑）
         self.last_dialog: ReleaseDialog | None = None
+        self._identity: tuple[str, str, str] = ("", "", "")
         box = QWidget()
         self.ship = QVBoxLayout(box)
         self.ship.setContentsMargins(0, 0, 0, 0)
@@ -194,12 +196,17 @@ class ReleasePage(c.ReadPage):
         self.results_text[release_id] = (text, sev)
         self.render_ship()
 
+    def set_identity(self, source: str, effective: str, control_root: str) -> None:
+        self._identity = (source, effective, control_root)
+        self.render_ship()
+
     def add_receipt(self, receipt: Receipt) -> None:
         if receipt.rc is not None:
             self.receipts = [r for r in self.receipts if not (r.rc is None and r.action == receipt.action)]
         self.receipts.append(receipt)
         self.receipts = self.receipts[-RECEIPT_LIMIT * 2:]
         self.render_ship()
+        self.receipt_added.emit(receipt)
 
     def blocked(self, release_id: str) -> str:
         """这个候选版本的“同意切换”为什么灰着；空串＝可以点。点开那一刻、运行之前都再算一次。"""
@@ -212,6 +219,29 @@ class ReleasePage(c.ReadPage):
         if self.root is None:
             return
         self.human_block = decisions.human_only_block(self.markers())
+        src, eff, ctrl = self._identity
+        if src or eff or ctrl:
+            same = bool(src and eff and src in eff)
+            lock_card, lock_lay = c.card("ok" if same else ("risk" if src and eff else ""))
+            lock_lay.addWidget(c.hrow(
+                c.label("版本锁与控制根对照", "section", wrap=False),
+                c.chip("现役发布和主干一致" if same else ("版本不一致或未切到最新" if src and eff else "未完全读取"),
+                       "ok" if same else ("risk" if src and eff else "na")),
+                1,
+            ))
+            holder, grid = c.grid(3)
+            box1, l1 = c.inner()
+            l1.addWidget(c.label("现役发布槽", "small", wrap=False))
+            l1.addWidget(c.label(eff or "—", "mono", wrap=False))
+            box2, l2 = c.inner()
+            l2.addWidget(c.label("本地 main HEAD", "small", wrap=False))
+            l2.addWidget(c.label(src or "—", "mono", wrap=False))
+            box3, l3 = c.inner()
+            l3.addWidget(c.label("控制根", "small", wrap=False))
+            l3.addWidget(c.label((ctrl or "—") + " · 脚本/文档改动并入 main 即生效，不必每次发版", "small"))
+            c.fill_grid(grid, [box1, box2, box3], 3)
+            lock_lay.addWidget(holder)
+            self.ship.addWidget(lock_card)
         self.ship.addWidget(c.section("候选版本", "每个版本改了什么、门禁和审计放没放行；按钮灰着时旁边写着差哪一条"))
         if not self.candidates:
             self.ship.addWidget(c.label(NO_CANDIDATES, "muted"))

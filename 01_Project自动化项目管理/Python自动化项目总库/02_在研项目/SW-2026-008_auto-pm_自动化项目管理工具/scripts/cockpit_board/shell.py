@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
+    QHBoxLayout,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -38,20 +40,17 @@ class PageSpec:
 
 
 PAGES: tuple[PageSpec, ...] = (
-    PageSpec("home", "今天", "日常", "现在最该你办的一件、四个数、每张开着的卡走到哪一格、机器检查灯"),
-    PageSpec("decisions", "决定", "日常", "待你批准、验收的卡；每个按钮背后是同一条 main.py 命令"),
-    PageSpec("issues", "问题", "日常", "所有项目的挡路、风险、提醒，一张表"),
-    PageSpec("attention", "要你出手", "日常", "等你本人拍板的范围卡和收件箱条目，只读"),
-    PageSpec("projects", "全部项目", "受管项目", "受管的全部项目"),
-    PageSpec("project", "项目详情", "受管项目", nav=False),
-    PageSpec("tasks", "任务", "受管项目", "一个项目的四栏卡和进门定位，只读"),
-    PageSpec("flow", "流程图", "驾驶舱", "看一张卡在状态流程里走到了哪一步"),
-    PageSpec("tools", "工具", "驾驶舱", "变更单、决策、变量表的只读查询和预览"),
-    PageSpec("prs", "PR 与审计", "驾驶舱", "开着的 PR 和审计结论，读窗口已有的 GitHub 采集"),
-    PageSpec("worktrees", "工作树与分支", "驾驶舱", "每个工位的分支和改动，可清理的只列出不动"),
-    PageSpec("release", "发版", "驾驶舱", "长任务（门禁等）在跑什么、跑完没有，只读"),
-    PageSpec("spine", "脊柱图", "驾驶舱", "一张卡从进门到收口的十步"),
-    PageSpec("commands", "命令与契约", "驾驶舱", "每条命令界面能不能碰、谁能按"),
+    PageSpec("home", "今天", "产线主控", "现在最该你办的一件、四个数、项目产线舱与六格工位条、机器检查灯"),
+    PageSpec("worktrees", "项目工位与分支", "产线主控", "按项目分组挂载的 AI 工位与分支、AI 名册及本机近期记录"),
+    PageSpec("decisions", "决定与待办", "产线主控", "待你拍板的卡和条目；每个按钮背后是同一条 main.py 命令"),
+    PageSpec("projects", "全部项目", "产线主控", "受管的全部项目，表格或产线卡片浏览"),
+    PageSpec("project", "项目详情", "产线主控", nav=False),
+    PageSpec("release", "发版中心", "产线主控", "版本锁对比、候选版本检查与长任务状态"),
+    PageSpec("tools", "工程工具箱", "产线主控", "变更单、决策、变量表、入箱、项目与本机交接的只读查看与预览"),
+    PageSpec("issues", "问题汇总", "排查与诊断", "所有项目的挡路、风险、提醒，一张表"),
+    PageSpec("prs", "PR 与审计", "排查与诊断", "开着的 PR、审计结论与 GitHub 联动档位说明"),
+    PageSpec("flow", "流程与状态机", "排查与诊断", "四套状态机图与十步治理脊柱图，只读查阅"),
+    PageSpec("commands", "命令与契约", "排查与诊断", "每条命令界面能不能碰、谁能按"),
 )
 
 # 骨架页读哪些命令：真源是 flow/pages.json（契约测试对过：只读 read 类命令、不带写开关、读法已登记）。
@@ -127,6 +126,35 @@ class Sidebar(QFrame):
                 layout.addWidget(item)
                 self.buttons[page.key] = item
         layout.addStretch(1)
+        telemetry = QFrame()
+        telemetry.setObjectName("telemetry_panel")
+        self.telemetry_layout = QVBoxLayout(telemetry)
+        self.telemetry_layout.setContentsMargins(0, 0, 0, 0)
+        self.telemetry_layout.setSpacing(3)
+        layout.addWidget(telemetry)
+        self.set_telemetry([
+            ("账本", "没检查", "na", "○"),
+            ("版本锁", "没检查", "na", "○"),
+            ("GitHub", "没检查", "na", "○"),
+            ("AI 标记", "没检查", "na", "○"),
+        ])
+
+    def set_telemetry(self, rows: Sequence[tuple[str, str, str, str]]) -> None:
+        """更新侧栏左下角 4 盏系统联锁遥测灯：(名字, 值文字, 语义色, 图形标记)。"""
+        c.clear(self.telemetry_layout)
+        self.telemetry_layout.addWidget(c.label("系统联锁遥测", "small", wrap=False))
+        for name, value, sev, glyph in rows:
+            dot = c.label(glyph, "led", wrap=False)
+            dot.setProperty("sev", sev)
+            val = c.label(value, "small", wrap=False)
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(4)
+            line.addWidget(dot)
+            line.addWidget(c.label(name, "small", wrap=False))
+            line.addStretch(1)
+            line.addWidget(val)
+            self.telemetry_layout.addLayout(line)
 
     def select(self, key: str) -> None:
         """点亮 key 对应的按钮；不在侧栏里的页（项目详情）全部熄灭。"""

@@ -144,8 +144,11 @@ def test_pm_board_is_read_only(qapp: QApplication, tmp_path: Path) -> None:
         for widget in window.findChildren(kind):
             if _in_flow_or_tools(window, widget):  # 流程图页、工具页的输入框由各自的测试清点（只在 tool_form 里，或是选图选卡的下拉框）
                 continue
-            assert _inside(widget, "bc_form") or (_inside(widget, "decisions_page") and widget.objectName() == "approver"), (
-                kind.__name__, widget.objectName())
+            assert (
+                _inside(widget, "bc_form")
+                or (_inside(widget, "decisions_page") and widget.objectName() == "approver")
+                or (_inside(widget, "commands_filter") and widget.objectName() == "commands_search")
+            ), (kind.__name__, widget.objectName())
     assert window.projects.table.editTriggers() == window.projects.table.EditTrigger.NoEditTriggers
     window.close()
 
@@ -734,6 +737,8 @@ def test_lifecycle_buttons_only_appear_on_their_own_page(qapp: QApplication, tmp
         window.goto(key)
         qapp.processEvents()
         count()
+    _wait_threads(window, qapp)
+    _wait_decisions(window, qapp)
     assert seen["project"] & LIFECYCLE_WORDS == LIFECYCLE_WORDS  # 五个键都真的画出来过，不是空清点
     for key in ("home", "issues", "projects"):
         assert not seen[key] & LIFECYCLE_WORDS, (key, seen[key] & LIFECYCLE_WORDS)

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -18,13 +18,14 @@ from cockpit_board import decisions, theme
 from cockpit_board.actions import Receipt
 from cockpit_board.viewmodel import PHASES, ProjectVM, change_status_text
 from cockpit_board.widgets import common as c
+from cockpit_board.widgets import tasks as tasks_widget
 from cockpit_board.widgets.delivery import github_block
 from cockpit_board.widgets.home import decision_card
 from cockpit_board.widgets.issues import issue_card
 from PySide6.QtWidgets import QButtonGroup, QVBoxLayout, QWidget
 
 TABS = (("overview", "概览"), ("board", "卡片"), ("evidence", "证据"), ("changes", "变更记录"),
-        ("io", "依赖与交付"), ("recipe", "规范与模板"))
+        ("handoff", "交接事件流"), ("io", "依赖与交付"), ("recipe", "规范与模板"))
 
 
 class LifecyclePort(Protocol):
@@ -53,6 +54,7 @@ class ProjectPage(QWidget):
         self.vm: ProjectVM | None = None
         self.now: datetime | None = None
         self.online: bool | None = None
+        self._tasks_results: dict[str, list[c.ReadResult]] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         self.scroll_area, self.layout_ = c.page()
@@ -158,6 +160,22 @@ class ProjectPage(QWidget):
         if self.vm is not None and self.now is not None:
             self.show_view(self.vm, self.now, self.online)
 
+    def set_tasks_results(self, project_id: str, results: Sequence[c.ReadResult]) -> None:
+        """接收针对该项目的 pm missions / pm orient 只读结果并刷新卡片页签。"""
+        self._tasks_results[project_id] = list(results)
+        if self.vm is not None and self.vm.card.project_id == project_id and self.now is not None:
+            self.show_view(self.vm, self.now, self.online)
+
+    def _phase_strip(self) -> QWidget:
+        items: list[QWidget | int] = [c.label("阶段周期", "small", wrap=False)]
+        for name in PHASES:
+            pill = c.label(name, "phase_pill", wrap=False)
+            pill.setProperty("at", "todo")
+            items.append(pill)
+        items.append(c.label("8 段标准周期（当前所处阶段不自动推算）", "small", wrap=False))
+        items.append(1)
+        return c.hrow(*items, spacing=theme.SPACE // 2)
+
     def show_view(self, vm: ProjectVM, now: datetime, online: bool | None) -> None:
         if self.vm is not None and self.vm.card.project_id != vm.card.project_id:
             # 换到另一个项目：上一个项目的预演和回执都不带过来，确认键消失
@@ -172,7 +190,7 @@ class ProjectPage(QWidget):
         lay.addWidget(c.hrow(c.label(card.milestone, "muted", wrap=False), c.label("到期 " + card.due_text, "muted", wrap=False),
                              c.label("数据覆盖 " + card.coverage.text(), "muted", wrap=False),
                              c.label("最后动静 " + card.last_text, "muted", wrap=False), 1))
-        lay.addWidget(c.label("阶段：" + " › ".join(PHASES) + "（只列阶段名；当前在哪个阶段没有从任何文件读，也不自动推算）", "small"))
+        lay.addWidget(self._phase_strip())
         group = QButtonGroup(self)
         buttons = []
         for key, text in TABS:
@@ -214,7 +232,19 @@ class ProjectPage(QWidget):
             inner.addWidget(row)
         lay.addWidget(frame)
 
-    def _board(self, vm: ProjectVM, _now: datetime) -> None:
+    def _board(self, vm: ProjectVM, now: datetime) -> None:
+        live = self._tasks_results.get(vm.card.project_id, [])
+        if live:
+            live_frame, live_lay = c.card()
+            live_lay.addWidget(c.label("进门定位与实时任务只读核对（pm missions / pm orient）", "section"))
+            for result in live:
+                state, status = c.read_state(result)
+                live_lay.addWidget(c.state_line(state, f"{result.command} · {status}"))
+                if c.shows_values(result):
+                    rows = tasks_widget.summarize(result.reader, result.parsed.data, now)
+                    if rows:
+                        live_lay.addWidget(c.kv(rows))
+            self.layout_.addWidget(live_frame)
         holder, grid = c.grid(len(vm.columns))
         widgets = []
         for column in vm.columns:
@@ -266,6 +296,53 @@ class ProjectPage(QWidget):
         self.layout_.addWidget(frame)
         self.layout_.addWidget(c.label("BC = 业务变更（客户改需求、领导砍需求、参数变化），CARD = 实施卡，CHG = 收口变更单。三种合一张表。"
                                        "还没收口的变更都在最上面；已收口的从新到旧只列最近 30 条；实施卡没有日期，列在最后。", "small"))
+
+    def _handoff(self, vm: ProjectVM, _now: datetime) -> None:
+        handoff = vm.handoff
+        if handoff is None or not handoff.exists:
+            frame, inner = c.card(dashed=True)
+            inner.addWidget(c.label("本机轻轨交接（PM-056 V2.0.0）", "section"))
+            inner.addWidget(c.label("这个项目还没有建立交接交换区；运行 pm_handoff.py set-focus / log 后在这里只读显示。", "muted"))
+            if handoff is not None and handoff.handoff_rel:
+                inner.addWidget(c.label("交换区路径：" + handoff.handoff_rel, "mono"))
+            self.layout_.addWidget(frame)
+            return
+        if handoff.unreadable:
+            bar, bar_lay = c.card("risk")
+            bar_lay.addWidget(c.label("交接交换区部分数据读不懂：" + handoff.unreadable, "small"))
+            self.layout_.addWidget(bar)
+        focus_frame, focus_lay = c.card("risk" if handoff.is_stale else "ok")
+        head_items: list[QWidget | int] = [c.label("当前阶段焦点（focus.json）", "section"), 1]
+        if handoff.is_stale:
+            head_items.insert(1, c.chip(f"已超过 {handoff.stale_days} 天未更新", "risk"))
+        elif handoff.updated_by:
+            head_items.insert(1, c.chip(f"最近更新 {handoff.updated_by}", "hint"))
+        focus_lay.addWidget(c.hrow(*head_items))
+        focus_lay.addWidget(c.kv([
+            ("交换区目录", handoff.handoff_rel or "—"),
+            ("更新时间", handoff.updated_at or "—"),
+            ("阶段目标", handoff.stage_goal or "（空）"),
+            ("活跃工作", f"{handoff.active_card or '—'} · 分支 {handoff.active_branch or '—'} · {handoff.active_chg or '无 CHG'}"),
+            ("当前断点", handoff.active_breakpoint or "（空）"),
+            ("下一步合法动作", handoff.next_action or "（空）"),
+        ]))
+        if handoff.priorities:
+            focus_lay.addWidget(c.label("优先级队列：" + "；".join(f"{p.rank}. {p.item}" for p in handoff.priorities), "small"))
+        if handoff.waiting_for_user:
+            focus_lay.addWidget(c.label("等用户定：" + "；".join(handoff.waiting_for_user), "small"))
+        self.layout_.addWidget(focus_frame)
+        self.layout_.addWidget(c.section("交接事件流（journal.jsonl）", f"最新 {len(handoff.events)} 条只读记录"))
+        if not handoff.events:
+            self.layout_.addWidget(c.label("还没有交接流水记录。", "muted"))
+        for ev in handoff.events:
+            ev_card, ev_lay = c.card()
+            ev_lay.addWidget(c.hrow(c.label(ev.ts or "—", "mono", wrap=False), c.chip(ev.kind or "note", "hint"),
+                                    c.label(ev.agent or "—", "small", wrap=False),
+                                    c.label(ev.card or "—", "mono", wrap=False), 1))
+            ev_lay.addWidget(c.label(ev.summary or "（无摘要）"))
+            if ev.next_hint or ev.commit:
+                ev_lay.addWidget(c.label(f"提交：{ev.commit or '—'} · 下一步：{ev.next_hint or '—'}", "small"))
+            self.layout_.addWidget(ev_card)
 
     def _io(self, vm: ProjectVM, _now: datetime) -> None:
         frame, inner = c.card()

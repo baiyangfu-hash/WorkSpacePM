@@ -1,0 +1,294 @@
+{
+  "schema_version": "cockpit-board-bridge-mapping.v1",
+  "project_id": "SW-2026-008",
+  "project_name": "auto-pm 自动化项目管理驾驶舱总控屏",
+  "target_module": "scripts/cockpit_board/",
+  "prototype_file": "cockpit_board_redesign.html",
+  "design_doc": "../008_总控屏GUI重设计方案.md",
+  "spec_refs": [
+    "STD-911",
+    "DEV-301",
+    "PM-056",
+    "PM-042"
+  ],
+  "views": [
+    {
+      "id": "today",
+      "title": "今天 · 总控",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "home"
+      ],
+      "reads": [
+        "pm_dashboard.build_board (ledger ro copy)",
+        "github_collector.collect",
+        "pm_handoff.show (focus.json)",
+        "worktree list --json --deep --no-size"
+      ],
+      "writes": []
+    },
+    {
+      "id": "worktrees",
+      "title": "项目工位与分支",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "worktrees"
+      ],
+      "reads": [
+        "worktree list --json --deep --no-size",
+        "worktree sweep --json --no-fetch",
+        "claim list --json --no-fetch (multi-machine only)",
+        "long-run status",
+        "agent list --json",
+        ".auto-pm/station-holders/*.json",
+        ".auto-pm/reports/local_merge/merge_log.jsonl",
+        "pm_handoff.show (focus.json active_work)"
+      ],
+      "writes": [
+        "worktree close <name> (human_only)",
+        "worktree sweep --apply --only <name> --no-fetch (human_only, blocked while long-run running)",
+        "worktree sweep --apply --no-fetch (human_only, blocked while long-run running)",
+        "worktree reclaim --stale --apply (preview first, human_only)",
+        "agent register <name> --via board (human_only)",
+        "agent unregister <name> (human_only)"
+      ]
+    },
+    {
+      "id": "decisions",
+      "title": "决定与待办",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "decisions",
+        "attention"
+      ],
+      "reads": [
+        "pm approver-pin status",
+        "pm pending --project-id <PID>",
+        "pm inbox list --project-id <PID>",
+        "pm_dashboard.ChangeOrderInfo",
+        "pm_dashboard.MissionInfo",
+        "viewmodel.attention_count (D-342)"
+      ],
+      "writes": [
+        "change transition <CHG> --to approved --pid <PID> (human_only, pin)",
+        "change transition <CHG> --to completed --pid <PID> (human_only)",
+        "pm approve --request-id <REQ> --plan-hash <HASH> (human_only, pin)",
+        "pm inbox confirm <ITEM> --ticket-hash <HASH> (human_only, pin)",
+        "pm inbox reject <ITEM> --ticket-hash <HASH> (human_only, pin)",
+        "pm confirm-start --mission-id <MSN>",
+        "pm verify (not on board; IDE agent runs)",
+        "pm accept --mission-id <MSN> (human_only, pin)",
+        "pm close --mission-id <MSN>",
+        "pm park --mission-id <MSN> (human_only, pin)",
+        "pm unpark --mission-id <MSN> (human_only, pin)",
+        "pm switch --pid <PID> --to <MSN> (human_only, pin)"
+      ]
+    },
+    {
+      "id": "projects",
+      "title": "全部项目",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "projects"
+      ],
+      "reads": [
+        "pm_dashboard.discover_projects",
+        "viewmodel.ProjectCard",
+        "workspace_registry.json"
+      ],
+      "writes": []
+    },
+    {
+      "id": "project_cabin",
+      "title": "项目舱（7 页签详情）",
+      "group": "受管项目（下钻）",
+      "replaces_legacy_pages": [
+        "project",
+        "tasks"
+      ],
+      "reads": [
+        "viewmodel.project_vm",
+        "pm missions --pid <PID>",
+        "pm orient <PID> --json",
+        "pm_handoff.show <PID> (focus.json + journal.jsonl)",
+        "project archive <PID> (dry-run preview)",
+        "project reactivate <PID> (dry-run preview)",
+        "project archive/reactivate/register --help (lifecycle probe)"
+      ],
+      "writes": [
+        "project archive <PID> --confirm --approval-evidence-ref <REF> (after dry-run, human_only, pin)",
+        "project reactivate <PID> --confirm --approval-evidence-ref <REF> (after dry-run, human_only, pin)"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "发版中心",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "release"
+      ],
+      "reads": [
+        "active_release.json",
+        "git rev-parse --short HEAD",
+        ".auto-pm/release-candidates/*",
+        "release ship <COMMIT> --json (user_only check)",
+        "long-run status"
+      ],
+      "writes": [
+        "release ship <COMMIT> --no-check-only --confirm-ref <REF> --approver <USER> --json (human_only, logs to release_ship.jsonl)"
+      ]
+    },
+    {
+      "id": "tools",
+      "title": "工程工具箱",
+      "group": "产线主控",
+      "replaces_legacy_pages": [
+        "tools"
+      ],
+      "reads": [
+        "change list <PID> --full",
+        "change show <CHG> --pid <PID>",
+        "decision list",
+        "decision show <DEC>",
+        "vartable parse <FILE> --output-format json",
+        "pm_handoff.show <PID>"
+      ],
+      "writes": [
+        "change create (preview required)",
+        "change transition (preview required, excludes approved/conditionally_approved)",
+        "pm inbox add (preview required, no prefilled original_words)",
+        "project create (preview required, --dry-run default checked)",
+        "project register (preview required, --dry-run default checked, --kind probe)",
+        "pm_handoff set-focus (preview required, worktree path only)"
+      ]
+    },
+    {
+      "id": "issues",
+      "title": "问题汇总",
+      "group": "排查与诊断",
+      "replaces_legacy_pages": [
+        "issues"
+      ],
+      "reads": [
+        "viewmodel.all_issues",
+        "viewmodel.decisions_without_issue (D-342)"
+      ],
+      "writes": []
+    },
+    {
+      "id": "prs",
+      "title": "PR 与审计",
+      "group": "排查与诊断",
+      "replaces_legacy_pages": [
+        "prs"
+      ],
+      "reads": [
+        "github_collector.collect (PR, gate, CI, safety sign-off, rules approval, reviews/ audits)",
+        ".auto-pm/reports/local_merge/github_mode.json"
+      ],
+      "writes": []
+    },
+    {
+      "id": "flow",
+      "title": "流程与状态机",
+      "group": "排查与诊断",
+      "replaces_legacy_pages": [
+        "flow",
+        "spine"
+      ],
+      "reads": [
+        "flow/graphs.json (mission, work, run, change)",
+        "flow/spine.json (10 steps + off_spine)",
+        "flowgraph.card_positions"
+      ],
+      "writes": []
+    },
+    {
+      "id": "commands",
+      "title": "命令与契约",
+      "group": "排查与诊断",
+      "replaces_legacy_pages": [
+        "commands"
+      ],
+      "reads": [
+        "flow/commands_map.json (226 leaf commands: read/write/user_only/never)"
+      ],
+      "writes": []
+    },
+    {
+      "id": "offline_station",
+      "title": "现场离线工位",
+      "group": "第二视角（工程工位）",
+      "replaces_legacy_pages": [
+        "station"
+      ],
+      "reads": [
+        "viewmodel.station_vm",
+        "actions.source_version",
+        "effective_release",
+        "plc check <PID> (read-only)",
+        "plc docs check <PID> (read-only)",
+        "plc docs sync --dry-run <PID> (preview)"
+      ],
+      "writes": [
+        "actions.bc_append (preview required + SHA-256 digest guard, writes 02_业务变更记录.md in manual worktree only)"
+      ]
+    }
+  ],
+  "data_adapters": {
+    "existing": {
+      "pm_dashboard": "scripts/pm_dashboard.py (只读账本临时拷贝 + 工程目录发现 + 变更单/台账解析)",
+      "github_collector": "scripts/github_collector.py (只 GET 采集 PR、门禁、安全签字、审计报告)",
+      "viewmodel": "scripts/cockpit_board/viewmodel.py (纯判定 ViewModel 层)",
+      "decisions": "scripts/cockpit_board/decisions.py (13 个决定动作真源与命令拼装)",
+      "stations": "scripts/cockpit_board/stations.py (工位与 AI 名册纯判定)",
+      "release_ship": "scripts/cockpit_board/release_ship.py (候选版本与切换条件判定)",
+      "tool_actions": "scripts/cockpit_board/tool_actions.py (工具页白名单命令与入箱/建项校验)",
+      "iocheck": "scripts/cockpit_board/iocheck.py (IO/变量表地址与变量名查重)",
+      "flowgraph": "scripts/cockpit_board/flowgraph.py (flow/graphs.json 图结构解析)",
+      "actions": "scripts/cockpit_board/actions.py (唯一允许起子进程与受控追加写的模块)"
+    },
+    "new_readonly_adapter": {
+      "local_handoff_reader": "只读接入 scripts/pm_handoff.py 解析各项目 focus.json 与 journal.jsonl，用于项目产线舱焦点展示、工位归属补充及漂移/陈旧提醒",
+      "local_merge_reader": "只读读取 .auto-pm/reports/local_merge/github_mode.json 与 merge_log.jsonl，展示本机 GitHub 三档及最近合并记录与 git revert -m 1 退回命令",
+      "station_project_resolver": "按 claims -> focus.json active_work -> git log 修改路径匹配 workspace_registry.json 的三级优先级解析单机工位所属项目"
+    }
+  },
+  "guardrails": {
+    "never_buttons": [
+      "合并",
+      "删除",
+      "切换发布（仅限发版页「同意切换到 <发布号>」受控例外）",
+      "代签 / 安全签字",
+      "no-verify",
+      "全量门禁直接运行",
+      "启动 codex / agent 执行",
+      "设置/重置批准口令"
+    ],
+    "human_only_decisions": [
+      "approve_card",
+      "accept",
+      "park",
+      "unpark",
+      "switch",
+      "inbox_confirm",
+      "inbox_reject",
+      "project_archive",
+      "project_reactivate",
+      "change_approve",
+      "change_complete"
+    ],
+    "unchecked_texts": [
+      "没检查",
+      "断网未知",
+      "读不懂"
+    ],
+    "offline_policy": {
+      "external_urls": false,
+      "external_fonts": false,
+      "plain_text_rendering": true,
+      "preview_before_write": true,
+      "single_use_preview": true
+    }
+  }
+}

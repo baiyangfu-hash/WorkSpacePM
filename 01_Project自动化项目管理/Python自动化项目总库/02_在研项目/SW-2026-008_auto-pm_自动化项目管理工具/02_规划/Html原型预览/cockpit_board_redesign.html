@@ -1,0 +1,2862 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SW-2026-008 驾驶舱总控屏（重设计原型）</title>
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --side: #e9edf3;
+      --card: #ffffff;
+      --card2: #f7f9fc;
+      --line: #dfe4ec;
+      --line2: #c5cedb;
+      --fg: #151a22;
+      --fg2: #525e6f;
+      --fg3: #6b778a;
+      --accent: #1d5c8f;
+      --accent-fg: #ffffff;
+      --accent-soft: #e3eef7;
+      --ok: #2e7d4f;
+      --ok-soft: #e6f4eb;
+      --risk: #b4690e;
+      --risk-soft: #fef3dc;
+      --block: #c62828;
+      --block-soft: #fdebec;
+      --hint: #2563a6;
+      --hint-soft: #e7f0fb;
+      --na: #7a8494;
+      --na-soft: #eef1f5;
+      --shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+      --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+      --font-mono: "Cascadia Mono", "Consolas", "DejaVu Sans Mono", monospace;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #0e131b;
+      --side: #121923;
+      --card: #171f2b;
+      --card2: #1d2736;
+      --line: #283446;
+      --line2: #394960;
+      --fg: #ecf1f8;
+      --fg2: #a8b4c4;
+      --fg3: #7c8b9e;
+      --accent: #60a5fa;
+      --accent-fg: #0b1220;
+      --accent-soft: rgba(96, 165, 250, 0.14);
+      --ok: #34d399;
+      --ok-soft: rgba(52, 211, 153, 0.13);
+      --risk: #f59e0b;
+      --risk-soft: rgba(245, 158, 11, 0.15);
+      --block: #f87171;
+      --block-soft: rgba(248, 113, 113, 0.14);
+      --hint: #38bdf8;
+      --hint-soft: rgba(56, 189, 248, 0.14);
+      --na: #8b97a8;
+      --na-soft: rgba(139, 151, 168, 0.12);
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13.5px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+    button { border: 1px solid var(--line2); background: var(--card); border-radius: 7px; padding: 5px 12px; cursor: pointer; transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease; display: inline-flex; align-items: center; gap: 6px; }
+    button:hover:not(:disabled) { background: var(--card2); border-color: var(--accent); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+    button.btn-primary:hover:not(:disabled) { opacity: 0.92; background: var(--accent); }
+    button.btn-ghost { border-color: transparent; background: transparent; color: var(--accent); }
+    button.btn-ghost:hover:not(:disabled) { background: var(--accent-soft); border-color: transparent; }
+    button.btn-warn { background: var(--risk-soft); color: var(--risk); border-color: var(--risk); font-weight: 600; }
+    button.btn-danger { background: var(--block-soft); color: var(--block); border-color: var(--block); font-weight: 600; }
+    button.btn-sm { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+
+    input[type="text"], input[type="search"], select, textarea {
+      background: var(--card2); border: 1px solid var(--line2); border-radius: 7px; padding: 6px 10px; outline: none; width: 100%;
+    }
+    input[type="text"]:focus, input[type="search"]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    input:disabled, select:disabled, textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .mono { font-family: var(--font-mono); }
+    .small { font-size: 12px; color: var(--fg3); }
+    .muted { color: var(--fg2); }
+    .hidden { display: none !important; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* Topbar */
+    .topbar {
+      position: sticky; top: 0; z-index: 30;
+      background: var(--card); border-bottom: 1px solid var(--line);
+      padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .topbar-left, .topbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; letter-spacing: 0.2px; }
+    .brand-icon { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+    .seg-group { display: inline-flex; background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+    .seg-btn { border: none; background: transparent; color: var(--fg2); padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+    .seg-btn:hover:not(:disabled) { background: var(--card); color: var(--fg); border: none; }
+    .seg-btn.active { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+
+    .version-pill {
+      display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px;
+      background: var(--card2); border: 1px solid var(--line2); font-size: 12px; font-family: var(--font-mono); cursor: pointer;
+    }
+    .version-pill.warn { background: var(--risk-soft); border-color: var(--risk); color: var(--risk); }
+
+    /* Body Grid */
+    .workspace-body { display: flex; flex: 1; min-width: 0; }
+    .sidebar {
+      width: 224px; flex-shrink: 0; background: var(--side); border-right: 1px solid var(--line);
+      padding: 12px 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;
+    }
+    .nav-group-title {
+      font-size: 11.5px; font-weight: 700; color: var(--fg3); padding: 4px 10px;
+      display: flex; align-items: center; justify-content: space-between; letter-spacing: 0.4px;
+    }
+    .nav-list { display: flex; flex-direction: column; gap: 2px; }
+    .nav-item {
+      width: 100%; border: none; background: transparent; color: var(--fg2);
+      padding: 7px 10px; border-radius: 8px; font-size: 13px; justify-content: space-between; text-align: left;
+    }
+    .nav-item:hover { background: var(--card2); color: var(--fg); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+    .nav-item-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+    .telemetry-box {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 12px;
+    }
+    .telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+    .telemetry-cell {
+      display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 6px; background: var(--card2); border: 1px solid var(--line);
+    }
+
+    /* Main Column + Console */
+    .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .main-scroll { flex: 1; padding: 18px 22px 24px; min-width: 0; }
+    .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .page-crumb { font-size: 12px; color: var(--fg3); }
+    .page-title { font-size: 20px; font-weight: 700; margin: 2px 0 0; letter-spacing: -0.2px; }
+    .page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .stack-v { display: flex; flex-direction: column; gap: 14px; }
+
+    /* Cards & Bays */
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; box-shadow: var(--shadow);
+    }
+    .card.dashed { background: transparent; border-style: dashed; box-shadow: none; }
+    .card.sev-block { border-left: 4px solid var(--block); }
+    .card.sev-risk { border-left: 4px solid var(--risk); }
+    .card.sev-ok { border-left: 4px solid var(--ok); }
+    .card.sev-hint { border-left: 4px solid var(--hint); }
+    .inner-box { background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; }
+
+    .bay-card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow);
+    }
+    .bay-stripe { height: 3px; background: var(--accent); }
+    .bay-stripe.warn { background: var(--risk); }
+    .bay-stripe.ok { background: var(--ok); }
+    .bay-stripe.block { background: var(--block); }
+    .bay-body { padding: 15px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+    /* Bus Rail + Station Pods */
+    .bus-rail { position: relative; padding-left: 20px; display: flex; flex-direction: column; gap: 9px; }
+    .bus-rail::before { content: ""; position: absolute; left: 7px; top: 4px; bottom: 16px; width: 2px; background: var(--line2); border-radius: 2px; }
+    .bus-node { position: relative; }
+    .bus-node::before { content: ""; position: absolute; left: -13px; top: 20px; width: 13px; height: 2px; background: var(--line2); }
+    .bus-node::after { content: ""; position: absolute; left: -16px; top: 17px; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px var(--card); }
+    .bus-node.locked::after { background: var(--block); }
+    .bus-node.ready::after { background: var(--ok); }
+    .pod {
+      background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .pod.locked { border-color: var(--block); background: var(--block-soft); }
+    .pod.ready { border-color: var(--ok); }
+
+    /* Semantic Chips & LEDs */
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 8px;
+      font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); background: var(--card2); color: var(--fg2); white-space: nowrap;
+    }
+    .chip.ok { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
+    .chip.risk { background: var(--risk-soft); color: var(--risk); border-color: var(--risk); }
+    .chip.block { background: var(--block-soft); color: var(--block); border-color: var(--block); }
+    .chip.hint { background: var(--hint-soft); color: var(--hint); border-color: var(--hint); }
+    .chip.na { background: var(--na-soft); color: var(--na); border-color: var(--line2); }
+
+    .led { width: 8px; height: 8px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
+    .led.ok { background: var(--ok); }
+    .led.risk { background: var(--risk); }
+    .led.block { background: var(--block); }
+    .led.hint { background: var(--hint); }
+    .led.na { background: transparent; border: 1.8px solid var(--na); }
+
+    /* Grids */
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .split-8-4 { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 16px; align-items: start; }
+    .split-4-8 { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 16px; align-items: start; }
+    @media (max-width: 1120px) {
+      .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split-8-4, .split-4-8 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .sidebar { width: 196px; }
+    }
+
+    /* Home: Number boxes, Strip, Lamps */
+    .num-box {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 4px; transition: border-color 140ms ease;
+    }
+    .num-box.clickable { cursor: pointer; }
+    .num-box.clickable:hover { border-color: var(--accent); }
+    .num-box.sev-block { background: var(--block-soft); border-color: var(--block); }
+    .num-box.sev-risk { background: var(--risk-soft); border-color: var(--risk); }
+    .num-val { font-size: 22px; font-weight: 700; font-family: var(--font-mono); }
+
+    .card-row {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card2); cursor: pointer;
+    }
+    .card-row:hover { border-color: var(--accent); }
+    .strip { display: flex; flex-wrap: wrap; gap: 3px; }
+    .strip-cell {
+      min-width: 68px; text-align: center; padding: 2px 7px; border-radius: 4px; font-size: 11.5px;
+      border: 1px solid var(--line); color: var(--fg3); background: var(--card);
+    }
+    .strip-cell.done { color: var(--fg2); background: var(--card2); }
+    .strip-cell.current { color: var(--fg); font-weight: 700; border-color: var(--line2); }
+    .strip-cell.current.block { background: var(--block-soft); color: var(--block); border-color: var(--block); }
+    .strip-cell.current.risk { background: var(--risk-soft); color: var(--risk); border-color: var(--risk); }
+
+    .lamp-box {
+      background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; cursor: pointer;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .lamp-box:hover { border-color: var(--accent); }
+    .lamp-box.sev-block { background: var(--block-soft); border-color: var(--block); }
+    .lamp-box.sev-risk { background: var(--risk-soft); border-color: var(--risk); }
+
+    /* Tables & KV */
+    .kv-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 12px; font-size: 12.5px; }
+    .kv-key { color: var(--fg3); font-weight: 600; }
+    .data-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; text-align: left; }
+    table.data-table th { background: var(--card2); color: var(--fg2); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    table.data-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.data-table tr:last-child td { border-bottom: none; }
+    table.data-table tr.clickable:hover { background: var(--card2); cursor: pointer; }
+
+    /* Tabs */
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tab-btn { border: 1px solid var(--line); background: var(--card); color: var(--fg2); padding: 5px 12px; border-radius: 8px; font-size: 12.5px; }
+    .tab-btn.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+
+    /* Banners & Pre */
+    .alert-bar {
+      padding: 11px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--card2);
+      display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; font-size: 12.5px;
+    }
+    .alert-bar.block { background: var(--block-soft); border-color: var(--block); }
+    .alert-bar.risk { background: var(--risk-soft); border-color: var(--risk); }
+    .alert-bar.ok { background: var(--ok-soft); border-color: var(--ok); }
+    .alert-bar.hint { background: var(--hint-soft); border-color: var(--hint); }
+    pre.cmd-pre {
+      margin: 0; padding: 9px 11px; border-radius: 8px; background: var(--card2); border: 1px solid var(--line);
+      font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--fg2);
+    }
+
+    /* Lifecycle 8 stages */
+    .lifecycle-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .life-node { padding: 3px 9px; border-radius: 6px; font-size: 12px; border: 1px solid var(--line); background: var(--card2); color: var(--fg3); }
+    .life-node.done { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
+    .life-node.cur { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+    /* Bottom Global Receipt Drawer */
+    .console-footer { border-top: 1px solid var(--line); background: var(--card); position: sticky; bottom: 0; z-index: 25; }
+    .console-toggle {
+      width: 100%; border: none; border-radius: 0; background: var(--card2); padding: 7px 16px;
+      display: flex; align-items: center; justify-content: space-between; font-size: 12px;
+    }
+    .console-body { max-height: 240px; overflow-y: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+
+    /* Modals & Toast */
+    .modal-mask {
+      position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.58);
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-box {
+      width: 100%; max-width: 620px; background: var(--card); border: 1px solid var(--line2);
+      border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+    }
+    .modal-head {
+      padding: 12px 16px; background: var(--card2); border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .modal-body { padding: 16px; max-height: 68vh; overflow-y: auto; display: flex; flex-direction: column; gap: 11px; font-size: 13px; }
+    .modal-foot { padding: 11px 16px; background: var(--card2); border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .toast {
+      position: fixed; bottom: 48px; right: 18px; z-index: 70; padding: 9px 14px; border-radius: 9px;
+      background: var(--card); border: 1px solid var(--accent); box-shadow: var(--shadow); font-size: 12.5px; font-weight: 600;
+    }
+
+    /* Form grid */
+    .form-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 12px; align-items: start; }
+    .form-label { font-size: 12.5px; color: var(--fg2); padding-top: 6px; }
+    @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+
+    /* SVG Graph wrapper */
+    .svg-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--card2); padding: 8px; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- 全局顶部总控仪表栏 -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/></svg>
+          </div>
+          <span>AUTO-PM 驾驶舱总控屏</span>
+          <span class="chip hint">方案 A 重设计原型</span>
+        </div>
+
+        <div class="seg-group" title="你的两种身份：有 AI 时是总控视角，自己动手时是现场离线工位">
+          <button id="btn-mode-boss" class="seg-btn active" onclick="setMode('boss')">总控视角</button>
+          <button id="btn-mode-offline" class="seg-btn" onclick="setMode('offline')">现场离线工位</button>
+        </div>
+
+        <div id="version-capsule" class="version-pill" onclick="toggleVersionDrift()" title="点击演练：源码版本与现役发布一致 / 漂移变橙"></div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="seg-group" title="GitHub 三档（GH-001）：关（离线静音）/ 备份（单机默认）/ 多机（PR 与占位协同）">
+          <span class="small" style="padding: 4px 6px 4px 8px;">GitHub</span>
+          <button id="gh-btn-关" class="seg-btn" onclick="askGhMode('关')">关</button>
+          <button id="gh-btn-备份" class="seg-btn active" onclick="askGhMode('备份')">备份</button>
+          <button id="gh-btn-多机" class="seg-btn" onclick="askGhMode('多机')">多机</button>
+        </div>
+
+        <select id="scenario-select" onchange="setScenario(this.value)" style="width: auto; padding: 4px 8px; font-size: 12px;" title="原型工况演练：验证三态真话与安全护栏">
+          <option value="normal">工况演练：正常单机</option>
+          <option value="offline">工况演练：断网离线</option>
+          <option value="ledger_down">工况演练：账本未读到</option>
+          <option value="ai_locked">工况演练：AI 会话启动（锁 11 按钮）</option>
+          <option value="pin_enforced">工况演练：批准口令已生效</option>
+        </select>
+
+        <button class="btn-sm" onclick="toggleTheme()" id="theme-btn">切浅色</button>
+        <button class="btn-sm" onclick="reloadAll()">重新读取</button>
+      </div>
+    </header>
+
+    <!-- 主体区 -->
+    <div class="workspace-body">
+      <aside id="sidebar" class="sidebar">
+        <div id="nav-container" class="stack-v"></div>
+        <div id="telemetry-panel" class="telemetry-box"></div>
+      </aside>
+
+      <div class="main-col">
+        <main class="main-scroll">
+          <div id="global-alert-slot" class="stack-v" style="margin-bottom: 12px;"></div>
+          <div class="page-head">
+            <div>
+              <div id="page-crumb" class="page-crumb"></div>
+              <h1 id="page-title" class="page-title"></h1>
+            </div>
+            <div id="page-actions" class="page-actions"></div>
+          </div>
+          <div id="page-body" class="stack-v"></div>
+        </main>
+
+        <!-- 底部全局可折叠命令执行回执终端 -->
+        <footer class="console-footer">
+          <button class="console-toggle" onclick="toggleConsole()">
+            <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              <strong>全局命令执行回执</strong>
+              <span id="console-count" class="chip ok"></span>
+              <span id="console-latest" class="mono small truncate"></span>
+            </span>
+            <span id="console-arrow" class="small">▸ 展开</span>
+          </button>
+          <div id="console-body" class="console-body hidden"></div>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用确认弹窗 -->
+  <div id="modal-mask" class="modal-mask hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div>
+          <div class="small">命令行安全确认 · 界面不绕过任何护栏</div>
+          <strong id="m-title" style="font-size:15px;"></strong>
+        </div>
+        <button class="btn-sm" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="m-target" class="mono" style="font-weight:700;"></div>
+        <div id="m-desc"></div>
+        <div id="m-facts" class="inner-box kv-grid hidden"></div>
+        <div id="m-warn" class="alert-bar risk hidden"></div>
+        <div id="m-pin-note" class="alert-bar hint hidden"></div>
+        <div id="m-blocked" class="alert-bar block hidden"></div>
+        <div id="m-approver-wrap" class="hidden">
+          <div class="small" style="margin-bottom:4px;">批准人（你的名字，自动记住）</div>
+          <input id="m-approver" type="text" oninput="syncModal()" placeholder="例如 fubai" />
+        </div>
+        <div id="m-fields" class="stack-v"></div>
+        <div>
+          <div class="small" style="margin-bottom:4px;">等价的命令行（点“复制命令”可到终端运行）</div>
+          <pre id="m-cmd" class="cmd-pre"></pre>
+        </div>
+        <div id="m-problem" class="small" style="color:var(--risk);"></div>
+      </div>
+      <div class="modal-foot">
+        <button onclick="copyText(document.getElementById('m-cmd').textContent)">复制命令</button>
+        <div style="display:flex; gap:8px;">
+          <button onclick="closeModal()">取消</button>
+          <button id="m-go" class="btn-primary" onclick="executeModal()">确认并运行</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 登记新 AI / 注销弹窗 -->
+  <div id="reg-mask" class="modal-mask hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div>
+          <div class="small">AI 机队名册（agent list / register / unregister）</div>
+          <strong style="font-size:15px;">登记新 AI / 管理注销</strong>
+        </div>
+        <button class="btn-sm" onclick="closeRegistry()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="inner-box">
+          <div class="small" style="margin-bottom:6px;">内置 5 个 AI（不可重复登记）</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            <span class="chip na mono">claude/</span>
+            <span class="chip na mono">trae/</span>
+            <span class="chip na mono">cursor/</span>
+            <span class="chip na mono">vscode/</span>
+            <span class="chip na mono">codex/</span>
+          </div>
+        </div>
+        <div class="stack-v" style="gap:6px;">
+          <div class="small">已登记外部 AI（点击注销将弹二次确认）</div>
+          <div id="reg-list" class="stack-v" style="gap:6px;"></div>
+        </div>
+        <div id="reg-blocked" class="alert-bar block hidden"></div>
+        <div>
+          <div class="small" style="margin-bottom:4px;">新 AI 名字（小写字母开头，2～20 位小写字母和数字）</div>
+          <input id="reg-name" type="text" placeholder="例如 gemini 或 windsurf" oninput="syncRegistry()" />
+          <div id="reg-err" class="small" style="color:var(--risk); margin-top:4px;"></div>
+        </div>
+        <div>
+          <div class="small" style="margin-bottom:4px;">等价的命令行</div>
+          <pre id="reg-cmd" class="cmd-pre"></pre>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button onclick="copyText(document.getElementById('reg-cmd').textContent)">复制命令</button>
+        <div style="display:flex; gap:8px;">
+          <button onclick="closeRegistry()">取消</button>
+          <button id="reg-go" class="btn-primary" onclick="submitRegistry()">确认并运行</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    /* ======================== 工具函数与 XSS 防护 ======================== */
+    function esc(v) {
+      return String(v == null ? "" : v)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function toast(msg) {
+      var el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(function() { el.classList.add("hidden"); }, 2500);
+    }
+
+    function copyText(txt) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).catch(function() {});
+      }
+      toast("已复制到剪贴板（纯文本）");
+    }
+
+    function progressRing(pct, colorVar) {
+      var r = 17, c = 2 * Math.PI * r;
+      var offset = c * (1 - Math.max(0, Math.min(100, pct)) / 100);
+      return '<div style="position:relative;width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">' +
+        '<svg width="44" height="44" style="transform:rotate(-90deg);">' +
+          '<circle cx="22" cy="22" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="4"/>' +
+          '<circle cx="22" cy="22" r="' + r + '" fill="none" stroke="' + (colorVar || "var(--accent)") + '" stroke-width="4" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + offset.toFixed(1) + '" stroke-linecap="round"/>' +
+        '</svg>' +
+        '<span class="mono" style="position:absolute;font-size:11px;font-weight:700;">' + pct + '%</span>' +
+      '</div>';
+    }
+
+    /* ======================== 静态规范数据（来自 flow/*.json） ======================== */
+    var PHASES_8 = ["立项", "需求", "设计", "编程", "仿真", "现场", "收尾", "归档"];
+    var STRIP_CELLS = ["草稿", "等批准", "进行中", "等验收", "已验收", "已关闭"];
+
+    var GRAPHS = {
+      mission: {
+        id: "mission", title: "任务", en: "Mission", width: 1080, height: 290,
+        intro: "一张卡（一件要办的事）从提出到关闭走的路。同一时刻一个项目只有一张在进行中。",
+        source: "auto_pm/application/core/mission_service.py 的 _TRANSITIONS",
+        hint: "线上的字是对应的命令；「用户」表示只听用户本人。",
+        terminals: ["CLOSED", "CANCELLED"],
+        nodes: [
+          { id: "DRAFT", label: "草稿", x: 20, y: 24 },
+          { id: "AWAITING_APPROVAL", label: "等批准", x: 200, y: 24 },
+          { id: "ACTIVE", label: "进行中", x: 380, y: 24 },
+          { id: "ACCEPTANCE_PENDING", label: "等验收", x: 560, y: 24 },
+          { id: "ACCEPTED", label: "已验收", x: 740, y: 24 },
+          { id: "CLOSED", label: "已关闭", x: 920, y: 24 },
+          { id: "BLOCKED", label: "受阻", x: 290, y: 130 },
+          { id: "PARKED", label: "搁着", x: 470, y: 130 },
+          { id: "CANCELLED", label: "已取消", x: 20, y: 215 }
+        ],
+        edges: [
+          { from: "DRAFT", to: "AWAITING_APPROVAL" },
+          { from: "DRAFT", to: "CANCELLED", minor: true },
+          { from: "AWAITING_APPROVAL", to: "ACTIVE", label: "pm confirm-start" },
+          { from: "AWAITING_APPROVAL", to: "CANCELLED", minor: true },
+          { from: "ACTIVE", to: "BLOCKED" },
+          { from: "ACTIVE", to: "PARKED", label: "pm park", actor: "user" },
+          { from: "ACTIVE", to: "ACCEPTANCE_PENDING", label: "pm verify" },
+          { from: "ACTIVE", to: "CANCELLED", minor: true },
+          { from: "BLOCKED", to: "ACTIVE" },
+          { from: "BLOCKED", to: "PARKED" },
+          { from: "BLOCKED", to: "CANCELLED", minor: true },
+          { from: "PARKED", to: "ACTIVE", label: "pm unpark", actor: "user" },
+          { from: "PARKED", to: "CANCELLED", minor: true },
+          { from: "ACCEPTANCE_PENDING", to: "ACCEPTED", label: "pm accept", actor: "user" },
+          { from: "ACCEPTANCE_PENDING", to: "BLOCKED" },
+          { from: "ACCEPTED", to: "CLOSED", label: "pm close" }
+        ]
+      },
+      work: {
+        id: "work", title: "工作项", en: "Work", width: 1080, height: 270,
+        intro: "任务下面一件被授权的具体活。它的状态由驾驶舱命令带着走，不用手推。",
+        source: "auto_pm/application/core/work_registry_service.py 的 _TRANSITIONS",
+        hint: "不要用 continuity work transition 手推工作项；用 pm 开头的命令。",
+        terminals: ["CLOSED", "CANCELLED"],
+        nodes: [
+          { id: "PLANNED", label: "已计划", x: 20, y: 24 },
+          { id: "READY", label: "就绪", x: 200, y: 24 },
+          { id: "IN_PROGRESS", label: "进行中", x: 380, y: 24 },
+          { id: "VERIFYING", label: "验证中", x: 560, y: 24 },
+          { id: "ACCEPTED", label: "已验收", x: 740, y: 24 },
+          { id: "CLOSED", label: "已关闭", x: 920, y: 24 },
+          { id: "BLOCKED", label: "受阻", x: 290, y: 125 },
+          { id: "CANCELLED", label: "已取消", x: 20, y: 205 }
+        ],
+        edges: [
+          { from: "PLANNED", to: "READY" },
+          { from: "PLANNED", to: "CANCELLED", minor: true },
+          { from: "READY", to: "IN_PROGRESS", label: "pm confirm-start" },
+          { from: "READY", to: "BLOCKED" },
+          { from: "READY", to: "CANCELLED", minor: true },
+          { from: "IN_PROGRESS", to: "BLOCKED" },
+          { from: "IN_PROGRESS", to: "VERIFYING" },
+          { from: "IN_PROGRESS", to: "CANCELLED", minor: true },
+          { from: "BLOCKED", to: "READY" },
+          { from: "BLOCKED", to: "CANCELLED", minor: true },
+          { from: "VERIFYING", to: "IN_PROGRESS" },
+          { from: "VERIFYING", to: "ACCEPTED", label: "pm accept", actor: "user" },
+          { from: "ACCEPTED", to: "CLOSED", label: "pm close" }
+        ]
+      },
+      run: {
+        id: "run", title: "运行", en: "Run", width: 760, height: 270,
+        intro: "工作项的一次动手：谁拿着租约、在哪个工位干。一个工作项可以有好几次。",
+        source: "auto_pm/application/core/continuity_execution_service.py 的 _RUN_TRANSITIONS",
+        hint: "agent 只推 RUNNING 和 VERIFYING 两步；终态由驾驶舱收口，绝不手推。",
+        terminals: ["SUCCEEDED", "FAILED", "CANCELLED"],
+        nodes: [
+          { id: "READY", label: "就绪", x: 20, y: 24 },
+          { id: "RUNNING", label: "运行中", x: 200, y: 24 },
+          { id: "VERIFYING", label: "验证中", x: 380, y: 24 },
+          { id: "SUCCEEDED", label: "成功", x: 580, y: 24 },
+          { id: "BLOCKED", label: "受阻", x: 110, y: 125 },
+          { id: "PENDING", label: "等待中", x: 290, y: 125 },
+          { id: "FAILED", label: "失败", x: 580, y: 125 },
+          { id: "CANCELLED", label: "已取消", x: 20, y: 205 }
+        ],
+        edges: [
+          { from: "READY", to: "RUNNING", label: "--to RUNNING" },
+          { from: "READY", to: "BLOCKED" },
+          { from: "READY", to: "FAILED", minor: true },
+          { from: "READY", to: "CANCELLED", minor: true },
+          { from: "RUNNING", to: "BLOCKED" },
+          { from: "RUNNING", to: "PENDING" },
+          { from: "RUNNING", to: "VERIFYING", label: "--to VERIFYING" },
+          { from: "RUNNING", to: "FAILED", minor: true },
+          { from: "BLOCKED", to: "RUNNING" },
+          { from: "BLOCKED", to: "CANCELLED", minor: true },
+          { from: "PENDING", to: "BLOCKED" },
+          { from: "PENDING", to: "FAILED", minor: true },
+          { from: "PENDING", to: "CANCELLED", minor: true },
+          { from: "VERIFYING", to: "RUNNING" },
+          { from: "VERIFYING", to: "SUCCEEDED", label: "pm verify" },
+          { from: "VERIFYING", to: "FAILED", minor: true }
+        ]
+      },
+      change: {
+        id: "change", title: "变更单", en: "Change", width: 1080, height: 300,
+        intro: "改动要留的账：从提出、批准、实施到验收关闭。每个业务改动都要有一张。",
+        source: "auto_pm/domain/change/constants.py 的 STATUS_FLOW",
+        hint: "批准（approved / conditionally_approved）在「决定」页或终端由用户本人做。",
+        terminals: ["closed", "archived", "abandoned"],
+        nodes: [
+          { id: "draft", label: "草稿", x: 20, y: 24 },
+          { id: "submitted", label: "已提交", x: 200, y: 24 },
+          { id: "under_review", label: "审核中", x: 380, y: 24 },
+          { id: "approved", label: "已批准", x: 560, y: 24 },
+          { id: "implementing", label: "实施中", x: 740, y: 24 },
+          { id: "pending_acceptance", label: "待验收", x: 920, y: 24 },
+          { id: "rejected", label: "已驳回", x: 290, y: 125 },
+          { id: "conditionally_approved", label: "有条件批准", x: 470, y: 125 },
+          { id: "completed", label: "已完成", x: 740, y: 125 },
+          { id: "accepting", label: "验收中", x: 920, y: 125 },
+          { id: "closed", label: "已关闭", x: 740, y: 220 },
+          { id: "archived", label: "已归档", x: 920, y: 220 },
+          { id: "abandoned", label: "已废弃", x: 20, y: 220 }
+        ],
+        edges: [
+          { from: "draft", to: "submitted" },
+          { from: "draft", to: "abandoned", minor: true },
+          { from: "submitted", to: "under_review" },
+          { from: "submitted", to: "draft" },
+          { from: "submitted", to: "abandoned", minor: true },
+          { from: "under_review", to: "approved", actor: "user" },
+          { from: "under_review", to: "conditionally_approved", actor: "user" },
+          { from: "under_review", to: "rejected" },
+          { from: "under_review", to: "submitted" },
+          { from: "under_review", to: "abandoned", minor: true },
+          { from: "approved", to: "implementing" },
+          { from: "approved", to: "abandoned", minor: true },
+          { from: "conditionally_approved", to: "implementing" },
+          { from: "conditionally_approved", to: "abandoned", minor: true },
+          { from: "implementing", to: "pending_acceptance" },
+          { from: "implementing", to: "approved" },
+          { from: "pending_acceptance", to: "accepting" },
+          { from: "accepting", to: "completed", actor: "user" },
+          { from: "accepting", to: "implementing" },
+          { from: "completed", to: "closed" },
+          { from: "completed", to: "archived" },
+          { from: "rejected", to: "draft" },
+          { from: "rejected", to: "abandoned", minor: true }
+        ]
+      }
+    };
+
+    var SPINE_STEPS = [
+      { n: 1, name: "进门定位", lanes: ["本地", "云端"], touch: "", cmds: ["project list", "pm orient", "pm resume"], done: "卡在账本里（orient 的 mission 非空）", pages: [["today", "今天 · 总控"], ["projects", "项目舱"]] },
+      { n: 2, name: "入箱", lanes: ["本地"], touch: "", cmds: ["pm inbox add", "pm inbox confirm"], done: "收件箱条目已确认并关联本卡", pages: [["decisions", "决定与待办"], ["tools", "工具箱"]] },
+      { n: 3, name: "出计划", lanes: ["本地"], touch: "T1 确认计划（你）", cmds: ["pm plan"], done: "范围卡存在且七栏齐", pages: [["decisions", "决定与待办"]] },
+      { n: 4, name: "批准", lanes: ["本地"], touch: "", cmds: ["pm approve"], done: "任务状态已过「等批准」，记批准人和时间", pages: [["decisions", "决定与待办"]] },
+      { n: 5, name: "开工", lanes: ["本地", "云端"], touch: "", cmds: ["pm confirm-start", "worktree open", "continuity run start"], done: "有 Run，工位已登记", pages: [["worktrees", "项目工位与分支"], ["decisions", "决定与待办"]] },
+      { n: 6, name: "写与自检", lanes: ["本地", "云端"], touch: "", cmds: ["plc check", "spec check", "doc check"], done: "Run 在 RUNNING 且有断点；自检回执见证据", pages: [["projects", "项目舱 · 证据"]] },
+      { n: 7, name: "验证", lanes: ["本地"], touch: "", cmds: ["pm verify"], done: "pm verify 的质量回执存在", pages: [["projects", "项目舱"]] },
+      { n: 8, name: "提 PR / 准备合并", lanes: ["本地", "云端"], touch: "", cmds: ["pr open（多机） / pm_merge merge（本机）"], done: "找到分支名含卡号的 PR 或本机门禁通过", pages: [["prs", "PR 与审计"], ["worktrees", "项目工位与分支"]] },
+      { n: 9, name: "审计与合并", lanes: ["云端 / 独立会话"], touch: "T2 规则批准 / 安全签字", cmds: ["audit_pr.py", "pr ready / pm_merge merge"], done: "合并完成且独立审计 PASS", pages: [["prs", "PR 与审计"], ["worktrees", "项目工位与分支"]] },
+      { n: 10, name: "验收与收口", lanes: ["本地"], touch: "T2 确认验收（你）", cmds: ["pm accept", "pm close", "ledger reconcile"], done: "任务已关闭且台账对账无差异", pages: [["decisions", "决定与待办"]] }
+    ];
+
+    var COMMAND_CATALOG = [
+      { cmd: "pm orient", cls: "read", note: "只读进门定位、焦点卡、冲突与下一步", wf: "" },
+      { cmd: "pm resume", cls: "read", note: "只读连续性上下文恢复", wf: "" },
+      { cmd: "pm missions", cls: "read", note: "列出项目四栏卡（在干/等你/搁着/已关）", wf: "" },
+      { cmd: "pm pending", cls: "read", note: "列出待批准范围卡", wf: "" },
+      { cmd: "pm triage", cls: "read", note: "只读分诊建议顺序", wf: "" },
+      { cmd: "pm inbox list", cls: "read", note: "列出收件箱条目", wf: "" },
+      { cmd: "pm approver-pin status", cls: "read", note: "查看批准口令状态", wf: "" },
+      { cmd: "pm control-root-status", cls: "read", note: "控制根未提交文件检查", wf: "" },
+      { cmd: "pm acceptance-scan", cls: "read", note: "验收命令预检", wf: "" },
+      { cmd: "project list", cls: "read", note: "列出登记与发现的项目", wf: "" },
+      { cmd: "project show", cls: "read", note: "查看单个项目详情", wf: "" },
+      { cmd: "change list", cls: "read", note: "列出变更单", wf: "" },
+      { cmd: "change show", cls: "read", note: "查看单张变更单详情", wf: "" },
+      { cmd: "decision list", cls: "read", note: "列出决策包", wf: "" },
+      { cmd: "decision show", cls: "read", note: "查看单个决策包", wf: "" },
+      { cmd: "worktree list", cls: "read", note: "列出本机全部工位及脏净检查", wf: "" },
+      { cmd: "worktree sweep", cls: "read", note: "默认只列不删；带 --no-fetch 防联网", wf: "--apply" },
+      { cmd: "agent list", cls: "read", note: "列出内置 5 席与本机已登记 AI 名册", wf: "" },
+      { cmd: "claim list", cls: "read", note: "列出远程占位表", wf: "" },
+      { cmd: "claim log", cls: "read", note: "读取卡交接记录", wf: "" },
+      { cmd: "plc check", cls: "read", note: "PLC 静态质量门（退出码 1 表示有失败）", wf: "--fix" },
+      { cmd: "plc docs check", cls: "read", note: "接口与变量文档一致性检查", wf: "" },
+      { cmd: "doc check", cls: "read", note: "文档门禁一致性检查", wf: "" },
+      { cmd: "vartable parse", cls: "read", note: "解析 IO 变量表输出 JSON（供查重）", wf: "" },
+      { cmd: "long-run status", cls: "read", note: "读取长任务状态", wf: "" },
+      { cmd: "release status", cls: "read", note: "核对现役指针与发布记录", wf: "" },
+      { cmd: "pr settle-scan", cls: "read", note: "合并后收口清单扫描", wf: "" },
+      { cmd: "pm-session view", cls: "read", note: "只读查看历史 PM_SESSION", wf: "--output, -o" },
+      { cmd: "change create", cls: "write", note: "工具箱先预览再创建变更单", wf: "" },
+      { cmd: "change transition", cls: "write", note: "工具箱推进非批准态；决定页推进批准/完成", wf: "" },
+      { cmd: "pm inbox add", cls: "write", note: "工具箱记入收件箱（PROPOSED）", wf: "" },
+      { cmd: "pm confirm-start", cls: "user_only", note: "用户的唯一开工确认", wf: "" },
+      { cmd: "pm close", cls: "write", note: "收口并回已验收任务", wf: "" },
+      { cmd: "pm verify", cls: "write", note: "IDE 代理用租约执行质量验证", wf: "" },
+      { cmd: "project create", cls: "write", note: "工具箱按模板新建项目（支持 --dry-run）", wf: "" },
+      { cmd: "project register", cls: "write", note: "工具箱登记项目到工作区登记表", wf: "" },
+      { cmd: "worktree open", cls: "write", note: "为 AI 开独立工位分支", wf: "" },
+      { cmd: "worktree close", cls: "write", note: "工位页收掉干净工位", wf: "" },
+      { cmd: "worktree reclaim", cls: "write", note: "工位页先只列再清残留持有记录", wf: "" },
+      { cmd: "ledger reconcile", cls: "write", note: "不加 --fix 只对账报告；加 --fix 写台账", wf: "" },
+      { cmd: "prototype check", cls: "write", note: "原型与点表对齐检查", wf: "" },
+      { cmd: "pm approve", cls: "user_only", note: "批准范围；开了批准口令时要用户本人输入口令", wf: "" },
+      { cmd: "pm accept", cls: "user_only", note: "验收；开了批准口令时要用户本人输入口令", wf: "" },
+      { cmd: "pm park", cls: "user_only", note: "带凭据搁卡要用户原话（WS-002）", wf: "" },
+      { cmd: "pm unpark", cls: "user_only", note: "拿回搁着的卡只听用户（WS-002）", wf: "" },
+      { cmd: "pm switch", cls: "user_only", note: "插急活只听用户（WS-002）", wf: "" },
+      { cmd: "pm inbox confirm", cls: "user_only", note: "记录用户对分诊单的确认", wf: "" },
+      { cmd: "pm inbox reject", cls: "user_only", note: "记录用户对分诊单的驳回", wf: "" },
+      { cmd: "pm sign-risk", cls: "user_only", note: "只限用户本人在交互终端签署接受风险；agent 一律拒绝", wf: "" },
+      { cmd: "pm approver-pin init", cls: "user_only", note: "只限用户本人设置或更换批准口令", wf: "" },
+      { cmd: "agent register", cls: "user_only", note: "登记新 AI 只限用户本人；带 agent 标记拒", wf: "" },
+      { cmd: "agent unregister", cls: "user_only", note: "注销 AI 只限用户本人", wf: "" },
+      { cmd: "project archive", cls: "user_only", note: "不加 --confirm 只预演；加 --confirm 改归档状态", wf: "" },
+      { cmd: "project reactivate", cls: "user_only", note: "不加 --confirm 只预演；加 --confirm 改回在研", wf: "" },
+      { cmd: "project delete", cls: "user_only", note: "破坏性操作，不上看板，只听用户本人", wf: "" },
+      { cmd: "project restore", cls: "user_only", note: "从回收区恢复项目，只听用户本人", wf: "" },
+      { cmd: "release ship", cls: "user_only", note: "默认只看；--no-check-only 真发版要看板点击记录与凭据", wf: "" },
+      { cmd: "release deploy", cls: "user_only", note: "切换发布要用户同意", wf: "" },
+      { cmd: "release rollback", cls: "user_only", note: "退回发布版本要用户同意", wf: "" },
+      { cmd: "continuity restore-backup", cls: "user_only", note: "用备份替换在用账本", wf: "" },
+      { cmd: "claim reclaim", cls: "user_only", note: "收回别人的占位只凭用户一句话", wf: "" },
+      { cmd: "pm execute", cls: "never", note: "前台阻塞执行 Saga，永远不放进界面", wf: "" },
+      { cmd: "pm workflow", cls: "never", note: "已隔离的旧技能名，只保留可发现性", wf: "" },
+      { cmd: "continuity mission transition", cls: "never", note: "不得单独推 Mission 状态，收口走 pm close", wf: "" },
+      { cmd: "continuity work transition", cls: "never", note: "不得单独推 Work 状态", wf: "" },
+      { cmd: "continuity run transition", cls: "never", note: "不得单独推 Run 状态", wf: "" },
+      { cmd: "continuity lease run-with-renewal", cls: "never", note: "长命令续租专用，界面不跑长命令", wf: "" },
+      { cmd: "git-hook commit-msg", cls: "never", note: "由 git 钩子调用", wf: "" },
+      { cmd: "git-hook pre-commit", cls: "never", note: "由 git 钩子调用", wf: "" },
+      { cmd: "worktree heartbeat", cls: "never", note: "由 Claude Code 钩子调用", wf: "" }
+    ];
+
+    /* ======================== 原型核心状态 ======================== */
+    var S = {
+      theme: "dark",
+      mode: "boss",
+      page: "today",
+      gh: "备份",
+      scenario: "normal",
+      versionDrift: false,
+      diagOpen: true,
+      consoleOpen: false,
+      approver: "fubai",
+      selectedPid: "DJ-2026-005",
+      projectTab: "overview",
+      projectsViewMode: "cards",
+      projectKindFilter: "all",
+      projectHealthFilter: "all",
+      showArchived: false,
+      oldProbeDowngrade: false,
+      toolTab: "change",
+      toolPreviewed: false,
+      toolKindProbeOld: false,
+      toolProjectKind: "equipment",
+      toolProjectName: "上料机改造",
+      toolProjectStack: "plc",
+      toolProjectDryRun: true,
+      toolTransChg: "CHG-DJ-2026-001",
+      toolTransTo: "implementing",
+      vartableReport: "",
+      issueSev: "all",
+      issueWho: "all",
+      issueOldMode: "hide",
+      flowTab: "graphs",
+      selectedGraph: "mission",
+      selectedFlowCard: "MISSION-DJ005-319",
+      clickedNode: null,
+      cmdClassFilter: "all",
+      cmdSearch: "",
+      activeLampNote: "",
+      longRunRunning: false,
+      offlineBannerDismissed: false,
+      bcPreview: null,
+      bcValues: { raised: "2026-11-21 16:20", channel: "微信", who: "张工（客户设备科）", kind: "参数", what: "上料光电防抖滤波 20ms → 35ms", why: "现场高反光误触发", impact: "FB_Infeed 滤波参数，不碰安全区" },
+      safetyChecks: [true, true, false, false],
+      folds: { focus: false, quiet: false, activity: false, raw_wt: false, pending_detail: false },
+      failureBanner: null,
+      releaseSwitchResult: null,
+      registeredAIs: [
+        { name: "antigravity", prefix: "antigravity/", by: "no-agent-marker", at: "2026-11-18T03:49Z" }
+      ],
+      projects: [
+        {
+          pid: "DJ-2026-005", name: "PLC 自动化产线控制项目（试车基准）", stack: "plc", kind: "equipment", kindLabel: "设备", statusLabel: "在研", archived: false, registered: true,
+          health: "block", healthLabel: "挡路", lifeIdx: 2, pct: 67, milestone: "L2 需求与接口点表", dueText: "2026-11-28", lastText: "3 小时前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "MISSION-DJ005-319", nowWho: "claude", nowStep: "整理急停与安全门联锁点表差异",
+          handoffDir: "11_监控/交接交换区", updatedAt: "2026-11-20T14:20Z", updatedBy: "claude",
+          stageGoal: "锁定急停与安全门联锁点表，完成工位 1~3 SCL 静态检查全绿并交用户 TIA V19 实测",
+          nextAction: "请用户批准 CHG-PLC-2026-019，随后在隔离工位修改 SCL 块",
+          priorities: [{ r: 1, item: "审批安全门/急停联锁点表变更", ref: "CHG-PLC-2026-019" }, { r: 2, item: "导出 SCL 在 TIA V19 编译复核", ref: "tests/fixtures/tia_baseline/" }],
+          strips: [
+            { mid: "MISSION-DJ005-319", title: "急停复位与安全门联锁 SCL 点表", state: "AWAITING_APPROVAL", current: 2, text: "等批准", sev: "block", shape: "■", right: "等你：审批点表变更（等了 2 天）" },
+            { mid: "MISSION-DJ005-320", title: "工位 2 气缸步进链超时自诊断", state: "ACTIVE", current: 3, text: "进行中", sev: "risk", shape: "●", right: "主执行：已超 1 小时未发断点" }
+          ],
+          columns: {
+            "在干": [{ mid: "MISSION-DJ005-320", title: "工位 2 气缸步进链超时自诊断", meta: "RUN-8821 · claude" }],
+            "等你": [{ mid: "MISSION-DJ005-319", title: "急停复位与安全门联锁 SCL 点表", meta: "AWAITING_APPROVAL · 需批准" }],
+            "搁着": [{ mid: "MISSION-DJ005-311", title: "Modbus 扫码枪通讯超时重试", meta: "PARKED · 等客户确认波特率" }],
+            "已关": [{ mid: "MISSION-DJ005-305", title: "主站初始化骨架与 OB100", meta: "CLOSED · 5 天前" }]
+          },
+          evidence: [
+            { state: "ok", title: "LSP-905 / 903 静态规则", detail: "plc check 关键 FB 语法与定时器检查已通过（前次）" },
+            { state: "block", title: "HMI 原型变量对齐", detail: "prototype check 发现 2 个新增急停复位点尚未绑定" },
+            { state: "na", title: "TIA V19 上机实测", detail: "没检查：待用户导入 TIA Portal 编译并回传结果" }
+          ],
+          changes: [
+            { id: "CHG-PLC-2026-019", date: "2026-11-20", kind: "CHG", what: "新增急停复位联锁点表（要你点头）", status: "待批：审核中" },
+            { id: "BC-DJ-2026-005-2026_11_002", date: "2026-11-19", kind: "BC", what: "上料光电防抖滤波 20ms -> 35ms", status: "待批" },
+            { id: "CARD-DJ-2026-005-001", date: "—", kind: "CARD", what: "安全门联锁模块实施卡", status: "进行中" }
+          ],
+          journal: [
+            { ts: "2026-11-20T14:20Z", kind: "handoff", agent: "claude", card: "CARD-DJ-2026-005-001", commit: "9703dfbc", chg: "CHG-PLC-2026-019", sum: "梳理安全门与急停点表差异，等待用户批准后开始修改 SCL", readFirst: ["0100_PLC自动化/DJ-2026-005/02_接口与点表/INT.md"] }
+          ],
+          specs: [["PLC 编程规范", "LSP-905 V1.7.2 / LSP-903 V3.0.1"], ["HMI 原型规范", "STD-910 V2.0.0"], ["工位状态机", "STD-830 V1.0.0 / STD-860 V1.0.0"]]
+        },
+        {
+          pid: "SW-2026-008", name: "auto-pm 自动化项目管理工具", stack: "python", kind: "tool", kindLabel: "工具", statusLabel: "在研", archived: false, registered: true,
+          health: "risk", healthLabel: "有风险", lifeIdx: 4, pct: 92, milestone: "M8 工具线与单机收口", dueText: "2026-11-23", lastText: "刚刚",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "20261121-gui-redesign", nowWho: "antigravity", nowStep: "方案 A 画面先行重设计原型",
+          handoffDir: "04_监控/交接交换区", updatedAt: "2026-11-19T22:08Z", updatedBy: "antigravity",
+          stageGoal: "完成单机本地优先驾驶舱收口与轻轨交接契约落地，升级总控屏 GUI 原型",
+          nextAction: "请用户审阅 GUI 重设计原型，并将 CHG-SCPT-2026-726 推到完成",
+          priorities: [{ r: 1, item: "评审总控屏 V4 重设计方案与 HTML 原型", ref: "02_规划/008_总控屏GUI重设计方案.md" }, { r: 2, item: "将 CHG-SCPT-2026-726 推到完成", ref: "CHG-SCPT-2026-726" }],
+          strips: [
+            { mid: "MISSION-SW008-726", title: "单机轻轨交接与总控屏验收收口", state: "ACCEPTANCE_PENDING", current: 4, text: "等验收", sev: "block", shape: "■", right: "等你：确认验收并推到完成" }
+          ],
+          columns: {
+            "在干": [],
+            "等你": [{ mid: "MISSION-SW008-726", title: "单机轻轨交接与总控屏验收收口", meta: "ACCEPTANCE_PENDING" }],
+            "搁着": [],
+            "已关": [{ mid: "MISSION-50F5CC2BAEBA15D7", title: "README 补充读者与适用范围", meta: "CLOSED · 19 天前" }]
+          },
+          evidence: [
+            { state: "ok", title: "doc check 文档门禁", detail: "DOC-001（43 组 CLI）/ DOC-004（版本锁 1.3.3）100% PASS" },
+            { state: "ok", title: "ledger reconcile 台账对账", detail: "0 缺失、0 孤儿、0 状态不一致" },
+            { state: "risk", title: "异地账本备份", detail: "距离上次 state-backup push 已超过 24 小时" }
+          ],
+          changes: [
+            { id: "CHG-SCPT-2026-726", date: "2026-11-19", kind: "CHG", what: "升级 PM-056 V2.0.0 单机轻轨交接契约与进门降噪", status: "验收中" },
+            { id: "CHG-SCPT-2026-730", date: "2026-11-21", kind: "CHG", what: "统一全量门禁实施", status: "实施中" },
+            { id: "CHG-SCPT-2026-725", date: "2026-11-19", kind: "CHG", what: "本机合并超长路径分批修复", status: "已完成" }
+          ],
+          journal: [
+            { ts: "2026-11-19T22:08Z", kind: "handoff", agent: "antigravity", card: "318", commit: "d6574d0b", chg: "CHG-SCPT-2026-726", sum: "PM-056 V2.0.0 单机轻轨交接契约落地，进门/体检 0 红全过", readFirst: ["AGENTS.md", "00_Obsidian_Base全局规范文件仓库/01_项目管理域/00_元规则与治理/056_跨Agent工作连续性与恢复协议_PM.md"] }
+          ],
+          specs: [["Python 上位机 GUI", "DEV-216 V2.0.0 / DEV-301 V1.1.0"], ["桌面驾驶舱原型", "STD-911 V1.0.0"], ["连续性与交接", "PM-056 V2.0.0"]]
+        },
+        {
+          pid: "DJ-2026-009", name: "汇川换型改造", stack: "plc", kind: "equipment", kindLabel: "设备", statusLabel: "在研", archived: false, registered: true,
+          health: "nodata", healthLabel: "无数据", lifeIdx: 1, pct: 35, milestone: "L1 调研与 IO 勘测", dueText: "2026-12-10", lastText: "4 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "2026-11-17T09:00Z", updatedBy: "user",
+          stageGoal: "完成原机台 IO 点表读入与换型配方清单整理", nextAction: "使用工程工具箱变量表查重检查 io_points.csv",
+          priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [{ state: "na", title: "plc check", detail: "没检查：尚未录入 SCL/ST 程序" }],
+          changes: [], journal: [], specs: [["PLC 规范", "LSP-907 V1.6.0"]]
+        },
+        {
+          pid: "SysLib", name: "PLC 公共标准功能块库", stack: "plc", kind: "library", kindLabel: "公共库", statusLabel: "在研", archived: false, registered: true,
+          health: "ok", healthLabel: "正常", lifeIdx: 3, pct: 85, milestone: "V1.0.0 标准库稳定", dueText: "—", lastText: "6 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "2026-11-15T12:00Z", updatedBy: "claude",
+          stageGoal: "保持典型气缸、伺服与首出报警标准块与 DJ-2026-005 同步", nextAction: "暂无待办",
+          priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [{ state: "ok", title: "plc check", detail: "100% PASS" }],
+          changes: [], journal: [], specs: [["标准设备块规范", "STD-840 V2.0.0"]]
+        },
+        {
+          pid: "DJ-2026-011", name: "驾驶舱 A6 PLC 续作验证套件", stack: "plc", kind: "test", kindLabel: "测试", statusLabel: "在研", archived: false, registered: true,
+          health: "old", healthLabel: "旧账", lifeIdx: 6, pct: 100, milestone: "验证归档基准", dueText: "—", lastText: "10 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "2026-11-11T08:00Z", updatedBy: "codex",
+          stageGoal: "TIA V19 实测基准样本对照", nextAction: "只读基准样本",
+          priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [{ state: "ok", title: "TIA 基线", detail: "FB_1091 / FB_2001 已归档 TIA V19 实测证据" }],
+          changes: [], journal: [], specs: [["测试规范", "STD-816 V1.0.0"]]
+        },
+        {
+          pid: "DJ-2026-000", name: "DJ-2026-000 测试沙箱", stack: "plc", kind: "test", kindLabel: "测试", statusLabel: "在研", archived: false, registered: true,
+          health: "nodata", healthLabel: "无数据", lifeIdx: 0, pct: 20, milestone: "沙箱", dueText: "—", lastText: "14 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "", updatedBy: "",
+          stageGoal: "模板生成与迁移测试用", nextAction: "无", priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [], changes: [], journal: [], specs: []
+        },
+        {
+          pid: "SW-2026-009", name: "英语学习助手", stack: "python", kind: "test", kindLabel: "测试", statusLabel: "在研", archived: false, registered: true,
+          health: "nodata", healthLabel: "无数据", lifeIdx: 1, pct: 15, milestone: "原型探索", dueText: "—", lastText: "18 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "04_监控/交接交换区", updatedAt: "", updatedBy: "",
+          stageGoal: "Python 多项目治理测试用", nextAction: "无", priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [], changes: [], journal: [], specs: []
+        },
+        {
+          pid: "SYS-2026-001", name: "工作空间治理基座", stack: "python", kind: "tool", kindLabel: "工具", statusLabel: "在研", archived: false, registered: true,
+          health: "ok", healthLabel: "正常", lifeIdx: 4, pct: 90, milestone: "WS-001 / GH-001 治理", dueText: "—", lastText: "1 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "04_监控/交接交换区", updatedAt: "", updatedBy: "",
+          stageGoal: "工作区根规则、审计工具与跨 AI 协同基座", nextAction: "无", priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [], changes: [], journal: [], specs: [["跨 Agent 协议", "PM-056 V2.0.0"]]
+        },
+        {
+          pid: "DJ-2026-012", name: "长边产线改造（工作区未登记示例）", stack: "plc", kind: "unregistered", kindLabel: "未登记", statusLabel: "未登记", archived: false, registered: false,
+          health: "off", healthLabel: "未接入", lifeIdx: 0, pct: 10, milestone: "未登记", dueText: "—", lastText: "—",
+          cov: { ledger: false, git: true, github: false },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "", updatedBy: "",
+          stageGoal: "尚未登记进 workspace_registry.json", nextAction: "到工具箱「项目」页签登记", priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [], changes: [], journal: [], specs: []
+        },
+        {
+          pid: "DJ-2025-003", name: "旧版电机装配线（已归档）", stack: "plc", kind: "equipment", kindLabel: "设备", statusLabel: "已归档", archived: true, registered: true,
+          health: "ok", healthLabel: "正常", lifeIdx: 7, pct: 100, milestone: "已交付归档", dueText: "2026-03-01", lastText: "90 天前",
+          cov: { ledger: true, git: true, github: true },
+          nowCard: "—", nowWho: "—", nowStep: "—", handoffDir: "11_监控/交接交换区", updatedAt: "", updatedBy: "",
+          stageGoal: "历史已归档项目", nextAction: "如需恢复请走「重新激活…」预演", priorities: [], strips: [],
+          columns: { "在干": [], "等你": [], "搁着": [], "已关": [] },
+          evidence: [], changes: [], journal: [], specs: []
+        }
+      ],
+      stations: [
+        {
+          name: "antigravity-d2481c", agent: "AG", agentName: "antigravity（会话别名）", pid: "SW-2026-008",
+          resolveSource: "focus.json + git log 路径归属", kind: "agent", branch: "antigravity/20261121-gui-redesign",
+          card: "20261121-gui-redesign · 总控屏 GUI 重设计原型", lastSeen: "刚刚活跃 · 今天动过",
+          checked: true, dirty: 0, unpushed: 0, merged: true, locked: false, broken: "",
+          actionKey: "close", actionLabel: "收工位", cmd: ["worktree", "close", "antigravity-d2481c"],
+          summary: "工作树干净且已合并进 main，安全删除工位目录并回收本地分支（远程分支不动）。", blocked: "", closed: false
+        },
+        {
+          name: "codex-01a1fa", agent: "CX", agentName: "codex（会话别名）", pid: "SW-2026-008",
+          resolveSource: "分支前缀 codex/ + CHG-SCPT-2026-732", kind: "agent", branch: "codex/CHG-SCPT-2026-732",
+          card: "CHG-SCPT-2026-732 · 统一门禁测试收尾", lastSeen: "0.4 小时前 · 今天动过",
+          checked: true, dirty: 2, unpushed: 1, merged: false, locked: false, broken: "",
+          actionKey: "close", actionLabel: "收工位", cmd: ["worktree", "close", "codex-01a1fa"],
+          summary: "安全收工位", blocked: "有未提交的改动 2 个文件（工作树不干净，命令不收）", closed: false
+        },
+        {
+          name: "claude-ab91f0", agent: "CL", agentName: "claude（会话别名）", pid: "DJ-2026-005",
+          resolveSource: "focus.json active_work.branch", kind: "agent", branch: "claude/CARD-DJ-2026-005-001",
+          card: "CARD-DJ-2026-005-001 · 安全门联锁点表", lastSeen: "1.5 小时前 · 今天动过",
+          checked: true, dirty: 0, unpushed: 1, merged: false, locked: false, broken: "",
+          actionKey: "close", actionLabel: "收工位", cmd: ["worktree", "close", "claude-ab91f0"],
+          summary: "安全收工位", blocked: "有 1 个提交尚未合并进 main（未并入 main 时命令不收）", closed: false
+        },
+        {
+          name: "gate-formal-old", agent: "SYS", agentName: "门禁临时工作树（名册外）", pid: null,
+          resolveSource: "公用基础设施目录", kind: "other", branch: "detached @ 4778f2f2",
+          card: "历史门禁验证残留目录", lastSeen: "3 天没动",
+          checked: true, dirty: 0, unpushed: 0, merged: true, locked: false, broken: "",
+          actionKey: "sweep_one", actionLabel: "清理", cmd: ["worktree", "sweep", "--apply", "--only", "gate-formal-old", "--no-fetch"],
+          summary: "清理清单判为「可清」：已并进 main 且工作树干净，不在保留名单。", blocked: "", warning: "名册外目录：需确认没有长任务正在占用它。", closed: false
+        }
+      ],
+      sweepItems: [
+        { target: "claude/312-old-cleanup", cat: "已合并旧分支", reason: "已并入 main 且远程已删", removable: true, cleared: false },
+        { target: "deploy-1.3.3-9703dfb", cat: "现役发布快照", reason: "现役发布保留名单，受保护", removable: false, cleared: false }
+      ],
+      merges: [
+        { sha: "9703dfbc", pid: "SW-2026-008", card: "318", chg: "CHG-SCPT-2026-726", title: "升级 PM-056 V2.0.0 单机轻轨交接契约与进门降噪", time: "2026-11-21 12:31" },
+        { sha: "d356fb1c", pid: "SW-2026-008", card: "316", chg: "CHG-SCPT-2026-724", title: "1.3.3-d356fb1 发版记录入库与 Windows sh.exe 修复", time: "2026-11-20 06:10" },
+        { sha: "65b5403e", pid: "SW-2026-008", card: "317", chg: "CHG-SCPT-2026-725", title: "pm_merge 超长路径分批修复防 WinError 206", time: "2026-11-19 20:29" }
+      ],
+      decisions: [
+        {
+          id: "DEC-C1", column: "变更单", pid: "CHG-PLC-2026-019", proj: "DJ-2026-005", title: "CHG-PLC-2026-019 新增急停复位联锁点表",
+          detail: "CHG-PLC-2026-019 · DJ-2026-005 · 审核中（要你点头）", sev: "risk", done: false,
+          buttons: [{ key: "change_approve", label: "批准变更单", humanOnly: true, pin: true, needsApprover: true, primary: true,
+            summary: "批准这张变更单：从「审核中」推到「已批准」，批准人和本次点击凭据写进变更单与审计日志。",
+            fields: [{ k: "comment", label: "批准意见（可空）", hint: "不填时记「同意」", required: false }],
+            cmd: "change transition CHG-PLC-2026-019 --to approved --pid DJ-2026-005 --approver {approver} --approval-evidence-ref <click>" }]
+        },
+        {
+          id: "DEC-C2", column: "变更单", pid: "CHG-SCPT-2026-726", proj: "SW-2026-008", title: "CHG-SCPT-2026-726 单机轻轨交接契约与进门降噪",
+          detail: "CHG-SCPT-2026-726 · SW-2026-008 · 验收中", sev: "hint", done: false,
+          buttons: [{ key: "change_complete", label: "推到完成", humanOnly: true, pin: false, needsApprover: true, primary: true,
+            summary: "把这张变更单从「验收中」推到「已完成」：验证结论写进变更单，命令再核一遍验证清单。",
+            fields: [{ k: "conclusion", label: "验证结论", hint: "要有「通过」两个字", def: "全部通过", required: true }],
+            cmd: "change transition CHG-SCPT-2026-726 --to completed --pid SW-2026-008 --approver {approver} --verification-conclusion \"{conclusion}\" --approval-evidence-ref <click>" }]
+        },
+        {
+          id: "DEC-S1", column: "范围卡", pid: "REQ-DJ005-09", proj: "DJ-2026-005", title: "工位 3 伺服扭矩限制与报警复位改造",
+          detail: "请求 REQ-DJ005-09 · 哈希 a91f0c44e2b1…", sev: "risk", done: false,
+          buttons: [{ key: "approve_card", label: "批准范围", humanOnly: true, pin: true, needsApprover: true, primary: true,
+            summary: "批准这张范围卡：只批准你看过的这一版（哈希对不上命令会拒绝）。批准不会启动任何 agent。",
+            fields: [{ k: "admission", label: "撞车放行（可空，平时不用填）", hint: "仅当改同一批文件或满 8 张卡时填放行原话位置", required: false, collapsed: true }],
+            cmd: "pm approve --request-id REQ-DJ005-09 --plan-hash a91f0c44e2b1 --approver {approver} --approval-evidence-ref <click>" }]
+        },
+        {
+          id: "DEC-I1", column: "收件箱", pid: "INBOX-042", proj: "DJ-2026-005", title: "客户反馈上料光电高反光误触发，需增设 35ms 消抖",
+          detail: "条目 INBOX-042 · 哈希 7c8831ab90d2… · PROPOSED", sev: "", done: false,
+          buttons: [
+            { key: "inbox_confirm", label: "确认入箱", humanOnly: true, pin: true, needsApprover: true, primary: true,
+              summary: "确认这条收件箱事项（确认不等于开工）。",
+              fields: [{ k: "note", label: "备注（可空）", hint: "一行", required: false }],
+              cmd: "pm inbox confirm INBOX-042 --ticket-hash 7c8831ab90d2 --approver {approver} --approval-evidence-ref <click>" },
+            { key: "inbox_reject", label: "驳回入箱", humanOnly: true, pin: true, needsApprover: true, primary: false,
+              summary: "驳回这条收件箱事项并写明理由。",
+              fields: [{ k: "note", label: "驳回理由", hint: "一行", required: true }],
+              cmd: "pm inbox reject INBOX-042 --ticket-hash 7c8831ab90d2 --approver {approver} --note \"{note}\" --approval-evidence-ref <click>" }
+          ]
+        },
+        {
+          id: "DEC-M1", column: "等你", pid: "MISSION-DJ005-319", proj: "DJ-2026-005", title: "急停复位与安全门联锁 SCL 点表",
+          detail: "MISSION-DJ005-319 · DJ-2026-005 · 等批准（AWAITING_APPROVAL）", sev: "", done: false,
+          buttons: [
+            { key: "begin_work", label: "确认开工", humanOnly: false, pin: false, needsApprover: false, primary: true,
+              summary: "确认开工：任务转为进行中，不会启动任何 agent；之后由 IDE 里的 agent 按流程领取。",
+              fields: [], cmd: "pm confirm-start --mission-id MISSION-DJ005-319" },
+            { key: "switch", label: "插急活", humanOnly: true, pin: true, needsApprover: false, primary: false,
+              summary: "改干这一张：把手上「进行中」的 MISSION-DJ005-320 记好断点搁着，再把这张拿起来。",
+              fields: [
+                { k: "reason", label: "手上这张为什么先放下", hint: "例如：安全点表优先", required: true },
+                { k: "summary", label: "手上这张的断点", hint: "干到哪了、下一步做什么", required: true },
+                { k: "as_owner", label: "谁来干急活", hint: "如 claude:cloud 或 antigravity:ide", required: true }
+              ],
+              cmd: "pm switch --pid DJ-2026-005 --to MISSION-DJ005-319 --reason \"{reason}\" --summary \"{summary}\" --as {as_owner} --approval-evidence-ref <click>" }
+          ]
+        },
+        {
+          id: "DEC-M2", column: "等你", pid: "MISSION-SW008-726", proj: "SW-2026-008", title: "单机轻轨交接与总控屏验收收口",
+          detail: "MISSION-SW008-726 · SW-2026-008 · 等验收（ACCEPTANCE_PENDING）", sev: "block", done: false,
+          buttons: [{ key: "accept", label: "确认验收", humanOnly: true, pin: true, needsApprover: false, primary: true,
+            danger: "验收只能由你本人做；点之前确认你已经看过结果。验收后还要点「收口」才会把文件并回控制根。",
+            summary: "确认验收：记下你已经看过结果。",
+            fields: [], cmd: "pm accept --mission-id MISSION-SW008-726" }]
+        },
+        {
+          id: "DEC-M3", column: "在干", pid: "MISSION-DJ005-320", proj: "DJ-2026-005", title: "工位 2 气缸步进链超时自诊断",
+          detail: "MISSION-DJ005-320 · DJ-2026-005 · 进行中（ACTIVE）", sev: "", done: false,
+          buttons: [{ key: "park", label: "搁着", humanOnly: true, pin: true, needsApprover: false, primary: false,
+            summary: "把这张卡记好断点放进「搁着」：交出钥匙，之后谁也不能往它的工作树里写，直到你拿回。",
+            fields: [
+              { k: "reason", label: "为什么先放下", hint: "例如：客户急改 IO 表", required: true },
+              { k: "summary", label: "断点", hint: "干到哪了、下一步做什么", required: true }
+            ],
+            cmd: "pm park --mission-id MISSION-DJ005-320 --reason \"{reason}\" --summary \"{summary}\" --approval-evidence-ref <click>" }]
+        },
+        {
+          id: "DEC-M4", column: "搁着", pid: "MISSION-DJ005-311", proj: "DJ-2026-005", title: "Modbus 扫码枪通讯超时重试",
+          detail: "MISSION-DJ005-311 · DJ-2026-005 · 搁着（PARKED）", sev: "", done: false,
+          buttons: [
+            { key: "unpark", label: "拿回", humanOnly: true, pin: true, needsApprover: false, primary: true,
+              summary: "拿回这张卡：先核对工作树没被动过，再发新钥匙。",
+              fields: [{ k: "as_owner", label: "谁来接着干", hint: "如 claude:cloud 或 antigravity:ide", required: true }],
+              cmd: "pm unpark --mission-id MISSION-DJ005-311 --as {as_owner} --approval-evidence-ref <click>" }
+          ]
+        },
+        {
+          id: "DEC-M5", column: "已关", pid: "MISSION-SW008-317", proj: "SW-2026-008", title: "本机合并超长路径分批修复（已验收待收口示例）",
+          detail: "MISSION-SW008-317 · SW-2026-008 · 已验收（ACCEPTED）", sev: "hint", done: false,
+          buttons: [{ key: "close", label: "收口", humanOnly: false, pin: false, needsApprover: false, primary: true,
+            summary: "收口（也用于「重试同步」）：把验收过的文件按字节并回控制根，推进任务，把证据写进变更单。不替你提交 Git。",
+            fields: [], cmd: "pm close --mission-id MISSION-SW008-317" }]
+        }
+      ],
+      candidates: [
+        {
+          releaseId: "1.3.4-a1b2c3d", commit: "a1b2c3d", activeRelease: "1.3.3-9703dfb",
+          gate: { state: "pass", run_id: "19402881", detail: "11/11 全量门禁 PASS" },
+          audit: { state: "present", detail: "reviews/2026-11-21_audit.md 放行" },
+          preflight: {
+            ok: true,
+            checks: [
+              { ok: true, name: "版本锁一致性", detail: "pyproject 1.3.4 与候选匹配" },
+              { ok: true, name: "孤立 checkout 校验", detail: "哈希与 tree 一致" },
+              { ok: true, name: "Continuity Store Dogfood", detail: "双引擎冷启动 PASS" },
+              { ok: true, name: "控制根洁净度", detail: "无阻断残留" },
+              { ok: true, name: "旧槽回退指针", detail: "1.3.3-9703dfb 可用" },
+              { ok: true, name: "安全护栏回归", detail: "门禁通过" }
+            ]
+          },
+          changes: [{ pr: "871", title: "GUI 总控屏单机适配器与双色令牌上线" }, { pr: "870", title: "修复 Windows 句柄清理" }],
+          canSwitch: true, deployed: false
+        },
+        {
+          releaseId: "1.3.4-e4f5a6b", commit: "e4f5a6b", activeRelease: "1.3.3-9703dfb",
+          gate: { state: "fail", run_id: "19402710", detail: "test_cockpit_board 失败 1 项" },
+          audit: { state: "missing", detail: "尚未产生独立审计放行" },
+          preflight: { ok: false, checks: [{ ok: false, name: "全量门禁校验", detail: "门禁未通过" }] },
+          changes: [{ pr: "869", title: "实验候选（未放行）" }],
+          canSwitch: false, deployed: false
+        }
+      ],
+      longRuns: [
+        { name: "gate-full-sw008-9703dfb", state: "DONE", rc: 0, started: "2026-11-21 11:40", detail: "全量门禁 11 组通过" },
+        { name: "gate-precheck-live", state: "RUNNING", rc: null, started: "刚刚（模拟长任务开启时显示）", detail: "正在运行全量 pytest xdist" }
+      ],
+      issues: [
+        { sev: "block", owner: "user", who: "你", pid: "DJ-2026-005", title: "等你超过 2 天：批准变更单 CHG-PLC-2026-019", detail: "涉及安全门与急停联锁点表，批准前 AI 不得修改 SCL。", basis: "变更单审核中", ref: "CHG-PLC-2026-019", waited: "2 天" },
+        { sev: "block", owner: "user", who: "你", pid: "SW-2026-008", title: "验收结果：单机轻轨交接任务等待确认验收", detail: "MISSION-SW008-726 已完成验证，等待你在「决定与待办」点击确认验收。", basis: "账本状态为「等验收」", ref: "MISSION-SW008-726", waited: "1 天" },
+        { sev: "risk", owner: "lead", who: "主执行", pid: "DJ-2026-005", title: "卡在跑但超过 1 小时没有新断点", detail: "MISSION-DJ005-320 租约有效但断点停留超过阈值。", basis: "Run 活跃度监测", ref: "WORK-DJ005-320 / RUN-8821", waited: "1.5 小时" },
+        { sev: "risk", owner: "lead", who: "主执行", pid: "SW-2026-008", title: "账本异地备份超过 24 小时", detail: "上次 pm state-backup push 在 45 小时前，请主执行补推。", basis: "pm orient 巡检", ref: "backup-6824", waited: "45 小时" },
+        { sev: "hint", owner: "lead", who: "主执行", pid: "SW-2026-008", title: "控制根存在 3 个超 3 天未认领 .trae/ 子目录", detail: "多半是收口遗留，请主执行与用户确认提交或还原。", basis: "pm control-root-status", ref: ".trae/skills/*/refs", waited: "23 天" },
+        { sev: "hint", owner: "lead", who: "主执行", pid: "DJ-2026-011", title: "旧账：归档校验基准项目的历史台账记录提示", detail: "项目已无开着的卡，属于账本历史旧账，默认折叠。", basis: "账本一致性检查（项目下已没有开着的卡，算旧账）", ref: "OLD-DJ011-01", waited: "10 天" }
+      ],
+      prs: [
+        {
+          number: 871, title: "feat(cockpit): 单机本地优先适配器接入", author: "antigravity", url: "github.com/example/repo/pull/871",
+          projects: ["SW-2026-008"],
+          gate: { text: "PASS", sev: "ok", tip: "gate 5 项全绿" },
+          ci: [["ruff", { text: "通过", sev: "ok" }], ["mypy", { text: "通过", sev: "ok" }], ["pytest", { text: "通过", sev: "ok" }]],
+          safety: { text: "不涉及", sev: "ok", tip: "未改安全回路" },
+          rules: { text: "不涉及", sev: "ok", tip: "未改规则路径" },
+          audit: { text: "通过", sev: "ok", tip: "reviews/2026-11-21_pr871.md" },
+          note: "领卡占位: 20261121-gui-redesign"
+        },
+        {
+          number: 872, title: "feat(DJ-2026-005): 新增急停复位联锁功能块", author: "claude", url: "github.com/example/repo/pull/872",
+          projects: ["DJ-2026-005"],
+          gate: { text: "红 1 项", sev: "block", tip: "prototype check 未绑定新增点位" },
+          ci: [["plc check", { text: "通过", sev: "ok" }], ["prototype", { text: "缺 2 点", sev: "block" }]],
+          safety: { text: "待安全签字", sev: "risk", tip: "触及急停回路，需用户在 PR 写 安全签字 + 提交号" },
+          rules: { text: "不涉及", sev: "ok", tip: "" },
+          audit: { text: "未审", sev: "na", tip: "待独立会话审计" },
+          note: "涉及安全区 · 需 PLCSIM 实测"
+        }
+      ],
+      receipts: [
+        { time: "16:13", action: "进门定位", cmd: ".venv\\Scripts\\python.exe -B scripts\\pm_flows.py entry SW-2026-008", rc: 0, out: "14 步体检 0 红全过（单机模式「备份」跳过远程占位表）；focus.json 校验通过。" },
+        { time: "16:12", action: "工位扫描", cmd: ".venv\\Scripts\\python.exe -B main.py worktree list --json --no-size", rc: 0, out: "已识别工位及分支状态（含 codex-01a1fa、antigravity-d2481c）。" }
+      ],
+      modal: null
+    };
+
+    /* ======================== 语义辅助判定 ======================== */
+    function isOffline() { return S.scenario === "offline"; }
+    function isLedgerDown() { return S.scenario === "ledger_down"; }
+    function isAiLocked() { return S.scenario === "ai_locked"; }
+    function isPinEnforced() { return S.scenario === "pin_enforced"; }
+
+    function humanOnlyBlock() {
+      if (isAiLocked()) {
+        return "这个看板是带 AI 标记的会话打开的（AUTO_PM_AGENT=claude）：此按钮只许你本人打开的看板点。请你自己双击控制根的 bat 重新打开。";
+      }
+      return "";
+    }
+
+    function addReceipt(action, cmd, out, rc) {
+      var d = new Date();
+      var ts = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      var entry = { time: ts, action: action, cmd: cmd, rc: rc, out: out };
+      S.receipts.unshift(entry);
+      if (rc !== 0 && rc !== null) {
+        S.failureBanner = entry;
+      }
+      renderConsole();
+    }
+
+    /* ======================== 顶栏与全局控制器 ======================== */
+    function setMode(m) { S.mode = m; render(); }
+    function goto(page) { S.mode = "boss"; S.page = page; render(); }
+    function openProject(pid) { S.selectedPid = pid; S.mode = "boss"; S.page = "project_cabin"; render(); }
+    function openIssuesFiltered(key) {
+      S.mode = "boss"; S.page = "issues";
+      S.issueSev = "all";
+      if (key === "old") { S.issueWho = "all"; S.issueOldMode = "only"; }
+      else { S.issueWho = key; S.issueOldMode = "hide"; }
+      render();
+    }
+    function openCardInFlow(mid) {
+      S.mode = "boss"; S.page = "flow"; S.flowTab = "graphs"; S.selectedGraph = "mission"; S.selectedFlowCard = mid; S.clickedNode = null;
+      render();
+    }
+
+    function toggleTheme() {
+      S.theme = S.theme === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", S.theme);
+      document.getElementById("theme-btn").textContent = S.theme === "dark" ? "切浅色" : "切深色";
+    }
+
+    function toggleVersionDrift() {
+      S.versionDrift = !S.versionDrift;
+      toast(S.versionDrift ? "已演练：源码版本与现役发布不一致（变橙警示）" : "已恢复：源码版本与现役发布一致");
+      render();
+    }
+
+    function setScenario(v) {
+      S.scenario = v;
+      if (v === "offline") toast("工况切换：断网离线（所有网络相关显示「断网未知」）");
+      else if (v === "ledger_down") toast("工况切换：账本未读到（严禁显示 0 或绿）");
+      else if (v === "ai_locked") toast("工况切换：AI 会话启动（11 个决定键及写操作自锁）");
+      else if (v === "pin_enforced") toast("工况切换：批准口令生效（弹窗改走终端窗口）");
+      else toast("工况切换：正常单机运行");
+      render();
+    }
+
+    function reloadAll() {
+      addReceipt("全站重新读取", "后台并行读取：账本只读拷贝 + Git 工位 + pm_handoff + GitHub", isOffline() ? "本机读取完成；GitHub 因断网保持「断网未知」" : "读取完成，退出码 0", 0);
+      toast("已完成全站重新读取");
+      render();
+    }
+
+    function askGhMode(mode) {
+      if (S.gh === mode) return;
+      var tips = {
+        "关": "纯本机离线档：不碰网络、不拉不推、静音远程 PR 与占位表。",
+        "备份": "单机推荐档：本机合并后自动尝试推送 main 备份；断网不影响干活；静音远程占位表噪音。",
+        "多机": "多电脑 / 云端并行档：启用远程占位表核对、开 PR 与跨机对账。"
+      };
+      openModal({
+        title: "切换 GitHub 档位 → 「" + mode + "」",
+        target: "github-mode " + mode,
+        desc: tips[mode],
+        cmd: "scripts\\pm_merge.py github-mode " + mode,
+        humanOnly: false,
+        onRun: function(cmd) {
+          S.gh = mode;
+          addReceipt("切换 GitHub 档位", cmd, "当前 GitHub 档位已设为「" + mode + "」", 0);
+          toast("已切换 GitHub 档位：" + mode);
+        }
+      });
+    }
+
+    /* ======================== 通用弹窗逻辑 ======================== */
+    function openModal(cfg) {
+      S.modal = cfg;
+      var blocked = cfg.blocked || (cfg.humanOnly ? humanOnlyBlock() : "");
+      S.modal._blocked = blocked;
+      var viaPin = isPinEnforced() && Boolean(cfg.pin);
+      S.modal._viaPin = viaPin;
+
+      document.getElementById("m-title").textContent = cfg.title || "";
+      var tgt = document.getElementById("m-target");
+      tgt.textContent = cfg.target || "";
+      tgt.classList.toggle("hidden", !cfg.target);
+      document.getElementById("m-desc").textContent = cfg.desc || "";
+
+      var factsEl = document.getElementById("m-facts");
+      if (cfg.facts && cfg.facts.length) {
+        factsEl.innerHTML = cfg.facts.map(function(f) {
+          return '<div class="kv-key">' + esc(f[0]) + '</div><div>' + esc(f[1]) + '</div>';
+        }).join("");
+        factsEl.classList.remove("hidden");
+      } else { factsEl.classList.add("hidden"); }
+
+      var warnEl = document.getElementById("m-warn");
+      warnEl.textContent = cfg.warn || "";
+      warnEl.classList.toggle("hidden", !cfg.warn);
+
+      var pinEl = document.getElementById("m-pin-note");
+      if (viaPin) {
+        pinEl.textContent = "批准口令已生效：点下面「在终端窗口里运行」会弹出一个新的终端窗口，口令只在那个窗口里输入，本程序看不到。";
+        pinEl.classList.remove("hidden");
+      } else { pinEl.classList.add("hidden"); }
+
+      var blkEl = document.getElementById("m-blocked");
+      blkEl.textContent = blocked;
+      blkEl.classList.toggle("hidden", !blocked);
+
+      var apWrap = document.getElementById("m-approver-wrap");
+      var needAp = Boolean(cfg.needsApprover) && !(viaPin && cfg.key === "approve_card");
+      apWrap.classList.toggle("hidden", !needAp);
+      document.getElementById("m-approver").value = S.approver;
+
+      var fieldsEl = document.getElementById("m-fields");
+      fieldsEl.innerHTML = (cfg.fields || []).map(function(f) {
+        var inp = '<input data-k="' + esc(f.k) + '" type="text" value="' + esc(f.def || "") + '" placeholder="' + esc(f.hint || "") + '" oninput="syncModal()" />';
+        if (f.collapsed) {
+          return '<details style="border:1px dashed var(--line);border-radius:var(--radius-sm);padding:8px 10px;">' +
+            '<summary class="small" style="cursor:pointer;font-weight:600;">' + esc(f.label) + '（点开填写，平时留空）</summary>' +
+            '<div style="margin-top:8px;">' + inp + '</div>' +
+          '</details>';
+        }
+        return '<div>' +
+          '<div class="small" style="margin-bottom:4px;">' + esc(f.label) + (f.required ? "" : "（可空）") + '</div>' +
+          inp +
+        '</div>';
+      }).join("");
+
+      document.getElementById("m-go").textContent = viaPin ? "在终端窗口里运行" : "确认并运行";
+      syncModal();
+      document.getElementById("modal-mask").classList.remove("hidden");
+    }
+
+    function syncModal() {
+      if (!S.modal) return;
+      var cmd = S.modal.cmd;
+      var ap = document.getElementById("m-approver").value.trim();
+      var apVisible = !document.getElementById("m-approver-wrap").classList.contains("hidden");
+      if (ap) S.approver = ap;
+      cmd = cmd.replace(/\{approver\}/g, ap || "<批准人>");
+      var err = "";
+      if (apVisible && !ap) err = "还没填：批准人";
+      var forbidden = /["%^$`\n\r]/;
+      if (apVisible && forbidden.test(ap)) err = "批准人里不能有 \" % ^ $ ` 或换行";
+
+      var inputs = document.querySelectorAll("#m-fields input[data-k]");
+      var vals = {};
+      inputs.forEach(function(inp) {
+        var k = inp.getAttribute("data-k");
+        var v = inp.value.trim();
+        vals[k] = v;
+        cmd = cmd.replace(new RegExp("\\{" + k + "\\}", "g"), v || "<待填>");
+      });
+      (S.modal.fields || []).forEach(function(f) {
+        var v = vals[f.k] || "";
+        if (!err && f.required && !v) err = "还没填：" + f.label;
+        if (!err && v && forbidden.test(v)) err = "「" + f.label + "」里不能有 \" % ^ $ ` 或换行";
+      });
+
+      document.getElementById("m-cmd").textContent = "main.py " + cmd;
+      document.getElementById("m-problem").textContent = err;
+      document.getElementById("m-go").disabled = Boolean(err || S.modal._blocked);
+    }
+
+    function closeModal() { document.getElementById("modal-mask").classList.add("hidden"); S.modal = null; }
+    function executeModal() {
+      if (!S.modal) return;
+      var cmd = document.getElementById("m-cmd").textContent;
+      var fn = S.modal.onRun;
+      var viaPin = S.modal._viaPin;
+      closeModal();
+      if (viaPin) {
+        addReceipt("打开终端运行", cmd, "已在新的终端窗口打开：请在终端输入批准口令后回来点「重新读取」", null);
+        toast("已弹出终端窗口（等待用户输入口令）");
+      } else {
+        fn(cmd);
+      }
+      render();
+    }
+
+    /* ======================== 登记新 AI 弹窗 ======================== */
+    function openRegistry() {
+      var listEl = document.getElementById("reg-list");
+      listEl.innerHTML = S.registeredAIs.length ? S.registeredAIs.map(function(a) {
+        return '<div class="inner-box" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+          '<span class="mono"><strong>' + esc(a.name) + '</strong> · ' + esc(a.prefix) + ' · 登记 ' + esc(a.by) + '，' + esc(a.at) + '</span>' +
+          '<button class="btn-sm btn-danger" ' + (humanOnlyBlock() ? "disabled" : "") + ' onclick="askUnregister(\'' + esc(a.name) + '\')">注销</button>' +
+        '</div>';
+      }).join("") : '<div class="muted">已登记：还没有</div>';
+
+      var blk = humanOnlyBlock();
+      var blkEl = document.getElementById("reg-blocked");
+      blkEl.textContent = blk;
+      blkEl.classList.toggle("hidden", !blk);
+      document.getElementById("reg-name").value = "";
+      syncRegistry();
+      document.getElementById("reg-mask").classList.remove("hidden");
+    }
+
+    function closeRegistry() { document.getElementById("reg-mask").classList.add("hidden"); }
+
+    function syncRegistry() {
+      var name = document.getElementById("reg-name").value.trim();
+      var taken = ["claude", "trae", "cursor", "vscode", "codex"].concat(S.registeredAIs.map(function(x) { return x.name; }));
+      var err = "";
+      if (!name) err = "先填名字";
+      else if (!/^[a-z][a-z0-9]{1,19}$/.test(name)) err = "名字要小写字母开头，2～20 位小写字母和数字（不带横线、空格、大写）";
+      else if (taken.indexOf(name) >= 0) err = name + " 已经在名册里了";
+
+      document.getElementById("reg-err").textContent = err;
+      document.getElementById("reg-cmd").textContent = "main.py agent register " + (name || "<名字>") + " --via board";
+      document.getElementById("reg-go").disabled = Boolean(err || humanOnlyBlock());
+    }
+
+    function submitRegistry() {
+      var name = document.getElementById("reg-name").value.trim();
+      var cmd = document.getElementById("reg-cmd").textContent;
+      S.registeredAIs.push({ name: name, prefix: name + "/", by: "no-agent-marker", at: "刚刚" });
+      closeRegistry();
+      addReceipt("登记新 AI", cmd, "已登记 " + name + "（分支前缀 " + name + "/）", 0);
+      toast("已登记新 AI：" + name);
+      render();
+    }
+
+    function askUnregister(name) {
+      closeRegistry();
+      openModal({
+        title: "注销 AI 席位",
+        target: name,
+        desc: "注销这个 AI：以后带这个名字的 AI 会被拒。它还有工位或有效占位时命令会拒绝。",
+        cmd: "agent unregister " + name,
+        humanOnly: true,
+        onRun: function(cmd) {
+          S.registeredAIs = S.registeredAIs.filter(function(a) { return a.name !== name; });
+          addReceipt("注销 AI", cmd, "已注销 " + name, 0);
+          toast("已注销 " + name);
+        }
+      });
+    }
+
+    /* ======================== 动作函数 ======================== */
+    function fireDecision(decId, btnIdx) {
+      var d = S.decisions.find(function(x) { return x.id === decId; });
+      if (!d) return;
+      var b = d.buttons[btnIdx];
+      openModal({
+        key: b.key, title: b.label, target: d.title, desc: b.summary, warn: b.danger || "",
+        humanOnly: b.humanOnly, pin: b.pin, needsApprover: b.needsApprover, fields: b.fields, cmd: b.cmd,
+        onRun: function(cmd) {
+          d.done = true;
+          addReceipt(b.label + "（" + d.pid + "）", cmd, "执行完成：" + d.title, 0);
+          toast("已完成：" + b.label);
+        }
+      });
+    }
+
+    function triggerStationAction(name) {
+      var st = S.stations.find(function(x) { return x.name === name; });
+      if (!st || st.closed) return;
+      var runningLong = S.longRunRunning;
+      var blk = humanOnlyBlock() || st.blocked || (st.kind === "other" && runningLong ? "有长任务在跑（gate-precheck-live）：跑完前名册外目录一律不清" : "");
+      if (blk) return;
+      openModal({
+        title: st.actionLabel,
+        target: st.name + "（" + st.branch + "）",
+        desc: st.summary,
+        facts: [["所属项目", st.pid || "未挂载（公用/临时）"], ["分支", st.branch], ["检查结果", "未提交 " + st.dirty + " · 未推送 " + st.unpushed + " · " + (st.merged ? "已并进 main" : "没并进 main")]],
+        warn: st.warning || "",
+        humanOnly: true,
+        cmd: st.cmd.join(" "),
+        onRun: function(cmd) {
+          st.closed = true;
+          addReceipt(st.actionLabel + " " + st.name, cmd, "已安全收净：" + st.name, 0);
+          toast("已收工位：" + st.name);
+        }
+      });
+    }
+
+    function triggerSweepAll() {
+      if (humanOnlyBlock() || S.longRunRunning) return;
+      var rem = S.sweepItems.filter(function(x) { return x.removable && !x.cleared; });
+      if (!rem.length) return;
+      openModal({
+        title: "清理全部可清项",
+        target: rem.length + " 项",
+        desc: "清理清单里判了「可清」的全部项（工位目录和远程已删、已并进 main 的本地分支）；判了「保留」的不动。",
+        facts: rem.map(function(x) { return ["会清", x.target]; }),
+        humanOnly: true,
+        cmd: "worktree sweep --apply --no-fetch",
+        onRun: function(cmd) {
+          rem.forEach(function(x) { x.cleared = true; });
+          addReceipt("清理全部可清项", cmd, "已清理 " + rem.length + " 项可清目标", 0);
+          toast("整批清理完成");
+        }
+      });
+    }
+
+    function triggerReclaimPreview() {
+      if (humanOnlyBlock()) return;
+      addReceipt("清残留持有记录（只列）", "main.py worktree reclaim --stale", "可回收 stale-session-old：持有对话已不在，目录保留救援引用", 0);
+      openModal({
+        title: "清残留持有记录",
+        target: "1 条（只清列出来的这一条）",
+        desc: "持有对话已经不在的会话工位先存一份救援引用再收目录（分支保留）。",
+        facts: [["会清", "stale-session-old：持有对话已不在，先存救援引用"]],
+        humanOnly: true,
+        cmd: "worktree reclaim --stale --apply",
+        onRun: function(cmd) {
+          addReceipt("清残留持有记录", cmd, "已回收 1 条残留持有记录", 0);
+          toast("残留持有记录已清净");
+        }
+      });
+    }
+
+    /* ======================== 复用组件：工位 Pod & 项目产线舱 ======================== */
+    function renderPod(st) {
+      var runningLong = S.longRunRunning;
+      var blk = humanOnlyBlock() || st.blocked || (st.kind === "other" && runningLong ? "有长任务在跑：名册外目录暂锁清理" : "");
+      var cls = blk ? "locked" : "ready";
+      return '<div class="bus-node ' + cls + '">' +
+        '<div class="pod ' + cls + '">' +
+          '<div style="display:flex;align-items:flex-start;gap:10px;min-width:0;flex:1;">' +
+            '<span class="chip ' + (blk ? "block" : "ok") + ' mono" style="padding:5px 8px;border-radius:8px;">' + esc(st.agent) + '</span>' +
+            '<div style="min-width:0;flex:1;">' +
+              '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">' +
+                '<strong>' + esc(st.card) + '</strong>' +
+                '<span class="mono small">' + esc(st.name) + '</span>' +
+                '<span class="chip na mono">' + esc(st.branch) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;">' +
+                '<span class="chip ' + (st.dirty ? "block" : "ok") + '"><span class="led ' + (st.dirty ? "block" : "ok") + '"></span>' + (st.dirty ? "未提交 " + st.dirty : "无未提交") + '</span>' +
+                '<span class="chip ' + (st.unpushed ? "risk" : "ok") + '"><span class="led ' + (st.unpushed ? "risk" : "ok") + '"></span>' + (st.unpushed ? "未推送 " + st.unpushed : "无未推送") + '</span>' +
+                '<span class="chip ' + (st.merged ? "ok" : "hint") + '"><span class="led ' + (st.merged ? "ok" : "na") + '"></span>' + (st.merged ? "已并进 main" : "未并进 main") + '</span>' +
+                '<span class="small">' + esc(st.agentName) + ' · ' + esc(st.lastSeen) + (st.resolveSource ? ' · 归属：' + esc(st.resolveSource) : '') + '</span>' +
+              '</div>' +
+              (blk ? '<div class="small" style="color:var(--block);margin-top:5px;">🔒 ' + esc(blk) + '</div>' : "") +
+              (st.warning ? '<div class="small" style="color:var(--risk);margin-top:4px;">⚠ ' + esc(st.warning) + '</div>' : "") +
+            '</div>' +
+          '</div>' +
+          '<button ' + (blk ? "disabled" : "") + ' class="btn-sm ' + (blk ? "" : "btn-primary") + '" onclick="triggerStationAction(\'' + esc(st.name) + '\')">' + esc(st.actionLabel) + '</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderStripHtml(row) {
+      var cells = STRIP_CELLS.map(function(name, i) {
+        var idx = i + 1;
+        if (idx < row.current) return '<span class="strip-cell done">✓ ' + esc(name) + '</span>';
+        if (idx === row.current) return '<span class="strip-cell current ' + esc(row.sev) + '">' + esc(row.shape + " " + row.text) + '</span>';
+        return '<span class="strip-cell">' + esc(name) + '</span>';
+      }).join("");
+      return '<div class="strip">' + cells + '</div>';
+    }
+
+    function renderProjectBay(p, opts) {
+      opts = opts || {};
+      var docked = S.stations.filter(function(st) { return st.pid === p.pid && !st.closed; });
+      var decs = S.decisions.filter(function(d) { return d.proj === p.pid && !d.done; });
+      var stripeCls = p.health === "block" ? "block" : (p.health === "risk" ? "warn" : (p.health === "ok" ? "ok" : ""));
+      var ringColor = p.health === "block" ? "var(--block)" : (p.health === "risk" ? "var(--risk)" : "var(--ok)");
+      var healthChipCls = p.health === "block" ? "block" : (p.health === "risk" ? "risk" : (p.health === "ok" ? "ok" : (p.health === "old" ? "hint" : "na")));
+
+      return '<article class="bay-card">' +
+        '<div class="bay-stripe ' + stripeCls + '"></div>' +
+        '<div class="bay-body">' +
+          '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;">' +
+            '<div style="min-width:0;">' +
+              '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">' +
+                '<span class="chip hint mono">' + esc(p.pid) + '</span>' +
+                '<span class="chip na">' + esc(p.kindLabel) + '</span>' +
+                '<span class="chip ' + healthChipCls + '">' + esc(p.healthLabel) + '</span>' +
+                '<span class="small mono">' + esc(p.milestone) + '</span>' +
+              '</div>' +
+              '<div style="font-size:16px;font-weight:700;margin-top:4px;cursor:pointer;" onclick="openProject(\'' + esc(p.pid) + '\')">' + esc(p.name) + '</div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:10px;">' +
+              progressRing(p.pct, ringColor) +
+              '<button class="btn-sm" onclick="openProject(\'' + esc(p.pid) + '\')">打开项目舱 →</button>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="inner-box" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;">' +
+            '<div style="min-width:0;flex:1;">' +
+              '<div class="small mono">本机交接焦点（' + esc(p.handoffDir) + '/focus.json · ' + esc(p.updatedAt || "未建立") + '）</div>' +
+              '<div style="font-weight:500;margin-top:2px;">' + esc(p.stageGoal) + '</div>' +
+            '</div>' +
+            (decs.length
+              ? '<button class="btn-sm btn-warn" onclick="goto(\'decisions\')">⚡ 待拍板 ' + decs.length + ' 项 · 去决定</button>'
+              : '<span class="chip ok">✓ 无待拍板</span>') +
+          '</div>' +
+
+          (opts.showStrips && p.strips.length ? '<div class="stack-v" style="gap:6px;"><div class="small">开着的卡（点卡行直达「流程与状态机」）</div>' +
+            p.strips.map(function(row) {
+              return '<div class="card-row" onclick="openCardInFlow(\'' + esc(row.mid) + '\')">' +
+                '<div style="min-width:180px;flex:1;"><strong>' + esc(row.title) + '</strong> <span class="small mono">' + esc(row.mid) + '</span></div>' +
+                renderStripHtml(row) +
+                '<span class="small" style="min-width:190px;text-align:right;">' + esc(row.right) + '</span>' +
+              '</div>';
+            }).join("") + '</div>' : '') +
+
+          '<div class="stack-v" style="gap:7px;">' +
+            '<div class="small" style="display:flex;justify-content:space-between;"><span>挂载在本项目总线上的工位（' + docked.length + ' 个）</span>' + (docked.length ? "" : '<span class="chip ok">空槽 · 干净</span>') + '</div>' +
+            (docked.length
+              ? '<div class="bus-rail">' + docked.map(renderPod).join("") + '</div>'
+              : '<div class="card dashed small" style="padding:9px 12px;">当前没有挂载在此项目的工位 · <span class="mono">main.py worktree open &lt;agent&gt; &lt;卡号&gt;</span></div>') +
+          '</div>' +
+        '</div>' +
+      '</article>';
+    }
+
+    /* ======================== 各视图渲染 ======================== */
+    function renderToday() {
+      var ledgerOk = !isLedgerDown();
+      var offline = isOffline();
+      var pendingCount = S.decisions.filter(function(d) { return !d.done; }).length;
+      var activeCount = S.projects.reduce(function(acc, p) { return acc + (p.columns["在干"] ? p.columns["在干"].length : 0); }, 0);
+      var leadIssues = S.issues.filter(function(i) { return i.owner === "lead" && i.basis.indexOf("旧账") < 0; }).length;
+      var oldIssues = S.issues.filter(function(i) { return i.basis.indexOf("旧账") >= 0; }).length;
+      var topDec = S.decisions.find(function(d) { return !d.done; });
+      var nextDecs = S.decisions.filter(function(d) { return !d.done && (!topDec || d.id !== topDec.id); }).slice(0, 2);
+
+      // Block 1: Focus
+      var block1 = "";
+      if (!ledgerOk) {
+        block1 = '<div class="card dashed"><span class="chip na">没检查</span> <span class="muted">账本这次没读到，有没有要你办的事不知道。</span></div>';
+      } else if (!topDec) {
+        block1 = '<div class="card dashed"><span class="muted">现在没有要你办的。</span></div>';
+      } else {
+        var replyLine = "同意 " + topDec.pid + "，按当前版本推进。";
+        block1 = '<div class="card sev-' + esc(topDec.sev || "hint") + '">' +
+          '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+              '<span class="chip hint mono">' + esc(topDec.proj) + '</span>' +
+              '<strong>' + esc(topDec.title) + '</strong>' +
+            '</div>' +
+            '<span class="small">共 ' + pendingCount + ' 件待拍板</span>' +
+          '</div>' +
+          '<div style="margin-top:6px;">要你定：<strong>' + esc(topDec.buttons[0].label) + '</strong> · <span class="muted">' + esc(topDec.detail) + '</span></div>' +
+          '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;">' +
+            '<button class="btn-primary btn-sm" onclick="goto(\'decisions\')">去「决定」页办</button>' +
+            '<button class="btn-ghost btn-sm" onclick="copyText(\'' + esc(replyLine) + '\')">复制回复句</button>' +
+            '<button class="btn-ghost btn-sm" onclick="S.folds.focus=!S.folds.focus;render()">' + (S.folds.focus ? "▾ 收起" : "▸ 依据和编号") + '</button>' +
+          '</div>' +
+          (S.folds.focus ? '<div class="inner-box kv-grid" style="margin-top:10px;">' +
+            '<div class="kv-key">对象编号</div><div class="mono">' + esc(topDec.pid) + '</div>' +
+            '<div class="kv-key">依据</div><div>' + esc(topDec.detail) + '</div>' +
+            '<div class="kv-key">终端等价命令</div><div class="mono">main.py ' + esc(topDec.buttons[0].cmd) + '</div>' +
+          '</div>' : "") +
+          (nextDecs.length ? '<div class="small" style="margin-top:10px;">接下来：' + nextDecs.map(function(n) { return esc(n.proj + " · " + n.title); }).join(" ｜ ") + '</div>' : "") +
+        '</div>';
+      }
+
+      // Block 2: Four Numbers
+      var nums = [
+        { k: "user", label: "要你办", val: ledgerOk ? String(pendingCount) : "没检查", sev: ledgerOk && pendingCount ? "block" : "na", click: "openIssuesFiltered('user')" },
+        { k: "running", label: "AI 在干", val: ledgerOk ? String(activeCount) : "没检查", sev: "na", click: "" },
+        { k: "lead", label: "AI 那边要收拾", val: ledgerOk ? String(leadIssues) : "没检查", sev: ledgerOk && leadIssues ? "risk" : "na", click: "openIssuesFiltered('lead')" },
+        { k: "old", label: "旧账", val: ledgerOk ? String(oldIssues) : "没检查", sev: "na", click: "openIssuesFiltered('old')" }
+      ];
+      var block2 = '<div class="grid-4">' + nums.map(function(n) {
+        return '<div class="num-box ' + (n.click ? "clickable " : "") + (n.sev !== "na" ? "sev-" + n.sev : "") + '" ' + (n.click ? 'onclick="' + n.click + '"' : "") + '>' +
+          '<div class="num-val">' + esc(n.val) + '</div>' +
+          '<div class="small">' + esc(n.label) + (n.click ? " →" : "") + '</div>' +
+        '</div>';
+      }).join("") + '</div>';
+
+      // Block 3: Project Bays + Six-cell Strips + Quiet projects
+      var activeProjs = S.projects.filter(function(p) { return !p.archived && p.strips.length > 0; });
+      var quietProjs = S.projects.filter(function(p) { return !p.archived && p.strips.length === 0; });
+      var archivedProjs = S.projects.filter(function(p) { return p.archived; });
+      var block3 = '<div class="stack-v">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+          '<strong>项目与卡（■ 要你办 · ● 主执行要收拾 · ✓ 状态走过）</strong>' +
+          '<span class="small">另有 ' + archivedProjs.length + ' 个已归档（可在「全部项目」勾选查看）</span>' +
+        '</div>' +
+        (ledgerOk
+          ? activeProjs.map(function(p) { return renderProjectBay(p, { showStrips: true }); }).join("")
+          : '<div class="card dashed small">账本这次没读到，开着哪些卡不知道。</div>') +
+        (ledgerOk ? '<div class="card">' +
+          '<div style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="S.folds.quiet=!S.folds.quiet;render()">' +
+            '<span class="small">' + (S.folds.quiet ? "▾" : "▸") + ' 其余 ' + quietProjs.length + ' 个项目没有开着的卡（其中 1 个留有旧账 1 条）</span>' +
+            '<span class="small">点击展开/收起</span>' +
+          '</div>' +
+          (S.folds.quiet ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">' + quietProjs.map(function(qp) {
+            return '<div class="small" style="cursor:pointer;" onclick="openProject(\'' + esc(qp.pid) + '\')">· <span class="mono">' + esc(qp.pid) + '</span> ' + esc(qp.name) + '（' + esc(qp.healthLabel) + '）</div>';
+          }).join("") + '</div>' : "") +
+        '</div>' : "") +
+      '</div>';
+
+      // Block 4: 6+1 Machine Checks Lamps
+      var lamps = [
+        { k: "lost", label: "执行者失联", val: ledgerOk ? "1 张卡" : "没检查", sev: ledgerOk ? "risk" : "na", state: ledgerOk ? "number" : "unchecked", note: "执行者失联：卡开着且超过 1 小时没有新断点（DJ-2026-005 MISSION-DJ005-320）。" },
+        { k: "stale", label: "交接陈旧检查", val: ledgerOk ? "0 条" : "没检查", sev: ledgerOk ? "ok" : "na", state: ledgerOk ? "number" : "unchecked", note: "各项目 focus.json 更新均在 7 天以内，无陈旧漂移。" },
+        { k: "ledger", label: "账本一致性", val: ledgerOk ? "0 差" : "没检查", sev: ledgerOk ? "ok" : "na", state: ledgerOk ? "number" : "unchecked", note: "ledger reconcile 核对台账 0 缺失、0 孤儿、0 状态不一致。" },
+        { k: "docs", label: "文档门禁", val: "全绿", sev: "ok", state: "number", note: "main.py doc check DOC-001 / DOC-004 100% PASS。" },
+        { k: "merge_log", label: "本机合并对账", val: "0 对不上", sev: "ok", state: "number", note: "pm_merge.py verify-log：main 上每个提交均有来历记录。" },
+        { k: "root_clean", label: "控制根清洁", val: "0 临时文件", sev: "ok", state: "number", note: "控制根顶层无 tmp_*、.coverage、htmlcov 等杂物（DEV-TMP-001）。" },
+        { k: "github", label: "GitHub 上的 PR", val: offline ? "断网未知" : (S.gh === "多机" ? "开着 2 个，门禁红 1 个" : "单机" + S.gh + "档"), sev: offline ? "na" : (S.gh === "多机" ? "block" : "na"), state: offline ? "offline" : (S.gh === "多机" ? "number" : "unchecked"), note: "点击跳到「PR 与审计」页。" }
+      ];
+      var block4 = '<div class="card">' +
+        '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
+          '<strong>机器检查（6 项 + GitHub 汇总灯）</strong>' +
+          '<span class="small">空心灰圈 ○ 是没检查或断网未知，不是 0，更不是绿 · 点一盏灯看说明</span>' +
+        '</div>' +
+        '<div class="grid-4">' + lamps.map(function(l) {
+          var cls = l.sev === "block" ? "sev-block" : (l.sev === "risk" ? "sev-risk" : "");
+          var dotCls = l.state === "number" ? l.sev : "na";
+          return '<div class="lamp-box ' + cls + '" onclick="' + (l.k === "github" ? "goto('prs')" : "S.activeLampNote=(S.activeLampNote==='" + l.k + "'?'':'" + l.k + "');render()") + '">' +
+            '<div style="display:flex;align-items:center;gap:6px;"><span class="led ' + dotCls + '"></span><span class="small">' + esc(l.label) + '</span></div>' +
+            '<strong style="color:' + (l.state === "number" ? "var(--fg)" : "var(--fg3)") + ';">' + esc(l.val) + '</strong>' +
+          '</div>';
+        }).join("") + '</div>' +
+        (S.activeLampNote ? '<div class="inner-box small" style="margin-top:10px;">' + esc((lamps.find(function(x) { return x.k === S.activeLampNote; }) || {}).note || "") + '</div>' : "") +
+      '</div>';
+
+      // Block 5: Recent 7 days
+      var block5 = '<div class="card">' +
+        '<div style="cursor:pointer;" onclick="S.folds.activity=!S.folds.activity;render()">' +
+          '<span class="small">' + (S.folds.activity ? "▾" : "▸") + ' 最近 7 天发生了什么</span>' +
+        '</div>' +
+        (S.folds.activity ? '<div class="stack-v" style="margin-top:10px;gap:6px;">' +
+          '<div class="small"><span class="mono">11-21 12:31</span> · <span class="mono">SW-2026-008</span> · pm_merge 合并 CHG-SCPT-2026-726（9703dfbc）</div>' +
+          '<div class="small"><span class="mono">11-20 14:20</span> · <span class="mono">DJ-2026-005</span> · claude 更新交接交换区等待批准 CHG-PLC-2026-019</div>' +
+          '<div class="small" style="margin-top:6px;">只用账本、变更记录与本地提交里真有的时间。这页没有任何改写命令的按钮；要定的事请到「决定与待办」办理。</div>' +
+        '</div>' : "") +
+      '</div>';
+
+      return {
+        crumb: "产线主控 · 今天",
+        title: "今日产线全景（方案丙五块 + 项目产线舱）",
+        actions: '<button class="btn-primary btn-sm" onclick="goto(\'decisions\')">去处理待拍板 (' + (ledgerOk ? pendingCount : "没检查") + ')</button>',
+        html: block1 + block2 + block3 + block4 + block5
+      };
+    }
+
+    function renderWorktrees() {
+      var blk = humanOnlyBlock();
+      var orphans = S.stations.filter(function(st) { return !st.pid && !st.closed; });
+      var remSweep = S.sweepItems.filter(function(x) { return x.removable && !x.cleared; });
+      var sweepBlocked = blk || S.longRunRunning || !remSweep.length;
+
+      var leftHtml = '<div class="stack-v">' +
+        (blk ? '<div class="alert-bar block">' + esc(blk) + '</div>' : "") +
+        S.projects.filter(function(p) { return !p.archived && (p.pid === "DJ-2026-005" || p.pid === "SW-2026-008"); }).map(function(p) { return renderProjectBay(p, { showStrips: false }); }).join("") +
+        '<div class="card dashed">' +
+          '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">' +
+            '<strong>公用 / 名册外目录与可清理分支</strong>' +
+            '<label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer;">' +
+              '<input type="checkbox" ' + (S.longRunRunning ? "checked" : "") + ' onchange="S.longRunRunning=this.checked;render()" /> 模拟有长任务在跑（互锁测试）' +
+            '</label>' +
+          '</div>' +
+          (orphans.length ? '<div class="stack-v" style="margin-bottom:10px;">' + orphans.map(renderPod).join("") + '</div>' : "") +
+          '<div class="grid-2">' + S.sweepItems.filter(function(x) { return !x.cleared; }).map(function(x) {
+            return '<div class="inner-box" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+              '<div style="min-width:0;"><div class="mono" style="font-weight:600;">' + esc(x.target) + '</div><div class="small">' + esc(x.cat + " · " + x.reason) + '</div></div>' +
+              '<span class="chip ' + (x.removable ? "ok" : "na") + '">' + (x.removable ? "可清" : "保留") + '</span>' +
+            '</div>';
+          }).join("") + '</div>' +
+        '</div>' +
+        '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;cursor:pointer;" onclick="S.folds.raw_wt=!S.folds.raw_wt;render()">' +
+            '<span class="small">' + (S.folds.raw_wt ? "▾" : "▸") + ' 只读命令输出（D-316：读到并读懂时自动收起原文）' + (isOffline() ? " · 离线已使用 12 分钟前快照" : "") + '</span>' +
+            '<span class="chip ' + (isOffline() ? "na" : "ok") + '">' + (isOffline() ? "断网未知（快照）" : "读到了") + '</span>' +
+          '</div>' +
+          (S.folds.raw_wt ? '<pre class="cmd-pre" style="margin-top:8px;">main.py worktree list --json --deep --no-size\n-> stations: ' + S.stations.filter(function(s){return !s.closed;}).length + ' 个，已结合 focus.json 完成单机项目归属解析。</pre>' : "") +
+        '</div>' +
+      '</div>';
+
+      var rightHtml = '<div class="stack-v">' +
+        '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>AI 机队席位</strong><button class="btn-ghost btn-sm" onclick="openRegistry()">管理名册</button></div>' +
+          '<div class="small" style="margin-bottom:4px;">内置 5 席</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">' +
+            ["claude/", "trae/", "cursor/", "vscode/", "codex/"].map(function(p) { return '<span class="chip na mono">' + p + '</span>'; }).join("") +
+          '</div>' +
+          '<div class="small" style="margin-bottom:4px;">已登记外部 AI</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:5px;">' +
+            (S.registeredAIs.length ? S.registeredAIs.map(function(a) { return '<span class="chip ok mono">' + esc(a.prefix) + '</span>'; }).join("") : '<span class="small">还没有</span>') +
+          '</div>' +
+        '</div>' +
+        '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>最近本机合并（pm_merge）</strong>' +
+            (S.gh === "关" ? '<span class="chip na">关档不推</span>' : '<button class="btn-ghost btn-sm" onclick="openModal({title:\'推送本机 main 备份\',desc:\'执行 scripts/pm_merge.py push 同步 origin/main。\',cmd:\'scripts\\\\pm_merge.py push\',onRun:function(c){addReceipt(\'推送备份\',c,\'origin/main 已同步\',0);toast(\'推送完成\');}})">立即推送</button>') +
+          '</div>' +
+          '<div class="stack-v" style="gap:8px;">' + S.merges.map(function(m) {
+            return '<div class="inner-box">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<span><span class="chip hint mono">' + esc(m.pid) + '</span> <strong class="mono">' + esc(m.sha) + '</strong></span>' +
+                '<button class="btn-ghost btn-sm" onclick="copyText(\'git revert -m 1 ' + esc(m.sha) + '\')">复制退回</button>' +
+              '</div>' +
+              '<div style="margin-top:4px;font-weight:500;">' + esc(m.title) + '</div>' +
+              '<div class="small mono">卡 ' + esc(m.card) + ' · ' + esc(m.chg) + ' · ' + esc(m.time) + '</div>' +
+            '</div>';
+          }).join("") + '</div>' +
+        '</div>' +
+        '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong>远程占位表（claims）</strong><span class="chip ' + (S.gh === "多机" ? "hint" : "na") + '">' + esc(S.gh) + '档</span></div>' +
+          '<div class="small">' + (S.gh === "多机" ? "多机协同模式已启用：当前无跨机路径冲突占位。" : "单机模式已自动静音远程 claims/* 噪音，工位归属由本机交接与 Git 提交路径自动解析。") + '</div>' +
+        '</div>' +
+      '</div>';
+
+      return {
+        crumb: "产线主控 · 项目工位与分支",
+        title: "项目产线与挂载工位（先看所属项目，再管挂载工位）",
+        actions: '<button ' + (sweepBlocked ? "disabled" : "") + ' class="btn-sm" onclick="triggerSweepAll()">清理全部可清项 (' + remSweep.length + ')</button>' +
+          '<button ' + (blk ? "disabled" : "") + ' class="btn-sm" onclick="triggerReclaimPreview()">清残留持有记录</button>' +
+          '<button ' + (blk ? "disabled" : "") + ' class="btn-primary btn-sm" onclick="openRegistry()">登记新 AI / 注销</button>',
+        html: '<div class="split-8-4">' + leftHtml + rightHtml + '</div>'
+      };
+    }
+
+    function renderDecisions() {
+      var ledgerOk = !isLedgerDown();
+      var blk = humanOnlyBlock();
+      var pinMsg = isPinEnforced()
+        ? "批准口令：已生效（批准、验收、搁着、拿回会在新的终端窗口里问口令）"
+        : "批准口令：未生效（批准只做格式检查，口令设好后自动改走终端窗口）";
+      var pendingCount = S.decisions.filter(function(d) { return !d.done; }).length;
+      var order = ["变更单", "范围卡", "收件箱", "等你", "在干", "搁着", "已关"];
+
+      var html = '<div class="alert-bar ' + (isPinEnforced() ? "hint" : "") + '">' +
+        '<div><strong>D-342 同源对账：</strong>' + (ledgerOk ? ('共有 ' + pendingCount + ' 件待拍板（变更单、范围卡、收件箱与任务卡），与首页计入同源。') : '<span class="chip na">没检查</span> 首页与账本未读到，暂不计数。') +
+        '<div class="small" style="margin-top:3px;">' + esc(pinMsg) + '</div></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="small">批准人</span><input type="text" value="' + esc(S.approver) + '" onchange="S.approver=this.value.trim()||\'fubai\'" style="width:110px;" />' +
+          '<button class="btn-sm" onclick="addReceipt(\'批准变更单（演练失败）\',\'main.py change transition CHG-ERR --to completed\',\'Error: 尚有 1 项验证清单未勾选，命令已拒绝\',1);render()">模拟失败回执</button>' +
+        '</div>' +
+      '</div>';
+
+      if (blk) {
+        html += '<div class="alert-bar block">' + esc(blk) + '</div>';
+      }
+
+      html += '<div class="small">另有 2 张变更单还是草稿或已提交，没送到「审核中」，所以这里没有「批准变更单」按钮；另有 1 张变更单已批准但还没走到「验收中」，所以没有「推到完成」按钮。</div>';
+
+      order.forEach(function(col) {
+        var items = S.decisions.filter(function(d) { return d.column === col; });
+        if (!items.length) return;
+        html += '<div class="stack-v" style="gap:8px;"><strong>' + esc(col) + '（' + items.length + '）</strong><div class="grid-2">' +
+          items.map(function(d) {
+            return '<div class="card ' + (d.sev ? "sev-" + d.sev : "") + '" style="' + (d.done ? "opacity:0.6;" : "") + '">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;">' +
+                '<span class="chip hint mono">' + esc(d.proj) + '</span>' +
+                '<span class="chip ' + (d.done ? "ok" : "risk") + '">' + (d.done ? "✓ 已执行" : "待决定") + '</span>' +
+              '</div>' +
+              '<div style="font-weight:700;">' + esc(d.title) + '</div>' +
+              '<div class="small mono" style="margin-top:3px;">' + esc(d.detail) + '</div>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">' +
+                (d.done
+                  ? '<span class="small" style="color:var(--ok);">✓ 已提交执行，回执见底部终端</span>'
+                  : d.buttons.map(function(b, bi) {
+                      var dis = b.humanOnly && blk;
+                      return '<button ' + (dis ? "disabled" : "") + ' class="btn-sm ' + (b.primary ? "btn-primary" : "") + '" onclick="fireDecision(\'' + esc(d.id) + '\',' + bi + ')">' + esc(b.label) + '</button>';
+                    }).join("")) +
+              '</div>' +
+            '</div>';
+          }).join("") +
+        '</div></div>';
+      });
+
+      html += '<div class="card">' +
+        '<div style="cursor:pointer;display:flex;justify-content:space-between;" onclick="S.folds.pending_detail=!S.folds.pending_detail;render()">' +
+          '<span class="small">' + (S.folds.pending_detail ? "▾" : "▸") + ' 只读明细（pm pending &amp; pm inbox list · 已算进上方件数，不另计）</span>' +
+          '<span class="small">原「要你出手」页对账块</span>' +
+        '</div>' +
+        (S.folds.pending_detail ? '<div class="inner-box small mono" style="margin-top:8px;">pm pending --project-id DJ-2026-005 -> REQ-DJ005-09 (PROPOSED)\npm inbox list --project-id DJ-2026-005 -> INBOX-042 (PROPOSED)</div>' : "") +
+      '</div>';
+
+      return {
+        crumb: "产线主控 · 决定与待办",
+        title: "决定中心（13 个治理动作 · 每键对应同一条 CLI 命令）",
+        actions: "",
+        html: html
+      };
+    }
+
+    function renderProjects() {
+      var archivedCount = S.projects.filter(function(p) { return p.archived; }).length;
+      var filtered = S.projects.filter(function(p) {
+        if (!S.showArchived && p.archived) return false;
+        if (S.projectKindFilter !== "all" && p.kind !== S.projectKindFilter) return false;
+        if (S.projectHealthFilter !== "all" && p.health !== S.projectHealthFilter) return false;
+        return true;
+      });
+
+      var filterBar = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;">' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+          '<div class="seg-group">' + [["all", "全部性质"], ["equipment", "设备"], ["tool", "工具"], ["library", "公共库"], ["test", "测试"], ["unregistered", "未登记"]].map(function(x) {
+            return '<button class="seg-btn ' + (S.projectKindFilter === x[0] ? "active" : "") + '" onclick="S.projectKindFilter=\'' + x[0] + '\';render()">' + x[1] + '</button>';
+          }).join("") + '</div>' +
+          '<select onchange="S.projectHealthFilter=this.value;render()" style="width:auto;padding:4px 8px;font-size:12px;">' +
+            '<option value="all"' + (S.projectHealthFilter === "all" ? " selected" : "") + '>健康：全部</option>' +
+            '<option value="block"' + (S.projectHealthFilter === "block" ? " selected" : "") + '>挡路</option>' +
+            '<option value="risk"' + (S.projectHealthFilter === "risk" ? " selected" : "") + '>有风险</option>' +
+            '<option value="old"' + (S.projectHealthFilter === "old" ? " selected" : "") + '>旧账</option>' +
+            '<option value="ok"' + (S.projectHealthFilter === "ok" ? " selected" : "") + '>正常</option>' +
+            '<option value="nodata"' + (S.projectHealthFilter === "nodata" ? " selected" : "") + '>无数据</option>' +
+            '<option value="off"' + (S.projectHealthFilter === "off" ? " selected" : "") + '>未接入</option>' +
+          '</select>' +
+          '<label class="small" style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ' + (S.showArchived ? "checked" : "") + ' onchange="S.showArchived=this.checked;render()" /> 显示已归档（' + archivedCount + ' 个）</label>' +
+        '</div>' +
+        '<div class="seg-group">' +
+          '<button class="seg-btn ' + (S.projectsViewMode === "cards" ? "active" : "") + '" onclick="S.projectsViewMode=\'cards\';render()">卡片视图</button>' +
+          '<button class="seg-btn ' + (S.projectsViewMode === "table" ? "active" : "") + '" onclick="S.projectsViewMode=\'table\';render()">10 列表格</button>' +
+        '</div>' +
+      '</div>';
+
+      var body = "";
+      if (S.projectsViewMode === "cards") {
+        body = '<div class="grid-2">' + filtered.map(function(p) {
+          var hc = p.health === "block" ? "block" : (p.health === "risk" ? "risk" : (p.health === "ok" ? "ok" : (p.health === "old" ? "hint" : "na")));
+          return '<div class="card sev-' + esc(p.health === "block" ? "block" : (p.health === "risk" ? "risk" : (p.health === "ok" ? "ok" : "hint"))) + '" style="cursor:pointer;" onclick="openProject(\'' + esc(p.pid) + '\')">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+              '<div style="min-width:0;">' +
+                '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+                  '<span class="chip hint mono">' + esc(p.pid) + '</span>' +
+                  '<span class="chip na">' + esc(p.kindLabel) + '</span>' +
+                  '<span class="chip ' + hc + '">' + esc(p.healthLabel) + '</span>' +
+                  (p.archived ? '<span class="chip na">已归档</span>' : "") +
+                '</div>' +
+                '<div style="font-size:15px;font-weight:700;margin-top:6px;">' + esc(p.name) + '</div>' +
+                '<div class="small" style="margin-top:4px;">里程碑：' + esc(p.milestone) + ' · 在干：' + esc(p.nowCard) + '</div>' +
+              '</div>' +
+              progressRing(p.pct) +
+            '</div>' +
+            '<div class="small mono" style="margin-top:8px;">账本 ' + (p.cov.ledger ? "✓" : "✗") + ' · Git ' + (p.cov.git ? "✓" : "✗") + ' · GitHub ' + (p.cov.github ? "✓" : "✗") + ' · 最后动静 ' + esc(p.lastText) + '</div>' +
+          '</div>';
+        }).join("") + '</div>';
+      } else {
+        body = '<div class="data-table-wrap"><table class="data-table"><thead><tr>' +
+          '<th>项目</th><th>性质</th><th>状态</th><th>健康</th><th>里程碑</th><th>到期</th><th>数据覆盖</th><th>现在在干</th><th>问题</th><th>最后动静</th>' +
+        '</tr></thead><tbody>' + filtered.map(function(p) {
+          var pIssues = S.issues.filter(function(i) { return i.pid === p.pid; }).map(function(i) { return i.title; }).join("、") || "—";
+          return '<tr class="clickable" onclick="openProject(\'' + esc(p.pid) + '\')">' +
+            '<td><strong class="mono">' + esc(p.pid) + '</strong><br/>' + esc(p.name) + '</td>' +
+            '<td>' + esc(p.kindLabel) + '</td><td>' + esc(p.statusLabel) + '</td><td>' + esc(p.healthLabel) + '</td>' +
+            '<td>' + esc(p.milestone) + '</td><td class="mono">' + esc(p.dueText) + '</td>' +
+            '<td class="mono">账本' + (p.cov.ledger ? "✓" : "✗") + ' Git' + (p.cov.git ? "✓" : "✗") + ' GH' + (p.cov.github ? "✓" : "✗") + '</td>' +
+            '<td class="mono">' + esc(p.nowCard) + '</td><td>' + esc(pIssues) + '</td><td>' + esc(p.lastText) + '</td>' +
+          '</tr>';
+        }).join("") + '</tbody></table></div>';
+      }
+
+      return {
+        crumb: "产线主控 · 全部项目",
+        title: "受管项目总览（共 " + S.projects.length + " 个 · 点击进入 7 页签项目舱）",
+        actions: '<button class="btn-primary btn-sm" onclick="S.toolTab=\'project\';goto(\'tools\')">新建项目…</button>',
+        html: filterBar + body
+      };
+    }
+
+    function renderProjectCabin() {
+      var cur = S.projects.find(function(p) { return p.pid === S.selectedPid; }) || S.projects[0];
+      var docked = S.stations.filter(function(s) { return s.pid === cur.pid && !s.closed; });
+      var blk = humanOnlyBlock();
+      var tabs = [
+        ["overview", "概览"], ["board", "卡片与定位"], ["evidence", "证据"],
+        ["changes", "变更记录"], ["journal", "交接事件流"], ["io", "依赖与交付"], ["recipe", "规范与模板"]
+      ];
+
+      var lifeHtml = '<div class="card" style="padding:10px 14px;">' +
+        '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
+          '<span class="small">8 段生命周期（来源：01_驾驶舱需求文档 v1.1）</span>' +
+          '<select onchange="openProject(this.value)" style="width:auto;padding:3px 8px;font-size:12px;">' +
+            S.projects.map(function(p) { return '<option value="' + esc(p.pid) + '"' + (p.pid === cur.pid ? " selected" : "") + '>' + esc(p.pid + " · " + p.name) + '</option>'; }).join("") +
+          '</select>' +
+        '</div>' +
+        '<div class="lifecycle-bar">' + PHASES_8.map(function(ph, i) {
+          var c = i < cur.lifeIdx ? "done" : (i === cur.lifeIdx ? "cur" : "");
+          return '<span class="life-node ' + c + '">' + (i < cur.lifeIdx ? "✓ " : "") + esc(ph) + '</span>' + (i < 7 ? '<span class="small">›</span>' : "");
+        }).join("") + '</div>' +
+      '</div>';
+
+      var tabBody = "";
+      if (S.projectTab === "overview") {
+        var dryPassed = Boolean(cur._dryPassed);
+        var actKey = cur.archived ? "reactivate" : "archive";
+        var dryLabel = cur.archived ? "重新激活…" : "归档…";
+        var confLabel = cur.archived ? "确认重新激活" : "确认归档";
+        tabBody = '<div class="stack-v">' +
+          '<div class="card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>本机轻轨交接焦点（focus.json）</strong><span class="small mono">' + esc(cur.handoffDir) + '</span></div>' +
+            '<div class="kv-grid"><div class="kv-key">阶段目标</div><div>' + esc(cur.stageGoal) + '</div><div class="kv-key">现在在干</div><div class="mono">' + esc(cur.nowCard + " (" + cur.nowWho + ") · " + cur.nowStep) + '</div><div class="kv-key">下一步</div><div>' + esc(cur.nextAction) + '</div></div>' +
+          '</div>' +
+          '<div class="card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>挂载工位（' + docked.length + '）</strong></div>' +
+            (docked.length ? '<div class="bus-rail">' + docked.map(renderPod).join("") + '</div>' : '<div class="small muted">当前没有挂载在此项目的活跃工位。</div>') +
+          '</div>' +
+          '<div class="card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+              '<div><strong>项目状态：' + esc(cur.statusLabel) + '</strong> <span class="small">（预演通过才出现确认键）</span></div>' +
+              '<label class="small" style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ' + (S.oldProbeDowngrade ? "checked" : "") + ' onchange="S.oldProbeDowngrade=this.checked;render()" /> 模拟旧发布版无归档命令</label>' +
+            '</div>' +
+            (!cur.registered
+              ? '<div class="small muted" style="margin-top:8px;">这个项目还没登记，没有状态；请到「工程工具箱 → 项目」页签登记。</div>'
+              : (S.oldProbeDowngrade
+                ? '<div class="small" style="color:var(--risk);margin-top:8px;">本机发布版太旧：没有这条命令（project ' + actKey + ' --help 未探测到）</div>'
+                : '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">' +
+                    '<button class="btn-sm" onclick="curProjectDryRun(\'' + esc(cur.pid) + '\',\'' + actKey + '\')">' + (dryPassed ? "重新检查" : dryLabel) + '</button>' +
+                    (dryPassed ? '<button ' + (blk ? "disabled" : "") + ' class="btn-sm btn-primary" onclick="curProjectConfirm(\'' + esc(cur.pid) + '\',\'' + actKey + '\')">' + confLabel + '</button>' : "") +
+                  '</div>' +
+                  (dryPassed ? '<pre class="cmd-pre" style="margin-top:8px;">main.py project ' + actKey + ' ' + esc(cur.pid) + '\n退出码：0\n预演（没加 --confirm）：5 项检查全部通过。</pre>' : ""))) +
+          '</div>' +
+        '</div>';
+      } else if (S.projectTab === "board") {
+        tabBody = '<div class="stack-v">' +
+          '<div class="card"><strong style="display:block;margin-bottom:6px;">进门定位（pm orient ' + esc(cur.pid) + ' --json）</strong>' +
+            '<div class="kv-grid"><div class="kv-key">焦点卡</div><div class="mono">' + esc(cur.nowCard) + '</div><div class="kv-key">冲突</div><div>0 条</div><div class="kv-key">下一步合法动作</div><div>' + esc(cur.nextAction) + '</div></div>' +
+          '</div>' +
+          '<div class="grid-4">' + ["在干", "等你", "搁着", "已关"].map(function(col) {
+            var cards = cur.columns[col] || [];
+            return '<div class="inner-box">' +
+              '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><strong>' + col + '</strong><span class="mono small">' + cards.length + '</span></div>' +
+              (cards.length ? cards.map(function(c) {
+                return '<div class="card" style="padding:9px 10px;margin-bottom:6px;"><div class="mono small">' + esc(c.mid) + '</div><div style="font-weight:600;margin-top:2px;">' + esc(c.title) + '</div><div class="small" style="margin-top:3px;">' + esc(c.meta) + '</div></div>';
+              }).join("") : '<div class="small">—</div>') +
+            '</div>';
+          }).join("") + '</div>' +
+        '</div>';
+      } else if (S.projectTab === "evidence") {
+        tabBody = '<div class="card stack-v">' +
+          '<div><strong>机器检查结果</strong> <span class="small">（每一行三态：过 ✓ / 没过 ✕ / 没检查 –）</span></div>' +
+          (cur.evidence.length ? cur.evidence.map(function(e) {
+            var glyph = e.state === "ok" ? "✓" : (e.state === "block" ? "✕" : (e.state === "risk" ? "!" : "–"));
+            return '<div class="inner-box" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+              '<div style="display:flex;align-items:center;gap:8px;"><span class="chip ' + esc(e.state) + '">' + glyph + '</span><strong>' + esc(e.title) + '</strong><span class="small">' + esc(e.detail) + '</span></div>' +
+              (e.state === "na" ? '<span class="chip na">没检查</span>' : "") +
+            '</div>';
+          }).join("") : '<div class="small muted">暂无证据记录。</div>') +
+        '</div>';
+      } else if (S.projectTab === "changes") {
+        tabBody = '<div class="data-table-wrap"><table class="data-table"><thead><tr><th>编号</th><th>日期</th><th>类型</th><th>改了什么</th><th>状态</th></tr></thead><tbody>' +
+          (cur.changes.length ? cur.changes.map(function(c) {
+            return '<tr><td class="mono">' + esc(c.id) + '</td><td class="mono">' + esc(c.date) + '</td><td><span class="chip na">' + esc(c.kind) + '</span></td><td>' + esc(c.what) + '</td><td>' + esc(c.status) + '</td></tr>';
+          }).join("") : '<tr><td colspan="5" class="muted">无变更记录。</td></tr>') +
+        '</tbody></table></div>';
+      } else if (S.projectTab === "journal") {
+        tabBody = '<div class="card stack-v"><strong>交接事件流（journal.jsonl）</strong>' +
+          (cur.journal.length ? cur.journal.map(function(j) {
+            return '<div class="inner-box">' +
+              '<div class="small mono">' + esc(j.ts + " · " + j.kind + " · " + j.agent + " · 卡 " + j.card + " · " + j.chg + " · " + j.commit) + '</div>' +
+              '<div style="margin-top:4px;font-weight:600;">' + esc(j.sum) + '</div>' +
+              '<div class="small" style="margin-top:4px;">先读：' + j.readFirst.map(function(r) { return '<span class="chip na mono">' + esc(r) + '</span>'; }).join(" ") + '</div>' +
+            '</div>';
+          }).join("") : '<div class="small muted">本项目尚未写入交接事件流。</div>') +
+        '</div>';
+      } else if (S.projectTab === "io") {
+        var relPrs = S.prs.filter(function(pr) { return pr.projects.indexOf(cur.pid) >= 0; });
+        tabBody = '<div class="stack-v">' +
+          '<div class="card"><strong>它在等谁</strong><div class="small muted" style="margin-top:4px;">依赖栏来自计划防呆七栏；当前没有阻塞外部依赖。</div></div>' +
+          '<div class="card"><strong>交出去的东西（PR · 门禁 · 安全签字 · 审计）</strong>' +
+            (isOffline() ? '<div class="chip na" style="margin-top:8px;">断网未知：未读取 GitHub</div>' :
+             (relPrs.length ? '<div class="stack-v" style="margin-top:8px;">' + relPrs.map(renderPrCard).join("") + '</div>' : '<div class="small muted" style="margin-top:8px;">没有改到这个项目的开着 PR。</div>')) +
+          '</div>' +
+        '</div>';
+      } else {
+        tabBody = '<div class="card"><strong>这个项目照哪份规范和模板干活</strong><div class="kv-grid" style="margin-top:10px;">' +
+          (cur.specs.length ? cur.specs.map(function(sp) { return '<div class="kv-key">' + esc(sp[0]) + '</div><div class="mono">' + esc(sp[1]) + '</div>'; }).join("") : '<div class="kv-key">规范</div><div>暂无登记规范</div>') +
+        '</div></div>';
+      }
+
+      return {
+        crumb: "受管项目 · 项目舱",
+        title: cur.pid + " · " + cur.name,
+        actions: '<button class="btn-sm" onclick="goto(\'projects\')">‹ 全部项目</button>',
+        html: lifeHtml +
+          '<div class="tabs">' + tabs.map(function(t) {
+            return '<button class="tab-btn ' + (S.projectTab === t[0] ? "active" : "") + '" onclick="S.projectTab=\'' + t[0] + '\';render()">' + t[1] + '</button>';
+          }).join("") + '</div>' + tabBody
+      };
+    }
+
+    function curProjectDryRun(pid, key) {
+      var cur = S.projects.find(function(p) { return p.pid === pid; });
+      if (!cur) return;
+      cur._dryPassed = true;
+      addReceipt("项目状态预演", "main.py project " + key + " " + pid, "预演（没加 --confirm）：5 项检查全部通过", 0);
+      toast("预演通过，确认按钮已出现");
+      render();
+    }
+
+    function curProjectConfirm(pid, key) {
+      var cur = S.projects.find(function(p) { return p.pid === pid; });
+      if (!cur || !cur._dryPassed) return;
+      openModal({
+        title: key === "archive" ? "确认归档" : "确认重新激活",
+        target: cur.pid + " " + cur.name,
+        desc: key === "archive" ? "只把登记表状态改成「已归档」，目录不搬，编号路径不变。" : "把「已归档」项目改回「在研」。",
+        humanOnly: true, pin: true, needsApprover: false,
+        cmd: "project " + key + " " + pid + " --confirm --approval-evidence-ref <click>",
+        onRun: function(cmd) {
+          cur.archived = (key === "archive");
+          cur.statusLabel = cur.archived ? "已归档" : "在研";
+          cur._dryPassed = false;
+          addReceipt(key === "archive" ? "确认归档" : "确认重新激活", cmd, "项目登记状态已更新", 0);
+          toast("项目状态已更新");
+        }
+      });
+    }
+
+    function renderRelease() {
+      var blk = humanOnlyBlock();
+      var summary = '<div class="grid-3">' +
+        '<div class="card"><div class="small">现役发布槽（active_release.json）</div><div class="mono" style="font-size:16px;font-weight:700;margin-top:4px;">1.3.3-9703dfb</div></div>' +
+        '<div class="card"><div class="small">本机 main HEAD</div><div class="mono" style="font-size:16px;font-weight:700;margin-top:4px;">9703dfbc</div></div>' +
+        '<div class="card"><div class="small">是否需要发版</div><div style="font-weight:700;color:var(--ok);margin-top:4px;">无需发版（脚本与原型合入 main 即生效）</div></div>' +
+      '</div>';
+
+      var candHtml = '<div class="stack-v">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+          '<strong>候选版本（.auto-pm/release-candidates/）</strong>' +
+          '<button ' + (blk ? "disabled" : "") + ' class="btn-sm" onclick="addReceipt(\'检查候选版本\',\'main.py release ship <commit> --json\',\'已刷新 2 个候选版本检查结论\',0);toast(\'已重新检查候选版本\');render()">重新检查候选版本</button>' +
+        '</div>' +
+        (blk ? '<div class="alert-bar block">' + esc(blk) + '</div>' : "") +
+        S.candidates.map(function(c) {
+          var reason = "";
+          if (blk) reason = blk;
+          else if (c.deployed) reason = "已经是现在生效的版本";
+          else if (c.gate.state !== "pass") reason = "门禁没有 PASS 判决：" + c.gate.detail;
+          else if (c.audit.state !== "present") reason = "审计还没放行：" + c.audit.detail;
+          else if (!c.canSwitch) reason = "release ship 说现在不能切";
+
+          return '<div class="card ' + (reason ? "sev-block" : "sev-ok") + '">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
+              '<strong class="mono" style="font-size:15px;">' + esc(c.releaseId) + '</strong>' +
+              '<span class="chip ' + (c.deployed ? "ok" : (reason ? "block" : "ok")) + '">' + (c.deployed ? "已切换生效" : (reason ? "条件未齐 · 不可切" : "门禁与审计全部放行")) + '</span>' +
+            '</div>' +
+            '<div class="kv-grid">' +
+              '<div class="kv-key">门禁</div><div>' + esc(c.gate.detail + " (run " + c.gate.run_id + ")") + '</div>' +
+              '<div class="kv-key">审计</div><div>' + esc(c.audit.detail) + '</div>' +
+              '<div class="kv-key">预检明细</div><div>' + c.preflight.checks.map(function(p) { return '<span class="chip ' + (p.ok ? "ok" : "block") + '" style="margin:2px;">' + (p.ok ? "✓ " : "✕ ") + esc(p.name) + '</span>'; }).join("") + '</div>' +
+              '<div class="kv-key">包含变更 PR</div><div class="mono">' + c.changes.map(function(ch) { return "#" + ch.pr + " " + ch.title; }).join("；") + '</div>' +
+            '</div>' +
+            (S.releaseSwitchResult && S.releaseSwitchResult.id === c.releaseId
+              ? '<div class="alert-bar ' + esc(S.releaseSwitchResult.sev) + '" style="margin-top:10px;">' + esc(S.releaseSwitchResult.msg) + '</div>' : "") +
+            '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;">' +
+              '<button ' + (reason ? "disabled" : "") + ' class="btn-primary btn-sm" onclick="openReleaseDialog(\'' + esc(c.releaseId) + '\')">同意切换到 ' + esc(c.releaseId) + '</button>' +
+              (reason ? '<span class="small" style="color:var(--block);">' + esc(reason) + '</span>' : "") +
+            '</div>' +
+          '</div>';
+        }).join("") +
+      '</div>';
+
+      var longHtml = '<div class="card"><strong>长任务监控（long-run status）</strong>' +
+        '<div class="data-table-wrap" style="margin-top:8px;"><table class="data-table"><thead><tr><th>任务名</th><th>状态</th><th>退出码</th><th>开始时间</th><th>说明</th></tr></thead><tbody>' +
+        S.longRuns.filter(function(r) { return S.longRunRunning || r.state !== "RUNNING"; }).map(function(r) {
+          return '<tr><td class="mono">' + esc(r.name) + '</td><td><span class="chip ' + (r.state === "RUNNING" ? "hint" : "ok") + '">' + esc(r.state) + '</span></td><td class="mono">' + (r.rc === null ? "—" : r.rc) + '</td><td class="mono">' + esc(r.started) + '</td><td>' + esc(r.detail) + '</td></tr>';
+        }).join("") +
+        '</tbody></table></div>' +
+      '</div>';
+
+      return { crumb: "产线主控 · 发版中心", title: "发版切换与长任务监控", actions: "", html: summary + candHtml + longHtml };
+    }
+
+    function openReleaseDialog(releaseId) {
+      var c = S.candidates.find(function(x) { return x.releaseId === releaseId; });
+      if (!c) return;
+      openModal({
+        title: "同意切换到 " + releaseId,
+        target: releaseId,
+        desc: "点击「确认并运行」那一刻，看板生成凭据（user-confirmation:board-click:<UTC>:<会话号>），先落盘到 .auto-pm/reports/board_approvals/release_ship.jsonl，写成了才运行；失败自动退回旧版本。",
+        facts: [["提交号", c.commit], ["现役版本", c.activeRelease], ["门禁", c.gate.detail], ["审计", c.audit.detail]],
+        humanOnly: true, needsApprover: true,
+        fields: [{ k: "simOutcome", label: "原型演练结果（可选：ok / rollback）", hint: "填 ok 模拟切流成功，填 rollback 模拟失败自动退回", def: "ok", required: false }],
+        cmd: "release ship " + c.commit + " --no-check-only --confirm-ref <click-ref> --approver {approver} --json",
+        onRun: function(cmd) {
+          var isRb = cmd.indexOf("rollback") >= 0;
+          if (isRb) {
+            S.releaseSwitchResult = { id: c.releaseId, sev: "risk", msg: "没切成，已自动退回旧版本 1.3.3-9703dfb" };
+            addReceipt("同意切换到 " + c.releaseId, cmd, "演练失败，已自动退回旧版本 1.3.3-9703dfb", 1);
+          } else {
+            c.deployed = true;
+            S.releaseSwitchResult = { id: c.releaseId, sev: "ok", msg: "切换成了：现役已切至 " + c.releaseId };
+            addReceipt("同意切换到 " + c.releaseId, cmd, "切换成了：" + c.releaseId, 0);
+            toast("模拟切流完成");
+          }
+        }
+      });
+    }
+
+    function renderTools() {
+      var tabs = [["change", "变更单"], ["decision", "决策"], ["vartable", "变量表"], ["inbox", "入箱"], ["project", "项目"], ["handoff", "本机交接"]];
+      var tHtml = '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">' +
+        '<div class="tabs">' + tabs.map(function(t) {
+          return '<button class="tab-btn ' + (S.toolTab === t[0] ? "active" : "") + '" onclick="S.toolTab=\'' + t[0] + '\';S.toolPreviewed=false;render()">' + t[1] + '</button>';
+        }).join("") + '</div>' +
+        '<button class="btn-sm" onclick="addReceipt(\'打开高级工作台\',\'main.py gui --advanced\',\'已另起一个窗口；两者互不影响（不含已删除的 Modbus 工坊）\',0);toast(\'已拉起高级工作台\');render()">打开高级工作台</button>' +
+      '</div>';
+
+      var projSelect = '<div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:10px;">' +
+        '<span class="small">当前操作项目</span>' +
+        '<select id="tool-pid" onchange="S.selectedPid=this.value;S.toolPreviewed=false;render()" style="max-width:360px;">' +
+          S.projects.filter(function(p) { return p.registered; }).map(function(p) {
+            return '<option value="' + esc(p.pid) + '"' + (p.pid === S.selectedPid ? " selected" : "") + '>' + esc(p.pid + " · " + p.name) + '</option>';
+          }).join("") +
+        '</select>' +
+      '</div>';
+
+      var body = "";
+      if (S.toolTab === "change") {
+        body = '<div class="card stack-v">' +
+          '<strong>看变更单（只读）</strong>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+            '<button class="btn-sm" onclick="addReceipt(\'change list\',\'main.py change list ' + esc(S.selectedPid) + ' --full\',\'列出当前项目变更单（含已批准/实施中/验收中）\',0);render()">列出变更单</button>' +
+            '<input id="t-chg-num" type="text" placeholder="变更单号，例如 CHG-SCPT-2026-726" style="max-width:260px;" />' +
+            '<button class="btn-sm" onclick="addReceipt(\'change show\',\'main.py change show \'+(document.getElementById(\'t-chg-num\').value||\'CHG-SCPT-2026-726\')+\' --pid ' + esc(S.selectedPid) + '\',\'已读取变更单全文\',0);render()">查看这张</button>' +
+          '</div>' +
+          '<strong style="margin-top:8px;">建一张变更单（先预览命令，看过再创建）</strong>' +
+          '<div class="form-grid">' +
+            '<div class="form-label">技术领域</div><select onchange="S.toolPreviewed=false"><option>PLC</option><option>HMI</option><option>SCPT</option><option>DOCU</option><option>ELEC</option><option>MECH</option><option>SAFE</option><option>SPEC</option></select>' +
+            '<div class="form-label">业务性质</div><select onchange="S.toolPreviewed=false"><option>REQ（需求变更）</option><option>DEF（缺陷修复）</option><option>OPT（优化）</option><option>CFG（配置调整）</option><option>EMRG（紧急处理）</option></select>' +
+            '<div class="form-label">影响范围（可多选）</div><div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:5px;">' + ["LOCAL", "MODULE", "SYSTEM", "CROSS", "SAFE"].map(function(s) { return '<label class="small"><input type="checkbox" ' + (s === "MODULE" ? "checked" : "") + ' onchange="S.toolPreviewed=false" /> ' + s + '</label>'; }).join("") + '</div>' +
+            '<div class="form-label">申请人</div><input type="text" value="张工（客户设备科）" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">变更背景</div><input type="text" placeholder="现在是什么情况" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">变更必要性</div><input type="text" placeholder="为什么要改" oninput="S.toolPreviewed=false" />' +
+          '</div>' +
+          previewBar("change_create", "创建变更单", "main.py change create --pid " + S.selectedPid + " --domain PLC --nature REQ --scope MODULE --applicant 张工 --background ... --necessity ...") +
+          '<strong style="margin-top:8px;">转状态（批准类状态请在「决定与待办」页点击「批准变更单」，或在终端由你本人做）</strong>' +
+          '<div class="form-grid">' +
+            '<div class="form-label">变更单号</div><input type="text" value="' + esc(S.toolTransChg) + '" placeholder="例如 CHG-DJ-2026-001" oninput="S.toolTransChg=this.value;S.toolPreviewed=false" />' +
+            '<div class="form-label">转到（不含批准态）</div><select onchange="S.toolTransTo=this.value;S.toolPreviewed=false;render()">' +
+              [["submitted", "submitted（已提交）"], ["under_review", "under_review（审核中）"], ["implementing", "implementing（实施中）"], ["pending_acceptance", "pending_acceptance（待验收）"], ["accepting", "accepting（验收中）"], ["rejected", "rejected（已驳回）"], ["abandoned", "abandoned（已废弃）"]].map(function(o) {
+                return '<option value="' + o[0] + '"' + (S.toolTransTo === o[0] ? " selected" : "") + '>' + o[1] + '</option>';
+              }).join("") +
+            '</select>' +
+            '<div class="form-label">意见 / 原因</div><input type="text" placeholder="废弃必须写原因" oninput="S.toolPreviewed=false" />' +
+          '</div>' +
+          previewBar("change_transition", "转状态", "main.py change transition " + (S.toolTransChg.trim() || "CHG-DJ-2026-001") + " --to " + S.toolTransTo + " --pid " + S.selectedPid) +
+        '</div>';
+      } else if (S.toolTab === "decision") {
+        body = '<div class="card stack-v">' +
+          '<strong>决策包（只读：列出、查看；新建需本人在终端输口令）</strong>' +
+          '<div class="form-grid">' +
+            '<div class="form-label">按变更单筛选</div><div style="display:flex;gap:8px;"><input type="text" placeholder="可不填" /><button class="btn-sm" onclick="addReceipt(\'decision list\',\'main.py decision list --pid ' + esc(S.selectedPid) + '\',\'已列出决策包\',0);render()">列出决策</button></div>' +
+            '<div class="form-label">决策编号</div><div style="display:flex;gap:8px;"><input type="text" placeholder="DEC-20261121-XXXX" /><button class="btn-sm" onclick="addReceipt(\'decision show\',\'main.py decision show DEC-20261121-D9703DFB\',\'已读取决策包原文\',0);render()">查看这个决策</button></div>' +
+          '</div>' +
+        '</div>';
+      } else if (S.toolTab === "vartable") {
+        body = '<div class="card stack-v">' +
+          '<strong>变量表 / IO 查重（只读，不改文件）</strong>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+            '<input id="vt-path" type="text" value="0100_PLC自动化/DJ-2026-005/03_程序/io_points.csv" style="flex:1;min-width:260px;" />' +
+            '<button class="btn-sm" onclick="document.getElementById(\'vt-path\').value=\'0100_PLC自动化/DJ-2026-005/03_程序/io_points.csv\';toast(\'已选文件\')">选择文件…</button>' +
+            '<button class="btn-sm" onclick="document.getElementById(\'vt-path\').value=\'0100_PLC自动化/DJ-2026-005/03_程序/io_points.csv\';toast(\'已在项目中定位到 io_points.csv\')">在项目里找</button>' +
+            '<button class="btn-primary btn-sm" onclick="S.vartableReport=\'共 128 条，重复地址 1 组，重复变量名 1 组，0 条缺地址\\n- 重复地址 I0.4（站 PLC_Main，第 14、42 行）：DI_Door_Safe / DI_Door_Spare\\n- 重复变量名 DO_Conveyor_Run（站 PLC_Main，第 67、89 行）：Q1.0 / Q1.5\';addReceipt(\'vartable parse\',\'main.py vartable parse io_points.csv --output-format json\',\'查重完成：发现 1 组重复地址、1 组重复变量名\',0);render()">查重</button>' +
+          '</div>' +
+          '<div class="small">比较规则：地址去掉 % 和空格、不分大小写；不同站（station）同名同址不算重复；空地址与空变量名单独计数。</div>' +
+          (S.vartableReport ? '<pre class="cmd-pre">' + esc(S.vartableReport) + '</pre>' : "") +
+        '</div>';
+      } else if (S.toolTab === "inbox") {
+        body = '<div class="card stack-v">' +
+          '<strong>记一条新事项进收件箱（pm inbox add · 用户原话永不预填）</strong>' +
+          '<div class="form-grid">' +
+            '<div class="form-label">标题</div><input type="text" placeholder="一行，至多 120 字" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">类别</div><select onchange="S.toolPreviewed=false"><option>bug（缺陷）</option><option>iteration（迭代）</option><option>change（变更）</option><option>urgent（加急）</option><option>debt（技术债）</option></select>' +
+            '<div class="form-label">变更动作</div><select onchange="S.toolPreviewed=false"><option>（类别不是变更时不填）</option><option>add</option><option>modify</option><option>reduce</option><option>freeze</option><option>remove</option></select>' +
+            '<div class="form-label">用户原话（必填）</div><textarea rows="2" placeholder="照原样填你（或客户）说的话；看板绝不替你预填" oninput="S.toolPreviewed=false"></textarea>' +
+            '<div class="form-label">影响了什么</div><input type="text" placeholder="项目、WBS 行、文件、依赖" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">查重结论</div><input type="text" placeholder="查了哪里、结论是什么" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">取证（至少一条）</div><input type="text" placeholder="file:... / cmd:... / ledger:... / chg:... / commit:..." oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">建议处置</div><select onchange="S.toolPreviewed=false"><option>after_current（手上这张做完再做）</option><option>interrupt_now（马上插进来）</option><option>inbox_wait（先放收件箱）</option><option>reject（建议不做）</option></select>' +
+            '<div class="form-label">理由 / 备选方案 / 成本风险</div><input type="text" placeholder="理由、备选方案与预估成本" oninput="S.toolPreviewed=false" />' +
+          '</div>' +
+          previewBar("inbox_add", "记入收件箱", "main.py pm inbox add --project-id " + S.selectedPid + " --request-id board-20261121T162000Z --proposed-by cockpit-board ...") +
+        '</div>';
+      } else if (S.toolTab === "project") {
+        var unreg = S.projects.filter(function(p) { return !p.registered; });
+        var KIND_DEFAULTS = {
+          equipment: { label: "设备（PLC · standard-project · DJ）", stack: "plc", line: "DJ", mode: "standard-project" },
+          library:   { label: "公共库（PLC · shared-library · DJ）", stack: "plc", line: "DJ", mode: "shared-library" },
+          tool:      { label: "工具（Python · standard-project · SW）", stack: "python", line: "SW", mode: "standard-project" },
+          test:      { label: "测试（需自选技术栈）", stack: S.toolProjectStack || "plc", line: "SW", mode: "standard-project" }
+        };
+        var kd = KIND_DEFAULTS[S.toolProjectKind] || KIND_DEFAULTS.equipment;
+        var effStack = S.toolProjectKind === "test" ? (S.toolProjectStack || "plc") : kd.stack;
+        var projCreateCmd = "main.py project create --stack " + effStack + " --name " + (S.toolProjectName.trim() || "上料机改造") + " --auto-id --business-line " + kd.line + " --mode " + kd.mode + (S.toolProjectDryRun ? " --dry-run" : "");
+        body = '<div class="stack-v">' +
+          '<div class="card stack-v">' +
+            '<strong>新建项目（project create · KIND_DEFAULTS 自动带出默认值）</strong>' +
+            '<div class="form-grid">' +
+              '<div class="form-label">项目名称</div><input type="text" value="' + esc(S.toolProjectName) + '" placeholder="例如 上料机改造" oninput="S.toolProjectName=this.value;S.toolPreviewed=false" />' +
+              '<div class="form-label">性质（--kind）</div><select onchange="S.toolProjectKind=this.value;S.toolProjectStack=(this.value===\'tool\'?\'python\':\'plc\');S.toolPreviewed=false;render()">' +
+                Object.keys(KIND_DEFAULTS).map(function(k) {
+                  return '<option value="' + k + '"' + (S.toolProjectKind === k ? " selected" : "") + '>' + esc(KIND_DEFAULTS[k].label) + '</option>';
+                }).join("") +
+              '</select>' +
+              '<div class="form-label">带出默认值</div><div class="mono small" style="padding-top:6px;">stack=' + esc(effStack) + ' · line=' + esc(kd.line) + ' · mode=' + esc(kd.mode) + '</div>' +
+              '<div class="form-label">预览开关</div><label class="small" style="padding-top:6px;"><input type="checkbox" ' + (S.toolProjectDryRun ? "checked" : "") + ' onchange="S.toolProjectDryRun=this.checked;S.toolPreviewed=false;render()" /> 只试一次，不写（--dry-run）</label>' +
+            '</div>' +
+            '<details style="border:1px dashed var(--line);border-radius:var(--radius-sm);padding:8px 10px;">' +
+              '<summary class="small" style="cursor:pointer;font-weight:600;">显示高级选项（技术栈 / 模板路径 / 模式，一般不用改）</summary>' +
+              '<div class="form-grid" style="margin-top:8px;">' +
+                '<div class="form-label">技术栈</div><select onchange="S.toolProjectStack=this.value;S.toolPreviewed=false;render()">' +
+                  ["plc", "python", "vue", "docs"].map(function(st) { return '<option value="' + st + '"' + (effStack === st ? " selected" : "") + '>' + st + '</option>'; }).join("") +
+                '</select>' +
+                '<div class="form-label">模板目录</div><input type="text" value="templates/' + esc(effStack) + '-standard" oninput="S.toolPreviewed=false" />' +
+              '</div>' +
+            '</details>' +
+            previewBar("project_create", "新建项目", projCreateCmd) +
+          '</div>' +
+          '<div class="card stack-v">' +
+            '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+              '<strong>登记已有项目（project register · 看板不替你提交登记表）</strong>' +
+              '<label class="small" style="cursor:pointer;"><input type="checkbox" ' + (S.toolKindProbeOld ? "checked" : "") + ' onchange="S.toolKindProbeOld=this.checked;render()" /> 模拟旧发布无 --kind</label>' +
+            '</div>' +
+            '<div class="form-grid">' +
+              '<div class="form-label">从工作区未登记项目选</div><select onchange="S.toolPreviewed=false">' + unreg.map(function(u) { return '<option>' + esc(u.pid + " · " + u.name) + '</option>'; }).join("") + '</select>' +
+              '<div class="form-label">性质（--kind）</div>' + (S.toolKindProbeOld ? '<input type="text" disabled value="发版切换后可填；现在登记后显示未分类" />' : '<select onchange="S.toolPreviewed=false"><option>equipment（设备）</option><option>library（公共库）</option><option>tool（工具）</option><option>test（测试）</option></select>') +
+              '<div class="form-label">预览开关</div><label class="small" style="padding-top:6px;"><input type="checkbox" checked onchange="S.toolPreviewed=false" /> 只试一次，不写（--dry-run）</label>' +
+            '</div>' +
+            previewBar("project_register", "登记", "main.py project register DJ-2026-012" + (S.toolKindProbeOld ? "" : " --kind equipment") + " --dry-run") +
+          '</div>' +
+        '</div>';
+      } else {
+        var curP = S.projects.find(function(p) { return p.pid === S.selectedPid; }) || S.projects[0];
+        body = '<div class="card stack-v">' +
+          '<strong>本机轻轨交接（PM-056 V2.0.0 · pm_handoff.py）</strong>' +
+          '<div class="kv-grid">' +
+            '<div class="kv-key">交换区目录</div><div class="mono">' + esc(curP.handoffDir) + '</div>' +
+            '<div class="kv-key">当前阶段目标</div><div>' + esc(curP.stageGoal) + '</div>' +
+            '<div class="kv-key">下一步合法动作</div><div>' + esc(curP.nextAction) + '</div>' +
+          '</div>' +
+          '<div class="form-grid">' +
+            '<div class="form-label">新阶段目标</div><input type="text" value="' + esc(curP.stageGoal) + '" oninput="S.toolPreviewed=false" />' +
+            '<div class="form-label">下一步建议</div><input type="text" value="' + esc(curP.nextAction) + '" oninput="S.toolPreviewed=false" />' +
+          '</div>' +
+          previewBar("handoff_focus", "写入工位 focus.json", "scripts\\pm_handoff.py set-focus " + S.selectedPid + " --root .auto-pm/worktrees/antigravity-d2481c --by user --goal \"...\" --next \"...\"") +
+        '</div>';
+      }
+
+      return {
+        crumb: "产线主控 · 工程工具箱",
+        title: "工程工具箱（6 页签 · 先预览后执行 · 表单修改自动作废预览）",
+        actions: "",
+        html: tHtml + projSelect + body
+      };
+    }
+
+    function previewBar(key, runLabel, cmdText) {
+      return '<div class="inner-box stack-v" style="gap:8px;">' +
+        '<pre class="cmd-pre">' + (S.toolPreviewed === key ? esc(cmdText) : "（点击「1. 预览命令」核对整条命令后，再点运行；表单一改，预览自动作废）") + '</pre>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button class="btn-sm" onclick="S.toolPreviewed=\'' + esc(key) + '\';render()">1. 预览命令</button>' +
+          '<button ' + (S.toolPreviewed === key ? "" : "disabled") + ' class="btn-primary btn-sm" onclick="addReceipt(\'' + esc(runLabel) + '\',\'' + esc(cmdText) + '\',\'执行完成（rc 0），一次预览只执行一次。\',0);S.toolPreviewed=false;toast(\'已执行：' + esc(runLabel) + '\');render()">2. ' + esc(runLabel) + '</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderIssues() {
+      var ledgerOk = !isLedgerDown();
+      var aged = S.issues.filter(function(i) {
+        var isOld = i.basis.indexOf("旧账") >= 0;
+        if (S.issueOldMode === "show") return true;
+        return isOld === (S.issueOldMode === "only");
+      });
+      var base = aged.filter(function(i) { return S.issueWho === "all" || i.owner === S.issueWho; });
+      var shown = base.filter(function(i) { return S.issueSev === "all" || i.sev === S.issueSev; });
+      var oldTotal = S.issues.filter(function(i) { return i.basis.indexOf("旧账") >= 0; }).length;
+
+      var html = '<div class="card" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+          '<div class="seg-group">' + [["all", "全部"], ["block", "阻塞"], ["risk", "风险"], ["hint", "提醒"]].map(function(f) {
+            var cnt = base.filter(function(i) { return f[0] === "all" || i.sev === f[0]; }).length;
+            return '<button class="seg-btn ' + (S.issueSev === f[0] ? "active" : "") + '" onclick="S.issueSev=\'' + f[0] + '\';render()">' + f[1] + ' (' + cnt + ')</button>';
+          }).join("") + '</div>' +
+          '<div class="seg-group">' + [["all", "谁来办：全部"], ["user", "要你办"], ["lead", "AI 那边要收拾"]].map(function(w) {
+            return '<button class="seg-btn ' + (S.issueWho === w[0] ? "active" : "") + '" onclick="S.issueWho=\'' + w[0] + '\';render()">' + w[1] + '</button>';
+          }).join("") + '</div>' +
+        '</div>' +
+        '<label class="small" style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ' + (S.issueOldMode !== "hide" ? "checked" : "") + ' onchange="S.issueOldMode=this.checked?\'show\':\'hide\';render()" /> 显示旧账（' + oldTotal + ' 条）</label>' +
+      '</div>';
+
+      if (!ledgerOk) {
+        html += '<div class="alert-bar block">没检查：账本未读到，当前列表不可信。</div>';
+      }
+      if (S.issueOldMode === "only") {
+        html += '<div class="alert-bar hint"><span>现在只列旧账。去掉「显示旧账」的勾回到平常的样子。</span></div>';
+      }
+      if (S.issueWho === "user") {
+        html += '<div class="small">要你办共 ' + S.decisions.filter(function(d){return !d.done;}).length + ' 件：这页列 ' + base.length + ' 条；另有其余待确认在「决定与待办」与「PR 与审计」页。</div>';
+      }
+
+      html += shown.length ? shown.map(function(i) {
+        return '<div class="card sev-' + esc(i.sev) + '">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+              '<span class="chip ' + esc(i.sev) + '">' + (i.sev === "block" ? "阻塞" : (i.sev === "risk" ? "风险" : "提醒")) + '</span>' +
+              '<span class="mono small">' + esc(i.pid) + '</span>' +
+              '<strong>' + esc(i.title) + '</strong>' +
+            '</div>' +
+            '<button class="btn-sm" onclick="openProject(\'' + esc(i.pid) + '\')">看项目</button>' +
+          '</div>' +
+          '<div class="muted" style="margin-top:6px;">' + esc(i.detail) + '</div>' +
+          '<div class="small" style="margin-top:6px;">谁动手：' + esc(i.who) + ' · 等了 ' + esc(i.waited) + ' · 依据：' + esc(i.basis) + ' · 编号：<span class="mono">' + esc(i.ref) + '</span></div>' +
+        '</div>';
+      }).join("") : '<div class="card dashed small">这一档没有问题。</div>';
+
+      return { crumb: "排查与诊断 · 问题汇总", title: "全工作区问题诊断（每条来自机器判定 · 看板只负责让你看见）", actions: "", html: html };
+    }
+
+    function renderPrCard(row) {
+      return '<div class="inner-box">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+          '<div><strong class="mono">#' + row.number + '</strong> <strong>' + esc(row.title) + '</strong></div>' +
+          '<span class="chip hint mono">' + esc(row.projects.join(" · ")) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">' +
+          '<span class="chip ' + esc(row.gate.sev) + '">门禁：' + esc(row.gate.text) + '</span>' +
+          row.ci.map(function(c) { return '<span class="chip ' + esc(c[1].sev) + '">' + esc(c[0]) + '：' + esc(c[1].text) + '</span>'; }).join("") +
+          '<span class="chip ' + esc(row.safety.sev) + '">安全签字：' + esc(row.safety.text) + '</span>' +
+          '<span class="chip ' + esc(row.rules.sev) + '">规则批准：' + esc(row.rules.text) + '</span>' +
+          '<span class="chip ' + esc(row.audit.sev) + '">审计：' + esc(row.audit.text) + '</span>' +
+        '</div>' +
+        '<div class="small" style="margin-top:6px;">' + esc(row.note) + ' · 网址（纯文本不跳转）：<span class="mono">' + esc(row.url) + '</span></div>' +
+      '</div>';
+    }
+
+    function renderPrs() {
+      if (isOffline()) {
+        return {
+          crumb: "排查与诊断 · PR 与审计", title: "PR 与独立审计", actions: "",
+          html: '<div class="card dashed stack-v"><span class="chip na">断网未知</span><div>断网，读不到 GitHub；本机缓存截至 11-21 09:30 UTC，不拿来冒充现在。</div></div>'
+        };
+      }
+      if (S.gh !== "多机") {
+        return {
+          crumb: "排查与诊断 · PR 与审计", title: "PR 与独立审计（单机模式静音）",
+          actions: '<button class="btn-sm" onclick="askGhMode(\'多机\')">切换为多机档看 PR</button>',
+          html: '<div class="card stack-v">' +
+            '<div><strong>当前为单机「' + esc(S.gh) + '」档（GH-001）</strong></div>' +
+            '<div class="muted">日常改动经由本机门禁与独立审计，通过 <span class="mono">scripts/pm_merge.py merge</span> 直接合入本机 main，不强制开 GitHub PR。需要跨电脑协同或云端跑 CI 时再切到「多机」档。</div>' +
+            '<div class="inner-box small">本机审计目录（D-317）：&lt;控制根&gt;/reviews/（只认「编号_*.md」格式；已读到 18 份历史归档审计报告）。</div>' +
+          '</div>'
+        };
+      }
+      return {
+        crumb: "排查与诊断 · PR 与审计", title: "开着的 PR · 门禁 · 安全签字 · 独立审计（D-317）", actions: "",
+        html: '<div class="card stack-v">' +
+          '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;"><strong>交出去的东西（' + S.prs.length + ' 个开着的 PR）</strong><span class="chip ok">读到了（GitHub 多机联机）</span></div>' +
+          S.prs.map(renderPrCard).join("") +
+          '<div class="inner-box small"><strong>当前审计报告（D-317 分离口径）：</strong>PR #871 已对上 reviews/2026-11-21_pr871.md（PASS）；另有 18 份旧报告未对上开着的 PR，不当作当前审计报告。</div>' +
+        '</div>'
+      };
+    }
+
+    function renderFlow() {
+      var tabs = '<div class="tabs">' +
+        '<button class="tab-btn ' + (S.flowTab === "graphs" ? "active" : "") + '" onclick="S.flowTab=\'graphs\';render()">四套交互状态机图（Mission / Work / Run / Change）</button>' +
+        '<button class="tab-btn ' + (S.flowTab === "spine" ? "active" : "") + '" onclick="S.flowTab=\'spine\';render()">十步治理脊柱图（spine.json）</button>' +
+      '</div>';
+
+      if (S.flowTab === "spine") {
+        return {
+          crumb: "排查与诊断 · 流程与状态机", title: "十步治理脊柱图与中途出状况处理", actions: "",
+          html: tabs + '<div class="grid-2">' + SPINE_STEPS.map(function(s) {
+            return '<div class="card">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">' +
+                '<strong class="mono">第 ' + s.n + ' 步 · ' + esc(s.name) + '</strong>' +
+                (s.touch ? '<span class="chip risk">' + esc(s.touch) + '</span>' : '<span class="chip na">' + esc(s.lanes.join(" / ")) + '</span>') +
+              '</div>' +
+              '<div class="kv-grid" style="margin-top:8px;">' +
+                '<div class="kv-key">命令</div><div class="mono">' + esc(s.cmds.join("、")) + '</div>' +
+                '<div class="kv-key">做完判据</div><div>' + esc(s.done) + '</div>' +
+                '<div class="kv-key">在哪页看</div><div style="display:flex;gap:6px;flex-wrap:wrap;">' + s.pages.map(function(pg) { return '<button class="btn-ghost btn-sm" onclick="goto(\'' + pg[0] + '\')">' + esc(pg[1]) + '</button>'; }).join("") + '</div>' +
+              '</div>' +
+            '</div>';
+          }).join("") + '</div>' +
+          '<div class="card"><strong>不在主线上 · 中途出状况（off_spine）</strong><div class="small mono" style="margin-top:6px;">pm park · pm switch · pm unpark · pm handoff · pm takeover · pm recover</div></div>'
+        };
+      }
+
+      var g = GRAPHS[S.selectedGraph];
+      var cards = [
+        { mid: "MISSION-DJ005-319", pid: "DJ-2026-005", title: "急停复位与安全门联锁 SCL 点表", states: { mission: "AWAITING_APPROVAL", work: "READY", run: "READY", change: "under_review" } },
+        { mid: "MISSION-DJ005-320", pid: "DJ-2026-005", title: "工位 2 气缸步进链超时自诊断", states: { mission: "ACTIVE", work: "IN_PROGRESS", run: "RUNNING", change: "implementing" } },
+        { mid: "MISSION-SW008-726", pid: "SW-2026-008", title: "单机轻轨交接与总控屏验收收口", states: { mission: "ACCEPTANCE_PENDING", work: "VERIFYING", run: "SUCCEEDED", change: "accepting" } }
+      ];
+      var selCard = cards.find(function(c) { return c.mid === S.selectedFlowCard; });
+      var curState = selCard ? selCard.states[g.id] : null;
+      var nextIds = curState ? g.edges.filter(function(e) { return e.from === curState; }).map(function(e) { return e.to; }) : [];
+      var focusNode = S.clickedNode || curState;
+
+      // Render SVG from flow/graphs.json exact topology
+      var nw = 136, nh = 42;
+      var nodeMap = {};
+      g.nodes.forEach(function(n) { nodeMap[n.id] = n; });
+      var svgEdges = g.edges.map(function(e) {
+        var a = nodeMap[e.from], b = nodeMap[e.to];
+        if (!a || !b) return "";
+        var x1 = a.x + nw / 2, y1 = a.y + nh / 2, x2 = b.x + nw / 2, y2 = b.y + nh / 2;
+        var emph = curState && e.from === curState;
+        var stroke = emph ? "var(--accent)" : (e.minor ? "var(--line)" : "var(--line2)");
+        return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke + '" stroke-width="' + (emph ? 2.4 : 1.3) + '" ' + (e.minor ? 'stroke-dasharray="4 4"' : "") + ' marker-end="url(#arrow-' + (emph ? "acc" : "norm") + ')" />' +
+          (e.label ? '<text x="' + ((x1 + x2) / 2) + '" y="' + ((y1 + y2) / 2 - 4) + '" text-anchor="middle" fill="var(--fg2)" font-size="10" font-family="monospace">' + esc(e.label + (e.actor === "user" ? " (用户)" : "")) + '</text>' : "");
+      }).join("");
+
+      var svgNodes = g.nodes.map(function(n) {
+        var isCur = n.id === curState;
+        var isFoc = n.id === S.clickedNode;
+        var isNext = nextIds.indexOf(n.id) >= 0;
+        var isTerm = g.terminals.indexOf(n.id) >= 0;
+        var fill = isCur ? "var(--accent-soft)" : "var(--card)";
+        var stroke = isCur ? "var(--accent)" : (isFoc ? "var(--hint)" : (isNext ? "var(--accent)" : "var(--line2)"));
+        return '<g style="cursor:pointer;" onclick="S.clickedNode=\'' + esc(n.id) + '\';render()">' +
+          '<rect x="' + n.x + '" y="' + n.y + '" width="' + nw + '" height="' + nh + '" rx="8" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (isCur || isFoc ? 2.5 : 1.3) + '" ' + (isNext && !isCur ? 'stroke-dasharray="5 3"' : "") + ' />' +
+          (isTerm ? '<rect x="' + (n.x + 3) + '" y="' + (n.y + 3) + '" width="' + (nw - 6) + '" height="' + (nh - 6) + '" rx="6" fill="none" stroke="' + stroke + '" stroke-width="1" />' : "") +
+          '<text x="' + (n.x + nw / 2) + '" y="' + (n.y + 18) + '" text-anchor="middle" fill="' + (isCur ? "var(--accent)" : "var(--fg)") + '" font-size="12.5" font-weight="700">' + esc(n.label) + '</text>' +
+          '<text x="' + (n.x + nw / 2) + '" y="' + (n.y + 34) + '" text-anchor="middle" fill="var(--fg3)" font-size="9.5" font-family="monospace">' + esc(n.id) + '</text>' +
+        '</g>';
+      }).join("");
+
+      var detailPanel = "";
+      if (focusNode && nodeMap[focusNode]) {
+        var outEdges = g.edges.filter(function(e) { return e.from === focusNode; });
+        detailPanel = '<div class="card"><strong>' + esc(nodeMap[focusNode].label) + '（' + esc(focusNode) + '）</strong>' +
+          (outEdges.length ? '<div class="stack-v" style="margin-top:8px;gap:5px;">' + outEdges.map(function(e) {
+            return '<div class="small">→ <strong>' + esc(nodeMap[e.to].label) + '</strong> <span class="mono">(' + esc(e.to) + ')</span>' +
+              (e.label ? ' · 命令：<span class="mono">' + esc(e.label) + '</span>' : "") +
+              (e.actor === "user" ? ' · <span class="chip risk">只听用户本人</span>' : "") +
+              (e.minor ? ' · 随时可退出' : "") + '</div>';
+          }).join("") + '</div>' : '<div class="small muted" style="margin-top:6px;">终态，没有下一步。</div>') +
+        '</div>';
+      }
+
+      return {
+        crumb: "排查与诊断 · 流程与状态机", title: "四套真实状态机图 & 十步治理脊柱图（只读）", actions: "",
+        html: tabs +
+          '<div class="card stack-v">' +
+            '<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">' +
+              '<div class="seg-group">' + ["mission", "work", "run", "change"].map(function(gid) {
+                return '<button class="seg-btn ' + (S.selectedGraph === gid ? "active" : "") + '" onclick="S.selectedGraph=\'' + gid + '\';S.clickedNode=null;render()">' + GRAPHS[gid].title + ' (' + GRAPHS[gid].en + ')</button>';
+              }).join("") + '</div>' +
+              '<select onchange="S.selectedFlowCard=this.value;S.clickedNode=null;render()" style="max-width:360px;">' +
+                '<option value="">（不指定卡，只看流程）</option>' +
+                cards.map(function(c) { return '<option value="' + esc(c.mid) + '"' + (S.selectedFlowCard === c.mid ? " selected" : "") + '>' + esc(c.pid + " · " + c.mid + " · " + c.title) + '</option>'; }).join("") +
+              '</select>' +
+            '</div>' +
+            '<div class="muted">' + esc(g.intro) + '</div>' +
+            '<div class="svg-scroll"><svg width="' + g.width + '" height="' + g.height + '" viewBox="0 0 ' + g.width + ' ' + g.height + '">' +
+              '<defs><marker id="arrow-norm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="var(--line2)"/></marker>' +
+              '<marker id="arrow-acc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="var(--accent)"/></marker></defs>' +
+              svgEdges + svgNodes +
+            '</svg></div>' +
+            '<div class="small">源码对照：<span class="mono">' + esc(g.source) + '</span> · ' + esc(g.hint) + ' · 点击任意状态节点看下一步</div>' +
+          '</div>' + detailPanel
+      };
+    }
+
+    function renderCommands() {
+      var list = COMMAND_CATALOG.filter(function(c) {
+        if (S.cmdClassFilter !== "all" && c.cls !== S.cmdClassFilter) return false;
+        if (S.cmdSearch && (c.cmd + " " + c.note + " " + c.wf).toLowerCase().indexOf(S.cmdSearch.toLowerCase()) < 0) return false;
+        return true;
+      });
+      var clsName = { read: "只读", write: "写", user_only: "只听用户本人", never: "永不放进界面" };
+      var clsChip = { read: "ok", write: "hint", user_only: "risk", never: "block" };
+
+      return {
+        crumb: "排查与诊断 · 命令与契约",
+        title: "CLI 命令分类契约（flow/commands_map.json · 全库 226 条叶子命令）",
+        actions: '<input type="search" value="' + esc(S.cmdSearch) + '" oninput="S.cmdSearch=this.value;render()" placeholder="搜索命令或写开关…" style="width:220px;" />',
+        html: '<div class="grid-4">' +
+          '<div class="card"><div class="small">只读（read）</div><div class="num-val">69</div><div class="small">页面可后台自动读</div></div>' +
+          '<div class="card"><div class="small">写（write）</div><div class="num-val">120</div><div class="small">需白名单按钮且先预览</div></div>' +
+          '<div class="card"><div class="small">只听用户本人（user_only）</div><div class="num-val">24</div><div class="small">AI 标记拒跑</div></div>' +
+          '<div class="card"><div class="small">永不放进界面（never）</div><div class="num-val">13</div><div class="small">界面绝对禁用</div></div>' +
+        '</div>' +
+        '<div class="seg-group" style="align-self:flex-start;">' + [["all", "全部展示"], ["read", "只读 (read)"], ["write", "写 (write)"], ["user_only", "只听用户 (user_only)"], ["never", "永不进界面 (never)"]].map(function(f) {
+          return '<button class="seg-btn ' + (S.cmdClassFilter === f[0] ? "active" : "") + '" onclick="S.cmdClassFilter=\'' + f[0] + '\';render()">' + f[1] + '</button>';
+        }).join("") + '</div>' +
+        '<div class="data-table-wrap"><table class="data-table"><thead><tr><th>命令</th><th>分类</th><th>禁止带入的写开关</th><th>说明</th></tr></thead><tbody>' +
+          list.map(function(c) {
+            return '<tr><td class="mono"><strong>' + esc(c.cmd) + '</strong></td><td><span class="chip ' + clsChip[c.cls] + '">' + clsName[c.cls] + '</span></td><td class="mono">' + (c.wf ? '<span class="chip block">' + esc(c.wf) + '</span>' : "—") + '</td><td>' + esc(c.note || "—") + '</td></tr>';
+          }).join("") +
+        '</tbody></table></div>'
+      };
+    }
+
+    function renderOfflineStation() {
+      var p = S.projects[0]; // DJ-2026-005
+      var steps = [
+        { n: 1, title: "开人工工位（manual/ 分支）", st: "已完成", sev: "ok", detail: "在 .auto-pm/worktrees/manual 作业，绝不直接改控制根。", cmd: "git worktree add -b manual/20261121-safety .auto-pm/worktrees/manual", btns: [] },
+        { n: 2, title: "安全区命中检测", st: "进行中", sev: "hint", detail: "改到急停、安全门、光栅、联锁等安全区时亮红提醒（不阻断）。", cmd: "", safety: "安全区命中：FB_EStop_Reset / SafetyGate_Interlock。必须先 PLCSIM 仿真；发现 OR TRUE 旁路直接判不合格。", btns: [] },
+        { n: 3, title: "本机静态质量门检查", st: "待做", sev: "na", detail: "离线照常跑本机 PLC 静态检查与接口文档一致性检查。", cmd: "main.py -w .auto-pm/worktrees/manual plc check DJ-2026-005", btns: [
+          { label: "重新跑 plc check", action: function() { addReceipt("plc check", "main.py -w .auto-pm/worktrees/manual plc check DJ-2026-005", "LSP-905 / 903 检查完成（rc 0）", 0); } },
+          { label: "plc docs check", action: function() { addReceipt("plc docs check", "main.py -w .auto-pm/worktrees/manual plc docs check DJ-2026-005", "接口与变量文档一致（rc 0）", 0); } },
+          { label: "docs sync 预览", action: function() { addReceipt("docs sync 预览", "main.py -w .auto-pm/worktrees/manual plc docs sync --dry-run DJ-2026-005", "预览完成，未写文件", 0); } }
+        ]},
+        { n: 4, title: "登记业务变更（BC 行 · 先预览再写入）", st: "待做", sev: "na", detail: "写入 .auto-pm/worktrees/manual/.../02_业务变更记录.md 表末；一次预览只写一次。", cmd: "", isBc: true, btns: [] },
+        { n: 5, title: "本地提交（断网照常在 manual/ 提交）", st: "待做", sev: "na", detail: "看板不代跑 git commit；复制提交说明到终端提交。", cmd: "git -C .auto-pm/worktrees/manual commit -m \"feat(DJ-2026-005): 现场参数调整\"", btns: [
+          { label: "复制提交说明", action: function() { copyText("feat(DJ-2026-005): 现场参数调整\n\n领卡占位: manual-20261121"); } },
+          { label: "提交（请在终端运行）", disabled: true }
+        ]},
+        { n: 6, title: "归队本机收口（pm_merge.py merge）", st: "待做", sev: "na", detail: "回办公室后在控制根走 pm_merge.py merge 合入 main，批准变更单请到「决定与待办」页。", cmd: "scripts\\pm_merge.py merge manual", btns: [
+          { label: "批准范围", action: function() { goto("decisions"); } },
+          { label: "开工", action: function() { goto("decisions"); } }
+        ]}
+      ];
+
+      var html = '<div class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;' + (S.versionDrift ? "background:var(--risk-soft);border-color:var(--risk);" : "") + '">' +
+        '<span class="mono small">源码 <strong>9703dfbc</strong></span>' +
+        '<span class="mono small">生效 <strong>1.3.3-9703dfb</strong></span>' +
+        '<span class="mono small">控制根 <strong>是</strong></span>' +
+        '<span class="small">' + (S.versionDrift ? "⚠ 源码与现役版本不一致（RUNTIME_IDENTITY_DIVERGENCE）" : "两版本一致") + '</span>' +
+      '</div>';
+
+      if (isOffline() && !S.offlineBannerDismissed) {
+        html += '<div class="alert-bar risk"><span>当前离线（手动或探测离线）：GitHub 与远程操作已静音，本机检查与 BC 写入照常可用。</span><button class="btn-sm" onclick="S.offlineBannerDismissed=true;render()">知道了</button></div>';
+      }
+
+      html += '<div class="card">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
+          '<div><span class="chip hint mono">' + esc(p.pid) + '</span> <strong>' + esc(p.name) + '</strong></div>' +
+          '<span class="chip risk">涉及安全区</span>' +
+        '</div>' +
+        '<div class="kv-grid"><div class="kv-key">上次干到</div><div>' + esc(p.nowStep) + '</div><div class="kv-key">下一步</div><div>' + esc(p.nextAction) + '</div><div class="kv-key">人工工位</div><div class="mono">.auto-pm/worktrees/manual（分支 manual/20261121-safety）</div></div>' +
+        '<div style="margin-top:10px;"><button class="btn-sm" onclick="openProject(\'' + esc(p.pid) + '\')">看卡和变更记录</button></div>' +
+      '</div>';
+
+      html += steps.map(function(s) {
+        var bcFormHtml = "";
+        if (s.isBc) {
+          var v = S.bcValues;
+          bcFormHtml = '<div class="inner-box stack-v" style="margin-top:8px;">' +
+            '<div class="form-grid">' +
+              '<div class="form-label">提出时间</div><input type="text" value="' + esc(v.raised) + '" oninput="S.bcValues.raised=this.value;S.bcPreview=null;renderBcStateOnly()" />' +
+              '<div class="form-label">渠道</div><select onchange="S.bcValues.channel=this.value;S.bcPreview=null;render()">' + ["当面", "电话", "邮件", "微信"].map(function(c) { return '<option' + (v.channel === c ? " selected" : "") + '>' + c + '</option>'; }).join("") + '</select>' +
+              '<div class="form-label">提出人</div><input type="text" value="' + esc(v.who) + '" oninput="S.bcValues.who=this.value;S.bcPreview=null;renderBcStateOnly()" />' +
+              '<div class="form-label">类型</div><select onchange="S.bcValues.kind=this.value;S.bcPreview=null;render()">' + ["需求", "参数", "硬件"].map(function(k) { return '<option' + (v.kind === k ? " selected" : "") + '>' + k + '</option>'; }).join("") + '</select>' +
+              '<div class="form-label">改了什么</div><input type="text" value="' + esc(v.what) + '" oninput="S.bcValues.what=this.value;S.bcPreview=null;renderBcStateOnly()" />' +
+              '<div class="form-label">为什么</div><input type="text" value="' + esc(v.why) + '" oninput="S.bcValues.why=this.value;S.bcPreview=null;renderBcStateOnly()" />' +
+              '<div class="form-label">影响</div><input type="text" value="' + esc(v.impact) + '" oninput="S.bcValues.impact=this.value;S.bcPreview=null;renderBcStateOnly()" />' +
+            '</div>' +
+            '<div id="bc-preview-wrap">' + (S.bcPreview ? '<div class="card"><div class="small" style="margin-bottom:6px;">预览：要往 02_业务变更记录.md 末尾追加的 11 栏</div><div class="kv-grid">' +
+              S.bcPreview.cols.map(function(c) { return '<div class="kv-key">' + esc(c[0]) + '</div><div class="mono">' + esc(c[1] || "（空）") + '</div>'; }).join("") +
+            '</div><pre class="cmd-pre" style="margin-top:8px;">' + esc(S.bcPreview.line) + '</pre></div>' : '<div class="small">全部填好后点「预览」，看过整行再点「写入 02_业务变更记录.md」。</div>') + '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+              '<button class="btn-sm" onclick="buildBcPreview()">预览</button>' +
+              '<button id="btn-bc-write" ' + (S.bcPreview ? "" : "disabled") + ' class="btn-primary btn-sm" onclick="writeBcRow()">写入 02_业务变更记录.md</button>' +
+            '</div>' +
+          '</div>';
+        }
+
+        return '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<strong>' + s.n + '. ' + esc(s.title) + '</strong>' +
+            '<span class="chip ' + esc(s.sev) + '">' + esc(s.st) + '</span>' +
+          '</div>' +
+          '<div class="muted" style="margin-top:4px;">' + esc(s.detail) + '</div>' +
+          (s.cmd ? '<pre class="cmd-pre" style="margin-top:8px;">' + esc(s.cmd) + '</pre>' : "") +
+          (s.safety ? '<div class="alert-bar block" style="margin-top:8px;">' + esc(s.safety) + '</div>' : "") +
+          bcFormHtml +
+          (s.btns.length ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' + s.btns.map(function(b, bi) {
+            return '<button ' + (b.disabled ? "disabled" : "") + ' class="btn-sm" onclick="runStationStepBtn(' + s.n + ',' + bi + ')">' + esc(b.label) + '</button>';
+          }).join("") + '</div>' : "") +
+        '</div>';
+      }).join("");
+
+      html += '<div class="grid-2">' +
+        '<div class="card stack-v"><strong>安全区自查（仅本机提醒，不进账本）</strong>' +
+          ["急停、安全门、光栅、联锁等改了先 PLCSIM / InoProShop 仿真", "没有 OR TRUE 一类旁路；安全点没有漏接", "下载前校验码和上次上载记录对得上", "回来后按需补记 CHG 与交接交换区"].map(function(t, i) {
+            return '<label class="small" style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;"><input type="checkbox" ' + (S.safetyChecks[i] ? "checked" : "") + ' onchange="S.safetyChecks[' + i + ']=this.checked" /><span>' + esc(t) + '</span></label>';
+          }).join("") +
+        '</div>' +
+        '<div class="card stack-v"><strong>回来要补记的（AI 回来才接得上）</strong>' +
+          '<div class="small">· DJ-2026-005：归队后使用 pm_handoff 更新 focus.json；若涉及安全区改动先建变更单并请自己批准。</div>' +
+          '<div class="small">· 永远不会有：合并、删除、切换发布、替你签字、跑全量门禁。</div>' +
+        '</div>' +
+      '</div>';
+
+      return {
+        crumb: "第二视角 · 现场离线工程工位",
+        title: "现场离线工位（《无 AI 离线手册》六步 + 安全自查 + BC 预览写入）",
+        actions: '<button class="btn-sm" onclick="setMode(\'boss\')">切回总控视角</button>',
+        html: html
+      };
+    }
+
+    function renderBcStateOnly() {
+      var btn = document.getElementById("btn-bc-write");
+      if (btn) btn.disabled = true;
+      var wrap = document.getElementById("bc-preview-wrap");
+      if (wrap) wrap.innerHTML = '<div class="small">表单已修改；全部填好后点「预览」，看过整行再点「写入 02_业务变更记录.md」。</div>';
+    }
+
+    function buildBcPreview() {
+      var v = S.bcValues;
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v.raised.trim()) || !v.who.trim() || !v.what.trim() || !v.why.trim() || !v.impact.trim()) {
+        toast("请填齐 BC 表单各必填栏（提出时间需 YYYY-MM-DD HH:MM）");
+        return;
+      }
+      var id = "BC-DJ-2026-005-2026_11_003";
+      var cols = [
+        ["编号", id], ["提出时间", v.raised.trim() + "（" + v.channel + "）"], ["提出人", v.who.trim()],
+        ["类型", v.kind], ["改了什么", v.what.trim()], ["为什么", v.why.trim()], ["影响", v.impact.trim()],
+        ["批准人", ""], ["批准日期", ""], ["状态", "待批"], ["关联 CHG / 提交", ""]
+      ];
+      var line = "| " + cols.map(function(c) { return c[1]; }).join(" | ") + " |";
+      S.bcPreview = { cols: cols, line: line };
+      addReceipt("写入 BC 行（预览）", "append 02_业务变更记录.md <- " + id, "已生成 11 栏预览（尚未写盘）", 0);
+      render();
+    }
+
+    function writeBcRow() {
+      if (!S.bcPreview) return;
+      var line = S.bcPreview.line;
+      S.bcPreview = null;
+      addReceipt("写入 BC 行", "append 02_业务变更记录.md <- BC-DJ-2026-005-2026_11_003", "校验文件指纹一致，已只追加写入表末并完成字节校验：\n" + line, 0);
+      toast("已写入待批 BC 行（单次预览已核销）");
+      render();
+    }
+
+    function runStationStepBtn(stepNum, btnIdx) {
+      if (stepNum === 3) {
+        var cmds = [
+          ["plc check", "main.py -w .auto-pm/worktrees/manual plc check DJ-2026-005", "LSP-905 / 903 静态检查通过（rc 0）"],
+          ["plc docs check", "main.py -w .auto-pm/worktrees/manual plc docs check DJ-2026-005", "接口文档与点表一致（rc 0）"],
+          ["docs sync 预览", "main.py -w .auto-pm/worktrees/manual plc docs sync --dry-run DJ-2026-005", "预览完成，未改任何文件（rc 0）"]
+        ];
+        var item = cmds[btnIdx];
+        addReceipt(item[0], item[1], item[2], 0);
+        toast("已执行：" + item[0]);
+      } else if (stepNum === 5 && btnIdx === 0) {
+        copyText("feat(DJ-2026-005): 现场参数调整\n\n领卡占位: manual-20261121");
+      } else if (stepNum === 6) {
+        goto("decisions");
+      }
+    }
+
+    /* ======================== 壳层渲染 ======================== */
+    function renderNavAndTelemetry() {
+      var sidebar = document.getElementById("sidebar");
+      sidebar.classList.toggle("hidden", S.mode === "offline");
+      if (S.mode === "offline") return;
+
+      var ledgerOk = !isLedgerDown();
+      var pending = S.decisions.filter(function(d) { return !d.done; }).length;
+      var openSt = S.stations.filter(function(s) { return !s.closed; }).length;
+      var blockIssues = S.issues.filter(function(i) { return i.basis.indexOf("旧账") < 0 && i.sev === "block"; }).length;
+
+      var mainItems = [
+        { k: "today", label: "今天 · 总控", badge: ledgerOk ? pending : "?", cls: "risk" },
+        { k: "worktrees", label: "项目工位与分支", badge: openSt, cls: openSt ? "hint" : "na" },
+        { k: "decisions", label: "决定与待办", badge: ledgerOk ? pending : "?", cls: "risk" },
+        { k: "projects", label: "全部项目", badge: S.projects.filter(function(p){return !p.archived;}).length, cls: "na" },
+        { k: "release", label: "发版中心", badge: "", cls: "" },
+        { k: "tools", label: "工程工具箱", badge: "", cls: "" }
+      ];
+      var diagItems = [
+        { k: "issues", label: "问题汇总", badge: ledgerOk ? blockIssues : "?", cls: blockIssues ? "block" : "na" },
+        { k: "prs", label: isOffline() ? "PR（断网未知）" : (S.gh === "多机" ? "PR 与审计" : "PR（单机" + S.gh + "）"), badge: "", cls: "" },
+        { k: "flow", label: "流程与状态机", badge: "", cls: "" },
+        { k: "commands", label: "命令与契约", badge: "226", cls: "na" }
+      ];
+
+      document.getElementById("nav-container").innerHTML =
+        '<div>' +
+          '<div class="nav-group-title"><span>产线主控</span></div>' +
+          '<div class="nav-list">' + mainItems.map(function(it) {
+            var active = S.page === it.k || (S.page === "project_cabin" && it.k === "projects");
+            return '<button class="nav-item ' + (active ? "active" : "") + '" onclick="goto(\'' + it.k + '\')">' +
+              '<span class="nav-item-label">' + esc(it.label) + '</span>' +
+              (it.badge !== "" ? '<span class="chip ' + it.cls + '">' + esc(it.badge) + '</span>' : "") +
+            '</button>';
+          }).join("") + '</div>' +
+        '</div>' +
+        '<div style="border-top:1px solid var(--line);padding-top:8px;">' +
+          '<div class="nav-group-title" style="cursor:pointer;" onclick="S.diagOpen=!S.diagOpen;renderNavAndTelemetry()"><span>排查与诊断</span><span>' + (S.diagOpen ? "▾" : "▸") + '</span></div>' +
+          (S.diagOpen ? '<div class="nav-list">' + diagItems.map(function(it) {
+            return '<button class="nav-item ' + (S.page === it.k ? "active" : "") + '" onclick="goto(\'' + it.k + '\')">' +
+              '<span class="nav-item-label">' + esc(it.label) + '</span>' +
+              (it.badge !== "" ? '<span class="chip ' + it.cls + '">' + esc(it.badge) + '</span>' : "") +
+            '</button>';
+          }).join("") + '</div>' : "") +
+        '</div>';
+
+      // Bottom Telemetry strictly obeying tri-state rule!
+      var off = isOffline();
+      var lDown = isLedgerDown();
+      var cells = [
+        { led: lDown ? "na" : "ok", txt: lDown ? "账本没检查" : "账本 0 差" },
+        { led: "ok", txt: "文档 0 红" },
+        { led: off ? "na" : (S.gh === "关" ? "na" : "ok"), txt: off ? "断网未知" : (S.gh === "关" ? "GitHub 关" : "GitHub " + S.gh) },
+        { led: S.versionDrift ? "risk" : "ok", txt: S.versionDrift ? "版本漂移" : "版本一致" }
+      ];
+      document.getElementById("telemetry-panel").innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;"><strong class="small">系统联锁遥测</strong><span class="mono small">' + (off || lDown ? "三态降级" : "LIVE") + '</span></div>' +
+        '<div class="telemetry-grid">' + cells.map(function(c) {
+          return '<div class="telemetry-cell"><span class="led ' + c.led + '"></span><span class="small">' + esc(c.txt) + '</span></div>';
+        }).join("") + '</div>';
+    }
+
+    function toggleConsole() { S.consoleOpen = !S.consoleOpen; renderConsole(); }
+    function renderConsole() {
+      var cnt = document.getElementById("console-count");
+      var latest = document.getElementById("console-latest");
+      var body = document.getElementById("console-body");
+      var arrow = document.getElementById("console-arrow");
+      cnt.textContent = S.receipts.length + " 条";
+      var first = S.receipts[0];
+      if (first) {
+        var rcText = first.rc === null ? "终端运行中" : "rc " + first.rc;
+        latest.textContent = first.time + " · " + first.action + " (" + rcText + ")";
+        cnt.className = "chip " + (first.rc === 0 ? "ok" : (first.rc === null ? "hint" : "block"));
+      }
+      body.classList.toggle("hidden", !S.consoleOpen);
+      arrow.textContent = S.consoleOpen ? "▾ 收起" : "▸ 展开";
+      body.innerHTML = S.receipts.slice(0, 12).map(function(r) {
+        var rcCls = r.rc === 0 ? "ok" : (r.rc === null ? "hint" : "block");
+        var rcStr = r.rc === null ? "未验证" : "rc " + r.rc;
+        return '<div class="inner-box">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+            '<span><span class="mono small">' + esc(r.time) + '</span> <strong>' + esc(r.action) + '</strong> <span class="chip ' + rcCls + ' mono">' + rcStr + '</span></span>' +
+            '<button class="btn-ghost btn-sm" onclick="copyText(\'' + esc(r.cmd) + '\')">复制命令</button>' +
+          '</div>' +
+          '<div class="mono small" style="margin-top:4px;">' + esc(r.cmd) + '</div>' +
+          '<div style="margin-top:4px;white-space:pre-wrap;">' + esc(r.out) + '</div>' +
+        '</div>';
+      }).join("");
+    }
+
+    function renderTopbar() {
+      document.getElementById("btn-mode-boss").classList.toggle("active", S.mode === "boss");
+      document.getElementById("btn-mode-offline").classList.toggle("active", S.mode === "offline");
+      ["关", "备份", "多机"].forEach(function(m) {
+        document.getElementById("gh-btn-" + m).classList.toggle("active", S.gh === m);
+      });
+      var cap = document.getElementById("version-capsule");
+      cap.classList.toggle("warn", S.versionDrift);
+      cap.innerHTML = '<span class="led ' + (S.versionDrift ? "risk" : "ok") + '"></span>' +
+        '<span>现役 <strong>' + (S.versionDrift ? "1.3.2-old" : "1.3.3-9703dfb") + '</strong> / main <strong>9703dfbc</strong> · 控制根: 是' +
+        (S.versionDrift ? " ⚠ 版本不一致" : "") + '</span>';
+    }
+
+    function renderGlobalAlerts() {
+      var slot = document.getElementById("global-alert-slot");
+      var parts = [];
+      if (S.failureBanner) {
+        var f = S.failureBanner;
+        parts.push('<div class="alert-bar block">' +
+          '<div><strong>没成功：' + esc(f.action) + '（rc ' + esc(f.rc) + '）</strong>' +
+          '<div class="small" style="margin-top:3px;">' + esc(f.out) + '</div>' +
+          '<div class="mono small" style="margin-top:3px;">' + esc(f.cmd) + '</div></div>' +
+          '<button class="btn-sm" onclick="S.failureBanner=null;renderGlobalAlerts()">知道了</button>' +
+        '</div>');
+      }
+      slot.innerHTML = parts.join("");
+    }
+
+    function render() {
+      renderTopbar();
+      renderNavAndTelemetry();
+      renderGlobalAlerts();
+      renderConsole();
+
+      var viewMap = {
+        today: renderToday,
+        worktrees: renderWorktrees,
+        decisions: renderDecisions,
+        projects: renderProjects,
+        project_cabin: renderProjectCabin,
+        release: renderRelease,
+        tools: renderTools,
+        issues: renderIssues,
+        prs: renderPrs,
+        flow: renderFlow,
+        commands: renderCommands
+      };
+      var v = S.mode === "offline" ? renderOfflineStation() : (viewMap[S.page] || renderToday)();
+      document.getElementById("page-crumb").textContent = v.crumb;
+      document.getElementById("page-title").textContent = v.title;
+      document.getElementById("page-actions").innerHTML = v.actions || "";
+      document.getElementById("page-body").innerHTML = v.html;
+    }
+
+    render();
+  </script>
+</body>
+</html>

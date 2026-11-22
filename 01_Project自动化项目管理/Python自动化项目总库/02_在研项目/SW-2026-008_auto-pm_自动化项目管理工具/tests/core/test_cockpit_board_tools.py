@@ -716,8 +716,8 @@ def test_project_choice_survives_a_refresh_and_empty_projects_are_handled(qapp: 
 def test_tabs_show_one_page_at_a_time(qapp: QApplication, tmp_path: Path) -> None:
     page = _page(tmp_path)
     page.show()
-    assert list(page.pages) == ["change", "decision", "vartable", "inbox", "project"] == list(page.tab_buttons)
-    for key in ("decision", "vartable", "inbox", "project", "change"):
+    assert list(page.pages) == ["change", "decision", "vartable", "inbox", "project", "handoff"] == list(page.tab_buttons)
+    for key in ("decision", "vartable", "inbox", "project", "handoff", "change"):
         page.select_tab(key)
         assert [name for name, widget in page.pages.items() if widget.isVisible()] == [key]
 

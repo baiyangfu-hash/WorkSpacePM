@@ -24,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import github_collector as gh  # noqa: E402 - scripts/github_collector.py 数据层（GitHub，只读）
 import pm_dashboard as pd  # noqa: E402 - scripts/pm_dashboard.py 数据层
 
+from cockpit_board import local_data  # noqa: E402
+
 SEV_RANK = {"block": 3, "risk": 2, "hint": 1}
 SEV_LABEL = {"block": "阻塞", "risk": "风险", "hint": "提醒"}
 HEALTH_LABEL = {"ok": "正常", "risk": "有风险", "block": "挡路", "old": "旧账", "nodata": "无数据", "off": "未接入"}
@@ -36,7 +38,7 @@ LOST_HOURS = 1  # 执行者失联：卡开着 + 租约过期 + 最近断点都�
 USER = "你"
 OWNER_USER, OWNER_LEAD = "user", "lead"  # Issue.owner 的两个值；空串＝都不是（PR 作者线程修的门禁红）
 
-PHASES = ("需求", "设计", "编程", "仿真", "现场", "收尾")
+PHASES = ("立项", "需求", "设计", "编程", "仿真", "现场", "收尾", "归档")
 
 
 @dataclass(frozen=True)
@@ -213,6 +215,7 @@ class ProjectVM:
     github: GithubVM | None = None
     prs: list[PrRow] = field(default_factory=list)
     changes_more: str = ""  # “还有 M 条……”：变更记录只列最近 CHANGES_SHOWN 条，没列的在这里交代；全列了就是空
+    handoff: local_data.ProjectHandoff | None = None
 
 
 @dataclass(frozen=True)
@@ -299,6 +302,7 @@ class HomeVM:
     quiet: list[tuple[str, str, int]] = field(default_factory=list)  # 其余没有开着的卡的项目：(项目号, 项目名, 旧账条数)
     archived_count: int = 0
     decisions_without_issue: int = 0  # “要你办”里在问题页没有对应行的件数：PR 上等你签的、老后台补的
+    handoffs: dict[str, local_data.ProjectHandoff] = field(default_factory=dict)
 
 
 @dataclass
@@ -1108,7 +1112,8 @@ def focus_of(decision: Decision, names: Mapping[str, str]) -> Focus:
 
 
 def home_vm(
-    board: pd.Board, offset: timezone, online: bool | None, use_git: bool, github: gh.Snapshot | None = None
+    board: pd.Board, offset: timezone, online: bool | None, use_git: bool, github: gh.Snapshot | None = None,
+    *, root: Path | None = None,
 ) -> HomeVM:
     now = board.generated_at
     ledger_ok = board.ledger_note.startswith("账本只读")
@@ -1182,6 +1187,7 @@ def home_vm(
         extra_issues=extra_issues,
         issue_notes=github_issue_notes(github),
         loose_decisions=loose,
+        handoffs=local_data.read_all_handoffs(root, [(p.project_id, p.root) for p in board.projects], now=now) if root is not None else {},
     )
 
 
@@ -1270,7 +1276,8 @@ def recent_changes(rows: list[ChangeRow], root: str, limit: int = CHANGES_SHOWN)
 
 
 def project_vm(
-    board: pd.Board, card: ProjectCard, offset: timezone, online: bool | None, github: GithubVM | None = None
+    board: pd.Board, card: ProjectCard, offset: timezone, online: bool | None, github: GithubVM | None = None,
+    *, root: Path | None = None,
 ) -> ProjectVM:
     now = board.generated_at
     rows = _rows_of(github, card.project_id)
@@ -1340,7 +1347,8 @@ def project_vm(
         ("共享库", "01_SharedLibraries（LSP-903 文件头 VERSION）"),
         ("所在文件夹", project.root or "—"),
     ]
-    return ProjectVM(card, columns, evidence, changes, activity, recipe, github, rows, more)
+    handoff = local_data.read_project_handoff(root, card.project_id, project.root, now=now) if root is not None else None
+    return ProjectVM(card, columns, evidence, changes, activity, recipe, github, rows, more, handoff)
 
 
 # ---------------------------------------------------------------- 工程工位

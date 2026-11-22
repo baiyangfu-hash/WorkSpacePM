@@ -57,6 +57,7 @@ def pre(text: str) -> QFrame:
 
 class StationPage(QWidget):
     action = Signal(str)  # 动作键，由 app 交给 actions.py 在后台线程执行
+    receipt_added = Signal(object)
 
     def __init__(self, on_project: Callable[[str], None], on_copy: Callable[[str], None]) -> None:
         super().__init__()
@@ -155,7 +156,7 @@ class StationPage(QWidget):
                                 "绕过联锁只限你本人在命令提示符里做。详见 0100_PLC自动化/00_通用规范/无AI离线手册.md", "small"))
         lay.addWidget(frame)
         lay.addWidget(c.label("工程工位是你当工程师时的页面；项目经理看板仍然只读。写文件只有“写入 BC 行”一处；"
-                              "批准 / 开工要等界面接上批准口令；现在在终端运行 pm approve。合并、删除、切换、代签永远不加。", "small"))
+                              "批准 / 开工已在「决定与待办」页接线（口令生效时弹新终端输口令）。合并、删除、切换、代签永远不加。", "small"))
         self._render_drawer()
 
     def _step(self, step: Step, vm: StationVM) -> QFrame:
@@ -220,6 +221,7 @@ class StationPage(QWidget):
     def add_receipt(self, receipt: Receipt) -> None:
         self.receipts.insert(0, receipt)
         self._render_drawer()
+        self.receipt_added.emit(receipt)
 
     # ------------------------------------------------ 第 4 步：业务变更表单
 

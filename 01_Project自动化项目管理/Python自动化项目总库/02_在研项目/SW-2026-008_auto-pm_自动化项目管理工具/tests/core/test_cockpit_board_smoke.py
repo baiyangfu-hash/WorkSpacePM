@@ -32,8 +32,8 @@ SAMPLES = {
     "worktree_list": "worktree_list.json", "worktree_sweep": "worktree_sweep.json", "long_run": "long_run_status.json",
     "claim_list": "claim_list.json",
 }
-# 侧栏上的页：功能 1 今天、2 任务、3 PR 与审计、4 问题、8 工作树与分支、13 要你出手都在里面
-FUNCTION_PAGES = {"home", "tasks", "prs", "issues", "worktrees", "attention"}
+# 侧栏上的核心功能页：今天、PR 与审计、问题汇总、项目工位与分支、决定与待办都在里面
+FUNCTION_PAGES = {"home", "prs", "issues", "worktrees", "decisions"}
 
 
 def _runner(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -113,7 +113,7 @@ def test_a_page_stuck_reading_fails_with_the_wait_named(qapp: QApplication, tmp_
 def test_a_page_header_left_on_reading_fails_even_when_nothing_is_running(qapp: QApplication, tmp_path: Path) -> None:
     """后台读都结束了，页头却还写着“正在读”（结果回来了、页头没刷新）：只看后台忙不忙抓不到，要单独查页头。"""
     window = _window(qapp, tmp_path)
-    page = window.read_pages["tasks"]
+    page = window.read_pages["worktrees"]
     real_show = page.show_results
 
     def show_results(scope: str, results: Any) -> None:
@@ -124,7 +124,7 @@ def test_a_page_header_left_on_reading_fails_even_when_nothing_is_running(qapp: 
     report = smoke.run(window, qapp, wait=20)
     window.close()
     bad = [p for p in report.pages if not p.ok]
-    assert [p.key for p in bad] == ["tasks"]
+    assert [p.key for p in bad] == ["worktrees"]
     assert bad[0].problems == ["页头还写着“正在读”"]
 
 

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from cockpit_board import iocheck, theme, tool_actions
+from cockpit_board import iocheck, local_data, theme, tool_actions
 from cockpit_board.actions import Receipt
 from cockpit_board.widgets import common as c
 from PySide6.QtCore import QThread, Signal
@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"), ("inbox", "入箱"), ("project", "项目"))
+TABS = (("change", "变更单"), ("decision", "决策"), ("vartable", "变量表"), ("inbox", "入箱"), ("project", "项目"), ("handoff", "本机交接"))
 DOMAIN_ZH = {"ELEC": "电气", "MECH": "机械", "PLC": "PLC", "HMI": "HMI", "SCPT": "脚本", "DOCU": "文档", "SAFE": "安全", "SPEC": "规范"}
 NATURE_ZH = {"REQ": "需求变更", "DEF": "缺陷修复", "OPT": "优化", "CFG": "配置调整", "EMRG": "紧急处理"}
 SCOPE_ZH = {"LOCAL": "局部", "MODULE": "模块", "SYSTEM": "系统", "CROSS": "跨系统", "SAFE": "安全"}
@@ -83,15 +83,19 @@ class _Job(QThread):
 class ToolsPage(QWidget):
     """root＝控制根；runner / opener 可换成假的（测试用）；threaded=False 时在当前线程里直接跑。"""
 
+    receipt_added = Signal(object)
+
     def __init__(
         self,
         root: Path,
         runner: Callable[..., Any] = tool_actions.run_tool,
         opener: Callable[[Path], Receipt] = tool_actions.open_workbench,
         threaded: bool = True,
+        on_copy: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self.root, self.runner, self.opener, self.threaded = root, runner, opener, threaded
+        self.on_copy = on_copy or (lambda _text: None)
         self.receipts: list[Receipt] = []
         self.project_roots: dict[str, str] = {}
         self.preview: tuple[str, dict[str, Any]] | None = None
@@ -112,8 +116,11 @@ class ToolsPage(QWidget):
         outer.addWidget(self.scroll_area)
         self.project_box = QComboBox()
         self.project_box.setObjectName("tool_project")
-        self.project_box.currentIndexChanged.connect(self._clear_preview)
+        self.project_box.currentIndexChanged.connect(self._on_project_changed)
         self.pages: dict[str, QWidget] = {}
+        self.handoff_box = QVBoxLayout()
+        self.handoff_box.setContentsMargins(0, 0, 0, 0)
+        self.handoff_box.setSpacing(theme.SPACE)
         self.output = QPlainTextEdit()
         self.output.setObjectName("tool_output")
         self.output.setReadOnly(True)
@@ -142,12 +149,12 @@ class ToolsPage(QWidget):
             self.tab_buttons[key] = tab
             items.append(tab)
         items.append(1)
-        self.workbench_button = c.button("打开高级工作台", "", "另起一个窗口：变量表、规范中心、模板、交付包、Modbus 调试等其余工具在那里")
+        self.workbench_button = c.button("打开高级工作台", "", "另起一个窗口：变量表、规范中心、模板、交付包等其余工具在那里")
         self.workbench_button.clicked.connect(self.open_workbench)
         items.append(self.workbench_button)
         lay.addWidget(c.hrow(*items))
         lay.addWidget(self._boxed(c.hrow(c.label("项目", "muted", wrap=False), self.project_box, 1)))
-        builders = (self._change_tab, self._decision_tab, self._vartable_tab, self._inbox_tab, self._project_tab)
+        builders = (self._change_tab, self._decision_tab, self._vartable_tab, self._inbox_tab, self._project_tab, self._handoff_tab)
         for (key, _text), builder in zip(TABS, builders, strict=True):
             self.pages[key] = builder()  # 几页都放进布局，选哪页就显示哪页（不用 QStackedWidget：它按最高那页撑高，其余页会被拉出大空白）
             lay.addWidget(self.pages[key])
@@ -156,8 +163,47 @@ class ToolsPage(QWidget):
         lay.addWidget(self.output)
         lay.addWidget(c.section("最近动作", "命令 + 退出码；rc 0＝成功，其余＝失败或没跑成"))
         lay.addWidget(self.receipts_holder)
-        lay.addWidget(c.label("这里永远没有：批准、合并、删除、切换发布、替你签字。批准变更单只在终端里由你本人做。", "small"))
+        lay.addWidget(c.label("这里永远没有：合并、删除、切换发布、替你签字。批准变更单请在「决定与待办」页办，或在终端由你本人做。", "small"))
         self.select_tab("change")
+
+    def _handoff_tab(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addLayout(self.handoff_box)
+        self._refresh_handoff()
+        return page
+
+    def _refresh_handoff(self) -> None:
+        c.clear(self.handoff_box)
+        pid = self.pid()
+        proj_root = self.project_roots.get(pid, "")
+        self.handoff_box.addWidget(c.section("本机轻轨交接（PM-056 V2.0.0）", "只读查看所选项目的交接焦点、交换区目录与写入命令提示"))
+        if not pid:
+            self.handoff_box.addWidget(c.label("请先在上方选一个已登记项目。", "muted"))
+            return
+        info = local_data.read_project_handoff(self.root, pid, proj_root)
+        frame, inner = c.card("risk" if info.is_stale else ("ok" if info.exists else ""))
+        inner.addWidget(c.kv([
+            ("项目编号", pid),
+            ("交换区目录", info.handoff_rel or "—"),
+            ("存在状态", "已建立" if info.exists else "尚未建立 focus.json / journal.jsonl"),
+            ("阶段目标", info.stage_goal or "（空）"),
+            ("活跃工作", f"{info.active_card or '—'} · 分支 {info.active_branch or '—'}"),
+            ("下一步", info.next_action or "（空）"),
+        ]))
+        if info.unreadable:
+            inner.addWidget(c.label("数据校验：" + info.unreadable, "small"))
+        script_rel = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/pm_handoff.py"
+        cmd_hint = f'.\\.venv\\Scripts\\python.exe -B "{script_rel}" set-focus {pid} --root <工位目录> --by <署名> --goal "<目标>" --next "<下一步>"'
+        copy_box = c.click_row("copy_cmd", "复制 pm_handoff 命令", "把 pm_handoff set-focus 命令模板放进剪贴板", c.quiet("复制模板", "small"))
+        copy_box.activated.connect(lambda cmd=cmd_hint: self.on_copy(cmd))
+        inner.addWidget(c.hrow(c.label(cmd_hint, "mono"), 1, copy_box))
+        self.handoff_box.addWidget(frame)
+
+    def _on_project_changed(self, *_args: object) -> None:
+        self._clear_preview()
+        self._refresh_handoff()
 
     def _form(self) -> tuple[QFrame, QGridLayout]:
         frame, layout = c.inner("tool_form")
@@ -494,6 +540,7 @@ class ToolsPage(QWidget):
         self.project_box.setCurrentIndex(max(index, 0))
         self.project_box.blockSignals(False)
         self._clear_preview()
+        self._refresh_handoff()
 
     def set_unregistered(self, project_ids: list[str]) -> None:
         """工作区里找到、还没登记的项目（板数据里 registered 为假的那些）：填进登记表单的下拉，选一个就写进“项目编号”。"""
@@ -523,6 +570,8 @@ class ToolsPage(QWidget):
         self._clear_preview()
         if key == "project" and self.on_project_tab is not None:
             self.on_project_tab()
+        if key == "handoff":
+            self._refresh_handoff()
 
     def _kind_changed(self, *_args: object) -> None:
         self.kind_note.setText(tool_actions.TEST_KIND_NOTE if self._value("create_kind") == "test" else "")
@@ -620,6 +669,7 @@ class ToolsPage(QWidget):
             self.receipts_layout.addWidget(c.hrow(
                 c.label(item.when, "mono", wrap=False), c.label(item.action, "", wrap=False),
                 c.label(item.command, "mono"), 1, c.chip(item.rc_text, sev)))
+        self.receipt_added.emit(receipt)
 
     # -- 变量表
 

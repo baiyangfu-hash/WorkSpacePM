@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from cockpit_board import theme
 from cockpit_board.viewmodel import (
@@ -229,13 +230,30 @@ class HomePage(QWidget):
             rows.append(c.label(f"还有 {group.more} 张", "small"))
         return rows
 
+    def _bay(self, group: ProjectGroup, handoff: Any, start: int) -> QFrame:
+        bay, bay_lay = c.inner("project_bay")
+        for widget in self._group(group, start):
+            bay_lay.addWidget(widget)
+        if handoff is not None and handoff.exists:
+            bits = []
+            if handoff.stage_goal:
+                bits.append("阶段目标：" + handoff.stage_goal)
+            if handoff.next_action:
+                bits.append("下一步：" + handoff.next_action)
+            if bits:
+                line = c.hrow(c.label(" · ".join(bits), "small"), 1)
+                if handoff.is_stale:
+                    c.insert_widget(line, 0, c.chip(f"交接 {handoff.stale_days} 天未更新", "risk"))
+                bay_lay.addWidget(line)
+        return bay
+
     def _projects_block(self, vm: HomeVM) -> QFrame:
         frame, layout = c.card()
         layout.addWidget(c.hrow(c.label("项目和卡", "section"), c.label("■ 要你办 · ● 主执行要收拾 · ✓ 状态走过", "q", wrap=False), 1))
         index = 1
         for group in vm.groups:
-            for widget in self._group(group, index):
-                layout.addWidget(widget)
+            handoff = vm.handoffs.get(group.project_id) if getattr(vm, "handoffs", None) else None
+            layout.addWidget(self._bay(group, handoff, index))
             index += len(group.cards)
         if not vm.groups:
             layout.addWidget(c.label("现在没有开着的卡。" if vm.ledger_ok else "账本这次没读到，开着哪些卡不知道。", "muted"))

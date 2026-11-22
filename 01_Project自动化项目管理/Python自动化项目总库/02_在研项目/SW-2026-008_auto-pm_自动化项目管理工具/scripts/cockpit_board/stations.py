@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cockpit_board import policy
+from cockpit_board import local_data, policy
 
 # 内置名册和会话别名的写法：和 auto_pm.application.core.agent_worktree_service 的 BUILTIN_ROSTER、_ALIAS 逐字一致（测试对照）；
 # 本包不 import auto_pm，所以照抄。用户登记的 AI（CHG-SCPT-2026-712）不在这里：`worktree list --json` 每个 agent 工位行
@@ -79,6 +79,11 @@ class StationRow:
     action: Action | None
     blocked: str = ""
     warning: str = ""  # 按钮能点也要先看的一句（名册外目录：是不是正被门禁用着）
+    checked: bool = False
+    dirty: int | None = None
+    unpushed: int | None = None
+    merged: bool | None = None
+    locked: bool = False
 
 
 @dataclass(frozen=True)
@@ -215,6 +220,8 @@ def build_view(
     human_block: str,
     now: datetime,
     long_runs: Sequence[Mapping[str, Any]] | None = None,
+    handoffs: Mapping[str, local_data.ProjectHandoff] | None = None,
+    known_pids: Sequence[str] = (),
 ) -> StationsView:
     """拼一页：每个工位一行、清理清单每项一行。``None``＝那条命令没读到：对应的按钮全灰，写明原因，不当成“没有”。
 
@@ -269,14 +276,22 @@ def build_view(
                 blocked = f"目录名“{name[:40]}”里有命令行不认的字符，不运行"
             else:
                 blocked = ""
+        resolved_proj = project_of(claim.get("paths") or ()) if claim else ""
+        if not resolved_proj:
+            resolved_proj = local_data.resolve_station_project(branch, card, None, handoffs, known_pids)
         view.rows.append(StationRow(
             name=name, kind=kind, branch=branch or "（没有分支）",
             who=_who(name, claim, note, str(row.get("branch_prefix") or "") if kind == "agent" else ""),
             card=(card or UNKNOWN) + ("" if claim or not card else "（占位表里没有这张）"),
-            project=project_of(claim.get("paths") or ()) or UNKNOWN if claim else UNKNOWN,
+            project=resolved_proj or UNKNOWN,
             last_seen=_last_seen(row, note, now),
             checks=_checks(row),
             action=action, blocked=blocked, warning=warning,
+            checked=bool(row.get("checked")),
+            dirty=row.get("dirty") if isinstance(row.get("dirty"), int) and not isinstance(row.get("dirty"), bool) else None,
+            unpushed=row.get("unpushed") if isinstance(row.get("unpushed"), int) and not isinstance(row.get("unpushed"), bool) else None,
+            merged=row.get("merged") if isinstance(row.get("merged"), bool) else None,
+            locked=bool(row.get("locked")),
         ))
     station_paths = {str(r.get("path") or "") for r in stations or ()}
     removable: list[str] = []
