@@ -553,7 +553,7 @@ def gate_receipt(repo: SimpleNamespace) -> Path:
             "base": rev(repo.root, "main"),
         },
     }
-    receipt = repo.root / ".auto-pm" / "gate-receipt.json"
+    receipt: Path = repo.root / ".auto-pm" / "gate-receipt.json"
     receipt.write_text(json.dumps(record), encoding="utf-8", errors="replace")
     (repo.root / "main.py").write_text(
         "from pathlib import Path\nprint(Path('.auto-pm/gate-receipt.json').read_text(encoding='utf-8'))\n",
