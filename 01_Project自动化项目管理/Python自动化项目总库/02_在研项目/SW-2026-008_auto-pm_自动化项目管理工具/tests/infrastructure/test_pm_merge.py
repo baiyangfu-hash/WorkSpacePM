@@ -155,25 +155,62 @@ def _change_order(root: Path, number: str, state: str) -> None:
     (folder / f"{number}.md").write_text(f"| 变更状态 | {state} |\n", encoding="utf-8")
 
 
+def _audit(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, verdict: str = "PASS",
+) -> int:
+    monkeypatch.setenv("AUTO_PM_AGENT", "codex")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "abcdefffffffff")
+    report = repo.tmp / "audit.md"
+    report.write_text("Independent review of the exact diff.\n", encoding="utf-8")
+    return run(
+        pm, repo.root, "audit-record", "w1", "--base", rev(repo.root, "main"),
+        "--candidate", rev(repo.wt, "HEAD"), "--verdict", verdict, "--report", str(report),
+    )
+
+
 def test_rule_files_need_an_approved_change_order_named_in_this_card(
-    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    commit(repo.wt, {"AGENTS.md": "rules\n"}, f"docs(rules)：[CHG-SCPT-2026-999] 改规则\n\n{CARD}")
+    message = f"docs(rules)：[CHG-SCPT-2026-999] 改规则\n\n{CARD}"
+    commit(repo.wt, {"AGENTS.md": "rules\n"}, message)
     _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "没有本卡的实施卡" in capsys.readouterr().out
-    card = "P/02_规划/311_别的单_PM.md"
-    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-111\n"}, f"docs(card)\n\n{CARD}")
+    card = "SW-2026-008/04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-311_实施卡.md"
+    commit(repo.wt, {card: "> 变更单：`CHG-SCPT-2026-111`\n"}, f"docs(card)\n\n{CARD}")
     assert run(pm, repo.root, "merge", "w1") == 1, "提交说明引用的单没写在本卡里（拿别的旧单顶）"
     assert "写在本卡实施卡里" in capsys.readouterr().out
-    commit(repo.wt, {card: "本卡凭 CHG-SCPT-2026-999\n"}, f"docs(card)\n\n{CARD}")
+    commit(repo.wt, {card: "> 变更单：`CHG-SCPT-2026-999`\n"}, f"docs(card)\n\n{CARD}")
+    orders = pm.find_change_orders(repo.root, "CHG-SCPT-2026-999")
+    assert len(orders) == 1
+    monkeypatch.setattr(pm, "find_change_orders", lambda _root, _number, _pid="": orders)
     for state in ("draft", "completed"):
         _change_order(repo.root, "CHG-SCPT-2026-999", state)
         assert run(pm, repo.root, "merge", "w1") == 1, state
     _change_order(repo.root, "CHG-SCPT-2026-999", "approved")
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card])
+    orders[0].write_text(
+        f"| 变更状态 | approved |\n| 涉及文件/交付物 | {card}<br>AGENTS.md |\n",
+        encoding="utf-8",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "超出实施卡可改范围：AGENTS.md" in capsys.readouterr().out
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card, "AGENTS.md"])
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "缺少对应当前 main 和候选提交的独立审计凭证" in capsys.readouterr().out
+    assert not repo.gates
+    assert _audit(pm, repo, monkeypatch, "FAIL") == 0
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "独立审计未放行" in capsys.readouterr().out
+    assert _audit(pm, repo, monkeypatch) == 0
+    commit(repo.wt, {"AGENTS.md": "updated rules\n"}, message)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "缺少对应当前 main 和候选提交的独立审计凭证" in capsys.readouterr().out
+    assert _audit(pm, repo, monkeypatch) == 0
     assert run(pm, repo.root, "merge", "w1") == 0
     entry = pm.read_log(repo.root)[-1]
     assert entry["user_paths"] == ["AGENTS.md"] and entry["chgs"] == ["CHG-SCPT-2026-999"]
+    assert entry["audit"]["candidate"] == rev(repo.wt, "HEAD")
     assert repo.gates[-1] is True, "要用户点头的那一类要跑全量门禁"
 
 
@@ -299,8 +336,10 @@ def _deployed_archive(repo: SimpleNamespace) -> tuple[str, dict[str, bytes], str
         f"{infra}/releases/{release}/payload.txt": "unchanged\n",
         ledger: row + "base\n",
         record: "| 变更状态 | approved |\n",
-        "P/02_规划/311_归档_PM.md": f"{number}\n",
     }
+    card = "P/02_规划/311_归档_PM.md"
+    table = "\n".join(f"| `{path}` | 计划新增 |" for path in [*files, card])
+    files[card] = f"{number}\n\n| 路径 | 基线状态 |\n|---|---|\n{table}\n"
     commit(repo.wt, files, f"{number} 归档\n\n{CARD}")
     _change_order(repo.root, number, "approved")
     local = {
@@ -322,9 +361,10 @@ def _deployed_archive(repo: SimpleNamespace) -> tuple[str, dict[str, bytes], str
 
 
 def test_archive_adopts_existing_files_and_leaves_unrelated_edits(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, ledger = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     assert run(pm, repo.root, "install-hook") == 0
     assert run(pm, repo.root, "merge", "w1", "--archive-existing") == 0
     assert rev(repo.root, "main^1") == base
@@ -337,9 +377,10 @@ def test_archive_adopts_existing_files_and_leaves_unrelated_edits(
 
 
 def test_archive_restores_git_index_if_reference_transaction_refuses(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     index = git(repo.root, "ls-files", "--stage").stdout
     hook = repo.root / ".git" / "hooks" / "reference-transaction"
     hook.write_bytes(b'#!/bin/sh\n[ "$1" != prepared ]\n')
@@ -356,6 +397,7 @@ def test_interrupted_archive_restores_only_archive_index_entries(
     pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     initial_index = git(repo.root, "ls-files", "--stage").stdout
     original_run = pm.Git.run
     stage_calls = 0
@@ -380,9 +422,10 @@ def test_interrupted_archive_restores_only_archive_index_entries(
 
 
 def test_archive_does_not_overwrite_an_ignored_local_document(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base, local, _ = _deployed_archive(repo)
+    assert _audit(pm, repo, monkeypatch) == 0
     card = "P/02_规划/311_归档_PM.md"
     (repo.root / ".git" / "info" / "exclude").write_bytes(f"{card}\n".encode())
     override = repo.root / card

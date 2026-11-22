@@ -39,10 +39,10 @@ _PROJECT_ID_ROW_PATTERN = re.compile(
 )
 _VALID_CHANGE_STATUSES = change_status_guard.APPROVED_OR_LATER
 RELEASE_TREE_PREFIX = "00_Infrastructure/auto_pm/releases/"
-# FLOW-001“要你点头”那一类的生产代码：提交时仍要绑定一个已批准的变更单。
+# FLOW-001“要你点头”那一类的规则文件：不按后缀豁免。
 # 规则文件清单与 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS 同一份，
 # 由 tests/infrastructure/test_git_hook_enforcer.py 的漂移测试钉住，避免两处各写一套。
-PROTECTED_PROD_PATTERNS = (
+RULE_FILE_PATTERNS = (
     "AGENTS.md",
     "CLAUDE.md",
     ".trae/*",
@@ -55,6 +55,9 @@ PROTECTED_PROD_PATTERNS = (
     "roles/*",
     ".github/*",
     "reviews/tools/*",
+)
+PROTECTED_PROD_PATTERNS = (
+    *RULE_FILE_PATTERNS,
     f"{RELEASE_TREE_PREFIX}*",
     "0100_PLC自动化/*",
     "*/templates/plc-*",
@@ -437,11 +440,12 @@ def is_excluded_from_production(path: str) -> bool:
 
 
 def filter_production_files(files: list[str]) -> list[str]:
-    """从暂存区筛选出生产代码文件"""
+    """从暂存区筛选受保护文件及普通生产代码。"""
     return [
         f
         for f in files
-        if f.replace("\\", "/").lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f)
+        if is_protected_production_file(f)
+        or (f.lower().endswith(PRODUCTION_EXTENSIONS) and not is_excluded_from_production(f))
     ]
 
 
@@ -491,6 +495,8 @@ def _binding_for_staged_file(
         control_root_project_id = next(
             (pid for prefix, pid in CONTROL_ROOT_PREFIX_BINDINGS.items() if path.startswith(prefix)), None
         )
+    if not control_root_project_id and any(fnmatch.fnmatchcase(path, pattern) for pattern in RULE_FILE_PATTERNS):
+        control_root_project_id = "SW-2026-008"
     if control_root_project_id:
         control_matches = [
             binding for binding in bindings if binding.project_id == control_root_project_id

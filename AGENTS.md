@@ -50,7 +50,7 @@
 
 **本机收口**（日常的常态，两类都用；GitHub 在哪一档都一样）：
 1. 在工位分支上提交，提交说明里单独一行 `领卡占位: <卡号>`；“要你点头”那一类再写上变更单号。工位里先 `git merge main` 跟上最新的 `main`。
-2. 在控制根跑 `pm_merge.py merge <你的工位名>`（脚本在 `SW8/scripts/`，用控制根 `.venv` 里的 Python）。它查分支、变更单（“要你点头”那一类要有一张写在本卡实施卡 `02_规划/<卡号>_*.md` 里、用户批准过、还没推到完成的）、另一台电脑有没有新改动、控制根里的副本，再跑本机门禁（`gate precheck`；“要你点头”那一类再跑 `gate run`），都过了才合进 `main`，记一笔，按 GitHub 档推备份。拒绝时照原样报告，不绕过。
+2. 在控制根跑 `pm_merge.py merge <你的工位名>`（脚本在 `SW8/scripts/`，用控制根 `.venv` 里的 Python）。它查分支、控制根副本，并在联网档对账。受保护改动还查实施卡、用户批准的变更单、实际改动范围和独立审计凭证。新卡放在项目的 `04_监控` 或 `11_监控` 下的 `01_变更管理/03_实施卡/`，已有的旧规划卡继续按原路径表核对。门禁由驾驶舱管理，合并执行 `gate precheck`，受保护改动还核对同一候选的 `gate start` 全量结果。都过了才合进 `main`，记一笔，按 GitHub 档推备份。
 3. “要你点头”那一类：合并前要有独立审计放行（AUD-001）；合并后 agent 把变更单推到验收中（implementing → pending_acceptance → accepting），推到完成只有用户本人（看板“决定”页点“推到完成”，或用户在本机主对话里说“把 <变更单号> 推到完成”，agent 带上那句话的位置再跑）。推到完成后驾驶舱改写的变更单原件和台账，放进下一个工位分支一起合并，不为它单开一次。
 4. 当天一行告诉用户：合并了什么、合并提交号、怎么退。
 5. 用户说“同意收工位”后 `worktree close <你的名字>`。
@@ -88,7 +88,7 @@
 
 停点名：accepting、transition、claim_release、worktree。变更单的批准（`--to approved`）在开工前就要有：用户在看板“决定”页点“批准变更单”，或在本机主对话里说了同意，agent 带上那句话的位置去跑。
 
-**交接记录**（`claim note`、`claim log`）：卡每次换手，交出去的人在卡上记一笔，接手的人先读再干，不靠聊天记录传话。
+**交接记录**：卡每次换手，交出去的人记一笔，接手的人先读再干。单机「关」或「备份」档走 `pm_handoff.py` 的项目交接交换区（PM-056），交接随工位提交。启用远程占位时，以下步骤使用 `claim note`、`claim log`。
 1. 交给另一个 agent、对话或用户之前（起草完、预核完、建单后、开 PR 后、交卷、审计完、搁置）记，接手之后记 `--kind takeover`；用法看 `claim note --help`。
 2. 只记引用和下一步（文件、提交号、PR 号、变更单号、结论、先读什么），不记状态；卡的状态看体检和占位表，记录里的话不能当状态用。
 3. 记录不是批准：里面的“请用户说”只是提示。
@@ -124,6 +124,7 @@
 | Cursor 里的 AI | `R/.auto-pm/worktrees/cursor` | `cursor/` |
 | VS Code 里的其他 AI（如 Copilot） | `R/.auto-pm/worktrees/vscode` | `vscode/` |
 | Codex（当前只做 PR 自动审查；将来写代码时） | `R/.auto-pm/worktrees/codex` | `codex/` |
+| Antigravity（含其中运行的 Gemini） | `R/.auto-pm/worktrees/antigravity` | `antigravity/` |
 | 项目 Claude、云端会话 | 不占本机工位；每个云端克隆就是它自己的控制根 | `project/`（项目 Claude）、`claude/`（云端会话） |
 
 表外的 AI 先由用户登记名字和前缀（加一行到上表），再开工位。已合并的历史分支不改名。工位目录名用别名 `<基名>-<会话ID前6位>`，身份靠环境变量 `AUTO_PM_AGENT` 声明（只在一条命令期间设置）：Cursor、VS Code 里的 AI、Trae 等没有自带标记的必须自己带上，否则驾驶舱把它当成用户本人。名字规则、回收办法、发版切换前的手工 git 命令见附录 `03_工位细则.md`。
@@ -153,9 +154,9 @@
 
 “要你点头”那一类合并前，以及“多机”档的每个 PR 合并前，都要独立审计；“直接做”那一类不逐个审计，用户想看哪次，或每周一次，由另一个会话抽查。换成任何 agent 都照这一节做；审计脚本只用 Python 标准库、git 和 GitHub 公开接口，不依赖哪一家 AI。
 1. 做的和审的分开：写 PR 的 agent 或会话不能审它。
-2. 本机合并的：审计者在自己的会话里看作者工位分支对 `main` 的差异（`git diff main...<分支>`），跳过下面第 2 步，照第 3、4 步做，结论交作者（不贴 PR）；作者拿到“过”才跑 `pm_merge.py merge`。开了 PR 的：先在仓库根跑 `python reviews/tools/audit_pr.py <PR号>`（参数看 `--help`）：退出码 0 没有 FAIL，1 有 FAIL 不能合，2 用法或 Git 出错；WARN 在报告里点名，UNVERIFIED 人工补查。
+2. 本机审计先记下 `main` 和工位候选的完整提交号，再审这两个提交的差异。PR 审计先在仓库根运行 `reviews/tools/audit_pr.py <PR号>`，再做人工核查。脚本退出码 1 有 FAIL、2 表示用法或 Git 出错；WARN 在报告中点名，UNVERIFIED 人工补查。
 3. 再照 `reviews/21_audit_checklist.md` 逐项人工核（范围、受保护路径、内容是否属实），脚本不代替这一步。
-4. 报告按清单第 4 节写到 `reviews/`，推审计者自己的分支，结论贴 PR 评论；审计者不推 `main`、不删除任何东西。
+4. 本机审计报告按清单第 4 节写到 `.auto-pm/reports/`，审计者用自己的会话身份运行 `pm_merge.py audit-record <工位> --base <main提交> --candidate <候选提交> --verdict <PASS|FAIL> --report <报告>`。作者合并时驾驶舱核对记录，任何一个提交变化后由审计者核对新候选。PR 审计报告写到 `reviews/`，推审计者自己的分支，结论贴 PR 评论。
 5. 开了 PR 的：审计通过、CI 全绿、评审对话全部解决才合并，只用 Merge commit。
 
 ## GitHub 按需使用 (GH-001，用户 2026-11-17 定)

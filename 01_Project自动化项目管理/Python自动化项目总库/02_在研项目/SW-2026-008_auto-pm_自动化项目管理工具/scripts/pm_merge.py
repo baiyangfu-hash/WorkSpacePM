@@ -12,8 +12,7 @@
 1. 控制根停在 main；工位 ``.auto-pm/worktrees/<工位名>`` 已全部提交，main 是工位分支的祖先，
    分支上至少一个提交带 ``领卡占位: <卡号>`` 这一行。
 2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己，以及删除或改名驾驶舱项目目录以外
-   的已入库文件），提交说明里引用、又写在分支里本卡实施卡（``02_规划/<卡号>_*.md``）里的变更单，至少一张已被用户
-   批准、还没推到完成（变更单原件里的状态是已批准到验收中之间）。
+   的已入库文件），核对实施卡、变更单、实际路径和独立审计凭证。审计绑定候选提交和当前 main。
 3. GitHub 开启且可达时，``origin/main`` 必须已在本机 main 里；多机档无法对账时拒绝合并。
 4. 控制根里和分支改到的路径重叠的未提交文件，只允许是和分支内容一样的副本（只差行尾）；合并前先备份再换掉，
    合并失败就放回去。别的未提交改动一律拒绝。
@@ -34,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -41,6 +41,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -69,7 +70,13 @@ GITHUB_MERGE = re.compile(r"^Merge pull request #\d+ ")
 CARD_LINE = re.compile(r"^领卡占位:\s*(\S+)\s*$", re.MULTILINE)
 CHG_RE = re.compile(r"CHG-[A-Z]+-\d{4}-\d{3,}")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+STANDARD_CARD = re.compile(
+    r"/(?:04|11)_监控/01_变更管理/03_实施卡/(CARD-([A-Z]+-\d{4}-\d{3})-(\d{3}))_[^/]+\.md$"
+)
+AUDIT_SCHEMA = "local-merge-audit.v1"
+AUDIT_SESSION = re.compile(r"([a-z][a-z0-9]*)-([0-9a-f]{6})")
 STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
+CHANGE_FILES_ROW = re.compile(r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|", re.MULTILINE)
 APPROVED_STATES = frozenset(
     {"approved", "conditionally_approved", "implementing", "pending_acceptance", "accepting"}
 )
@@ -375,6 +382,7 @@ class Plan:
     notes: list[str]
     archive_existing: bool = False
     base: str = ""
+    audit: dict[str, Any] | None = None
 
 
 def _commits(git: Git, base: str, tip: str) -> list[str]:
@@ -406,13 +414,143 @@ def removed_outside_cockpit(git: Git, base: str, tip: str) -> list[str]:
     )
 
 
-def card_files(git: Git, tip: str, card: str) -> list[str]:
-    """分支里本卡的实施卡文件（``02_规划/<卡号>_*.md``）。"""
+def card_files(git: Git, tip: str, card: str, pid: str) -> tuple[list[str], list[str]]:
+    """按完整卡号查找；变更单号或传统短号以同项目的序号对应。"""
     raw = git.run("ls-tree", "-r", "-z", "--name-only", tip, check=True).stdout
+    legacy_name = re.compile(rf"/02_规划/{re.escape(card)}_[^/]*\.md$")
+    serial = card.rsplit("-", 1)[-1] if CHG_RE.fullmatch(card) or card.isdecimal() else ""
+    standard, legacy = [], []
+    for path in raw.split("\0"):
+        match = STANDARD_CARD.search(path)
+        if match and (not pid or match[2] == pid):
+            if card == match[1] or serial == match[3]:
+                standard.append(path)
+        elif legacy_name.search(path):
+            legacy.append(path)
+    return standard, legacy
+
+
+def _legacy_card_scope(text: str) -> list[str]:
+    """旧卡的范围来自有基线状态的路径表，运行态条目不授权写入。"""
+    allowed: list[str] = []
+    columns: tuple[int, int] | None = None
+    for line in text.splitlines():
+        if not line.strip().startswith("|"):
+            columns = None
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if "路径" in cells and "基线状态" in cells:
+            columns = (cells.index("路径"), cells.index("基线状态"))
+        elif columns and len(cells) > max(columns):
+            item, state = cells[columns[0]], cells[columns[1]]
+            match = re.fullmatch(r"`([^\x00`]+)`", item)
+            if match and re.match(r"^(存在|计划新增)(?:$|[（(])", state):
+                path = match[1].rstrip("/")
+                if path and not any(part in {"", ".", ".."} for part in path.split("/")):
+                    allowed.append(path)
+    return allowed
+
+
+def _card_precheck(
+    git: Git, worktree: Path, base: str, sha: str, path: str, pid: str, change: str,
+) -> list[str]:
+    """复用现役驾驶舱预检，确认读取的是候选里的实施卡。"""
+    file = worktree / path
+    try:
+        raw = file.read_bytes()
+        blob = bytes(git.run("show", f"{sha}:{path}", check=True).stdout, "utf-8")
+        if file.resolve() != file.absolute() or not _same_ignoring_cr(raw, blob):
+            raise RefusedError(f"工位实施卡和提交里的版本不同：{path}")
+        result = subprocess.run(
+            [_python(git.cwd), "-B", str(git.cwd / "main.py"), "implementation-card",
+             "precheck", "--card-file", str(file), "--pid", pid],
+            cwd=git.cwd, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RefusedError(f"实施卡预检无法运行：{exc}") from exc
+    report = _parse_precheck_json(result.stdout)
+    if (
+        report is None
+        or report.get("schema_version") != "implementation-card-precheck.v1"
+        or report.get("card_format") != "new"
+        or report.get("card_sha256") != hashlib.sha256(raw).hexdigest()
+        or not isinstance(report.get("findings"), list)
+        or not isinstance(report.get("paths"), list)
+        or report.get("change") != change
+    ):
+        raise RefusedError(f"读不到与候选匹配的实施卡预检结果：{path} {result.stderr.strip()}")
+    findings = report["findings"]
+    # 本机变更单原件在控制根，由本流程核准。工位在合并前可以没有该纸面副本。
+    missing_copy = {
+        "rule": "change", "subject": change,
+        "message": "本项目变更管理柜的 01_变更单/ 里找不到这张变更单",
+    }
+    if not (
+        result.returncode == 0 and report.get("passed") is True and not findings
+        or result.returncode == 1 and report.get("passed") is False and findings == [missing_copy]
+    ):
+        raise RefusedError(f"实施卡预检未通过：{json.dumps(findings, ensure_ascii=False)}")
+    baseline = report.get("baseline")
+    if (
+        not isinstance(baseline, str)
+        or re.fullmatch(r"[0-9a-f]{40}", baseline) is None
+        or not git.ok("merge-base", "--is-ancestor", baseline, base)
+    ):
+        raise RefusedError("实施卡的隔离基线必须是当前 main 的历史提交")
+    return [item["path"] for item in report["paths"] if item["state"] != "运行态"]
+
+
+def _check_card(
+    git: Git, worktree: Path, base: str, sha: str, card: str, chgs: list[str],
+    paths: list[str], pid: str, *, archive_existing: bool,
+) -> None:
+    standard, legacy = card_files(git, sha, card, pid)
+    choices = standard or legacy
+    if len(choices) != 1:
+        problem = "没有本卡的实施卡" if not choices else "找到多张同号实施卡，请带 --pid 核对"
+        raise RefusedError(problem)
+    path = choices[0]
+    text = git.run("show", f"{sha}:{path}", check=True).stdout
+    if standard:
+        match = STANDARD_CARD.search(path)
+        assert match is not None
+        pid = match[2]
+        changes = re.findall(r"^>\s*变更单：`?(CHG-[A-Z]+-\d{4}-\d{3,})`?\s*$", text, re.MULTILINE)
+    else:
+        if not archive_existing and not git.ok("cat-file", "-e", f"{base}:{path}"):
+            raise RefusedError("新增实施卡要放在项目的 04_监控或 11_监控实施卡目录")
+        changes = CHG_RE.findall(text)
+    approved: list[tuple[str, Path]] = []
+    for number in chgs:
+        if number not in changes:
+            continue
+        orders = find_change_orders(git.cwd, number, pid)
+        if len(orders) > 1:
+            raise RefusedError(f"找到 {len(orders)} 份 {number}，带 --pid 指明是哪个项目的")
+        if orders and change_order_state(orders[0]) in APPROVED_STATES:
+            approved.append((number, orders[0]))
+    if len(approved) != 1:
+        raise RefusedError("需有且仅有一张用户批准并写在本卡实施卡里的变更单；已完成的单不能开新活")
+    change, order = approved[0]
+    if standard:
+        allowed = _card_precheck(git, worktree, base, sha, path, pid, change)
+        row = CHANGE_FILES_ROW.search(order.read_text(encoding="utf-8", errors="replace"))
+        approved_paths = [item.strip().rstrip("/") for item in row[1].split("<br>")] if row else []
+        outside_approval = _outside_scope(paths, approved_paths)
+        if outside_approval:
+            raise RefusedError(f"超出变更单 {change} 批准范围：" + "、".join(outside_approval[:10]))
+    else:
+        allowed = _legacy_card_scope(text)
+    outside = _outside_scope(paths, allowed)
+    if outside:
+        raise RefusedError("超出实施卡可改范围：" + "、".join(outside[:10]))
+
+
+def _outside_scope(paths: list[str], allowed: list[str]) -> list[str]:
     return [
-        path
-        for path in raw.split("\0")
-        if re.search(rf"/02_规划/{re.escape(card)}_[^/]*\.md$", path)
+        path for path in paths
+        if not any(path == scope or path.startswith(f"{scope}/") for scope in allowed)
     ]
 
 
@@ -575,46 +713,26 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
         raise RefusedError(
             f"分支 {branch} 里还没有最新的 main，先在工位里合并 main（git merge main）再来"
         )
-    messages = _commits(root_git, "main", sha)
+    messages = _commits(root_git, base, sha)
     if not messages:
         raise RefusedError(f"分支 {branch} 比 main 没有新提交，没什么可合的")
     cards = [match.group(1) for message in messages for match in CARD_LINE.finditer(message)]
     if not cards:
         raise RefusedError("分支上没有一个提交带“领卡占位: <卡号>”这一行")
     chgs = sorted({number for message in messages for number in CHG_RE.findall(message)})
-    paths = _changed_paths(root_git, "main", sha)
+    paths = _changed_paths(root_git, base, sha)
     user_paths = [path for path in paths if needs_user(path)]
     user_paths += [
-        path for path in removed_outside_cockpit(root_git, "main", sha) if path not in user_paths
+        path for path in removed_outside_cockpit(root_git, base, sha) if path not in user_paths
     ]
     if user_paths:
-        card = cards[0]
-        cards_text = "".join(
-            root_git.run("show", f"{sha}:{path}").stdout for path in card_files(root_git, sha, card)
-        )
-        if not cards_text:
-            raise RefusedError(
-                "改到了要用户点头的文件（"
-                + "、".join(user_paths[:5])
-                + f"），分支里却没有本卡的实施卡（02_规划/{card}_*.md），变更单和卡对不上"
-            )
-        approved = []
-        for number in chgs:
-            if number not in cards_text:
-                continue
-            orders = find_change_orders(root, number, pid)
-            if len(orders) > 1:
-                raise RefusedError(f"找到 {len(orders)} 份 {number}，带 --pid 指明是哪个项目的")
-            if orders and change_order_state(orders[0]) in APPROVED_STATES:
-                approved.append(number)
-        if not approved:
-            raise RefusedError(
-                "改到了要用户点头的文件（"
-                + "、".join(user_paths[:5])
-                + "），却没有一张用户批准过、又写在本卡实施卡里的变更单"
-                + (f"（提交说明引用了 {'、'.join(chgs)}）" if chgs else "")
-                + "；已推到完成的单不能再用来开新活"
-            )
+        if len(set(cards)) != 1:
+            raise RefusedError("受保护改动只能用一个领卡占位号")
+        try:
+            _check_card(root_git, worktree, base, sha, cards[0], chgs, paths, pid,
+                        archive_existing=archive_existing)
+        except RefusedError as exc:
+            raise RefusedError(f"受保护变更（{'、'.join(user_paths[:5])}）：{exc}") from exc
     notes: list[str] = []
     replace = _control_root_copies(root_git, root, sha, paths, archive_existing=archive_existing)
     if archive_existing:
@@ -785,6 +903,8 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
     }
     if plan.archive_existing:
         entry["adopted"] = plan.replace
+    if plan.audit is not None:
+        entry["audit"] = plan.audit
     if mode != "关":
         push = root_git.run("push", "--quiet", "origin", "main", timeout=NET_TIMEOUT * 2)
         entry["pushed"] = push.returncode == 0
@@ -799,19 +919,118 @@ def _tracked_dirty(git: Git) -> list[str]:
     return [entry[3:] for entry in raw.split("\0") if len(entry) > 3]
 
 
+def _audit_identity(root: Path, name: str, base: str, sha: str) -> dict[str, str]:
+    return {
+        "schema": AUDIT_SCHEMA,
+        "worktree": name,
+        "base": base,
+        "candidate": sha,
+        "tree": Git(root).out("rev-parse", "--verify", f"{sha}^{{tree}}"),
+    }
+
+
+def _reviewer_is_independent(reviewer: str, owner: str, branch: str) -> bool:
+    review = AUDIT_SESSION.fullmatch(reviewer)
+    author = AUDIT_SESSION.fullmatch(owner)
+    if review is None:
+        return False
+    if author is not None:
+        return review[2] != author[2]
+    return review[1] != branch.partition("/")[0]
+
+
+def _audit_path(root: Path, base: str, sha: str) -> Path:
+    return state_dir(root) / "audits" / f"{base}-{sha}.json"
+
+
+def audit_receipt(root: Path, name: str, plan: Plan) -> dict[str, Any]:
+    identity = _audit_identity(root, name, plan.base, plan.sha)
+    path = _audit_path(root, plan.base, plan.sha)
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError) as exc:
+        raise RefusedError("缺少对应当前 main 和候选提交的独立审计凭证，请由审计会话运行 audit-record") from exc
+    if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in identity.items()):
+        raise RefusedError("独立审计凭证与当前 main、候选或工位不匹配")
+    reviewer = receipt.get("reviewer")
+    report = receipt.get("report")
+    if not isinstance(reviewer, str) or not _reviewer_is_independent(reviewer, name, plan.branch):
+        raise RefusedError("独立审计必须来自另一会话")
+    if (
+        receipt.get("verdict") != "PASS"
+        or not isinstance(report, str)
+        or not report.strip()
+        or receipt.get("report_sha256") != hashlib.sha256(report.encode("utf-8")).hexdigest()
+    ):
+        raise RefusedError("独立审计未放行，或报告缺失、摘要不符")
+    return {key: value for key, value in receipt.items() if key != "report"}
+
+
+def cmd_audit_record(
+    root: Path, name: str, base: str, sha: str, verdict: str, report_file: Path,
+) -> int:
+    try:
+        worktree = root / ".auto-pm" / "worktrees" / name
+        if not NAME_RE.fullmatch(name) or not (worktree / ".git").exists():
+            raise RefusedError("找不到要审计的工位")
+        git = Git(root)
+        wt = Git(worktree)
+        branch = wt.run("symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
+        if not base or not sha or base != git.rev(MAIN_REF) or sha != wt.rev("HEAD") or not branch:
+            raise RefusedError("审计期间 main 或候选已变化，请核对新版本")
+        agent = os.getenv("AUTO_PM_AGENT", "").split(":", 1)[0].strip().lower()
+        session = (os.getenv("AUTO_PM_SESSION_ID") or os.getenv("CLAUDE_CODE_SESSION_ID") or "").strip()
+        compact = session.lower().replace("-", "")
+        tag = (
+            compact[:6] if re.fullmatch(r"[0-9a-f]{6,}", compact)
+            else hashlib.sha256(session.encode("utf-8")).hexdigest()[:6]
+        )
+        reviewer = f"{agent}-{tag}"
+        if not session or not _reviewer_is_independent(reviewer, name, branch):
+            raise RefusedError("请由另一审计会话登记，携带 AUTO_PM_AGENT 和实际会话 ID")
+        report = report_file.read_text(encoding="utf-8", errors="replace")
+        if not report.strip():
+            raise RefusedError("审计报告为空")
+        receipt = {
+            **_audit_identity(root, name, base, sha),
+            "reviewer": reviewer,
+            "verdict": verdict,
+            "time": _now(),
+            "report_sha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
+            "report": report,
+        }
+        path = _audit_path(root, base, sha)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+            pending = Path(temporary.name)
+        try:
+            pending.write_text(json.dumps(receipt, ensure_ascii=False), encoding="utf-8", errors="replace")
+            pending.replace(path)
+        finally:
+            pending.unlink(missing_ok=True)
+    except (OSError, RefusedError) as exc:
+        print(f"拒绝登记审计：{exc}")
+        return 1
+    print(f"已登记独立审计 {verdict}：{reviewer}，{sha[:8]} 对 {base[:8]}，凭证 {path}")
+    return 0
+
+
 def cmd_merge(root: Path, name: str, pid: str, full_gate: bool, *, archive_existing: bool = False) -> int:
     mode = read_mode(root)
     try:
-        base = Git(root).rev("main")
         plan = plan_merge(root, name, pid, archive_existing=archive_existing)
+        if plan.user_paths:
+            plan.audit = audit_receipt(root, name, plan)
         check_github(root, mode, plan.notes)
         gates = run_gates(
             root, root / ".auto-pm" / "worktrees" / name, full_gate or bool(plan.user_paths)
         )
         if not gates.ok:
             raise RefusedError("本机门禁没过：" + "；".join(gates.lines))
-        if Git(root).rev("main") != base or Git(root).rev(plan.branch) != plan.sha:
+        if Git(root).rev("main") != plan.base or Git(root).rev(plan.branch) != plan.sha:
             raise RefusedError("检查期间 main 或候选已变更，请核对最新候选再合并")
+        if plan.audit is not None and audit_receipt(root, name, plan) != plan.audit:
+            raise RefusedError("检查期间独立审计凭证已变化，请核对后重新合并")
         entry = do_merge(root, plan, gates, mode)
     except RefusedError as exc:
         print(f"拒绝合并：{exc}")
@@ -910,8 +1129,7 @@ printf '%s\\n' "$input" | "{python}" -B "{script.as_posix()}" --root "$root" hoo
 
 
 def hooks_dir(root: Path) -> Path:
-    common = Git(root).out("rev-parse", "--path-format=absolute", "--git-common-dir")
-    return Path(common) / "hooks"
+    return Path(Git(root).out("rev-parse", "--path-format=absolute", "--git-path", "hooks"))
 
 
 def cmd_install_hook(root: Path) -> int:
@@ -1058,6 +1276,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     merge.add_argument("--pid", default="")
     merge.add_argument("--full-gate", action="store_true", help="不管改了什么都跑一遍 gate run")
     merge.add_argument("--archive-existing", action="store_true", help="归档与现役相符的发布副本，保留本机发布文件")
+    audit = sub.add_parser("audit-record", help="登记另一会话对当前候选的独立审计")
+    audit.add_argument("worktree")
+    audit.add_argument("--base", required=True, help="审计所读的 main 完整提交号")
+    audit.add_argument("--candidate", required=True, help="审计所读的工位候选完整提交号")
+    audit.add_argument("--verdict", required=True, choices=("PASS", "FAIL"))
+    audit.add_argument("--report", required=True, type=Path)
     sub.add_parser("sync", help="从 GitHub 拉 main，只做快进")
     sub.add_parser("push", help="把 main 推到 GitHub")
     mode = sub.add_parser("github-mode", help="看或设 GitHub 档")
@@ -1073,6 +1297,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "merge":
         return cmd_merge(root, args.worktree, args.pid, args.full_gate, archive_existing=args.archive_existing)
+    if args.command == "audit-record":
+        return cmd_audit_record(root, args.worktree, args.base, args.candidate, args.verdict, args.report)
     if args.command == "sync":
         return cmd_sync(root)
     if args.command == "push":
