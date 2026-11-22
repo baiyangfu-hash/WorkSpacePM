@@ -13,6 +13,7 @@ sys.path.insert(0, str(PROJECT))
 
 from auto_pm.application.core import release_deploy_check, release_wiring  # noqa: E402
 from auto_pm.application.core.agent_registry import use_ledger_roster  # noqa: E402
+from auto_pm.application.core.gate_precheck_service import related_tests  # noqa: E402
 from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job  # noqa: E402
 from auto_pm.application.core.release_deploy import DeployError  # noqa: E402
 from auto_pm.application.core.release_ledger import LedgerError  # noqa: E402
@@ -34,14 +35,38 @@ def audit_candidate(root: Path, station: Path, verify_gates: bool) -> None:
     sys.modules[spec.name] = merge
     spec.loader.exec_module(merge)
     try:
+        control_git = merge.Git(root)
         branch = merge.Git(station).out("symbolic-ref", "--short", "HEAD")
-        base = merge.Git(root).rev("refs/heads/main")
+        card = branch.rsplit("/", 1)[-1]
+        base = control_git.rev("refs/heads/main")
         head = merge.Git(station).rev("HEAD")
+        if not merge.CHG_RE.fullmatch(card) or not control_git.ok("merge-base", "--is-ancestor", base, head):
+            raise ValueError("续办工位必须有对应变更单并基于当前 main")
+        paths = merge._changed_paths(control_git, base, head)
+        merge._check_card(
+            control_git, station, base, head, card, [card], paths, "SW-2026-008", archive_existing=False
+        )
         plan = merge.Plan(branch, head, "", [], [], [], [], [], base=base)
         merge.audit_receipt(root, station.name, plan)
         if verify_gates:
-            gates = merge.run_gates(root, station, full=True)
-            if not gates.ok or merge.Git(station).rev("HEAD") != head or merge.Git(root).rev("refs/heads/main") != base:
+            protected = any(merge.needs_user(path) for path in paths) or bool(
+                merge.removed_outside_cockpit(control_git, base, head)
+            )
+            prefix = f"{release_deploy_check.PROJECT_DIR}/"
+            inside = [path.removeprefix(prefix) for path in paths if path.startswith(prefix)]
+            tests, _ = related_tests(PROJECT, inside)
+            if protected or tests == ["tests"] or len(inside) != len(paths):
+                passed = merge.run_gates(root, station, full=protected or tests == ["tests"]).ok
+            else:
+                logs = root / ".auto-pm" / "reports" / f"release-bootstrap-{head[:12]}"
+                code, output = release_wiring.run_process(
+                    [sys.executable, "-B", str(PROJECT / "main.py"), "gate", "precheck", "--worktree", str(station),
+                     "--base", "main", "--jobs", "2", "--out", str(logs)],
+                    root, timeout=merge.GATE_TIMEOUT,
+                )
+                print(output, flush=True)
+                passed = code == 0
+            if not passed or merge.Git(station).rev("HEAD") != head or control_git.rev("refs/heads/main") != base:
                 raise ValueError("工位的门禁未通过或候选已变化")
     except merge.RefusedError as error:
         raise ValueError(str(error)) from error

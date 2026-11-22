@@ -12,7 +12,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -111,10 +110,13 @@ def test_an_unknown_commit_stops_the_card_and_nothing_is_written(tmp_path: Path)
     assert not release_card.card_path(tmp_path, "1.3.3-fffffff").exists()
 
 
-def test_a_real_deploy_without_a_card_file_that_cannot_write_the_card_stops_before_the_books_with_pointers_unmoved(tmp_path: Path) -> None:
+def test_a_real_deploy_without_a_card_file_that_cannot_write_the_card_stops_before_the_books_with_pointers_unmoved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _control_root(tmp_path)
     pointers = {name: (tmp_path / CONTAINER / name).read_bytes() for name in POINTERS}
-    report = SimpleNamespace(release_id="1.3.3-fffffff", commit="f" * 40)
+    report = check.Preflight(release_id="1.3.3-fffffff", commit="f" * 40, active_release=OLD)
+    monkeypatch.setattr(wiring, "hook_dry_run", lambda _root: (True, "hook covered in test_release_wiring"))
 
     with pytest.raises(DeployError, match="入账卡没生成") as caught:
         wiring.real_deploy(tmp_path, report, approver="baiyang", confirm_ref="user-confirmation:2026-11-17T03:26:28Z", card_file=None,
@@ -132,6 +134,7 @@ def test_a_real_deploy_without_a_card_file_books_with_the_card_it_generated(tmp_
     _control_root(tmp_path)  # writes the 1.3.3-dad7036 card; this deploy is another release, so its card is generated here
     release = "1.3.3-abcdef0"
     monkeypatch.setattr(release_card, "payload_files", lambda _repo, _commit: list(PAYLOAD))
+    monkeypatch.setattr(wiring, "hook_dry_run", lambda _root: (True, "hook covered in test_release_wiring"))
     seen: dict[str, Any] = {}
 
     def capture(plan: Any, **kwargs: Any) -> Any:
@@ -142,8 +145,9 @@ def test_a_real_deploy_without_a_card_file_books_with_the_card_it_generated(tmp_
     drill = tmp_path / "drill.py"
     drill.write_text("print('drill')\n", encoding="utf-8")
 
+    report = check.Preflight(release_id=release, commit="abcdef0" + "1" * 33, active_release=OLD)
     with pytest.raises(DeployError, match="captured"):
-        wiring.real_deploy(tmp_path, SimpleNamespace(release_id=release, commit="abcdef0" + "1" * 33), approver="baiyang",
+        wiring.real_deploy(tmp_path, report, approver="baiyang",
                            confirm_ref="user-confirmation:2026-11-17T03:26:28Z", card_file=None, drill_script=drill)
 
     card = release_card.card_path(tmp_path, release)
