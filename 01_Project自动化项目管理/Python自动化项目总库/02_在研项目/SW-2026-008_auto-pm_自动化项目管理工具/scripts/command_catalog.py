@@ -3,6 +3,7 @@
 用法（在本项目目录 SW-2026-008 下）：
   python scripts/command_catalog.py           # 重新生成两页（入库的那两页）
   python scripts/command_catalog.py --print   # 不写文件，把两页的当前内容打印出来（以这个为准）
+  python scripts/command_catalog.py --by-task # 不写文件，按办事场景查看现有入口
   python scripts/command_catalog.py --check   # 只比对，不写；入库的两页落后于代码就退出 1（发版入库那张单上核）
 
 只读扫描三样东西，不执行任何驾驶舱命令：
@@ -56,6 +57,81 @@ WHO_CAN_RUN = {
     "never": "看板不放（钩子调用或规则禁止单独跑）",
 }
 WRITES = {"read": "不写", "write": "写", "user_only": "写", "never": "写"}
+
+TASK_SECTIONS: dict[str, tuple[str, ...]] = {
+    "任务与接手": (
+        "agent",
+        "change",
+        "claim",
+        "context",
+        "decision",
+        "gui",
+        "implementation-card",
+        "pm",
+        "project",
+        "role",
+        "worktree",
+        "scripts/card_status.py",
+        "scripts/plan_status.py",
+        "scripts/pm_dashboard.py",
+        "scripts/pm_dashboard_gui.py",
+        "scripts/pm_flows.py",
+        "scripts/pm_handoff.py",
+    ),
+    "验证与交付": (
+        "delivery",
+        "gate",
+        "ledger",
+        "pr",
+        "python",
+        "pm accept",
+        "pm acceptance-scan",
+        "pm close",
+        "pm verify",
+        "scripts/github_collector.py",
+        "scripts/long_gate.py",
+        "scripts/pm_merge.py",
+        "scripts/run_tests.py",
+        "scripts/sample_drill.py",
+    ),
+    "工程工具箱": (
+        "doc",
+        "plc",
+        "prototype",
+        "template",
+        "vartable",
+        "scripts/figure_consistency_check.py",
+        "scripts/pmf_build.py",
+    ),
+    "维护与恢复": (
+        "clean",
+        "constraint",
+        "doctor",
+        "dogfood",
+        "git-hook",
+        "long-run",
+        "release",
+        "spec",
+        "pm state-backup",
+        "pm state-restore",
+        "scripts/gate_timeout_drill.py",
+        "scripts/gui_smoke_test.py",
+        "scripts/long_gate_drill.py",
+        "scripts/memory_gate.py",
+        "scripts/pm_release.py",
+        "scripts/release_event_chain_drill.py",
+        "scripts/release_selfcheck_dryrun.py",
+    ),
+    "功能索引与兼容入口": (
+        "continuity",
+        "handoff",
+        "pm-session",
+        "workflow",
+        "pm workflow",
+        "scripts/command_catalog.py",
+    ),
+}
+TASK_SECTION_BY_KEY = {key: section for section, keys in TASK_SECTIONS.items() for key in keys}
 
 GENERATED_NOTE = "> 本页由 `scripts/command_catalog.py` 生成，不要手改。"
 BASE_PREFIX = "> 生成于提交 "
@@ -379,6 +455,50 @@ def render_catalog(
     return "\n".join(lines) + "\n"
 
 
+def render_task_catalog(
+    commands: Sequence[CommandRow], scripts: Sequence[ScriptRow], base: str
+) -> str:
+    """按办事场景分组，保留原目录的命令权限和写入标记。"""
+    from scripts import pm_flows
+
+    sections: dict[str, list[str]] = {section: [] for section in TASK_SECTIONS}
+    sections["待归类"] = []
+    for row in [*commands, *scripts]:
+        keys = row.path.split(" ", maxsplit=2)
+        section = TASK_SECTION_BY_KEY.get(" ".join(keys[:2]), TASK_SECTION_BY_KEY.get(keys[0]))
+        access = f"{row.who} · {row.writes}" if isinstance(row, CommandRow) else "见脚本步骤和说明"
+        sections[section or "待归类"].append(f"| `{row.path}` | {row.summary} | {access} |")
+
+    lines = [
+        "# 驾驶舱按办事场景找功能",
+        "",
+        f"> 此目录来自当前源码 `{base}`，共 {len(commands)} 条命令、{len(scripts)} 个脚本。",
+        "> 分组用于查找。批准、验收和收工位仍遵守工作区的停点。使用频率需另查回执。",
+        "",
+        "## 先选已有流程",
+        "",
+        "- 新对话或换人接手，选进门。项目现况只读复查，选项目体检。",
+        "- 日常本机合并按 AGENTS.md「本机收口」走，使用 `scripts/pm_merge.py`。",
+        "- 已走 Run 的卡选交卷到收口。多机档的 PR 合并后选 PR 线收口。",
+        "",
+    ]
+    for flow in pm_flows.FLOWS:
+        pm_flows.print_steps(flow, out=lines.append)
+        lines.append("")
+    for section, rows in sections.items():
+        if not rows:
+            continue
+        lines += [
+            f"## {section}（{len(rows)} 项）",
+            "",
+            "| 入口 | 用途 | 命令权限与写入分类 |",
+            "|---|---|---|",
+            *rows,
+            "",
+        ]
+    return "\n".join(lines)
+
+
 def render_codes(
     codes: Sequence[CodeRow], constraints: Sequence[CodeRow], base: str = "未知"
 ) -> str:
@@ -490,8 +610,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     group.add_argument(
         "--print", dest="show", action="store_true", help="不写文件，打印两页当前内容"
     )
+    group.add_argument("--by-task", action="store_true", help="不写文件，按办事场景打印索引和流程")
     options = parser.parse_args(argv)
     base = base_commit()
+    if options.by_task:
+        sys.stdout.write(render_task_catalog(command_rows(), script_rows(), base))
+        return 0
     if options.show:
         catalog, codes = build_pages(None, base)
         sys.stdout.write(catalog + "\n" + codes)
