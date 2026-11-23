@@ -755,3 +755,416 @@ def test_managed_gate_rejects_wrong_git_identity(
     gate_receipt.write_text(json.dumps(record), encoding="utf-8", errors="replace")
     with pytest.raises(pm.RefusedError, match="当前 main 不匹配"):
         pm.managed_gate_receipt(repo.root, repo.wt)
+
+
+def _setup_archive_project(root: Path, pid: str = "SW-2026-008") -> tuple[Path, Path, str]:
+    project_rel = f"01_Project/{pid}"
+    reg_path = root / "SYS-2026-001_WorkspaceGovernance" / "workspace_registry.json"
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    reg_path.write_text(
+        json.dumps({"projects": [{"project_id": pid, "project_root": project_rel}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    chg_dir = root / project_rel / "04_监控" / "01_变更管理" / "01_变更单" / "CHG-SCPT"
+    ledger = root / project_rel / "04_监控" / "01_变更管理" / "02_变更记录" / "01_版本变更台账.md"
+    chg_dir.mkdir(parents=True, exist_ok=True)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    return chg_dir, ledger, project_rel
+
+
+def _chg_markdown(chg: str, status: str) -> str:
+    return (
+        f"# 变更单 {chg}\n\n"
+        "| 字段 | 值 |\n"
+        "|---|---|\n"
+        f"| 变更状态 | {status} |\n\n"
+        "## 1. 说明\n\n"
+        f"- 变更单号：{chg}\n"
+    )
+
+
+def _ledger_row(idx: int, chg: str, status_cell: str) -> str:
+    return (
+        f"| {idx} | [→ {chg}](../01_变更单/CHG-SCPT/{chg}.md) "
+        f"| 测试 {chg} | 2026-11-22 | {status_cell} |"
+    )
+
+
+def _ledger_doc(rows: list[str], *, blank_between: bool = True, eol: str = "\n") -> str:
+    head = [
+        "# 版本变更台账",
+        "",
+        "## 变更单索引",
+        "",
+        "| 序号 | 变更单 | 说明 | 日期 | 状态 |",
+        "|------|--------|------|------|------|",
+    ]
+    body: list[str] = []
+    for i, row in enumerate(rows):
+        body.append(row)
+        if blank_between and i + 1 < len(rows):
+            body.append("")
+    return eol.join([*head, *body]) + eol
+
+
+def test_archive_changes_projects_completed_only_preserves_unselected_and_is_idempotent(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    proj_rel = "01_Project/SW-2026-008"
+    chg_rel_base = f"{proj_rel}/04_监控/01_变更管理/01_变更单/CHG-SCPT"
+    ledger_rel = f"{proj_rel}/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    commit(
+        repo.wt,
+        {
+            f"{chg_rel_base}/CHG-SCPT-2026-700.md": _chg_markdown("CHG-SCPT-2026-700", "completed"),
+            f"{chg_rel_base}/CHG-SCPT-2026-701.md": _chg_markdown("CHG-SCPT-2026-701", "implementing"),
+            ledger_rel: _ledger_doc(
+                [
+                    _ledger_row(2, "CHG-SCPT-2026-701", "🔄实施中"),
+                    _ledger_row(1, "CHG-SCPT-2026-700", "✅已关闭"),
+                ]
+            ),
+        },
+        f"seed project baseline\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 0
+
+    chg_dir, ledger, _ = _setup_archive_project(repo.root)
+    p701 = chg_dir / "CHG-SCPT-2026-701.md"
+    p702 = chg_dir / "CHG-SCPT-2026-702.md"
+    p727 = chg_dir / "CHG-SCPT-2026-727.md"
+    p701.write_bytes(_chg_markdown("CHG-SCPT-2026-701", "completed").replace("\n", "\r\n").encode("utf-8"))
+    p702.write_bytes(_chg_markdown("CHG-SCPT-2026-702", "completed").replace("\n", "\r\n").encode("utf-8"))
+    p727.write_bytes(_chg_markdown("CHG-SCPT-2026-727", "implementing").replace("\n", "\r\n").encode("utf-8"))
+    ledger.write_bytes(
+        _ledger_doc(
+            [
+                _ledger_row(4, "CHG-SCPT-2026-727", "🔄实施中"),
+                _ledger_row(3, "CHG-SCPT-2026-702", "✅已关闭"),
+                _ledger_row(2, "CHG-SCPT-2026-701", "✅已关闭"),
+                _ledger_row(1, "CHG-SCPT-2026-700", "✅已关闭"),
+            ],
+            eol="\r\n",
+        ).encode("utf-8")
+    )
+    before_bytes = {
+        "701": p701.read_bytes(),
+        "702": p702.read_bytes(),
+        "727": p727.read_bytes(),
+        "ledger": ledger.read_bytes(),
+    }
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 0
+
+    changed = git(
+        repo.root, "-c", "core.quotePath=false", "show", "--name-only", "--format=", "HEAD"
+    ).stdout.splitlines()
+    assert sorted(line for line in changed if line) == sorted(
+        [
+            f"{chg_rel_base}/CHG-SCPT-2026-701.md",
+            f"{chg_rel_base}/CHG-SCPT-2026-702.md",
+            ledger_rel,
+        ]
+    )
+    main_ledger = git(repo.root, "show", f"HEAD:{ledger_rel}").stdout
+    assert "CHG-SCPT-2026-702" in main_ledger
+    assert "CHG-SCPT-2026-701" in main_ledger and "✅已关闭" in main_ledger
+    assert "CHG-SCPT-2026-700" in main_ledger
+    assert "CHG-SCPT-2026-727" not in main_ledger
+    assert "\n\n" in main_ledger
+    main_701 = git(repo.root, "show", f"HEAD:{chg_rel_base}/CHG-SCPT-2026-701.md").stdout
+    assert "\r\n" not in main_701
+    assert "| 变更状态 | completed |" in main_701
+
+    assert p701.read_bytes() == before_bytes["701"]
+    assert p702.read_bytes() == before_bytes["702"]
+    assert p727.read_bytes() == before_bytes["727"]
+    assert ledger.read_bytes() == before_bytes["ledger"]
+    assert run(pm, repo.root, "verify-log") == 0
+
+    archived_head = rev(repo.root, "main")
+    log_count = len(pm.read_log(repo.root))
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 0
+    assert rev(repo.root, "main") == archived_head
+    assert len(pm.read_log(repo.root)) == log_count
+
+
+def test_archive_changes_blocks_on_staged_index_active_gate_active_worktree_and_pending_audit(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    import sqlite3
+
+    chg_dir, ledger, _ = _setup_archive_project(repo.root)
+    (chg_dir / "CHG-SCPT-2026-702.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-702", "completed"), encoding="utf-8"
+    )
+    ledger.write_text(
+        _ledger_doc([_ledger_row(1, "CHG-SCPT-2026-702", "✅已关闭")]), encoding="utf-8"
+    )
+    deploy_wt = repo.root / ".auto-pm" / "worktrees" / "deploy-1.3.3-test"
+    deploy_wt.mkdir(parents=True, exist_ok=True)
+    (deploy_wt / ".git").write_text("gitdir: dummy\n", encoding="utf-8")
+
+    before_main = rev(repo.root, "main")
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--dry-run") == 0
+
+    staged = repo.root / "staged.txt"
+    staged.write_text("staged\n", encoding="utf-8")
+    git(repo.root, "add", "staged.txt")
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 1
+    assert rev(repo.root, "main") == before_main
+    git(repo.root, "reset", "--", "staged.txt")
+    staged.unlink()
+
+    gate_db = repo.root / pm.GATE_LEDGER_PATH
+    gate_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(gate_db)
+    try:
+        conn.execute(
+            "CREATE TABLE attempts (id TEXT PRIMARY KEY, key TEXT NOT NULL, number INTEGER NOT NULL, "
+            "backend TEXT NOT NULL, state TEXT NOT NULL, handle TEXT NOT NULL, detail TEXT NOT NULL, "
+            "approval TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "stale-1",
+                json.dumps({"base": "a" * 40, "commit": "b" * 40}),
+                1,
+                "github",
+                "running",
+                "h0",
+                "d0",
+                "a0",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--dry-run") == 0
+
+    conn = sqlite3.connect(gate_db)
+    try:
+        conn.execute(
+            "INSERT INTO attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "task-1",
+                json.dumps({"base": before_main, "commit": "c" * 40}),
+                1,
+                "github",
+                "running",
+                "h1",
+                "d1",
+                "a1",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 1
+    assert rev(repo.root, "main") == before_main
+    conn = sqlite3.connect(gate_db)
+    try:
+        conn.execute("UPDATE attempts SET state = 'passed' WHERE id = 'task-1'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    dirty_wt = repo.wt / "dirty.txt"
+    dirty_wt.write_text("dirty\n", encoding="utf-8")
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 1
+    assert rev(repo.root, "main") == before_main
+    dirty_wt.unlink()
+
+    candidate_sha = commit(repo.wt, {"feature.txt": "wip\n"}, f"wip\n\n{CARD}")
+    git(repo.wt, "branch", "pending-candidate", candidate_sha)
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 1
+    assert rev(repo.root, "main") == before_main
+    git(repo.wt, "reset", "--hard", before_main)
+
+    audits_dir = repo.root / pm.STATE_DIR / "audits"
+    audits_dir.mkdir(parents=True, exist_ok=True)
+    (audits_dir / "pending.json").write_text(
+        json.dumps(
+            {
+                "worktree": "other",
+                "base": before_main,
+                "candidate": candidate_sha,
+                "verdict": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 1
+    assert rev(repo.root, "main") == before_main
+
+    (audits_dir / "pending.json").unlink()
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--dry-run") == 0
+
+
+def test_archive_changes_succeeds_offline_in_backup_mode_and_supports_dry_run(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    assert run(pm, repo.root, "github-mode", "备份") == 0
+    git(repo.root, "remote", "set-url", "origin", str(repo.root / "missing-remote.git"))
+    chg_dir, ledger, _ = _setup_archive_project(repo.root)
+    (chg_dir / "CHG-SCPT-2026-702.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-702", "completed"), encoding="utf-8"
+    )
+    ledger.write_text(
+        _ledger_doc([_ledger_row(1, "CHG-SCPT-2026-702", "✅已关闭")]), encoding="utf-8"
+    )
+    before_main = rev(repo.root, "main")
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--dry-run") == 0
+    assert rev(repo.root, "main") == before_main
+    assert pm.read_log(repo.root) == []
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 0
+    assert rev(repo.root, "main") != before_main
+    entries = pm.read_log(repo.root)
+    assert len(entries) == 1
+    assert entries[0]["kind"] == "archive_changes"
+    assert entries[0]["pushed"] is False
+    assert entries[0]["chgs"] == ["CHG-SCPT-2026-702"]
+
+
+def test_archive_changes_rejects_uncompleted_explicit_chg_and_missing_ledger_row(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    chg_dir, ledger, _ = _setup_archive_project(repo.root)
+    (chg_dir / "CHG-SCPT-2026-727.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-727", "implementing"), encoding="utf-8"
+    )
+    (chg_dir / "CHG-SCPT-2026-702.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-702", "completed"), encoding="utf-8"
+    )
+    ledger.write_text(_ledger_doc([]), encoding="utf-8")
+    before_main = rev(repo.root, "main")
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--chg", "CHG-SCPT-2026-727") == 1
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008", "--chg", "CHG-SCPT-2026-702") == 1
+    assert rev(repo.root, "main") == before_main
+
+
+def test_project_ledger_anchors_index_section_on_multitable_ledger(pm: ModuleType) -> None:
+    base_text = "\n".join(
+        [
+            "# 版本变更台帐 - DJ-2026-009",
+            "",
+            "## 1. 变更统计一览",
+            "",
+            "| 变更类型 | 累计数量 | 待处理 | 已验证/关闭 |",
+            "|:---|:---:|:---:|:---:|",
+            "| **CHG-PLC** | 1 | 0 | 1 |",
+            "",
+            "## 2. 变更明细台账 (引用模式)",
+            "",
+            "| 变更编号 | 变更标题 | 状态 |",
+            "|:---|:---|:---:|",
+            "| CHG-PLC-2026-001 | 历史记录 | 已关闭 |",
+            "",
+            "## 变更单索引",
+            "",
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |",
+            "|------|----------|------|--------|----------|----------|----------|------|",
+            "| 002 | [→ CHG-PLC-2026-006](./01_变更单/CHG-PLC/CHG-PLC-2026-006.md) | PLC | u | 2026-11-06 | 描述6 | | 🔄实施中 |",
+            "",
+            "| 001 | [→ CHG-PLC-2026-005](./01_变更单/CHG-PLC/CHG-PLC-2026-005.md) | PLC | u | 2026-11-05 | 描述5 | 2026-11-06 | ✅已关闭 |",
+            "",
+            "## 3. 备注",
+            "",
+            "保留尾部注释。",
+            "",
+        ]
+    )
+    local_text = "\n".join(
+        [
+            "# 版本变更台帐 - DJ-2026-009",
+            "",
+            "## 1. 变更统计一览",
+            "",
+            "| 变更类型 | 累计数量 | 待处理 | 已验证/关闭 |",
+            "|:---|:---:|:---:|:---:|",
+            "| **CHG-PLC** | 1 | 0 | 1 |",
+            "",
+            "## 2. 变更明细台账 (引用模式)",
+            "",
+            "| 变更编号 | 变更标题 | 状态 |",
+            "|:---|:---|:---:|",
+            "| CHG-PLC-2026-001 | 历史记录 | 已关闭 |",
+            "",
+            "## 变更单索引",
+            "",
+            "| 序号 | 变更编号 | 领域 | 申请人 | 申请日期 | 变更描述 | 完成日期 | 状态 |",
+            "|------|----------|------|--------|----------|----------|----------|------|",
+            "| 004 | [→ CHG-PLC-2026-008](./01_变更单/CHG-PLC/CHG-PLC-2026-008.md) | PLC | u | 2026-11-10 | 未选实施中 | | 🔄实施中 |",
+            "",
+            "| 003 | [→ CHG-PLC-2026-007](./01_变更单/CHG-PLC/CHG-PLC-2026-007.md) | PLC | u | 2026-11-09 | 描述7 | 2026-11-09 | ✅已关闭 |",
+            "",
+            "| 002 | [→ CHG-PLC-2026-006](./01_变更单/CHG-PLC/CHG-PLC-2026-006.md) | PLC | u | 2026-11-06 | 描述6 | 2026-11-09 | ✅已关闭 |",
+            "",
+            "| 001 | [→ CHG-PLC-2026-005](./01_变更单/CHG-PLC/CHG-PLC-2026-005.md) | PLC | u | 2026-11-05 | 描述5 | 2026-11-06 | ✅已关闭 |",
+            "",
+            "## 3. 备注",
+            "",
+            "保留尾部注释。",
+            "",
+        ]
+    )
+
+    projected = pm._project_ledger(base_text, local_text, ["CHG-PLC-2026-006", "CHG-PLC-2026-007"])
+    lines = projected.splitlines()
+    stats_sep = lines.index("|:---|:---:|:---:|:---:|")
+    assert lines[stats_sep + 1] == "| **CHG-PLC** | 1 | 0 | 1 |"
+    assert "CHG-PLC-2026-001 | 历史记录" in projected
+    assert lines[-2:] == ["## 3. 备注", ""] or lines[-3:] == ["## 3. 备注", "", "保留尾部注释。"]
+    idx_sep = lines.index("|------|----------|------|--------|----------|----------|----------|------|")
+    assert "CHG-PLC-2026-007" in lines[idx_sep + 1]
+    assert "CHG-PLC-2026-006" in projected and "✅已关闭" in projected
+    assert "CHG-PLC-2026-008" not in projected
+
+    base_without_index = "\n".join(base_text.splitlines()[:14]) + "\n"
+    projected_boot = pm._project_ledger(base_without_index, local_text, ["CHG-PLC-2026-007"])
+    boot_lines = projected_boot.splitlines()
+    boot_stats_sep = boot_lines.index("|:---|:---:|:---:|:---:|")
+    assert boot_lines[boot_stats_sep + 1] == "| **CHG-PLC** | 1 | 0 | 1 |"
+    assert "## 变更单索引" in boot_lines
+    assert "CHG-PLC-2026-007" in projected_boot
+    assert "CHG-PLC-2026-008" not in projected_boot
+
+
+def test_archive_changes_logs_entry_even_when_post_merge_snapshot_drifts(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    chg_dir, ledger, proj_rel = _setup_archive_project(repo.root)
+    ledger_rel = f"{proj_rel}/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    (chg_dir / "CHG-SCPT-2026-702.md").write_text(
+        _chg_markdown("CHG-SCPT-2026-702", "completed"), encoding="utf-8"
+    )
+    ledger.write_text(
+        _ledger_doc([_ledger_row(1, "CHG-SCPT-2026-702", "✅已关闭")]), encoding="utf-8"
+    )
+
+    real_snaps = pm._file_snapshots
+    calls = 0
+
+    def flaky_snaps(root: Path, rel_paths: list[str] | tuple[str, ...]) -> dict[str, str]:
+        nonlocal calls
+        calls += 1
+        result: dict[str, str] = dict(real_snaps(root, rel_paths))
+        if calls == 3:
+            result[ledger_rel] = "e" * 64
+        return result
+
+    monkeypatch.setattr(pm, "_file_snapshots", flaky_snaps)
+    before_main = rev(repo.root, "main")
+
+    assert run(pm, repo.root, "archive-changes", "SW-2026-008") == 0
+    assert rev(repo.root, "main") != before_main
+    out = capsys.readouterr().out
+    assert "归档后发现本机变更记录有并发更新，请核对：" in out
+    entries = pm.read_log(repo.root)
+    assert len(entries) == 1
+    assert entries[0]["governance_drift"] == [ledger_rel]
+    assert run(pm, repo.root, "verify-log") == 0
