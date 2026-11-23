@@ -1,7 +1,8 @@
-"""本机合并：日常改动在本机合进 main，GitHub 按需使用（CHG-SCPT-2026-718，卡 311）。
+"""本机合并与受控变更单归档：日常改动合进 main、受控归档已完成变更单，GitHub 按需使用（CHG-SCPT-2026-718 / 735）。
 
 用法（在控制根，用控制根 .venv 里的 Python；Windows 是 .venv\\Scripts\\python.exe）：
   python <本项目>/scripts/pm_merge.py merge <工位名> [--pid <项目号>] [--full-gate]
+  python <本项目>/scripts/pm_merge.py archive-changes <项目号> [--chg <变更单号>] [--dry-run]
   python <本项目>/scripts/pm_merge.py sync              从 GitHub 拉 main，只做快进
   python <本项目>/scripts/pm_merge.py push              把 main 推到 GitHub（“备份”“多机”档）
   python <本项目>/scripts/pm_merge.py github-mode [关|备份|多机]
@@ -40,6 +41,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -94,6 +96,12 @@ GATE_TIMEOUT = 4 * 60 * 60
 STATUS_BATCH_CHARS = 8000
 PRECHECK_JOBS = min(max((os.cpu_count() or 4) * 3 // 4, 4), 12)
 SKIP_DIRS = frozenset({".git", ".auto-pm", "releases", "node_modules", ".venv", "__pycache__"})
+PID_RE = re.compile(r"^[A-Z]{2,4}-\d{4}-\d{3}$")
+REGISTRY_PATH = Path("SYS-2026-001_WorkspaceGovernance") / "workspace_registry.json"
+GATE_LEDGER_PATH = Path(".auto-pm") / "reports" / "gate-tasks" / "ledger.sqlite3"
+CHANGE_FILE_RE = re.compile(rf"^({CHG_RE.pattern})\.md$")
+LEDGER_SEP_RE = re.compile(r"^\|[\s\-:|]+\|$")
+COMPLETED_LEDGER_MARKERS = ("已关闭", "已完成", "completed")
 
 
 def _rule_patterns() -> tuple[str, ...]:
@@ -1398,6 +1406,539 @@ def cmd_verify_log(root: Path, since: str | None) -> int:
     return 1
 
 
+@dataclass
+class ArchivePlan:
+    pid: str
+    base: str
+    ledger_rel: str
+    selected: list[str]
+    blobs: dict[str, bytes]
+    snapshots: dict[str, str]
+    notes: list[str] = field(default_factory=list)
+
+
+def _ensure_plain_under_root(root: Path, path: Path) -> str:
+    resolved_root = root.resolve()
+    try:
+        resolved = path.resolve()
+        rel = path.relative_to(root).as_posix()
+        rel_resolved = resolved.relative_to(resolved_root).as_posix()
+    except (OSError, ValueError) as exc:
+        raise RefusedError(f"路径不在控制根内：{path}") from exc
+    cur = path
+    while cur != root:
+        if cur.is_symlink():
+            raise RefusedError(f"只允许控制根内的普通文件，拒绝符号链接：{rel}")
+        cur = cur.parent
+    if rel.casefold() != rel_resolved.casefold() or not path.is_file():
+        raise RefusedError(f"只允许控制根内的普通文件，拒绝转向路径或目录：{rel}")
+    return rel_resolved
+
+
+def _project_change_dir(root: Path, pid: str) -> tuple[str, Path, Path]:
+    registry_file = root / REGISTRY_PATH
+    project_root = ""
+    if registry_file.is_file():
+        try:
+            data = json.loads(registry_file.read_text(encoding="utf-8-sig", errors="replace"))
+        except (OSError, ValueError) as exc:
+            raise RefusedError(f"读不出项目登记表：{exc}") from exc
+        for item in data.get("projects", []) if isinstance(data, dict) else []:
+            if isinstance(item, dict) and item.get("project_id") == pid:
+                project_root = str(item.get("project_root", "")).replace("\\", "/").strip("/")
+                break
+        if not project_root:
+            raise RefusedError(f"登记表里找不到项目 {pid}")
+    elif pid == "SW-2026-008" and COCKPIT_PREFIX and (root / COCKPIT_PREFIX.rstrip("/")).is_dir():
+        project_root = COCKPIT_PREFIX.rstrip("/")
+    else:
+        raise RefusedError(f"登记表里找不到项目 {pid}")
+    for folder in ("04_监控", "11_监控"):
+        mgmt = root / project_root / folder / "01_变更管理"
+        chg_dir = mgmt / "01_变更单"
+        if mgmt.is_dir() and chg_dir.is_dir():
+            return project_root, chg_dir, mgmt / "02_变更记录" / "01_版本变更台账.md"
+    raise RefusedError(f"项目 {pid} 下找不到变更管理目录（04_监控/01_变更管理 或 11_监控/01_变更管理）")
+
+
+def _check_archive_safety_window(root: Path, git: Git, base: str) -> None:
+    head = git.run("symbolic-ref", "--quiet", "HEAD").stdout.strip()
+    if head != MAIN_REF:
+        raise RefusedError(f"控制根没停在 main（现在是 {head or '分离的 HEAD'}），不能归档变更单")
+    if not git.ok("diff", "--cached", "--quiet"):
+        raise RefusedError("控制根索引已有暂存内容，保留现场，不能归档变更单")
+    gate_db = root / GATE_LEDGER_PATH
+    if gate_db.is_file():
+        try:
+            conn = sqlite3.connect(f"{gate_db.resolve().as_uri()}?mode=ro", uri=True, timeout=10)
+            try:
+                has_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attempts'"
+                ).fetchone()
+                if has_table:
+                    rows = conn.execute(
+                        "SELECT id, key, state FROM attempts "
+                        "WHERE (key, number) IN (SELECT key, MAX(number) FROM attempts GROUP BY key) "
+                        "AND state IN ('unknown', 'queued', 'running') "
+                        "ORDER BY rowid DESC"
+                    ).fetchall()
+                    for attempt_id, raw_key, state in rows:
+                        try:
+                            key_obj = json.loads(raw_key)
+                        except ValueError:
+                            key_obj = None
+                        attempt_base = key_obj.get("base") if isinstance(key_obj, dict) else None
+                        valid_base = (
+                            isinstance(attempt_base, str)
+                            and re.fullmatch(r"[0-9a-f]{40}", attempt_base) is not None
+                        )
+                        if attempt_base == base or not valid_base:
+                            raise RefusedError(
+                                f"当前存在进行中的托管门禁任务（{attempt_id}，状态 {state}），"
+                                "为避免破坏门禁基线，已保留待入库"
+                            )
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            raise RefusedError(f"无法核对门禁任务账本（{exc}），保留现场，不能归档变更单") from exc
+    worktrees_dir = root / ".auto-pm" / "worktrees"
+    if worktrees_dir.is_dir():
+        for entry in sorted(worktrees_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("deploy-") or not (entry / ".git").exists():
+                continue
+            wt_git = Git(entry)
+            if wt_git.run("status", "--porcelain=v1", "-z", "--untracked-files=all", check=True).stdout.strip():
+                raise RefusedError(
+                    f"当前存在活跃开发工位 {entry.name}（有未提交改动），"
+                    "为避免推进 main 影响工位基线，已保留待入库"
+                )
+            wt_head = wt_git.rev("HEAD")
+            if not wt_head or not git.ok("merge-base", "--is-ancestor", wt_head, base):
+                raise RefusedError(
+                    f"当前存在活跃开发工位 {entry.name}（含未合并提交），"
+                    "为避免推进 main 影响工位基线，已保留待入库"
+                )
+    audits_dir = state_dir(root) / "audits"
+    if audits_dir.is_dir():
+        for path in sorted(audits_dir.glob("*.json")):
+            try:
+                receipt = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(receipt, dict):
+                continue
+            candidate = receipt.get("candidate")
+            if (
+                receipt.get("base") == base
+                and receipt.get("verdict") == "PASS"
+                and isinstance(candidate, str)
+                and re.fullmatch(r"[0-9a-f]{40}", candidate) is not None
+                and git.rev(candidate)
+                and not git.ok("merge-base", "--is-ancestor", candidate, base)
+            ):
+                raise RefusedError(
+                    f"当前基线存在已通过独立审计、尚未合并的候选（{receipt.get('worktree')} {candidate[:8]}），"
+                    "为避免令审计基线失效，已保留待入库"
+                )
+
+
+def _git_blob(root: Path, ref: str, rel_path: str) -> bytes | None:
+    done = subprocess.run(
+        ["git", "cat-file", "blob", f"{ref}:{rel_path}"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        timeout=GIT_TIMEOUT,
+    )
+    return done.stdout if done.returncode == 0 else None
+
+
+def _index_table_bounds(lines: Sequence[str]) -> tuple[int, int, int] | None:
+    heading_idx: int | None = None
+    sep_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if sep_idx is None:
+            if stripped.startswith("#") and "变更单索引" in stripped:
+                heading_idx = idx
+                continue
+            if heading_idx is None:
+                continue
+            if not stripped:
+                continue
+            if stripped.startswith("|"):
+                if LEDGER_SEP_RE.match(stripped):
+                    sep_idx = idx
+                continue
+            heading_idx = None
+        else:
+            if stripped and not stripped.startswith("|"):
+                assert heading_idx is not None
+                return heading_idx, sep_idx, idx
+    if heading_idx is not None and sep_idx is not None:
+        return heading_idx, sep_idx, len(lines)
+    return None
+
+
+def _ledger_row_change(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped.startswith("|") or LEDGER_SEP_RE.match(stripped):
+        return None
+    cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+    if len(cells) < 2:
+        return None
+    match = CHG_RE.search(cells[1])
+    return match.group(0) if match else None
+
+
+def _ledger_entries(text: str) -> tuple[list[str], dict[str, list[str]]]:
+    lines = text.splitlines()
+    bounds = _index_table_bounds(lines)
+    if bounds is None:
+        return [], {}
+    _, sep_idx, end_idx = bounds
+    order: list[str] = []
+    rows: dict[str, list[str]] = {}
+    for line in lines[sep_idx + 1 : end_idx]:
+        chg = _ledger_row_change(line)
+        if chg is None:
+            continue
+        if chg not in rows:
+            order.append(chg)
+        rows.setdefault(chg, []).append(line)
+    return order, rows
+
+
+def _is_completed_ledger_row(line: str) -> bool:
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    status_cell = cells[-1] if cells else ""
+    return any(marker in status_cell for marker in COMPLETED_LEDGER_MARKERS)
+
+
+def _uses_blank_row_spacing(lines: Sequence[str], sep_idx: int, end_idx: int) -> bool:
+    non_empty = [idx for idx in range(sep_idx + 1, end_idx) if lines[idx].strip()]
+    return len(non_empty) >= 2 and any(not lines[k].strip() for k in range(non_empty[0] + 1, non_empty[1]))
+
+
+def _project_ledger(base_text: str, local_text: str, selected: Sequence[str]) -> str:
+    local_lines = local_text.splitlines()
+    local_bounds = _index_table_bounds(local_lines)
+    if local_bounds is None:
+        raise RefusedError("本机版本变更台账缺少「变更单索引」表，请先运行 main.py ledger reconcile 对齐")
+    local_heading, local_sep, local_end = local_bounds
+
+    local_order, local_rows_map = _ledger_entries(local_text)
+    selected_set = set(selected)
+    local_rows: dict[str, str] = {}
+    for chg in selected:
+        rows = local_rows_map.get(chg, [])
+        if len(rows) != 1 or not _is_completed_ledger_row(rows[0]):
+            raise RefusedError(f"变更单 {chg} 在本机台账缺少唯一完成态记录，无法归档")
+        local_rows[chg] = rows[0]
+
+    use_local_blank = _uses_blank_row_spacing(local_lines, local_sep, local_end)
+    if base_text.strip():
+        base_lines = base_text.splitlines()
+        orig_base_bounds = _index_table_bounds(base_lines)
+        if orig_base_bounds is None:
+            working_lines = list(base_lines)
+            if working_lines and working_lines[-1].strip():
+                working_lines.append("")
+            working_lines.extend(local_lines[local_heading : local_sep + 1])
+            base_bounds = _index_table_bounds(working_lines)
+            if base_bounds is None:
+                raise RefusedError("无法在主线版本变更台账定位「变更单索引」表，无法投影")
+        else:
+            working_lines = list(base_lines)
+            base_bounds = orig_base_bounds
+        _, base_sep, base_end = base_bounds
+        prefix = list(working_lines[: base_sep + 1])
+        suffix = list(working_lines[base_end:])
+        updated: set[str] = set()
+        body: list[str] = []
+        for line in working_lines[base_sep + 1 : base_end]:
+            row_chg = _ledger_row_change(line)
+            if row_chg is not None and row_chg in selected_set:
+                body.append(local_rows[row_chg])
+                updated.add(row_chg)
+            else:
+                body.append(line)
+        to_insert = [chg for chg in local_order if chg in selected_set and chg not in updated]
+        insert_block: list[str] = []
+        if to_insert:
+            use_blank = _uses_blank_row_spacing(working_lines, base_sep, base_end) or use_local_blank
+            for chg in to_insert:
+                insert_block.append(local_rows[chg])
+                if use_blank:
+                    insert_block.append("")
+            if use_blank and insert_block and (not body or not body[0].strip()):
+                insert_block.pop()
+        out_lines = [*prefix, *insert_block, *body, *suffix]
+    else:
+        prefix = list(local_lines[: local_sep + 1])
+        suffix = list(local_lines[local_end:])
+        chosen = [chg for chg in local_order if chg in selected_set]
+        chosen_block: list[str] = []
+        for idx, chg in enumerate(chosen):
+            chosen_block.append(local_rows[chg])
+            if use_local_blank and idx + 1 < len(chosen):
+                chosen_block.append("")
+        out_lines = [*prefix, *chosen_block, *suffix]
+
+    projected = "\n".join(out_lines) + "\n"
+    proj_lines = projected.splitlines()
+    proj_bounds = _index_table_bounds(proj_lines)
+    if proj_bounds is None:
+        raise RefusedError("台账投影结果缺少「变更单索引」表，已保留现场")
+    _, proj_sep, proj_end = proj_bounds
+    if proj_lines[: proj_sep + 1] != prefix or proj_lines[proj_end:] != suffix:
+        raise RefusedError("台账投影意外改动了「变更单索引」之外的章节，已保留现场")
+    _, proj_rows_map = _ledger_entries(projected)
+    _, base_rows_map = _ledger_entries(base_text)
+    for chg in selected_set:
+        if proj_rows_map.get(chg) != [local_rows[chg]]:
+            raise RefusedError(f"台账投影结果缺少或重复了 {chg}，已保留现场")
+    for chg, rows in proj_rows_map.items():
+        if chg not in selected_set and base_rows_map.get(chg) != rows:
+            raise RefusedError(f"台账投影意外改动了未选中变更单 {chg}，已保留现场")
+    if not set(base_rows_map).issubset(proj_rows_map):
+        raise RefusedError("台账投影丢掉了主线原有行，已保留现场")
+    return projected
+
+
+def _file_snapshots(root: Path, rel_paths: Sequence[str]) -> dict[str, str]:
+    snaps: dict[str, str] = {}
+    for rel in rel_paths:
+        target = root / rel
+        snaps[rel] = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else ""
+    return snaps
+
+
+def _collect_archive_plan(
+    root: Path, git: Git, base: str, pid: str, chg_filters: Sequence[str]
+) -> ArchivePlan:
+    _, chg_dir, ledger_path = _project_change_dir(root, pid)
+    disk_chgs: dict[str, tuple[Path, str, str]] = {}
+    for folder, dirs, files in os.walk(chg_dir):
+        dirs[:] = sorted(name for name in dirs if name not in SKIP_DIRS)
+        for name in sorted(files):
+            match = CHANGE_FILE_RE.fullmatch(name)
+            if not match:
+                continue
+            chg = match.group(1)
+            path = Path(folder) / name
+            rel = _ensure_plain_under_root(root, path)
+            if chg in disk_chgs:
+                raise RefusedError(f"项目 {pid} 存在重复变更单文件：{chg}")
+            disk_chgs[chg] = (path, rel, change_order_state(path))
+
+    requested = list(dict.fromkeys(chg_filters))
+    for chg in requested:
+        if not CHG_RE.fullmatch(chg):
+            raise RefusedError(f"变更单号格式不对：{chg}")
+        if chg not in disk_chgs:
+            raise RefusedError(f"项目 {pid} 下找不到变更单 {chg}")
+        if disk_chgs[chg][2] != "completed":
+            raise RefusedError(f"变更单 {chg} 当前状态为 {disk_chgs[chg][2] or '未知'}，只允许归档已完成（completed）变更单")
+
+    candidates = requested if requested else sorted(
+        chg for chg, (_, _, state) in disk_chgs.items() if state == "completed"
+    )
+    ledger_rel = (
+        _ensure_plain_under_root(root, ledger_path)
+        if ledger_path.exists()
+        else ledger_path.relative_to(root).as_posix()
+    )
+    base_ledger_bytes = _git_blob(root, base, ledger_rel)
+    base_ledger_text = base_ledger_bytes.decode("utf-8", errors="replace") if base_ledger_bytes is not None else ""
+    local_ledger_text = (
+        ledger_path.read_text(encoding="utf-8", errors="replace") if ledger_path.is_file() else ""
+    )
+    _, base_rows_map = _ledger_entries(base_ledger_text)
+    _, local_rows_map = _ledger_entries(local_ledger_text)
+
+    selected: list[str] = []
+    for chg in candidates:
+        path, rel, _ = disk_chgs[chg]
+        local_rows = local_rows_map.get(chg, [])
+        disk_bytes = path.read_bytes()
+        main_blob = _git_blob(root, base, rel)
+        chg_needs = main_blob is None or not _same_ignoring_cr(disk_bytes, main_blob)
+        ledger_needs = base_rows_map.get(chg) != local_rows
+        if chg_needs or ledger_needs:
+            if len(local_rows) != 1 or not _is_completed_ledger_row(local_rows[0]):
+                raise RefusedError(
+                    f"变更单 {chg} 在本机台账缺少对应完成记录，请先运行 main.py ledger reconcile {pid} 核对"
+                )
+            selected.append(chg)
+        elif chg in requested and (len(local_rows) != 1 or not _is_completed_ledger_row(local_rows[0])):
+            raise RefusedError(
+                f"变更单 {chg} 在本机台账缺少对应完成记录，请先运行 main.py ledger reconcile {pid} 核对"
+            )
+
+    snapshot_paths = sorted({*(rel for _, rel, _ in disk_chgs.values()), ledger_rel})
+    snapshots = _file_snapshots(root, snapshot_paths)
+    if not selected:
+        return ArchivePlan(pid, base, ledger_rel, [], {}, snapshots)
+
+    if not ledger_path.is_file():
+        raise RefusedError(f"找不到版本变更台账：{ledger_rel}")
+
+    projected_ledger = _project_ledger(base_ledger_text, local_ledger_text, selected)
+    blobs: dict[str, bytes] = {}
+    for chg in selected:
+        path, rel, _ = disk_chgs[chg]
+        normalized = path.read_bytes().replace(b"\r\n", b"\n")
+        main_blob = _git_blob(root, base, rel)
+        if main_blob is None or main_blob != normalized:
+            blobs[rel] = normalized
+    projected_bytes = projected_ledger.encode("utf-8")
+    if base_ledger_bytes is None or base_ledger_bytes != projected_bytes:
+        blobs[ledger_rel] = projected_bytes
+
+    allowed = {disk_chgs[chg][1] for chg in selected} | {ledger_rel}
+    if not set(blobs).issubset(allowed):
+        raise RefusedError("归档路径超出受控白名单，已拒绝")
+    return ArchivePlan(pid, base, ledger_rel, selected, blobs, snapshots)
+
+
+def _hash_object_bytes(root: Path, content: bytes, env: dict[str, str] | None = None) -> str:
+    done = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=root,
+        env=env,
+        input=content,
+        capture_output=True,
+        check=False,
+        timeout=GIT_TIMEOUT,
+    )
+    if done.returncode != 0:
+        err = done.stderr.decode("utf-8", errors="replace").strip()
+        raise RefusedError(f"git hash-object 失败（退出码 {done.returncode}）：{err}")
+    return done.stdout.decode("utf-8", errors="replace").strip()
+
+
+def _execute_archive_plan(root: Path, plan: ArchivePlan, mode: str) -> dict[str, Any] | None:
+    root_git = Git(root)
+    base = plan.base
+    with tempfile.TemporaryDirectory() as tmp:
+        index_env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        idx_git = Git(root, env=index_env)
+        idx_git.run("read-tree", base, check=True)
+        for rel_path, content in sorted(plan.blobs.items()):
+            oid = _hash_object_bytes(root, content, env=index_env)
+            idx_git.run("update-index", "--add", "--cacheinfo", f"100644,{oid},{rel_path}", check=True)
+        tree_sha = idx_git.out("write-tree")
+        if tree_sha == root_git.out("rev-parse", f"{base}^{{tree}}"):
+            return None
+        title = f"chore(change): 归档 {plan.pid} 已完成变更单（{len(plan.selected)} 张）"
+        body = (
+            f"项目: {plan.pid}\n"
+            + "变更单: "
+            + "、".join(plan.selected)
+            + f"\n{MERGE_MARK}（受控变更单归档）"
+        )
+        commit_sha = root_git.out("commit-tree", tree_sha, "-p", base, "-m", title, "-m", body)
+
+    archive_paths = sorted(plan.blobs)
+    with _main_transaction(root, base, commit_sha) as tx_git:
+        if root_git.rev(MAIN_REF) != base:
+            raise RefusedError("归档前 main 已变动，请重试")
+        _check_archive_safety_window(root, root_git, base)
+        if _file_snapshots(root, sorted(plan.snapshots)) != plan.snapshots:
+            raise RefusedError("控制根变更单或台账在归档期间发生变动，请重试")
+        try:
+            for batch in _chunk_paths(archive_paths):
+                root_git.run(
+                    "--literal-pathspecs", "restore", "--staged", f"--source={commit_sha}", "--", *batch,
+                    check=True,
+                )
+            tx_git.run("merge", "--ff-only", "--no-overwrite-ignore", "--no-verify", commit_sha, check=True)
+        except (RefusedError, OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+            if root_git.rev(MAIN_REF) == base:
+                root_git.run("read-tree", base, check=True)
+            reason = "操作中断" if isinstance(exc, KeyboardInterrupt) else str(exc)
+            raise RefusedError(f"归档变更单失败，控制根记录已保持：{reason}") from exc
+        post_snaps = _file_snapshots(root, sorted(plan.snapshots))
+        drift = sorted(path for path, digest in post_snaps.items() if plan.snapshots.get(path) != digest)
+
+    entry: dict[str, Any] = {
+        "time": _now(),
+        "kind": "archive_changes",
+        "pid": plan.pid,
+        "branch": f"archive-changes/{plan.pid}",
+        "branch_sha": commit_sha,
+        "merge_sha": commit_sha,
+        "chgs": list(plan.selected),
+        "archived_paths": archive_paths,
+        "mode": mode,
+        "pushed": False,
+    }
+    if drift:
+        entry["governance_drift"] = drift
+    if mode != "关":
+        push = root_git.run(
+            "push", "--quiet", "origin", f"{commit_sha}:{MAIN_REF}", timeout=NET_TIMEOUT * 2
+        )
+        entry["pushed"] = push.returncode == 0
+        if push.returncode != 0:
+            entry["push_error"] = push.stderr.strip()[:300]
+    append_log(root, entry)
+    return entry
+
+
+def cmd_archive_changes(
+    root: Path, pid: str, chg_filters: Sequence[str], *, dry_run: bool = False
+) -> int:
+    if not PID_RE.fullmatch(pid):
+        print(f"项目号格式不对：{pid!r}（应像 SW-2026-008）")
+        return 2
+    mode = read_mode(root)
+    try:
+        root_git = Git(root)
+        base = root_git.rev(MAIN_REF)
+        if not base:
+            raise RefusedError("找不到本机 main 分支")
+        _check_archive_safety_window(root, root_git, base)
+        plan = _collect_archive_plan(root, root_git, base, pid, chg_filters)
+        if not plan.selected or not plan.blobs:
+            print(f"项目 {pid} 没有待归档的已完成变更单")
+            return 0
+        check_github(root, mode, plan.notes)
+        if dry_run:
+            for note in plan.notes:
+                print(f"说明：{note}")
+            print(f"[dry-run] 将归档项目 {pid} 的 {len(plan.selected)} 张已完成变更单：{'、'.join(plan.selected)}")
+            for path in sorted(plan.blobs):
+                print(f"  - {path}")
+            return 0
+        entry = _execute_archive_plan(root, plan, mode)
+    except RefusedError as exc:
+        print(f"拒绝归档变更单：{exc}")
+        return 1
+    if entry is None:
+        print(f"项目 {pid} 没有净变更需要归档")
+        return 0
+    for note in plan.notes:
+        print(f"说明：{note}")
+    print(
+        f"已归档 {pid} 的 {len(plan.selected)} 张已完成变更单（{'、'.join(plan.selected)}）进 main："
+        f"提交 {entry['merge_sha'][:8]}"
+    )
+    if entry.get("governance_drift"):
+        print("归档后发现本机变更记录有并发更新，请核对：" + "、".join(entry["governance_drift"]))
+    else:
+        print("未选中变更单与本机台账工作区副本均逐字节保留")
+    if mode == "关":
+        print("GitHub 关着，没有推送")
+    elif entry["pushed"]:
+        print("已推到 GitHub 备份")
+    else:
+        print("推到 GitHub 没成功，记成待推送，不影响使用；下次合并或跑 push 时再推")
+    print(f"退回办法：git revert {entry['merge_sha'][:12]}")
+    return 0
+
+
 def utf8_output() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -1408,7 +1949,8 @@ def utf8_output() -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     utf8_output()
     parser = argparse.ArgumentParser(
-        prog="pm_merge.py", description="本机合并，GitHub 按需使用（卡 311）"
+        prog="pm_merge.py",
+        description="本机合并与受控变更单归档，GitHub 按需使用（CHG-SCPT-2026-718 / 735）",
     )
     parser.add_argument(
         "--root", type=Path, default=DEFAULT_ROOT, help="控制根（默认按本脚本位置推出）"
@@ -1433,6 +1975,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub.add_parser("hook-check", help="钩子内部用")
     verify = sub.add_parser("verify-log", help="核对 main 上每个提交的来历（只读）")
     verify.add_argument("--since", default=None)
+    archive = sub.add_parser("archive-changes", help="受控归档项目下已完成（completed）变更单与台账对应行")
+    archive.add_argument("pid", help="项目编号，如 SW-2026-008")
+    archive.add_argument("--chg", action="append", default=[], help="只归档指定变更单号（可重复）")
+    archive.add_argument("--dry-run", action="store_true", help="只演练并列出将归档内容，不改 Git 或写日志")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     if not (root / ".git").exists():
@@ -1452,6 +1998,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_install_hook(root)
     if args.command == "hook-check":
         return cmd_hook_check(root)
+    if args.command == "archive-changes":
+        return cmd_archive_changes(root, args.pid, args.chg, dry_run=args.dry_run)
     return cmd_verify_log(root, args.since)
 
 
