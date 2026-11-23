@@ -30,3 +30,9 @@
 **机器落地缺口**：分档器、版本化核心清单、判卷对复用回执的校验都属于代码工作，不能夹带在文档档卡里，需要另立实现卡。
 
 **V1.1 机器落地缺口**：分档器卡（M2-TOOL-TIER）将机器化 §1 与 §11 的核对；总账（§12）、只读预检（§13）、第二轮归档（§14）、续租验证（§15）、退出码对照（§17）与回执措辞核对（§18）目前仍由脚本与人工执行，待卡工厂（TD-SW008-088）统一。
+
+> **V1.2 修订附注（2026-11-22，随 `CHG-SCPT-2026-739` 生效）**：依据用户批准（`user-confirmation:2026-11-22T20:20:24-07:00` 与 `2026-11-22T20:42:00-07:00`），在保留上文 §0～§19 全部底线的前提下增设三级分档（`L1 / L2 / L3`）并按下列四条规则受控落地：
+> 1. **一期 L1 仅对已核实样板白名单开放**：仅纯文档（`.md`/`.rst`）及 `L1_VERIFIED_PILOT_PATHS`（`scripts/command_catalog.py`、`tests/infrastructure/test_command_catalog.py`）可走纯本地 `L1` 闭环（`ruff` 同步覆盖改动 `scripts/*.py` + 作用域守卫 + 相关测试；20–60 秒作样板耗时目标，经实测后再逐批扩表；因 `gate_precheck_service.py` 暂不跟踪跨模块间接依赖且 `scripts/command_catalog.py` 尚有存量 `mypy` 问题待另单清理，未列入白名单的非 L3 改动先保守入 `L2`）。
+> 2. **受保护与核心改动零降档**：`scripts/pm_merge.py`、受保护变更/钩子链（`git_hook_enforcer.py`、`change_status_guard.py`、`change_service.py`、`status_journal.py`、`guard_checker.py`、`ui/cli/change.py`）、`auto_pm/contracts/`、`gate_*`、`release_*`、PLC/QML/全局配置、项目外与未知路径一律走 `L3` 全量门禁；`AGENTS.md` 第 53 行关于受保护改动核对同一候选全量结果的规定不变。
+> 3. **不按测试文件大小删减静态检查**：`test_cockpit_board.py` 主题颜色检查（:501）、`test_pm_dashboard_gui.py` 视图进程与文件边界检查（:502）与 `test_cockpit_board_tools.py` 子进程检查继续留在 `tests/tools/sw008_ci/source_guards_manifest.txt` 中按 `scripts/cockpit_board/`、`scripts/pm_dashboard_gui.py` 作用域触发，二期再将其中纯静态断言拆为独立守卫文件。
+> 4. **二期硬前置约束**：在允许 `L2` 分组回执或任何发版复用之前，二期必须先加固 `release_deploy_check.py:_check_gate`（核验完整 40 位提交号、`tier == "L3"`、全部必需回归组齐全及西门子插件通过），再由 `gate-full.yml` / `gate_task_service.py` 产出 `L2` 分组 `PASS` 回执。

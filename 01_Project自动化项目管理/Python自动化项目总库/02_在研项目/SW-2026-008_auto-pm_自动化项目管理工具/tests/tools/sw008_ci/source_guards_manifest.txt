@@ -1,0 +1,31 @@
+# SW-2026-008 整树守卫测试作用域清单（scoped source guards）
+# 格式: <scope[,scope2]>: <test_rel_path>
+# 支持的 <scope>:
+#   *         -> 任意非纯文档（.md/.rst）改动命中
+#   <dir>/    -> 命中该相对路径前缀下的项目内改动
+#   *.<ext>   -> 命中该扩展名改动
+#   <path>    -> 命中指定相对路径改动（多作用域可用英文逗号拼接）
+# 其余 19 个纯功能/重夹具树遍历匹配项登记于 tests/infrastructure/test_source_guards_manifest.py。
+
+*: tests/change/test_change_number_width.py
+*: tests/infrastructure/test_subprocess_text_encoding.py
+auto_pm/: tests/contracts/test_cli_hints_name_real_options.py
+auto_pm/: tests/contracts/test_quarantined_skill_routing.py
+auto_pm/: tests/core/test_business_line_whitelist.py
+auto_pm/: tests/infrastructure/test_file_text_encoding.py
+auto_pm/: tests/infrastructure/test_git_text_callers.py
+auto_pm/: tests/infrastructure/test_no_new_lenient_decoding.py
+auto_pm/: tests/infrastructure/test_no_new_short_layer_imports.py
+auto_pm/: tests/infrastructure/test_no_user_fallback_recorder.py
+auto_pm/: tests/infrastructure/test_run_control_root_guard_ratchet.py
+auto_pm/: tests/test_layer_import_direction.py
+auto_pm/: tests/test_readme_env_vars.py
+auto_pm/: tests/test_subprocess_timeout_guard.py
+scripts/cockpit_board/: tests/core/test_cockpit_board.py
+scripts/cockpit_board/: tests/core/test_cockpit_board_tools.py
+scripts/cockpit_board/: tests/core/test_cockpit_no_window.py
+scripts/cockpit_board/,scripts/pm_dashboard_gui.py: tests/core/test_pm_dashboard_gui.py
+tests/: tests/infrastructure/test_external_reads_marked.py
+tests/: tests/infrastructure/test_source_guards_manifest.py
+tests/: tests/test_fixture_health.py
+*.ps1: tests/infrastructure/test_powershell_script_rules.py

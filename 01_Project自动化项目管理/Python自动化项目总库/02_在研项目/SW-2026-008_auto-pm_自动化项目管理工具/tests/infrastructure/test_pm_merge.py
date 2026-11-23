@@ -1168,3 +1168,76 @@ def test_archive_changes_logs_entry_even_when_post_merge_snapshot_drifts(
     assert len(entries) == 1
     assert entries[0]["governance_drift"] == [ledger_rel]
     assert run(pm, repo.root, "verify-log") == 0
+
+
+@pytest.mark.parametrize("gh_mode", ["备份", "关"])
+def test_run_gates_allows_l1_without_managed_receipt_online_and_offline(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gh_mode: str
+) -> None:
+    root = tmp_path / "root"
+    (root / ".git").mkdir(parents=True)
+    wt = root / ".auto-pm" / "worktrees" / "w1"
+    (wt / "tests").mkdir(parents=True)
+    assert run(pm, root, "github-mode", gh_mode) == 0
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        payload = {
+            "verdict": "PASS",
+            "tier": "L1",
+            "recommended_groups": ["infrastructure", "rest"],
+            "full_gate_required": False,
+            "outside_changes": [],
+            "steps": [
+                {"name": "ruff", "verdict": "PASS", "exit": 0},
+                {"name": "mypy", "verdict": "PASS", "exit": 0},
+                {"name": "pytest", "verdict": "PASS", "exit": 0},
+            ],
+        }
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(payload, ensure_ascii=False), "")
+
+    monkeypatch.setattr(pm.subprocess, "run", fake_run)
+    monkeypatch.setattr(pm, "managed_gate_receipt", lambda *_args: pytest.fail("L1 不应触发托管全量凭证检查"))
+    res = pm.run_gates(root, wt, False)
+    assert res.ok
+    assert any("门禁分级：L1（本地轻量闭环，无需托管全量门禁）" in line for line in res.lines)
+    assert len(calls) == 1 and "--defer-full" in calls[0]
+
+
+@pytest.mark.parametrize("tier", ["L2", "L3"])
+def test_run_gates_still_requires_managed_receipt_for_l2_and_l3(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    wt = tmp_path / "wt"
+    (wt / "tests").mkdir(parents=True)
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        payload = {
+            "verdict": "UNVERIFIED",
+            "tier": tier,
+            "recommended_groups": ["application"] if tier == "L2" else ["core", "infrastructure"],
+            "full_gate_required": True,
+            "outside_changes": [],
+            "steps": [
+                {"name": "ruff", "verdict": "PASS", "exit": 0},
+                {"name": "mypy", "verdict": "PASS", "exit": 0},
+                {"name": "pytest", "verdict": "SKIPPED", "exit": None},
+            ],
+        }
+        return subprocess.CompletedProcess(cmd, 1, json.dumps(payload, ensure_ascii=False), "")
+
+    monkeypatch.setattr(pm.subprocess, "run", fake_run)
+
+    def missing_receipt(_root: Path, _worktree: Path) -> str:
+        raise pm.RefusedError("缺少托管全量门禁凭证")
+
+    monkeypatch.setattr(pm, "managed_gate_receipt", missing_receipt)
+    with pytest.raises(pm.RefusedError, match="托管全量"):
+        pm.run_gates(tmp_path, wt, False)
+
+    monkeypatch.setattr(pm, "managed_gate_receipt", lambda _root, _wt: f"托管凭证已核对({tier})")
+    ok_res = pm.run_gates(tmp_path, wt, False)
+    assert ok_res.ok
+    assert any(f"门禁分级：{tier}（建议组：" in line for line in ok_res.lines)
+    assert any(f"托管凭证已核对({tier})" in line for line in ok_res.lines)

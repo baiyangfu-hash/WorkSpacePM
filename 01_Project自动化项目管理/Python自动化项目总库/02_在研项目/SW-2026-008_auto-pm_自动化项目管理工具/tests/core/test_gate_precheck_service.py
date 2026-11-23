@@ -498,3 +498,99 @@ def test_scans_the_tree_keeps_os_walkers_python_globs_and_fail_closed_cases(
     target.write_text(body, encoding="utf-8")
     assert pre._scans_the_tree(target) is True
 
+
+def test_related_tests_uses_scoped_manifest_when_present_and_fails_closed_when_malformed(tmp_path: Path) -> None:
+    project = _project(tmp_path / "scoped")
+    (project / "tests/change").mkdir(parents=True)
+    (project / "tests/tools/sw008_ci").mkdir(parents=True)
+    (project / "tests/change/test_width_guard.py").write_text(
+        "import os\ndef test_x():\n    list(os.walk('auto_pm'))\n",
+        encoding="utf-8",
+    )
+    (project / "tests/core/test_board_guard.py").write_text(
+        "import os\ndef test_x():\n    list(os.walk('scripts'))\n",
+        encoding="utf-8",
+    )
+    (project / "tests/core/test_cockpit_board_heavy.py").write_text(
+        "from pathlib import Path\ndef test_x():\n    list(Path('tests').rglob('*.py'))\n",
+        encoding="utf-8",
+    )
+    manifest = project / pre.SOURCE_GUARDS_MANIFEST
+    manifest.write_text(
+        "*: tests/change/test_width_guard.py\n"
+        "scripts/cockpit_board/: tests/core/test_board_guard.py\n"
+        "scripts/cockpit_board/,scripts/pm_dashboard_gui.py: tests/core/test_cockpit_board_heavy.py\n",
+        encoding="utf-8",
+    )
+
+    tests, note = related_tests(project, ["tests/core/test_only_c.py"])
+    assert "tests/core/test_only_c.py" in tests
+    assert "tests/change/test_width_guard.py" in tests
+    assert "tests/core/test_board_guard.py" not in tests
+    assert "tests/core/test_cockpit_board_heavy.py" not in tests
+    assert "守卫" in note
+
+    gui_tests, _ = related_tests(project, ["scripts/pm_dashboard_gui.py"])
+    assert "tests/core/test_cockpit_board_heavy.py" in gui_tests
+    assert "tests/core/test_board_guard.py" not in gui_tests
+
+    manifest.write_text("invalid line without colon\n", encoding="utf-8")
+    broken_tests, broken_note = related_tests(project, ["tests/core/test_only_c.py"])
+    assert broken_tests == ["tests"] and "无效" in broken_note
+
+
+def test_defer_full_keeps_l1_local_with_capped_jobs_and_defers_l2_and_l3(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    l1_recorder = _Recorder()
+    monkeypatch.setattr(
+        pre,
+        "changed_files",
+        lambda worktree, base: [_inside("scripts/command_catalog.py"), _inside("tests/infrastructure/test_command_catalog.py")],
+    )
+    monkeypatch.setattr(
+        pre,
+        "related_tests",
+        lambda project, inside: ([f"tests/t{i}.py" for i in range(pre.PARALLEL_FROM + 1)], "作用域守卫"),
+    )
+    l1_report = PrecheckService(runner=l1_recorder).run(
+        _repo_root(), out_dir=tmp_path / "l1", jobs=8, defer_full=True
+    )
+    assert l1_report.tier == "L1"
+    assert l1_report.full_gate_required is False
+    assert l1_report.verdict == "PASS"
+    ruff_argv = next(argv for name, argv, _, _ in l1_recorder.calls if name == "ruff")
+    assert ruff_argv[-1] == "scripts/command_catalog.py"
+    pytest_argv = next(argv for name, argv, _, _ in l1_recorder.calls if name == "pytest")
+    assert pytest_argv[pytest_argv.index("-n") + 1] == "2"
+
+    l2_recorder = _Recorder()
+    monkeypatch.setattr(
+        pre,
+        "changed_files",
+        lambda worktree, base: [_inside(f"auto_pm/application/m{i}.py") for i in range(4)],
+    )
+    l2_report = PrecheckService(runner=l2_recorder).run(
+        _repo_root(), out_dir=tmp_path / "l2", jobs=8, defer_full=True
+    )
+    assert l2_report.tier == "L2"
+    assert l2_report.full_gate_required is True
+    assert l2_report.verdict == "UNVERIFIED"
+    assert "application" in l2_report.recommended_groups
+    assert next(s for s in l2_report.steps if s.name == "pytest").verdict == "SKIPPED"
+
+    l3_recorder = _Recorder()
+    monkeypatch.setattr(
+        pre,
+        "changed_files",
+        lambda worktree, base: [_inside("scripts/pm_merge.py")],
+    )
+    l3_report = PrecheckService(runner=l3_recorder).run(
+        _repo_root(), out_dir=tmp_path / "l3", jobs=8, defer_full=True
+    )
+    assert l3_report.tier == "L3"
+    assert l3_report.full_gate_required is True
+    assert l3_report.require_plugin is True
+    assert l3_report.verdict == "UNVERIFIED"
+    assert {"core", "infrastructure"} <= set(l3_report.recommended_groups)
+

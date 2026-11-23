@@ -342,6 +342,16 @@ def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
     steps = (report.get("steps") or []) if report else []
     outside = (report.get("outside_changes") or []) if report else []
     deferred = bool(report and report.get("full_gate_required"))
+    tier = report.get("tier") if isinstance(report, dict) else None
+    rec_groups = report.get("recommended_groups") if isinstance(report, dict) else None
+    if isinstance(tier, str) and tier:
+        if tier == "L1" and not deferred and not full:
+            lines.append("门禁分级：L1（本地轻量闭环，无需托管全量门禁）")
+        elif isinstance(rec_groups, list) and rec_groups:
+            shown = ", ".join(str(g) for g in rec_groups[:6]) + (" 等" if len(rec_groups) > 6 else "")
+            lines.append(f"门禁分级：{tier}（建议组：{shown}）")
+        else:
+            lines.append(f"门禁分级：{tier}")
     if deferred and not full:
         lines.append(managed_gate_receipt(root, worktree))
     steps_ok = (
