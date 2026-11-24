@@ -67,8 +67,10 @@ _GROUP_PREFIX_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tests/contracts/", ("contracts",)),
     ("tests/contract/", ("contracts",)),
     ("auto_pm/domain/change/", ("change",)),
-    ("auto_pm/application/change", ("change",)),
+    ("auto_pm/application/change_facade.py", ("change", "application")),
     ("tests/change/", ("change",)),
+    ("04_监控/01_变更管理/", ("change",)),
+    ("11_监控/01_变更管理/", ("change",)),
     ("auto_pm/domain/plc/", ("plc",)),
     ("auto_pm/application/plc/", ("plc",)),
     ("auto_pm/infrastructure/plc/", ("plc",)),
@@ -355,7 +357,7 @@ def classify_gate_tier(
 
         folded = normalized.casefold()
         base_name = Path(normalized).name
-        is_doc = any(folded.endswith(ext) for ext in _DOC_EXTENSIONS)
+        has_doc_ext = any(folded.endswith(ext) for ext in _DOC_EXTENSIONS)
 
         if folded in _GLOBAL_L3_EXACT:
             l3_reasons.append(f"全局测试/构建配置改动：{normalized}")
@@ -369,12 +371,15 @@ def classify_gate_tier(
         if m2_tier == "core":
             l3_reasons.extend(m2_path_reasons)
 
-        if not is_doc and not folded.endswith(".py"):
+        if not has_doc_ext and not folded.endswith(".py"):
             l3_reasons.append(f"非 Python 运行或配置资产改动：{normalized}")
 
-        if not is_doc:
+        is_pure_doc = m2_tier == "docs" and has_doc_ext
+        if not is_pure_doc:
             affected_groups.update(_groups_for_path(normalized))
-            if folded.startswith("tests/"):
+            if has_doc_ext:
+                l2_reasons.append(f"受治理运行态文档（m2={m2_tier}）未纳入一期 L1 纯文档白名单：{normalized}")
+            elif folded.startswith("tests/"):
                 test_py_paths.append(normalized)
                 if base_name == "conftest.py" and folded != "tests/conftest.py":
                     l2_reasons.append(f"子目录 conftest 影响整组测试：{normalized}")

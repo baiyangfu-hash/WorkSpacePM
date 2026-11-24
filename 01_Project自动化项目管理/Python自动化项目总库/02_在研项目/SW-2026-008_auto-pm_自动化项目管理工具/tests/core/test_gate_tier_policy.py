@@ -159,3 +159,19 @@ def test_missing_or_corrupted_rules_file_fails_closed_to_l3(tmp_path: Path) -> N
     bad_schema.write_text(json.dumps({"schema": "wrong"}), encoding="utf-8")
     wrong = classify_gate_tier(["scripts/command_catalog.py"], rules_path=bad_schema)
     assert wrong.tier == "L3" and wrong.full_forced is True
+
+
+def test_change_facade_includes_change_and_application_groups_and_governed_card_is_l2() -> None:
+    facade = classify_gate_tier(["auto_pm/application/change_facade.py"], project=REPO_PROJECT)
+    assert facade.tier == "L2"
+    assert facade.full_forced is False
+    assert facade.recommended_groups == ("application", "change")
+
+    card = classify_gate_tier(
+        ["04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-739_门禁三级策略与轻量闭环一期.md"],
+        project=REPO_PROJECT,
+    )
+    assert card.tier == "L2"
+    assert card.m2_tier == "product"
+    assert card.full_forced is False
+    assert "change" in card.recommended_groups
