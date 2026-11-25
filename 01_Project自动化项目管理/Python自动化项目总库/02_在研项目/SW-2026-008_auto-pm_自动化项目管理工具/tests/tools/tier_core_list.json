@@ -53,6 +53,7 @@
     {"id": "PRODUCT-TEST-FAKES", "tier": "product", "kind": "prefix", "pattern": "tests/fakes/", "reason": "shared fakes can change many groups (rule document section 3)"},
     {"id": "PRODUCT-TESTS-PACKAGE", "tier": "product", "kind": "exact", "pattern": "tests/__init__.py", "reason": "the package marker changes collection (rule document section 3)"},
     {"id": "TESTS-TREE", "tier": "tests", "kind": "prefix", "pattern": "tests/", "reason": "tests and test helpers"},
+    {"id": "DOCS-PROJECT-MGMT", "tier": "docs", "kind": "prefix", "pattern": "00_项目管理/", "reason": "project management documents and WBS plan tables"},
     {"id": "DOCS-START", "tier": "docs", "kind": "prefix", "pattern": "01_启动/", "reason": "project documents"},
     {"id": "DOCS-PLANNING", "tier": "docs", "kind": "prefix", "pattern": "02_规划/", "reason": "plans, cards and rule documents"},
     {"id": "DOCS-EXECUTION", "tier": "docs", "kind": "prefix", "pattern": "03_执行/", "reason": "iteration plans"},
