@@ -233,3 +233,15 @@ PR 与审计页的审计报告写明读了哪些目录（`<控制根>/reviews` �
 脊柱图、命令与契约：数据文件读不懂时那一行用 pages.json 的错态文案；脊柱图的空态（“没有选中的卡”）留给以后“按卡显示进度”，本单不接。
 
 **怎么补一页**：照 `PAGE_TEMPLATE.md` 一步步做（声明命令 → 解析 → 画 → 测试 → 截图）。
+
+## 8. 单机轻轨换班、WBS 计划表与门禁分档导航（对齐 1.3.3）
+
+本节与 `06_交付物/001_用户操作指南与排障手册_USER_GUIDE.md` 第 6 节保持同一套口径；`scripts/cockpit_board/` 始终遵循**“界面只读账本/文件，写盘走命令或工位”**：
+
+1. **新会话进门与体检（只读入口）**：接手总控屏或排查状态异常前，先在控制根使用 `.\.venv\Scripts\python.exe` 运行 `SW8/scripts/pm_flows.py entry <项目编号>`（只读定位）与 `pm_flows.py checkup <项目编号>`（12 步只读体检）；命令行入口始终从控制根调 `.\.venv\Scripts\python.exe .\main.py`，不直接运行 `SW8\main.py`。
+2. **单机轻轨交接（PM-056）**：日常单机模式下，换班上下文保存在 `<项目>/{04|11}_监控/交接交换区/`（`focus.json` 与 `journal.jsonl`）。总控屏若展示换班交接区内容，只允许只读呈现，**严禁**由界面直接改写控制根交接区文件；写盘必须在隔离工位内通过 `SW8/scripts/pm_handoff.py set-focus` / `log` 执行，并用 `pm_handoff.py validate <项目编号> --root <工位> --require-exists` 校验后随工位分支合入。
+3. **WBS 项目计划表（现算进度）**：多卡里程碑在 `<项目>/00_项目管理/01_立项与需求/NNN_<项目编号>_项目计划表.md` 登记任务行与独立证据回执，由 `SW8/scripts/plan_status.py <项目编号> [--json]` 按 `main` 与分支事实自动计算 `未开始 / 在干 / 已合并未验证 / 已完成 / 待用户验收 / 已达成`。总控屏仅可只读展示现算结果，不在表内手写状态栏，也不由界面写回计划表。
+4. **三级门禁分档（L1 / L2 / L3）**：修改 `scripts/cockpit_board/` 后，提交前统一在控制根运行 `.\.venv\Scripts\python.exe .\main.py gate precheck --worktree <工位> --defer-full [--json]` 自动判档（总控屏不新增绕过门禁或合并的按钮，仍受 `policy.py` 白名单与 `flow/commands_map.json` 契约约束）：
+   - **L1（本地快速闭环）**：仅修改纯文档（`.md` / `.rst`）或已核实样板路径（`L1_VERIFIED_PILOT_PATHS`）。通过本机自检与 `gate precheck` 后即可由 `pm_merge.py merge <工位>` 合入 `main`，无需云端排队。
+   - **L2（云端按组门禁）**：非核心脚本、测试或总控屏文档/代码改动。先执行 `git -C <工位> push -u origin <分支>`，再在控制根运行 `.\main.py gate start --worktree <工位>`（不带 `--full`），由云端仅跑受影响测试分组并签发 `gate-l2` 凭证。
+   - **L3（云端全量 + 插件）**：规则文件、核心门禁/发版/状态机/PLC/QML、配置文件或非 `.md/.py` 运行资产（含 `.json` / `.jsonl`）。强制运行 `.\main.py gate start --worktree <工位> --full`（全量 11 组 + 西门子插件）；命中 `FLOW-001`“要你点头”受保护类还须另起独立会话完成 `AUD-001` 审计与 `pm_merge.py audit-record` 登记。
