@@ -240,13 +240,14 @@ def _task_json(record: dict[str, object]) -> None:
 
 @gate_group.command(name="start")
 @click.option("--worktree", required=True, type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.option("--full", is_flag=True, help="强制登记 L3 全量门禁（含全部 11 组与 Siemens LSP 插件）")
 @click.pass_context
-def start_command(ctx: click.Context, worktree: Path) -> None:
-    """登记完整门禁，优先由 GitHub Actions 执行。同一候选返回已有任务。"""
+def start_command(ctx: click.Context, worktree: Path, full: bool) -> None:
+    """登记托管门禁，优先由 GitHub Actions 执行（L2 按组提速，核心或 --full 走 L3 全量）。同一候选返回已有任务。"""
     require_runtime_identity_for_workspace(ctx)
     root, service = _shared_gate(ctx)
     try:
-        _task_json(task_record(service.start(GateCandidate.from_worktree(root, worktree.resolve()))))
+        _task_json(task_record(service.start(GateCandidate.from_worktree(root, worktree.resolve(), full=full))))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
@@ -254,8 +255,9 @@ def start_command(ctx: click.Context, worktree: Path) -> None:
 @gate_group.command(name="status")
 @click.argument("task_id", required=False)
 @click.option("--worktree", type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.option("--full", is_flag=True, help="按 L3 全量门禁候选查询")
 @click.pass_context
-def status_command(ctx: click.Context, task_id: str | None, worktree: Path | None) -> None:
+def status_command(ctx: click.Context, task_id: str | None, worktree: Path | None, full: bool) -> None:
     """按任务号或当前候选查门禁，并与执行端对账。"""
     if (task_id is None) == (worktree is None):
         raise click.UsageError("请提供任务号或 --worktree")
@@ -263,10 +265,10 @@ def status_command(ctx: click.Context, task_id: str | None, worktree: Path | Non
     root, service = _shared_gate(ctx)
     try:
         if worktree is not None:
-            candidate = GateCandidate.from_worktree(root, worktree.resolve())
+            candidate = GateCandidate.from_worktree(root, worktree.resolve(), full=full)
             attempt = service.current(candidate)
             if attempt is None:
-                raise GateRunError("当前候选尚未登记全量门禁")
+                raise GateRunError("当前候选尚未登记全量门禁" if candidate.tier == "L3" else "当前候选尚未登记托管门禁")
         else:
             assert task_id is not None
             attempt = service.status(task_id)
@@ -291,12 +293,13 @@ def stop_command(ctx: click.Context, task_id: str) -> None:
 @gate_group.command(name="retry")
 @click.argument("task_id")
 @click.option("--worktree", required=True, type=CallerPath(exists=True, file_okay=False, path_type=Path))
+@click.option("--full", is_flag=True, help="按 L3 全量门禁重试（切换本机执行时需带此项）")
 @click.option("--local", is_flag=True, help="经用户确认，改用 Windows 计划任务")
 @click.option("--approval-evidence-ref", default="", help="user-confirmation:<用户消息编号>")
 @click.option("--siemens-lsp", type=CallerPath(exists=True, dir_okay=False, path_type=Path))
 @click.pass_context
 def retry_command(
-    ctx: click.Context, task_id: str, worktree: Path, local: bool, approval_evidence_ref: str,
+    ctx: click.Context, task_id: str, worktree: Path, full: bool, local: bool, approval_evidence_ref: str,
     siemens_lsp: Path | None,
 ) -> None:
     """为已结束的同一候选登记新一次尝试。"""
@@ -304,7 +307,7 @@ def retry_command(
     worktree = worktree.resolve()
     root, service = _shared_gate(ctx, worktree, siemens_lsp.resolve() if siemens_lsp else None)
     try:
-        candidate = GateCandidate.from_worktree(root, worktree)
+        candidate = GateCandidate.from_worktree(root, worktree, full=full)
         _task_json(task_record(service.retry(task_id, candidate, local=local, approval=approval_evidence_ref)))
     except _TASK_ERRORS as error:
         raise click.ClickException(str(error)) from error

@@ -269,22 +269,44 @@ def _parse_precheck_json(stdout: str) -> dict[str, Any] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
-def managed_gate_receipt(root: Path, worktree: Path) -> str:
+def _query_gate_status(root: Path, worktree: Path, *, include_full_flag: bool) -> subprocess.CompletedProcess[str]:
     command = [
         _python(root), "-B", str(root / "main.py"), "gate", "status",
         "--worktree", str(worktree),
     ]
+    if include_full_flag:
+        command.append("--full")
+    result = subprocess.run(
+        command, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+        timeout=120, check=False,
+    )
+    if include_full_flag and result.returncode == 2:
+        combined = f"{result.stderr or ''}\n{result.stdout or ''}"
+        if "No such option: --full" in combined:
+            fallback_cmd = [arg for arg in command if arg != "--full"]
+            return subprocess.run(
+                fallback_cmd, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+                timeout=120, check=False,
+            )
+    return result
+
+
+def managed_gate_receipt(
+    root: Path,
+    worktree: Path,
+    *,
+    require_full: bool = True,
+    expected_groups: Sequence[str] = (),
+) -> str:
     try:
-        result = subprocess.run(
-            command, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-            timeout=120, check=False,
-        )
+        result = _query_gate_status(root, worktree, include_full_flag=require_full)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RefusedError(f"托管门禁凭证无法读取：{exc}") from exc
     record = _parse_precheck_json(result.stdout or "")
     if result.returncode or not record:
+        label = "全量" if require_full else "托管"
         raise RefusedError(
-            "没有可核验的托管全量门禁凭证，请先用 gate start 登记候选。"
+            f"没有可核验的托管{label}门禁凭证，请先用 gate start 登记候选。"
             + (result.stderr or "").strip()
         )
     if record.get("state") != "passed":
@@ -298,7 +320,19 @@ def managed_gate_receipt(root: Path, worktree: Path) -> str:
         or not record.get("detail")
     ):
         raise RefusedError("托管全量门禁凭证与候选或当前 main 不匹配")
-    return f"托管全量门禁 PASS：{record['id']}（{record['backend']}，运行 {record['handle']}）"
+    rec_tier = str(identity.get("tier") or "L3").strip().upper()
+    rec_groups = tuple(str(g) for g in (identity.get("groups") or ()) if str(g))
+    if require_full:
+        if rec_tier != "L3":
+            raise RefusedError(f"当前合并需要 L3 全量门禁凭证，但 {record.get('id')} 为 {rec_tier}")
+        return f"托管全量门禁 PASS：{record['id']}（{record['backend']}，运行 {record['handle']}）"
+    if rec_tier == "L3":
+        return f"托管全量门禁 PASS：{record['id']}（{record['backend']}，运行 {record['handle']}）"
+    if rec_tier == "L2":
+        if expected_groups and not set(expected_groups).issubset(set(rec_groups)):
+            raise RefusedError("托管 L2 门禁凭证覆盖的测试组少于当前预期受影响组")
+        return f"托管 L2 门禁 PASS：{record['id']}（{record['backend']}，运行 {record['handle']}，组：{','.join(rec_groups)}）"
+    raise RefusedError(f"无法识别的托管门禁档次：{rec_tier}")
 
 
 def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
@@ -353,7 +387,17 @@ def run_gates(root: Path, worktree: Path, full: bool) -> GateResult:
         else:
             lines.append(f"门禁分级：{tier}")
     if deferred and not full:
-        lines.append(managed_gate_receipt(root, worktree))
+        if tier == "L2" and isinstance(rec_groups, list) and rec_groups and not outside:
+            lines.append(
+                managed_gate_receipt(
+                    root,
+                    worktree,
+                    require_full=False,
+                    expected_groups=tuple(str(g) for g in rec_groups),
+                )
+            )
+        else:
+            lines.append(managed_gate_receipt(root, worktree))
     steps_ok = (
         bool(steps)
         and all(isinstance(s, dict) and s.get("verdict") in ("PASS", "SKIPPED") for s in steps)

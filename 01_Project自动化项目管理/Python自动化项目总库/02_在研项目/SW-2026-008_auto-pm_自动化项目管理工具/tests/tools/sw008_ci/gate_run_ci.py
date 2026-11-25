@@ -33,6 +33,7 @@ from auto_pm.application.core.gate_run_service import (  # noqa: E402
     GateRunError,
     GateRunService,
     GateSummary,
+    manifest_sha256,
 )
 
 INCOMPLETE = "组不齐全"  # the one reason a single-group summary always carries; merging removes it, judge_dir re-adds it if true
@@ -72,7 +73,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if verdict == "PASS" else 1
 
 
-def merge_summaries(parts: list[dict[str, Any]]) -> dict[str, Any]:
+def merge_summaries(
+    parts: list[dict[str, Any]],
+    *,
+    expected_groups: list[str] | None = None,
+) -> dict[str, Any]:
     """One summary dict from several single-group ones; refuses to mix commits or manifests."""
     if not parts:
         raise GateRunError("没有可合并的分片")
@@ -99,11 +104,16 @@ def merge_summaries(parts: list[dict[str, Any]]) -> dict[str, Any]:
     merged["results"] = results
     merged["reasons"] = list(dict.fromkeys(reasons))
     merged["ignored_code"] = list(dict.fromkeys(ignored))
-    merged["groups_run"] = [g.name for g in GROUPS]
+    merged["groups_run"] = list(expected_groups) if expected_groups is not None else [g.name for g in GROUPS]
     return merged
 
 
-def failure_lines(out: Path, summary: GateSummary) -> list[str]:
+def failure_lines(
+    out: Path,
+    summary: GateSummary,
+    *,
+    expected_groups: list[str] | None = None,
+) -> list[str]:
     lines: list[str] = []
     for name, result in summary.results.items():
         if result.verdict == "PASS":
@@ -114,12 +124,36 @@ def failure_lines(out: Path, summary: GateSummary) -> list[str]:
             for raw in log.read_text(encoding="utf-8", errors="replace").splitlines():
                 if FAILED_LINE.match(raw):
                     lines.append(f"- {raw.strip()}")
-    for name in sorted({g.name for g in GROUPS} - set(summary.results)):
+    expected = set(expected_groups) if expected_groups is not None else {g.name for g in GROUPS}
+    for name in sorted(expected - set(summary.results)):
         lines.append(f"## {name}: 没有产出（这一组的任务没跑完或没上传）")
     return lines
 
 
+def _resolve_expected_groups(tier: str, raw_expected: str) -> list[str]:
+    official = [g.name for g in GROUPS]
+    if tier == "L3":
+        return official
+    parsed = {item.strip() for item in raw_expected.split(",") if item.strip()}
+    if not parsed:
+        raise GateRunError("L2 门禁缺少 --expected-groups")
+    unknown = sorted(parsed - set(official))
+    if unknown:
+        raise GateRunError(f"L2 包含未登记测试组: {', '.join(unknown)}")
+    return [name for name in official if name in parsed]
+
+
 def cmd_merge(args: argparse.Namespace) -> int:
+    tier = str(getattr(args, "tier", "L3") or "L3").strip().upper()
+    if tier not in {"L2", "L3"}:
+        print(f"非法门禁档次: {tier}")
+        return 2
+    raw_expected = str(getattr(args, "expected_groups", "") or "").strip()
+    try:
+        expected_groups = _resolve_expected_groups(tier, raw_expected)
+    except GateRunError as error:
+        print(f"参数无效: {error}")
+        return 2
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     parts: list[dict[str, Any]] = []
@@ -133,7 +167,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
             for item in directory.glob(pattern):
                 shutil.copy2(item, out / item.name)
     try:
-        merged = merge_summaries(parts)
+        merged = merge_summaries(parts, expected_groups=expected_groups)
     except GateRunError as error:
         print(f"合并被拒: {error}")
         return 2
@@ -143,13 +177,31 @@ def cmd_merge(args: argparse.Namespace) -> int:
     worktree = Path(args.worktree) if args.worktree else None
     judged = GateRunService().judge_dir(out, worktree=worktree)
     plugin_result = str(getattr(args, "plugin_result", "") or "").strip()
-    if plugin_result and plugin_result != "success":
-        judged.verdict = "FAIL"
-        judged.reasons.append(f"Siemens LSP 插件检查：{plugin_result}")
+    if tier == "L2":
+        judged.complete = False
+        judged.reasons = [r for r in judged.reasons if r != INCOMPLETE]
+        if judged.manifest_sha256 != manifest_sha256():
+            judged.reasons.append("manifest_sha256 与官方分组清单不一致")
+        missing = [g for g in expected_groups if g not in judged.results]
+        if missing:
+            judged.reasons.append(f"L2 缺失预期测试组: {', '.join(missing)}")
+        unexpected = sorted(set(judged.results) - set(expected_groups))
+        if unexpected:
+            judged.reasons.append(f"L2 出现非预期测试组: {', '.join(unexpected)}")
+        if plugin_result and plugin_result not in {"success", "skipped"}:
+            judged.reasons.append(f"Siemens LSP 插件检查：{plugin_result}")
+        judged.reasons = list(dict.fromkeys(judged.reasons))
+        all_pass = bool(judged.results) and all(r.verdict == "PASS" for r in judged.results.values())
+        judged.verdict = "PASS" if (all_pass and not judged.reasons and not missing) else "FAIL"
+    else:
+        if plugin_result and plugin_result != "success":
+            judged.verdict = "FAIL"
+            judged.reasons.append(f"Siemens LSP 插件检查：{plugin_result}")
     final = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
     final.update(
         {
-            "tier": "L3",
+            "tier": tier,
+            "expected_groups": expected_groups,
             "plugin_result": plugin_result,
             "verdict": judged.verdict,
             "complete": judged.complete,
@@ -163,9 +215,11 @@ def cmd_merge(args: argparse.Namespace) -> int:
     text = json.dumps(final, ensure_ascii=False, indent=2)
     (out / SUMMARY_FILE).write_text(text, encoding="utf-8", newline="\n")
     digest = hashlib.sha256((out / SUMMARY_FILE).read_bytes()).hexdigest()
-    failures = failure_lines(out, judged)
+    failures = failure_lines(out, judged, expected_groups=expected_groups)
+    heading = f"# L2 分组门禁判决: {judged.verdict}" if tier == "L2" else f"# 全量门禁判决: {judged.verdict}"
     body = [
-        f"# 全量门禁判决: {judged.verdict}",
+        heading,
+        f"- 档次: {tier}",
         f"- 提交号: {judged.commit}",
         f"- gate_summary.json SHA-256: {digest}",
     ]
@@ -194,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
     merge.add_argument("--out", required=True)
     merge.add_argument("--worktree", default="")
     merge.add_argument("--plugin-result", default="")
+    merge.add_argument("--tier", default="L3", choices=("L2", "L3"))
+    merge.add_argument("--expected-groups", default="")
     args = parser.parse_args(argv)
     if args.cmd == "list":
         print(json.dumps([g.name for g in GROUPS]))
