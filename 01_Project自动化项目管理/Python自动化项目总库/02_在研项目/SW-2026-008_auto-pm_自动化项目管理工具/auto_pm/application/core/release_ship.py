@@ -92,6 +92,7 @@ def _gate(
             cached = note.read_text(encoding="utf-8").strip() if note.is_file() else ""
             return _verdict_info(
                 target,
+                commit,
                 int(cached) if cached.isdigit() else None,
                 "",
                 "拿不到 GitHub 上的运行记录，用的是上次下载的判决（可能不是最新一轮）",
@@ -142,13 +143,14 @@ def _gate(
         if downloaded != target:
             shutil.copyfile(downloaded, target)
         run_note.write_text(str(run_id), encoding="utf-8")
-    return _verdict_info(target, run_id, url, ""), target
+    return _verdict_info(target, commit, run_id, url, ""), target
 
 
-def _verdict_info(path: Path, run_id: int | None, url: str, note: str) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+def _verdict_info(
+    path: Path, commit: str, run_id: int | None, url: str, note: str
+) -> dict[str, Any]:
+    data = check._json(path)  # noqa: SLF001 - reuse release preflight JSON reader
+    if data is None:
         return {
             "state": "error",
             "run_id": run_id,
@@ -157,14 +159,15 @@ def _verdict_info(path: Path, run_id: int | None, url: str, note: str) -> dict[s
             "verdict_sha256": "",
             "detail": "判决文件读不出",
         }
-    verdict = str(data.get("verdict", ""))
+    ok, reason = check.validate_full_gate_verdict(data, commit)
+    detail = f"{note}；{reason}" if (note and not ok) else (note or reason)
     return {
-        "state": "pass" if verdict.startswith("PASS") else "fail",
+        "state": "pass" if ok else "fail",
         "run_id": run_id,
         "run_url": url,
         "verdict_path": str(path),
         "verdict_sha256": check._sha256(path),  # noqa: SLF001 - the same digest the audit line carries
-        "detail": note or f"判决 {verdict[:60]}",
+        "detail": detail,
     }
 
 

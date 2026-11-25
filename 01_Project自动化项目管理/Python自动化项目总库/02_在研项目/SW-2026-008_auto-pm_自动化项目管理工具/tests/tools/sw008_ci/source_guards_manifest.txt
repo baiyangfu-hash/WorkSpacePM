@@ -1,4 +1,4 @@
-# SW-2026-008 整树守卫测试作用域清单（scoped source guards，共 35 项）
+# SW-2026-008 整树守卫测试作用域清单（scoped source guards，共 34 项）
 # 格式: <scope[,scope2]>: <test_rel_path>
 # 支持的 <scope>:
 #   *         -> 任意非纯文档（.md/.rst）改动命中
@@ -30,13 +30,12 @@ auto_pm/: tests/logging/test_package_logger.py
 auto_pm/: tests/test_layer_import_direction.py
 auto_pm/: tests/test_subprocess_timeout_guard.py
 auto_pm/ui/cli/: tests/cli/test_caller_path.py
-scripts/cockpit_board/: tests/core/test_cockpit_board.py
 scripts/cockpit_board/: tests/core/test_cockpit_board_release_page.py
 scripts/cockpit_board/: tests/core/test_cockpit_board_runner.py
 scripts/cockpit_board/: tests/core/test_cockpit_board_shell.py
 scripts/cockpit_board/: tests/core/test_cockpit_board_tools.py
 scripts/cockpit_board/,scripts/pm_dashboard.py: tests/core/test_cockpit_no_window.py
-scripts/cockpit_board/,scripts/pm_dashboard_gui.py: tests/core/test_pm_dashboard_gui.py
+scripts/cockpit_board/,scripts/pm_dashboard_gui.py: tests/infrastructure/test_cockpit_board_static_guards.py
 tests/: tests/infrastructure/test_external_reads_marked.py
 tests/: tests/infrastructure/test_memory_preflight.py
 tests/: tests/infrastructure/test_source_guards_manifest.py

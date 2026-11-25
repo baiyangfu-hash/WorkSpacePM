@@ -17,11 +17,26 @@ import pytest
 from auto_pm.application.core import release_deploy_check as check
 from auto_pm.application.core import release_ops
 from auto_pm.application.core import release_ship as ship_mod
+from auto_pm.application.core.gate_run_service import GROUPS
 from auto_pm.application.core.release_deploy import DeployError, DeployResult
 
 COMMIT = "c0e5bbcca64daaa85f415968fe6378d39e33c857"
 RID = "1.3.3-c0e5bbc"
-PASS_VERDICT = {"schema": "gate-run.v1", "commit": COMMIT, "verdict": "PASS", "complete": True}
+PASS_VERDICT = {
+    "schema": "gate-run.v1",
+    "commit": COMMIT,
+    "commit_end": COMMIT,
+    "verdict": "PASS",
+    "complete": True,
+    "tier": "L3",
+    "plugin_result": "success",
+    "git_dirty": False,
+    "git_dirty_end": False,
+    "manifest_sha256": "a" * 64,
+    "reasons": [],
+    "groups_run": [g.name for g in GROUPS],
+    "results": {g.name: {"verdict": "PASS"} for g in GROUPS},
+}
 
 
 class FakeGitHub:
@@ -269,4 +284,31 @@ def test_a_newer_gate_run_replaces_the_cached_verdict(root: Path) -> None:
     report = ship_mod.ship(root, "c0e5bbc", github=second)
     assert second.downloads == [8]
     assert report.gate["state"] == "fail" and report.gate["run_id"] == 8
+    assert report.can_switch is False
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"tier": "L2"},
+        {"tier": ""},
+        {"complete": False},
+        {"commit": COMMIT[:12]},
+        {"commit": "0" * 40},
+        {"commit_end": "0" * 40},
+        {"results": {g.name: {"verdict": "PASS"} for g in GROUPS[:-1]}},
+        {"results": {**{g.name: {"verdict": "PASS"} for g in GROUPS}, "core": {"verdict": "FAIL"}}},
+        {"plugin_result": "skipped"},
+        {"plugin_result": "failure"},
+        {"plugin_result": ""},
+        {"git_dirty": True},
+        {"manifest_sha256": "short"},
+        {"reasons": ["有异常"]},
+    ],
+)
+def test_non_l3_or_incomplete_verdict_blocks_ship(root: Path, patch: dict[str, Any]) -> None:
+    _signoff(root)
+    github = FakeGitHub([{"id": 9, "status": "completed", "url": "u9"}], {**PASS_VERDICT, **patch})
+    report = ship_mod.ship(root, "c0e5bbc", github=github)
+    assert report.gate["state"] == "fail"
     assert report.can_switch is False

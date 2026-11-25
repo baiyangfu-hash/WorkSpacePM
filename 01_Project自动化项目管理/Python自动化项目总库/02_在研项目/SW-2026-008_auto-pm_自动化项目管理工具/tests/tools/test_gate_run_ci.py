@@ -78,4 +78,56 @@ def test_plugin_failure_keeps_the_published_verdict_red(tmp_path: Path, monkeypa
     assert result == 1
     published = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
     assert published["verdict"] == "FAIL"
+    assert published["tier"] == "L3"
+    assert published["plugin_result"] == "failure"
     assert "Siemens LSP" in published["reasons"][0]
+
+
+def test_merge_writes_l3_tier_and_plugin_success_and_passes_release_validator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.gate_run_service import (
+        SUMMARY_FILE,
+        GateRunService,
+        GateSummary,
+        GroupResult,
+    )
+    from auto_pm.application.core.release_deploy_check import validate_full_gate_verdict
+
+    source = tmp_path / "merged"
+    source.mkdir()
+    commit = "a" * 40
+    merged_input = {
+        "schema": "gate-run.v1",
+        "commit": commit,
+        "commit_end": commit,
+        "git_dirty": False,
+        "git_dirty_end": False,
+        "manifest_sha256": "b" * 64,
+        "ignored_code": [],
+        "reasons": [],
+        "groups_run": [g.name for g in GROUPS],
+        "results": {g.name: {"exit": 0} for g in GROUPS},
+    }
+    (source / SUMMARY_FILE).write_text(json.dumps(merged_input), encoding="utf-8")
+    judged = GateSummary(
+        commit=commit,
+        commit_end=commit,
+        git_dirty=False,
+        git_dirty_end=False,
+        manifest_sha256="b" * 64,
+        groups_run=[g.name for g in GROUPS],
+        complete=True,
+        verdict="PASS",
+        reasons=[],
+        results={g.name: GroupResult(g.name, [], "", exit=0, verdict="PASS") for g in GROUPS},
+    )
+    monkeypatch.setattr(GateRunService, "judge_dir", lambda *_args, **_kwargs: judged)
+    out = tmp_path / "out"
+    result = ci.main(["merge", "--in", str(source), "--out", str(out), "--plugin-result", "success"])
+    assert result == 0
+    published = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
+    assert published["tier"] == "L3"
+    assert published["plugin_result"] == "success"
+    ok, detail = validate_full_gate_verdict(published, commit)
+    assert ok is True, detail

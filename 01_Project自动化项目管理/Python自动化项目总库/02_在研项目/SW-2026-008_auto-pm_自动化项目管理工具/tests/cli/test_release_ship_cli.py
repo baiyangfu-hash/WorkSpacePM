@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from auto_pm.application.core import release_deploy_check as rdc
 from auto_pm.application.core import release_ops, release_wiring
 from auto_pm.application.core import release_ship as ship_mod
+from auto_pm.application.core.gate_run_service import GROUPS
 from auto_pm.application.core.release_deploy import DeployError, DeployResult
 from auto_pm.contracts.interlock_matrix import COMMANDS, CommandKind
 from auto_pm.ui.cli import release as release_cli
@@ -45,7 +46,26 @@ class _GitHub:
     def download_verdict(self, run_id: int, commit: str, dest: Path) -> Path | None:
         dest.mkdir(parents=True, exist_ok=True)
         target = dest / "gate_verdict.json"
-        target.write_text(json.dumps({"commit": COMMIT, "verdict": self.verdict}), encoding="utf-8")
+        target.write_text(
+            json.dumps(
+                {
+                    "schema": "gate-run.v1",
+                    "commit": COMMIT,
+                    "commit_end": COMMIT,
+                    "verdict": self.verdict,
+                    "complete": True,
+                    "tier": "L3",
+                    "plugin_result": "success",
+                    "git_dirty": False,
+                    "git_dirty_end": False,
+                    "manifest_sha256": "a" * 64,
+                    "reasons": [],
+                    "groups_run": [g.name for g in GROUPS],
+                    "results": {g.name: {"verdict": "PASS"} for g in GROUPS},
+                }
+            ),
+            encoding="utf-8",
+        )
         return target
 
 

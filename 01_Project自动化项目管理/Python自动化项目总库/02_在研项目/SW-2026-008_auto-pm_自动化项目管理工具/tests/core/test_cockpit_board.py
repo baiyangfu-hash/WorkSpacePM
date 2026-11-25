@@ -497,10 +497,7 @@ def test_theme_tokens_are_the_only_colors() -> None:
         for name in names:
             assert getattr(tokens, name).startswith("#")
     assert "fonts.googleapis" not in theme.build_qss(theme.LIGHT)
-    # 画面代码里不许写颜色，改颜色只改 theme.py
-    for path in (SCRIPTS / "cockpit_board").rglob("*.py"):
-        if path.name != "theme.py":
-            assert not re.search(r"#[0-9a-fA-F]{6}\b", path.read_text(encoding="utf-8")), path.name
+    # 画面代码里不许写颜色字面量的纯静态守卫已拆出至 tests/infrastructure/test_cockpit_board_static_guards.py
 
 
 # ---------------------------------------------------------------- 本机动作
