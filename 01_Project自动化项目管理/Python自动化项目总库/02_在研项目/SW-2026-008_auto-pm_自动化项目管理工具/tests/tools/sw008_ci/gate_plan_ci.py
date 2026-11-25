@@ -8,9 +8,13 @@ workflow runner, overriding client hints upward to ``L3`` whenever required.
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import json
 import subprocess
 import sys
+import types
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,10 +23,53 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from auto_pm.application.core.gate_tier_policy import (  # noqa: E402
-    ALL_GATE_GROUPS,
-    classify_gate_tier,
-)
+
+def _load_tier_policy() -> tuple[tuple[str, ...], Callable[..., Any]]:
+    """Load tier policy using stdlib only without triggering ``auto_pm.__init__`` third-party imports."""
+    if "auto_pm" in sys.modules:
+        mod = importlib.import_module("auto_pm.application.core.gate_tier_policy")
+        return tuple(mod.ALL_GATE_GROUPS), mod.classify_gate_tier
+
+    packages = (
+        ("auto_pm", ROOT / "auto_pm"),
+        ("auto_pm.application", ROOT / "auto_pm" / "application"),
+        ("auto_pm.application.core", ROOT / "auto_pm" / "application" / "core"),
+        ("auto_pm.infrastructure", ROOT / "auto_pm" / "infrastructure"),
+    )
+    for pkg_name, pkg_dir in packages:
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = [str(pkg_dir)]
+        pkg.__package__ = pkg_name
+        sys.modules[pkg_name] = pkg
+        if "." in pkg_name:
+            parent_name, attr_name = pkg_name.rsplit(".", 1)
+            setattr(sys.modules[parent_name], attr_name, pkg)
+
+    modules = (
+        ("auto_pm.infrastructure.memory_preflight", ROOT / "auto_pm" / "infrastructure" / "memory_preflight.py"),
+        ("auto_pm.application.core.gate_env_preflight", ROOT / "auto_pm" / "application" / "core" / "gate_env_preflight.py"),
+        ("auto_pm.application.core.gate_run_service", ROOT / "auto_pm" / "application" / "core" / "gate_run_service.py"),
+        ("auto_pm.application.core.gate_tier_policy", ROOT / "auto_pm" / "application" / "core" / "gate_tier_policy.py"),
+    )
+    loaded: dict[str, types.ModuleType] = {}
+    for mod_name, mod_path in modules:
+        spec = importlib.util.spec_from_file_location(mod_name, mod_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法加载纯标准库模块: {mod_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = module
+        spec.loader.exec_module(module)
+        parent_name, attr_name = mod_name.rsplit(".", 1)
+        setattr(sys.modules[parent_name], attr_name, module)
+        loaded[mod_name] = module
+
+    policy = loaded["auto_pm.application.core.gate_tier_policy"]
+    groups: tuple[str, ...] = tuple(str(g) for g in policy.ALL_GATE_GROUPS)
+    classifier: Callable[..., Any] = policy.classify_gate_tier
+    return groups, classifier
+
+
+ALL_GATE_GROUPS, classify_gate_tier = _load_tier_policy()
 
 PROJ_PREFIX = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/"
 

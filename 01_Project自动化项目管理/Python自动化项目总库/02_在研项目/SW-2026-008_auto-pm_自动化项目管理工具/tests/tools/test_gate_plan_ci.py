@@ -58,7 +58,7 @@ def _commit_files(repo: Path, files: dict[str, str], msg: str) -> str:
 def _run_isolated(repo: Path, *args: str) -> dict[str, object]:
     env = {**os.environ, "PYTHONUTF8": "1"}
     proc = subprocess.run(
-        [sys.executable, "-I", str(PLAN_SCRIPT), "--repo", str(repo), *args],
+        [sys.executable, "-I", "-S", str(PLAN_SCRIPT), "--repo", str(repo), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -67,6 +67,31 @@ def _run_isolated(repo: Path, *args: str) -> dict[str, object]:
         check=True,
     )
     return dict(json.loads(proc.stdout))
+
+
+def test_gate_plan_ci_imports_with_zero_site_packages_and_no_third_party_modules() -> None:
+    snippet = (
+        "import json, sys; "
+        f"sys.path.insert(0, {str(PROJECT)!r}); "
+        "import tests.tools.sw008_ci.gate_plan_ci as m; "
+        "print(json.dumps({'groups': len(m.ALL_GATE_GROUPS), 'callable': callable(m.plan_ci_gate), "
+        "'site': [p for p in sys.path if 'site-packages' in p.lower()], "
+        "'third_party': [k for k in ('yaml', 'pydantic', 'pydantic_core') if k in sys.modules]}))"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", snippet],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONUTF8": "1"},
+        check=True,
+    )
+    info = json.loads(proc.stdout)
+    assert info["groups"] == len(ALL_GATE_GROUPS)
+    assert info["callable"] is True
+    assert info["site"] == []
+    assert info["third_party"] == []
 
 
 def test_gate_plan_ci_runs_in_isolated_stdlib_mode_for_l2_change(tmp_path: Path) -> None:
