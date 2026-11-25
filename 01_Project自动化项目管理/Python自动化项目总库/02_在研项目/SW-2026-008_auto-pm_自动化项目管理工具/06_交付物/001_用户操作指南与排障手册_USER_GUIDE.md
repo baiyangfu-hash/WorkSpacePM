@@ -2,7 +2,7 @@
 version: "V2.1.0"
 status: "正式发布"
 created: "2026-08-17"
-updated: "2026-09-01"
+updated: "2026-11-26"
 spec_id: "USER_GUIDE"
 project_id: "SW-2026-008"
 title: "auto-pm 自动化项目管理工具 - 用户操作指南与排障手册"
@@ -11,8 +11,8 @@ title: "auto-pm 自动化项目管理工具 - 用户操作指南与排障手册"
 # auto-pm 自动化项目管理工具 - 用户操作指南与排障手册 (USER_GUIDE V2.1.0)
 
 > **面向对象**：现场电气工程师、PLC 研发工程师、全栈软件开发、项目经理（PM）、AI 协作助手  
-> **适用版本**：auto-pm V1.2.3+ 工作空间基础设施运行位（GUI + CLI + AI Agent 协同）
-> **运行源码入口**：`00_Infrastructure/auto_pm`；本项目目录保留文档、历史交付物与回退材料。
+> **适用版本**：auto-pm 1.3.3+ 工作空间基础设施现役运行位（GUI + 总控屏 + CLI + AI Agent 协同）
+> **运行源码入口**：工作空间根目录 `.\.venv\Scripts\python.exe .\main.py`（由 `00_Infrastructure/auto_pm/active_release.json` 指向现役发布包）；本项目目录保留文档、交付物、总控屏脚本与 WBS/变更证据。
 
 ---
 
@@ -182,3 +182,34 @@ title: "auto-pm 自动化项目管理工具 - 用户操作指南与排障手册"
 【生成HMI原型】 : python -m auto_pm -w "." prototype init --pid <项目ID> --topology both
 ===================================================================================
 ```
+
+---
+
+## 6. 现役驾驶舱（1.3.3）进门流、门禁分档与排障补充
+
+### 6.1 进门定位、单机轻轨交接与 WBS 进度核算
+
+1. **新会话进门与体检**：在控制根用 `.\.venv\Scripts\python.exe` 运行 `SW8/scripts/pm_flows.py entry <项目编号>`（只读定位）与 `pm_flows.py checkup <项目编号>`（12 步只读体检）。
+2. **单机轻轨交接（PM-056）**：日常单机模式下，在隔离工位内通过 `SW8/scripts/pm_handoff.py set-focus` / `log` 更新 `<项目>/{04|11}_监控/交接交换区/`（`focus.json` 与 `journal.jsonl`），并用 `pm_handoff.py validate <项目编号> --root <工位> --require-exists` 校验；禁止直接写控制根交接区。
+3. **WBS 项目计划表（现算状态）**：当项目包含有依赖的多卡里程碑时，在 `<项目>/00_项目管理/01_立项与需求/NNN_<项目编号>_项目计划表.md` 登记任务行与独立证据回执，由 `SW8/scripts/plan_status.py <项目编号> [--json]` 按 `main` 与分支事实自动计算 `未开始 / 在干 / 已合并未验证 / 已完成 / 待用户验收 / 已达成`。
+
+### 6.2 三级门禁分档（L1 / L2 / L3）
+
+提交前统一在控制根运行 `.\.venv\Scripts\python.exe .\main.py gate precheck --worktree <工位> --defer-full [--json]` 自动判档：
+
+- **L1（本地快速闭环）**：仅修改纯文档（`.md` / `.rst`）或已核实样板路径（`L1_VERIFIED_PILOT_PATHS`）。通过本机自检与 `gate precheck` 后即可由 `pm_merge.py merge <工位>` 合入 `main`，无需云端排队。
+- **L2（云端按组门禁）**：非核心脚本、测试或总控屏文档/代码改动。先 `git push` 工位分支，再运行 `.\main.py gate start --worktree <工位>`（不带 `--full`），云端仅跑受影响测试分组并签发 `gate-l2` 凭证。
+- **L3（云端全量 + 插件）**：规则文件、核心门禁/发版/状态机/PLC/QML、配置文件或非 `.md/.py` 运行资产（含 `.json` / `.jsonl`）。强制 `.\main.py gate start --worktree <工位> --full`（全量 11 组 + 西门子插件）；命中 `FLOW-001`“要你点头”受保护类还须另起独立会话完成 `AUD-001` 审计与 `pm_merge.py audit-record` 登记。
+
+### 6.3 高频实操排障清单
+
+| 常见现象 | 根因 | 处置措施 |
+|---|---|---|
+| 报 `RUNTIME_IDENTITY_UNVERIFIED` | 直接调用了 `SW8\main.py` 而非根目录入口 | 始终在控制根调用 `.\.venv\Scripts\python.exe .\main.py` |
+| 变更单报 `D-154` 审批失效 | `--to approved` 后又修改了 `§5` 涉及文件 | 批准前务必在 `§5.1/§5.2` 填齐精确文件路径 |
+| `implementation-card precheck` 拒绝 | 实施卡 `> 依据：` 行出现了 `CHG-...` | 变更单号只放 `> 变更单：` 行，`> 依据：` 只填规范号 |
+| `gate start` 首次派发即失败 | 工位分支尚未推送到 `origin` | `gate start` 前先执行 `git -C <工位> push -u origin <分支>` |
+| `change transition --to completed` 拒流转 | `--verification-conclusion` 缺少“通过”或含“不通过” | 结论文案必须明确含“通过”且不含“不通过” |
+| Windows 本机 `mypy` 报缺模块或错误 | 未在 `SW8/` 下带隔离参数，或把 `pm_merge.py` 与 `tests/` 混跑 | 在 `SW8/` 下用 `--platform win32 --no-incremental --no-sqlite-cache --cache-dir=/dev/null`，并与 `pm_merge.py` 分开校验 |
+| 零依赖 CI 脚本上线后缺包 | 仅用 `python -I` 仍能看到 `.venv/Lib/site-packages` | 必须用 `python -I -S` 验证纯标准库隔离 |
+| 发版或本地钩子报缺 `dirname` | Git for Windows 的 `usr\bin` 未在 `PATH` 中 | 执行前将 `C:\Program Files\Git\usr\bin` 加入当前终端 `PATH` |
