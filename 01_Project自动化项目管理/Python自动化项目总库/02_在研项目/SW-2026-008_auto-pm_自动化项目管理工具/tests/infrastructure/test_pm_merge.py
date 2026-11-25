@@ -746,6 +746,50 @@ def test_managed_gate_accepts_real_git_identity(
     assert pm.managed_gate_receipt(repo.root, repo.wt) == "托管全量门禁 PASS：task（github，运行 12345）"
 
 
+def test_managed_gate_accepts_l2_and_enforces_tier_and_full_fallback(
+    pm: ModuleType, repo: SimpleNamespace, gate_receipt: Path
+) -> None:
+    # 1) L2 receipt accepted when require_full=False and expected_groups covered
+    record = json.loads(gate_receipt.read_text(encoding="utf-8", errors="replace"))
+    record["candidate"]["tier"] = "L2"
+    record["candidate"]["groups"] = ["application", "cli"]
+    gate_receipt.write_text(json.dumps(record), encoding="utf-8", errors="replace")
+
+    ok_l2 = pm.managed_gate_receipt(
+        repo.root, repo.wt, require_full=False, expected_groups=("application",)
+    )
+    assert ok_l2.startswith("托管 L2 门禁 PASS：task")
+
+    # 2) L2 receipt rejected if expected_groups has uncovered group
+    with pytest.raises(pm.RefusedError, match="少于当前预期受影响组"):
+        pm.managed_gate_receipt(
+            repo.root, repo.wt, require_full=False, expected_groups=("application", "core")
+        )
+
+    # 3) L2 receipt rejected when require_full=True
+    with pytest.raises(pm.RefusedError, match="需要 L3 全量门禁凭证"):
+        pm.managed_gate_receipt(repo.root, repo.wt, require_full=True)
+
+    # 4) L3 receipt satisfies L2 check (require_full=False)
+    record["candidate"]["tier"] = "L3"
+    record["candidate"].pop("groups", None)
+    gate_receipt.write_text(json.dumps(record), encoding="utf-8", errors="replace")
+    assert pm.managed_gate_receipt(repo.root, repo.wt, require_full=False).startswith("托管全量门禁 PASS")
+
+    # 5) Legacy main.py without --full flag falls back cleanly when require_full=True
+    (repo.root / "main.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "if '--full' in sys.argv:\n"
+        "    print('Error: No such option: --full', file=sys.stderr)\n"
+        "    raise SystemExit(2)\n"
+        "print(Path('.auto-pm/gate-receipt.json').read_text(encoding='utf-8'))\n",
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert pm.managed_gate_receipt(repo.root, repo.wt, require_full=True).startswith("托管全量门禁 PASS")
+
+
 @pytest.mark.parametrize("changed_field", ["commit", "tree", "base"])
 def test_managed_gate_rejects_wrong_git_identity(
     pm: ModuleType, repo: SimpleNamespace, gate_receipt: Path, changed_field: str
@@ -1228,15 +1272,25 @@ def test_run_gates_still_requires_managed_receipt_for_l2_and_l3(
         return subprocess.CompletedProcess(cmd, 1, json.dumps(payload, ensure_ascii=False), "")
 
     monkeypatch.setattr(pm.subprocess, "run", fake_run)
+    recorded_calls: list[dict[str, Any]] = []
 
-    def missing_receipt(_root: Path, _worktree: Path) -> str:
+    def missing_receipt(_root: Path, _worktree: Path, **kwargs: Any) -> str:
+        recorded_calls.append(kwargs)
         raise pm.RefusedError("缺少托管全量门禁凭证")
 
     monkeypatch.setattr(pm, "managed_gate_receipt", missing_receipt)
     with pytest.raises(pm.RefusedError, match="托管全量"):
         pm.run_gates(tmp_path, wt, False)
+    if tier == "L2":
+        assert recorded_calls[-1] == {"require_full": False, "expected_groups": ("application",)}
+    else:
+        assert recorded_calls[-1] == {}
 
-    monkeypatch.setattr(pm, "managed_gate_receipt", lambda _root, _wt: f"托管凭证已核对({tier})")
+    def ok_receipt(_root: Path, _wt: Path, **kwargs: Any) -> str:
+        recorded_calls.append(kwargs)
+        return f"托管凭证已核对({tier})"
+
+    monkeypatch.setattr(pm, "managed_gate_receipt", ok_receipt)
     ok_res = pm.run_gates(tmp_path, wt, False)
     assert ok_res.ok
     assert any(f"门禁分级：{tier}（建议组：" in line for line in ok_res.lines)

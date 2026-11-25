@@ -131,3 +131,141 @@ def test_merge_writes_l3_tier_and_plugin_success_and_passes_release_validator(
     assert published["plugin_result"] == "success"
     ok, detail = validate_full_gate_verdict(published, commit)
     assert ok is True, detail
+
+
+def test_merge_l2_accepts_expected_groups_keeps_incomplete_false_and_rejected_by_release_validator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.gate_run_service import (
+        SUMMARY_FILE,
+        GateRunService,
+        GateSummary,
+        GroupResult,
+    )
+    from auto_pm.application.core.release_deploy_check import validate_full_gate_verdict
+
+    source = tmp_path / "app"
+    source.mkdir()
+    commit = "a" * 40
+    part_payload = {
+        "schema": "gate-run.v1",
+        "commit": commit,
+        "commit_end": commit,
+        "git_dirty": False,
+        "git_dirty_end": False,
+        "manifest_sha256": "m" * 64,
+        "ignored_code": [],
+        "reasons": [ci.INCOMPLETE],
+        "results": {"application": {"exit": 0}},
+    }
+    (source / SUMMARY_FILE).write_text(json.dumps(part_payload), encoding="utf-8")
+    judged = GateSummary(
+        commit=commit,
+        commit_end=commit,
+        git_dirty=False,
+        git_dirty_end=False,
+        manifest_sha256="m" * 64,
+        groups_run=["application"],
+        complete=False,
+        verdict="PARTIAL",
+        reasons=[ci.INCOMPLETE],
+        results={"application": GroupResult("application", [], "", exit=0, verdict="PASS")},
+    )
+    monkeypatch.setattr(GateRunService, "judge_dir", lambda *_args, **_kwargs: judged)
+    monkeypatch.setattr(ci, "manifest_sha256", lambda: "m" * 64)
+
+    out = tmp_path / "out_l2"
+    code = ci.main(
+        [
+            "merge",
+            "--in",
+            str(source),
+            "--out",
+            str(out),
+            "--tier",
+            "L2",
+            "--expected-groups",
+            "application",
+            "--plugin-result",
+            "skipped",
+        ]
+    )
+    assert code == 0
+    published = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
+    assert published["tier"] == "L2"
+    assert published["expected_groups"] == ["application"]
+    assert published["complete"] is False
+    assert published["verdict"] == "PASS"
+    assert published["reasons"] == []
+    assert "没有产出" not in (out / "failures.md").read_text(encoding="utf-8")
+    ok, detail = validate_full_gate_verdict(published, commit)
+    assert ok is False and ("L2" in detail or "complete=False" in detail)
+
+
+def test_merge_l2_rejects_missing_expected_group_or_dirty_tree_or_manifest_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.gate_run_service import (
+        SUMMARY_FILE,
+        GateRunService,
+        GateSummary,
+        GroupResult,
+    )
+
+    source = tmp_path / "app"
+    source.mkdir()
+    commit = "a" * 40
+    (source / SUMMARY_FILE).write_text(
+        json.dumps(
+            {
+                "schema": "gate-run.v1",
+                "commit": commit,
+                "commit_end": commit,
+                "git_dirty": False,
+                "git_dirty_end": False,
+                "manifest_sha256": "wrong" + "0" * 59,
+                "ignored_code": [],
+                "reasons": [ci.INCOMPLETE],
+                "results": {"application": {"exit": 0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    judged = GateSummary(
+        commit=commit,
+        commit_end=commit,
+        git_dirty=True,
+        git_dirty_end=False,
+        manifest_sha256="wrong" + "0" * 59,
+        groups_run=["application", "cli"],
+        complete=False,
+        verdict="FAIL",
+        reasons=["工作树不干净（含未跟踪文件）或读不出", ci.INCOMPLETE],
+        results={"application": GroupResult("application", [], "", exit=0, verdict="PASS")},
+    )
+    monkeypatch.setattr(GateRunService, "judge_dir", lambda *_args, **_kwargs: judged)
+    monkeypatch.setattr(ci, "manifest_sha256", lambda: "m" * 64)
+
+    out = tmp_path / "out_l2_bad"
+    code = ci.main(
+        [
+            "merge",
+            "--in",
+            str(source),
+            "--out",
+            str(out),
+            "--tier",
+            "L2",
+            "--expected-groups",
+            "application,cli",
+            "--plugin-result",
+            "skipped",
+        ]
+    )
+    assert code == 1
+    published = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
+    assert published["verdict"] == "FAIL"
+    joined = " | ".join(published["reasons"])
+    assert "工作树不干净" in joined
+    assert "manifest_sha256" in joined
+    assert "缺失预期测试组: cli" in joined

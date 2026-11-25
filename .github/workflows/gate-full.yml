@@ -13,6 +13,10 @@ on:
       base_sha:
         type: string
         description: 当前 main 完整提交号
+      requested_tier:
+        type: string
+        default: L3
+        description: 请求门禁档次（L2|L3，服务端按基线与改动路径重算并可强升 L3）
   push:
     branches: [main]
 
@@ -40,6 +44,10 @@ jobs:
       candidate: ${{ steps.check.outputs.candidate }}
       reuse: ${{ steps.check.outputs.reuse }}
       digest: ${{ steps.check.outputs.digest }}
+      tier: ${{ steps.check.outputs.tier }}
+      groups: ${{ steps.check.outputs.groups }}
+      groups_csv: ${{ steps.check.outputs.groups_csv }}
+      run_plugin: ${{ steps.check.outputs.run_plugin }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,6 +59,7 @@ jobs:
           TASK_ID: ${{ inputs.task_id }}
           REQUESTED_SHA: ${{ inputs.candidate_sha }}
           REQUESTED_BASE: ${{ inputs.base_sha }}
+          REQUESTED_TIER: ${{ inputs.requested_tier }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -88,7 +97,8 @@ jobs:
             artifact="$RUNNER_TEMP/reuse-verdict"
             gh run download --repo "$GITHUB_REPOSITORY" "$id" --name "gate-verdict-${prior::12}" --dir "$artifact" || return 1
             jq -e --arg prior "$prior" '
-              .commit == $prior and .verdict == "PASS" and .complete and
+              .commit == $prior and .verdict == "PASS" and .complete == true and
+              .tier == "L3" and .plugin_result == "success" and
               (.manifest_sha256 | test("^[0-9a-f]{64}$"))' "$artifact/gate_summary.json" >/dev/null || return 1
             digest=$(sha256sum "$artifact/gate_summary.json" | cut -d' ' -f1) || return 1
             jq -e --arg desc "PASS: verdict PASS sha256 ${digest}, plugin success" \
@@ -105,7 +115,26 @@ jobs:
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "复用同树候选 $prior 的 GitHub 门禁 $run（第一父提交 $base）" >> "$GITHUB_STEP_SUMMARY"
           }
-          reuse || true
+          if reuse; then
+            echo "tier=L3" >> "$GITHUB_OUTPUT"
+            echo "groups=[\"core\"]" >> "$GITHUB_OUTPUT"
+            echo "groups_csv=" >> "$GITHUB_OUTPUT"
+            echo "run_plugin=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -n "${TASK_ID}${REQUESTED_SHA}${REQUESTED_BASE}" ]]; then
+            python3 "$PROJ/tests/tools/sw008_ci/gate_plan_ci.py" \
+              --repo "$GITHUB_WORKSPACE" \
+              --base "$REQUESTED_BASE" \
+              --candidate "$candidate" \
+              --requested-tier "${REQUESTED_TIER:-L3}" \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            python3 "$PROJ/tests/tools/sw008_ci/gate_plan_ci.py" \
+              --repo "$GITHUB_WORKSPACE" \
+              --base "$candidate" \
+              --candidate "$candidate" \
+              --requested-tier "L3" \
+              --github-output "$GITHUB_OUTPUT"
+          fi
       - name: Upload evidence for the same-tree merge
         if: steps.check.outputs.reuse != ''
         uses: actions/upload-artifact@v4
@@ -123,18 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group:
-          - application
-          - change
-          - cli
-          - contracts
-          - core
-          - infrastructure
-          - plc
-          - core_basis_serial
-          - qml
-          - qml_debounce_alone
-          - rest
+        group: ${{ fromJson(needs.identity.outputs.groups) }}
     defaults:
       run:
         shell: bash
@@ -184,7 +202,7 @@ jobs:
   # the runner.  Only this job sets AUTO_PM_SIEMENS_LSP; the eleven groups above keep the "no plugin" default of tests/conftest.py.
   plugin:
     needs: identity
-    if: ${{ !needs.identity.outputs.reuse }}
+    if: ${{ !needs.identity.outputs.reuse && needs.identity.outputs.run_plugin == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -277,7 +295,13 @@ jobs:
         id: name
         env:
           CANDIDATE: ${{ needs.identity.outputs.candidate }}
-        run: echo "artifact=gate-verdict-${CANDIDATE::12}" >> "$GITHUB_OUTPUT"
+          TIER: ${{ needs.identity.outputs.tier }}
+        run: |
+          if [ "$TIER" = "L2" ]; then
+            echo "artifact=gate-verdict-l2-${CANDIDATE::12}" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact=gate-verdict-${CANDIDATE::12}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Long paths
         run: git config --system core.longpaths true
@@ -312,12 +336,14 @@ jobs:
         working-directory: ${{ env.PROJ }}
         env:
           PLUGIN_RESULT: ${{ needs.plugin.result }}
+          TIER: ${{ needs.identity.outputs.tier }}
+          EXPECTED_GROUPS: ${{ needs.identity.outputs.groups_csv }}
         run: |
           # gate-* also matches a verdict an earlier attempt of this run uploaded (re-run): it is not a group record
           rm -rf "$RUNNER_TEMP"/parts/gate-verdict*
           "$RUNNER_TEMP/venv/Scripts/python.exe" tests/tools/sw008_ci/gate_run_ci.py merge \
             --in "$RUNNER_TEMP"/parts/gate-* --out "$RUNNER_TEMP/gate-final" --worktree "$GITHUB_WORKSPACE" \
-            --plugin-result "$PLUGIN_RESULT"
+            --plugin-result "$PLUGIN_RESULT" --tier "$TIER" --expected-groups "$EXPECTED_GROUPS"
 
       # CHG-SCPT-2026-705: the commit number and the verdict file's SHA-256 always go into the job summary and the job's
       # outputs (the commit-status job reads them), also when the merge step above failed or left no verdict file.
@@ -327,6 +353,7 @@ jobs:
         env:
           ARTIFACT: ${{ steps.name.outputs.artifact }}
           CANDIDATE: ${{ needs.identity.outputs.candidate }}
+          TIER: ${{ needs.identity.outputs.tier }}
         run: |
           summary="$RUNNER_TEMP/gate-final/gate_summary.json"
           if [ -f "$summary" ]; then
@@ -340,6 +367,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "## gate-full 判决记录"
+            echo "- 门禁档次: ${TIER:-L3}"
             echo "- 提交号: $CANDIDATE"
             echo "- 判决: $verdict"
             echo "- gate_summary.json SHA-256: $digest"
@@ -374,21 +402,35 @@ jobs:
           CANDIDATE: ${{ needs.identity.outputs.candidate }}
           REUSED: ${{ needs.identity.outputs.reuse }}
           REUSED_DIGEST: ${{ needs.identity.outputs.digest }}
+          TIER: ${{ needs.identity.outputs.tier }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          if [ "$VERDICT" = "PASS" ] && [ "$PLUGIN" = "success" ]; then
-            state=success
-            word=PASS
-          else
-            state=failure
-            word=FAIL
-          fi
-          description="$word: verdict ${VERDICT:-MISSING} sha256 ${DIGEST}, plugin $PLUGIN"
           if [ -n "$REUSED" ]; then
+            context=gate-full
             state=success
             description="PASS: reused exact candidate tree, sha256 ${REUSED_DIGEST:0:12}"
+          elif [ "$TIER" = "L2" ]; then
+            context=gate-l2
+            if [ "$VERDICT" = "PASS" ] && { [ "$PLUGIN" = "skipped" ] || [ "$PLUGIN" = "success" ]; }; then
+              state=success
+              word=PASS
+            else
+              state=failure
+              word=FAIL
+            fi
+            description="$word: verdict ${VERDICT:-MISSING} tier L2 sha256 ${DIGEST}, plugin $PLUGIN"
+          else
+            context=gate-full
+            if [ "$VERDICT" = "PASS" ] && [ "$PLUGIN" = "success" ]; then
+              state=success
+              word=PASS
+            else
+              state=failure
+              word=FAIL
+            fi
+            description="$word: verdict ${VERDICT:-MISSING} sha256 ${DIGEST}, plugin $PLUGIN"
           fi
-          echo "$CANDIDATE -> $state ($description)"
+          echo "$CANDIDATE [$context] -> $state ($description)"
           gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$CANDIDATE" \
-            -f state="$state" -f context=gate-full -f description="$description" -f target_url="$RUN_URL"
+            -f state="$state" -f context="$context" -f description="$description" -f target_url="$RUN_URL"

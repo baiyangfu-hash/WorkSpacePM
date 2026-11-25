@@ -24,12 +24,14 @@ from auto_pm.application.core.gate_run_service import (
     pytest_counts,
     sha256_file,
 )
+from auto_pm.application.core.gate_tier_policy import classify_gate_tier
 from auto_pm.infrastructure.executable_lookup import find_on_path
 from auto_pm.infrastructure.gate_executors import run_command
 from auto_pm.infrastructure.gate_task_store import GateAttempt, GateTaskStore
 
 # Increment when execution or receipt semantics change independently of the group manifest.
 POLICY = "gate-full-v1"
+POLICY_L2 = "gate-l2-v1"
 TERMINAL = {"failed", "stopped", "unavailable", "passed"}
 LSP_SHA256 = "690f0c692350956416d6b2768f48a1daa119dd6c5b55c6b25bb6fa19f4951985"
 WORKFLOW = "gate-full.yml"
@@ -47,6 +49,17 @@ def git(path: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _trusted_rules_project(root: Path, fallback_project: Path) -> Path:
+    """Prefer the control root's tier rules so a candidate branch cannot weaken L2->L3 checks."""
+    try:
+        root_project = project_dir_in(root)
+    except GateRunError:
+        return fallback_project
+    if (root_project / "tests" / "tools" / "tier_core_list.json").is_file():
+        return root_project
+    return fallback_project
+
+
 @dataclass(frozen=True)
 class GateCandidate:
     commit: str
@@ -54,9 +67,11 @@ class GateCandidate:
     base: str
     manifest: str
     policy: str
+    tier: str = "L3"
+    groups: tuple[str, ...] = ()
 
     @classmethod
-    def from_worktree(cls, root: Path, worktree: Path) -> GateCandidate:
+    def from_worktree(cls, root: Path, worktree: Path, *, full: bool = False) -> GateCandidate:
         if Path(git(worktree, "rev-parse", "--show-toplevel")).resolve() != worktree:
             raise GateRunError("请指定工位的 Git 根目录")
         if Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve() != (
@@ -65,17 +80,58 @@ class GateCandidate:
             raise GateRunError("工位与控制根不属于同一本 Git 仓库")
         if git(worktree, "status", "--porcelain", "--untracked-files=all"):
             raise GateRunError("候选工位有未提交内容")
-        project_dir_in(worktree)
+        project = project_dir_in(worktree)
         commit = git(worktree, "rev-parse", "HEAD")
         base = git(root, "rev-parse", "refs/heads/main")
         if commit == base or git(root, "merge-base", base, commit) != base:
             raise GateRunError("候选必须基于当前 main，且包含待合并提交")
         tree = git(worktree, "rev-parse", f"{commit}^{{tree}}")
-        return cls(commit, tree, base, manifest_sha256(), POLICY)
+        manifest = manifest_sha256()
+        if not full:
+            raw_diff = git(worktree, "-c", "core.quotepath=false", "diff", "--name-only", "--no-renames", f"{base}..{commit}")
+            changed = [line.strip() for line in raw_diff.splitlines() if line.strip()]
+            top_resolved = worktree.resolve()
+            proj_resolved = project.resolve()
+            prefix = (proj_resolved.relative_to(top_resolved).as_posix() + "/") if proj_resolved != top_resolved else ""
+            inside = [path[len(prefix) :] for path in changed if not prefix or path.startswith(prefix)]
+            outside = [path for path in changed if prefix and not path.startswith(prefix)]
+            rules_project = _trusted_rules_project(root, project)
+            decision = classify_gate_tier(inside, project=rules_project, outside_changes=outside)
+            if decision.tier != "L3" and decision.recommended_groups:
+                return cls(commit, tree, base, manifest, POLICY_L2, tier="L2", groups=decision.recommended_groups)
+        return cls(commit, tree, base, manifest, POLICY, tier="L3", groups=())
+
+    @classmethod
+    def from_key(cls, raw: str) -> GateCandidate:
+        data = json.loads(raw)
+        return cls(
+            commit=str(data["commit"]),
+            tree=str(data["tree"]),
+            base=str(data["base"]),
+            manifest=str(data["manifest"]),
+            policy=str(data["policy"]),
+            tier=str(data.get("tier") or "L3"),
+            groups=tuple(str(g) for g in (data.get("groups") or ()) if str(g)),
+        )
+
+    def as_full(self) -> GateCandidate:
+        if self.tier == "L3" and not self.groups and self.policy == POLICY:
+            return self
+        return GateCandidate(self.commit, self.tree, self.base, self.manifest, POLICY, tier="L3", groups=())
 
     @property
     def key(self) -> str:
-        return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        payload: dict[str, Any] = {
+            "base": self.base,
+            "commit": self.commit,
+            "manifest": self.manifest,
+            "policy": self.policy,
+            "tree": self.tree,
+        }
+        if self.tier != "L3":
+            payload["tier"] = self.tier
+            payload["groups"] = list(self.groups)
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
@@ -97,6 +153,12 @@ class GateTaskService:
         self.executors = {"github": cloud, "local": local}
 
     def start(self, candidate: GateCandidate) -> GateAttempt:
+        if candidate.tier == "L2":
+            existing_full = self.store.latest(candidate.as_full().key)
+            if existing_full is not None:
+                refreshed = self.status(existing_full.id)
+                if refreshed.state in {"queued", "running", "passed"}:
+                    return refreshed
         attempt, new = self.store.reserve(candidate.key, "github")
         return self._launch(attempt, candidate) if new else self.status(attempt.id)
 
@@ -104,14 +166,23 @@ class GateTaskService:
         attempt = self._get(attempt_id)
         if attempt.state in TERMINAL:
             return attempt
-        candidate = GateCandidate(**json.loads(attempt.key))
+        candidate = GateCandidate.from_key(attempt.key)
         result = self.executors[attempt.backend].inspect(attempt, candidate)
         return self.store.observe(attempt, result.state, result.handle, result.detail)
 
     def current(self, candidate: GateCandidate) -> GateAttempt | None:
+        if candidate.tier == "L2":
+            existing_full = self.store.latest(candidate.as_full().key)
+            if existing_full is not None:
+                refreshed_full = self._refresh_attempt(existing_full, candidate.as_full())
+                if refreshed_full.state in {"queued", "running", "passed"}:
+                    return refreshed_full
         attempt = self.store.latest(candidate.key)
         if attempt is None:
             return None
+        return self._refresh_attempt(attempt, candidate)
+
+    def _refresh_attempt(self, attempt: GateAttempt, candidate: GateCandidate) -> GateAttempt:
         attempt = self.status(attempt.id)
         if attempt.backend == "local" and attempt.state == "passed":
             result = self.executors["local"].inspect(attempt, candidate)
@@ -134,6 +205,8 @@ class GateTaskService:
         previous = self.status(attempt_id)
         if candidate.key != previous.key:
             raise GateRunError("候选、main 或门禁规则已变更。请用 gate start 登记新任务")
+        if local and candidate.tier != "L3":
+            raise GateRunError("L2 分组门禁仅支持 GitHub 云端执行；如需切换本机请加 --full")
         if previous.state not in {"failed", "stopped", "unavailable"}:
             raise GateRunError(f"当前状态 {previous.state} 无法重试")
         if local and (
@@ -198,12 +271,15 @@ class GitHubGateExecutor:
         return f"gate-full {attempt.id} {candidate.commit}"
 
     @staticmethod
-    def _supports_tasks(encoded: str) -> bool:
+    def _supports_tasks(encoded: str, *, tier: str = "L3") -> bool:
         try:
             workflow = base64.b64decode(encoded).decode("utf-8")
         except ValueError:
             return False
-        return "      task_id:" in workflow and "      candidate_sha:" in workflow and "      base_sha:" in workflow
+        base_ok = "      task_id:" in workflow and "      candidate_sha:" in workflow and "      base_sha:" in workflow
+        if tier == "L2":
+            return base_ok and "      requested_tier:" in workflow
+        return base_ok
 
     def launch(self, attempt: GateAttempt, candidate: GateCandidate) -> Observation:
         try:
@@ -234,14 +310,22 @@ class GitHubGateExecutor:
             return Observation("unavailable", detail="GitHub 候选只读探测中断，尚未派发")
         if target.returncode or target.stdout.strip() != candidate.tree:
             return Observation("failed", detail="GitHub 上找不到该候选及其 Git tree，请先推送候选分支")
-        if workflow.returncode or not self._supports_tasks(workflow.stdout):
+        if workflow.returncode or not self._supports_tasks(workflow.stdout, tier=candidate.tier):
+            if candidate.tier == "L2":
+                return Observation(
+                    "failed",
+                    detail="GitHub main 的 gate-full 尚不支持 L2 分档（请先合入支持 requested_tier 的工作流或加 --full）",
+                )
             return Observation("failed", detail="GitHub main 的 gate-full 尚不支持驾驶舱任务号")
+        dispatch_args = [
+            "workflow", "run", WORKFLOW, "--ref", "main",
+            "-f", f"task_id={attempt.id}", "-f", f"candidate_sha={candidate.commit}",
+            "-f", f"base_sha={candidate.base}",
+        ]
+        if candidate.tier == "L2":
+            dispatch_args.extend(["-f", "requested_tier=L2"])
         try:
-            result = self._gh(
-                "workflow", "run", WORKFLOW, "--ref", "main",
-                "-f", f"task_id={attempt.id}", "-f", f"candidate_sha={candidate.commit}",
-                "-f", f"base_sha={candidate.base}",
-            )
+            result = self._gh(*dispatch_args)
         except (OSError, subprocess.TimeoutExpired):
             return Observation("unknown", detail="派发结果未知；按任务号对账后才可以重跑")
         if result.returncode:
@@ -289,10 +373,13 @@ class GitHubGateExecutor:
             return Observation(attempt.state, detail=str(error))
 
     def _receipt(self, handle: str, candidate: GateCandidate, url: str) -> Observation:
+        artifact = (
+            f"gate-verdict-l2-{candidate.commit[:12]}"
+            if candidate.tier == "L2"
+            else f"gate-verdict-{candidate.commit[:12]}"
+        )
         with TemporaryDirectory(prefix="gate-receipt-") as temp:
-            result = self._gh(
-                "run", "download", handle, "--name", f"gate-verdict-{candidate.commit[:12]}", "--dir", temp
-            )
+            result = self._gh("run", "download", handle, "--name", artifact, "--dir", temp)
             if result.returncode:
                 raise GateRunError("运行已结束，暂时无法下载判卷产物")
             path = Path(temp) / SUMMARY_FILE
@@ -304,17 +391,46 @@ class GitHubGateExecutor:
         )
         if response.returncode:
             raise GateRunError("暂时无法核对 GitHub 提交状态")
+        expected_context = "gate-l2" if candidate.tier == "L2" else "gate-full"
         matches = [
             status for page in json.loads(response.stdout) for status in page
-            if status["context"] == "gate-full" and status["target_url"] == url
+            if status["context"] == expected_context and status["target_url"] == url
             and status.get("creator", {}).get("login") == "github-actions[bot]"
         ]
+        if not digest or not matches or matches[0]["state"] != "success":
+            return Observation("failed", handle, "GitHub 判卷、插件结果或候选指纹不匹配")
+        if candidate.tier == "L2":
+            allowed_descriptions = {
+                f"PASS: verdict PASS tier L2 sha256 {digest}, plugin skipped",
+                f"PASS: verdict PASS tier L2 sha256 {digest}, plugin success",
+            }
+            raw_results = record.get("results")
+            results_ok = (
+                isinstance(raw_results, dict)
+                and bool(raw_results)
+                and set(raw_results) == set(candidate.groups)
+                and all(isinstance(v, dict) and v.get("verdict") == "PASS" for v in raw_results.values())
+            )
+            if (
+                matches[0]["description"] in allowed_descriptions
+                and record.get("tier") == "L2"
+                and record.get("verdict") == "PASS"
+                and record.get("commit") == candidate.commit
+                and record.get("commit_end") == candidate.commit
+                and record.get("complete") is False
+                and record.get("manifest_sha256") == candidate.manifest
+                and tuple(record.get("expected_groups") or ()) == candidate.groups
+                and not record.get("reasons")
+                and results_ok
+            ):
+                return Observation("passed", handle, json.dumps({"url": url, "sha256": digest, "tier": "L2"}))
+            return Observation("failed", handle, "GitHub L2 判卷、分组或候选指纹不匹配")
         if (
-            digest and matches and matches[0]["state"] == "success"
-            and matches[0]["description"] == f"PASS: verdict PASS sha256 {digest}, plugin success"
+            matches[0]["description"] == f"PASS: verdict PASS sha256 {digest}, plugin success"
             and record.get("verdict") == "PASS" and record.get("commit") == candidate.commit
             and record.get("commit_end") == candidate.commit and record.get("complete") is True
             and record.get("manifest_sha256") == candidate.manifest
+            and record.get("tier", "L3") == "L3"
         ):
             return Observation("passed", handle, json.dumps({"url": url, "sha256": digest}))
         return Observation("failed", handle, "GitHub 判卷、插件结果或候选指纹不匹配")
@@ -361,13 +477,15 @@ class LocalGateExecutor:
         return ""
 
     def launch(self, attempt: GateAttempt, candidate: GateCandidate) -> Observation:
+        if candidate.tier != "L3":
+            return Observation("failed", detail="本机执行端仅支持 L3 全量门禁")
         folder = self._folder(attempt)
         worktree, plugin = self.worktree, self.plugin
         try:
             refusal = self._preflight()
             if refusal or worktree is None or plugin is None:
                 return Observation("unavailable", detail=refusal)
-            if GateCandidate.from_worktree(self.root, worktree) != candidate:
+            if GateCandidate.from_worktree(self.root, worktree, full=True) != candidate:
                 return Observation("failed", detail="本机派发前候选已变更")
             folder.mkdir(parents=True)
             project = project_dir_in(worktree)

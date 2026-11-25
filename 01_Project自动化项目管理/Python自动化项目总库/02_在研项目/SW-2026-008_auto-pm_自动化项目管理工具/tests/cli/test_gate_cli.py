@@ -155,3 +155,59 @@ def test_d235_gate_run_with_require_full_jobs_stops_with_exit_one_and_says_what_
     record = json.loads((tmp_path / "out" / "gate_summary.json").read_text(encoding="utf-8"))
     assert record["verdict"] == "FAIL" and record["results"][refused]["verdict"] == "REFUSED"
     assert set(record["results"]) == set(names[: names.index(refused) + 1])  # later groups are absent, not shown as anything
+
+
+def test_gate_managed_commands_forward_full_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from auto_pm.application.core import gate_task_service as service_module
+    from auto_pm.application.core.gate_task_service import GateCandidate
+    from auto_pm.infrastructure.gate_task_store import GateAttempt
+    from auto_pm.ui.cli import gate as gate_module
+
+    calls: list[tuple[str, bool]] = []
+    attempt = GateAttempt(
+        id="0" * 32,
+        key='{"base":"' + "c" * 40 + '","commit":"' + "a" * 40 + '","manifest":"' + "d" * 64 + '","policy":"gate-full-v1","tree":"' + "b" * 40 + '"}',
+        number=1,
+        backend="github",
+        state="passed",
+        handle="42",
+        detail="ok",
+        approval="",
+    )
+
+    class StubService:
+        def start(self, cand: GateCandidate) -> GateAttempt:
+            calls.append(("start", cand.tier == "L3"))
+            return attempt
+
+        def current(self, cand: GateCandidate) -> GateAttempt:
+            calls.append(("current", cand.tier == "L3"))
+            return attempt
+
+        def retry(self, task_id: str, cand: GateCandidate, **_kw: object) -> GateAttempt:
+            calls.append((f"retry:{task_id}", cand.tier == "L3"))
+            return attempt
+
+    def fake_from_worktree(_root: Path, _wt: Path, *, full: bool = False) -> GateCandidate:
+        return GateCandidate(
+            "a" * 40,
+            "b" * 40,
+            "c" * 40,
+            "d" * 64,
+            "gate-full-v1" if full else "gate-l2-v1",
+            tier="L3" if full else "L2",
+            groups=() if full else ("application",),
+        )
+
+    monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx: None)
+    monkeypatch.setattr(gate_module, "_shared_gate", lambda _ctx, *_a: (tmp_path, StubService()))
+    monkeypatch.setattr(service_module.GateCandidate, "from_worktree", classmethod(lambda cls, r, w, *, full=False: fake_from_worktree(r, w, full=full)))
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    runner = CliRunner()
+    assert runner.invoke(cli, ["gate", "start", "--worktree", str(wt)]).exit_code == 0
+    assert runner.invoke(cli, ["gate", "start", "--worktree", str(wt), "--full"]).exit_code == 0
+    assert runner.invoke(cli, ["gate", "status", "--worktree", str(wt), "--full"]).exit_code == 0
+    assert runner.invoke(cli, ["gate", "retry", "0" * 32, "--worktree", str(wt), "--full"]).exit_code == 0
+    assert calls == [("start", False), ("start", True), ("current", True), (f"retry:{'0' * 32}", True)]

@@ -68,3 +68,25 @@ def test_changed_base_has_no_matching_receipt(tmp_path: Path) -> None:
     passed = service.start(candidate())
     assert service.current(candidate()) == passed
     assert service.current(candidate("e" * 40)) is None
+
+
+def test_l2_candidate_key_upgrade_and_local_retry_guard(tmp_path: Path) -> None:
+    l2 = GateCandidate("a" * 40, "b" * 40, "c" * 40, "d" * 64, "gate-l2-v1", tier="L2", groups=("application",))
+    l3 = l2.as_full()
+    assert l3 == candidate()
+    assert GateCandidate.from_key(l3.key) == l3
+    assert GateCandidate.from_key(l2.key) == l2
+    assert '"tier"' not in l3.key and '"tier":"L2"' in l2.key
+
+    cloud = Executor("passed")
+    service = GateTaskService(GateTaskStore(tmp_path), cloud, Executor())
+    l3_attempt = service.start(l3)
+    assert service.start(l2).id == l3_attempt.id
+    assert service.current(l2) == l3_attempt
+    assert cloud.launches == [l3_attempt.id]
+
+    l2_store = GateTaskStore(tmp_path / "l2_only")
+    l2_service = GateTaskService(l2_store, Executor("unavailable"), Executor())
+    l2_attempt = l2_service.start(l2)
+    with pytest.raises(GateRunError, match="仅支持 GitHub 云端"):
+        l2_service.retry(l2_attempt.id, l2, local=True, approval="user-confirmation:99")
