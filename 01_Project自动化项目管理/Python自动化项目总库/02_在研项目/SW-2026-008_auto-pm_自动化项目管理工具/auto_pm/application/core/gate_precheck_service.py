@@ -36,6 +36,7 @@ from auto_pm.application.core.gate_run_service import (
     project_dir_in,
     pytest_counts,
 )
+from auto_pm.application.core.gate_tier_policy import classify_gate_tier
 
 DEFAULT_BASE = "origin/main"
 STEP_TIMEOUT_SECONDS = 20 * 60
@@ -43,7 +44,61 @@ FULL_TIMEOUT_SECONDS = 120 * 60  # Windows local parallel runs need headroom bey
 PARALLEL_FROM = 4  # this many test files or more (or the whole tree): run them with xdist
 # A change to one of these can break any test: the related set is everything (slow, said out loud in the report).
 EVERYTHING_FILES = frozenset({"tests/conftest.py", "pyproject.toml", "requirements.txt"})
+SOURCE_GUARDS_MANIFEST = Path("tests") / "tools" / "sw008_ci" / "source_guards_manifest.txt"
 _NO_MODULE = re.compile(r"No module named")
+
+
+def _load_source_guards_manifest(manifest_path: Path) -> list[tuple[str, str]]:
+    """Parse scoped source-guard test rules cleanly (UTF-8 strict)."""
+    text = manifest_path.read_bytes().decode("utf-8")
+    entries: list[tuple[str, str]] = []
+    for line_no, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            raise ValueError(f"第 {line_no} 行缺少冒号分隔符：{stripped!r}")
+        scope_raw, test_raw = stripped.split(":", 1)
+        scope_spec = scope_raw.strip()
+        test_rel = test_raw.strip()
+        sub_scopes = [part.strip() for part in scope_spec.split(",") if part.strip()]
+        if not scope_spec or not test_rel or "\\" in test_rel or test_rel.startswith("/") or not sub_scopes:
+            raise ValueError(f"第 {line_no} 行规则非法：{stripped!r}")
+        for scope in sub_scopes:
+            if (
+                scope != "*"
+                and not scope.endswith("/")
+                and not scope.startswith("*.")
+                and "/" not in scope
+                and "." not in scope
+            ):
+                raise ValueError(f"第 {line_no} 行作用域格式不支持：{scope!r}")
+        entries.append((",".join(sub_scopes), test_rel))
+    return entries
+
+
+def _guard_scope_matches(scope_spec: str, changes: Sequence[str]) -> bool:
+    for raw_scope in scope_spec.split(","):
+        scope = raw_scope.strip()
+        if not scope:
+            continue
+        if scope == "*":
+            if changes:
+                return True
+            continue
+        folded_scope = scope.casefold()
+        if folded_scope.startswith("*."):
+            ext = folded_scope[1:]
+            if any(path.casefold().endswith(ext) for path in changes):
+                return True
+            continue
+        if folded_scope.endswith("/"):
+            if any(path.casefold().startswith(folded_scope) for path in changes):
+                return True
+            continue
+        if any(path.casefold() == folded_scope for path in changes):
+            return True
+    return False
 
 
 @dataclass
@@ -65,6 +120,10 @@ class PrecheckReport:
     steps: list[StepResult] = field(default_factory=list)
     full_gate_required: bool = False
     outside_changes: list[str] = field(default_factory=list)  # changed files outside the project folder: no step of this check looks at them
+    tier: str = "L3"
+    recommended_groups: list[str] = field(default_factory=list)
+    require_plugin: bool = False
+    tier_reasons: list[str] = field(default_factory=list)
 
     @property
     def verdict(self) -> str:
@@ -394,8 +453,25 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
                 changed.add(relative)
                 grew = True
     related.update(t for t in changed if Path(t).name.startswith("test_"))
-    guards = sorted(t for t in test_files if Path(t).name.startswith("test_") and _scans_the_tree(project / t))
     if changes:
+        manifest_path = project / SOURCE_GUARDS_MANIFEST
+        if manifest_path.is_file():
+            try:
+                manifest_entries = _load_source_guards_manifest(manifest_path)
+            except (OSError, ValueError) as exc:
+                return ["tests"], f"守卫清单 {SOURCE_GUARDS_MANIFEST.as_posix()} 无效（{exc}）：相关测试 = 全部 tests"
+            test_file_set = set(test_files)
+            guards = sorted(
+                {
+                    test_rel
+                    for scope, test_rel in manifest_entries
+                    if test_rel in test_file_set and _guard_scope_matches(scope, changes)
+                }
+            )
+            related.update(guards)
+            note = f"按作用域守卫清单命中 {len(guards)} 个守卫类测试" if guards else ""
+            return sorted(related), note
+        guards = sorted(t for t in test_files if Path(t).name.startswith("test_") and _scans_the_tree(project / t))
         related.update(guards)
         return sorted(related), f"含 {len(guards)} 个扫整棵源码树的守卫类测试（任何 Python 改动都会带上）"
     return sorted(related), ""
@@ -448,26 +524,41 @@ class PrecheckService:
         tests, note = related_tests(project, inside)
         outside = [path for path in changed if not path.startswith(prefix)]
         report = PrecheckReport(base=base, changed=changed, related_tests=tests, scope_note=note, outside_changes=outside)
+        if not changed:
+            report.tier = "L1"
+            report.recommended_groups = []
+            report.require_plugin = False
+            report.tier_reasons = ["工作树相对基线无改动文件"]
+        else:
+            decision = classify_gate_tier(inside, project=project, outside_changes=outside)
+            report.tier = decision.tier
+            report.recommended_groups = list(decision.recommended_groups)
+            report.require_plugin = decision.require_plugin
+            report.tier_reasons = list(decision.reasons)
         logs = out_dir or Path(tempfile.mkdtemp(prefix="gate-precheck-"))
         logs.mkdir(parents=True, exist_ok=True)
         env = child_environment()
         python = self._python
+        changed_scripts = sorted(
+            path for path in inside if path.startswith("scripts/") and path.endswith(".py") and (project / path).is_file()
+        )
         plan: list[tuple[str, list[str]]] = [
-            ("ruff", [python, "-B", "-m", "ruff", "check", "--no-cache", "auto_pm", "tests"]),
+            ("ruff", [python, "-B", "-m", "ruff", "check", "--no-cache", "auto_pm", "tests", *changed_scripts]),
             (
                 "mypy",
                 [python, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-sqlite-cache", "--cache-dir=/dev/null", "auto_pm", "tests"],
             ),
         ]
-        report.full_gate_required = defer_full and (tests == ["tests"] or len(tests) >= PARALLEL_FROM)
+        report.full_gate_required = defer_full and bool(changed) and (report.tier != "L1" or tests == ["tests"])
         if report.full_gate_required:
             report.steps.append(StepResult("pytest", "SKIPPED", None, "交给托管全量门禁", [], ""))
         elif tests:
             # the project's addopts write coverage/junit/test-results.xml into the worktree and --no-cov does not stop that: point it at the logs
             junit = f"--junitxml={logs / 'pytest-junit.xml'}"
             pytest_argv = [python, "-B", "-m", "pytest", *tests, "-p", "no:cacheprovider", "--no-cov", "-q", junit]
-            if (len(tests) >= PARALLEL_FROM or tests == ["tests"]) and jobs > 1:
-                pytest_argv += ["-n", str(jobs), "--dist", "loadfile"]
+            effective_jobs = min(jobs, 2) if (defer_full and report.tier == "L1") else jobs
+            if (len(tests) >= PARALLEL_FROM or tests == ["tests"]) and effective_jobs > 1:
+                pytest_argv += ["-n", str(effective_jobs), "--dist", "loadfile"]
             plan.append(("pytest", pytest_argv))
         for name, argv in plan:
             log = logs / f"{name}.txt"
