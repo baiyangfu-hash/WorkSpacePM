@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from auto_pm.application.core.gate_run_service import GROUPS
 from auto_pm.application.core.release_consistency import check_release_consistency
 from auto_pm.contracts.user_evidence import is_user_confirmation
 from auto_pm.infrastructure.process_probe import windows_command_lines
@@ -45,6 +46,7 @@ NOT_COVERED = (
 
 _VERSION = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -245,6 +247,60 @@ def _check_consistency(root: Path, report: Preflight) -> None:
     report.add("发布记录互相一致", status, detail)
 
 
+def validate_full_gate_verdict(verdict: dict[str, Any], commit: str) -> tuple[bool, str]:
+    """Verify that a gate verdict represents a clean, complete L3 full run for the exact 40-char commit."""
+
+    expected = commit.strip().lower()
+    named = str(verdict.get("commit", "")).strip().lower()
+    named_end = str(verdict.get("commit_end", "")).strip().lower()
+    if not _FULL_SHA.fullmatch(expected) or not _FULL_SHA.fullmatch(named) or named != expected:
+        return (
+            False,
+            f"判决里的提交 {named[:12] or '空'} 不是待发布提交 {expected[:12] or '空'}（需要完整 40 位提交号一致）",
+        )
+    if not _FULL_SHA.fullmatch(named_end) or named_end != expected:
+        return (
+            False,
+            f"判决里的结束提交 commit_end {named_end[:12] or '空'} 不是待发布提交 {expected[:12]}（需要完整 40 位提交号一致）",
+        )
+    raw_verdict = verdict.get("verdict")
+    if raw_verdict != "PASS":
+        return False, f"判决不是 PASS：{str(raw_verdict or '')[:80]}"
+    if verdict.get("complete") is not True:
+        return False, f"门禁回执未标记全量完成（complete={verdict.get('complete')!r}）"
+    if verdict.get("tier") != "L3":
+        return False, f"门禁回执档次不是 L3 全量（tier={verdict.get('tier')!r}），不能用于发版"
+    if verdict.get("git_dirty") is not False or verdict.get("git_dirty_end") is not False:
+        return (
+            False,
+            f"门禁运行工作树不干净（git_dirty={verdict.get('git_dirty')!r}, git_dirty_end={verdict.get('git_dirty_end')!r}）",
+        )
+    manifest = verdict.get("manifest_sha256")
+    if not isinstance(manifest, str) or not _HEX64.fullmatch(manifest.strip().lower()):
+        return False, "门禁回执缺少合法的 64 位 manifest_sha256 指纹"
+    results = verdict.get("results")
+    if not isinstance(results, dict):
+        return False, "门禁回执缺少 results 分组结果"
+    required_groups = [g.name for g in GROUPS]
+    missing_groups = [name for name in required_groups if name not in results]
+    if missing_groups:
+        return False, f"门禁回执缺少官方回归分组：{'、'.join(missing_groups[:5])}"
+    failed_groups = [
+        name
+        for name in required_groups
+        if not isinstance(results.get(name), dict) or results[name].get("verdict") != "PASS"
+    ]
+    if failed_groups:
+        return False, f"门禁回执存在未通过分组：{'、'.join(failed_groups[:5])}"
+    if verdict.get("plugin_result") != "success":
+        return False, f"Siemens LSP 插件检查未通过（plugin_result={verdict.get('plugin_result')!r}）"
+    reasons = verdict.get("reasons")
+    if reasons is not None and (not isinstance(reasons, list) or len(reasons) > 0):
+        sample = reasons[0] if isinstance(reasons, list) else reasons
+        return False, f"门禁回执带有未清零失败原因：{str(sample)[:80]}"
+    return True, f"PASS（L3 全量 {len(GROUPS)} 组 + plugin=success）"
+
+
 def _check_gate(path: Path | None, commit: str, report: Preflight) -> None:
     if path is None:
         report.add("门禁判决", FAIL, "没给 --gate-verdict；部署必须有这个提交的全量门禁判决")
@@ -253,14 +309,8 @@ def _check_gate(path: Path | None, commit: str, report: Preflight) -> None:
     if verdict is None:
         report.add("门禁判决", FAIL, f"读不出 {path}")
         return
-    named = str(verdict.get("commit", "")).lower()
-    result = str(verdict.get("verdict", ""))
-    if not commit or not named or not (commit.startswith(named) or named.startswith(commit)) or len(named) < 12:
-        report.add("门禁判决", FAIL, f"判决里的提交 {named[:12] or '空'} 不是待发布提交 {commit[:12]}")
-    elif not result.startswith("PASS"):
-        report.add("门禁判决", FAIL, f"判决不是 PASS：{result[:80]}")
-    else:
-        report.add("门禁判决", PASS, f"{result[:80]}")
+    ok, detail = validate_full_gate_verdict(verdict, commit)
+    report.add("门禁判决", PASS if ok else FAIL, detail)
 
 
 AUDIT_LINE = re.compile(r"^audit:AUD-001 independent-audit (?P<token>\S+) (?P<run>\S+) (?P<commit>[0-9a-f]{40}) verdict-sha256=(?P<sha>[0-9a-f]{16})(?:\s|$)", re.MULTILINE)

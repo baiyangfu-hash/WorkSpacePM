@@ -16,7 +16,7 @@ TESTS = PROJECT / "tests"
 MANIFEST = PROJECT / SOURCE_GUARDS_MANIFEST
 
 # 仅保留真正只遍历临时夹具目录或业务构建数据的测试（6 项）；
-# 全部 35 项全局/子树源码静态守卫均按真实扫描作用域保留在 source_guards_manifest.txt 中，不按大小删减。
+# 全部 34 项全局/子树源码静态守卫均按真实扫描作用域保留在 source_guards_manifest.txt 中，不按大小删减。
 NON_SOURCE_GUARD_ALLOWLIST: frozenset[str] = frozenset(
     {
         "tests/cli/test_workflow_compat.py",
@@ -32,7 +32,7 @@ NON_SOURCE_GUARD_ALLOWLIST: frozenset[str] = frozenset(
 def test_manifest_and_allowlist_entries_exist_and_stay_disjoint() -> None:
     assert MANIFEST.is_file()
     entries = _load_source_guards_manifest(MANIFEST)
-    assert len(entries) >= 35
+    assert len(entries) >= 34
 
     manifest_tests: list[str] = []
     for scope_spec, rel in entries:
@@ -94,13 +94,12 @@ def test_manifest_scopes_exclude_gui_and_board_tests_on_script_and_test_changes(
     }
     assert expected_pilot_guards <= pilot_matched
     excluded_on_pilot = {
-        "tests/core/test_cockpit_board.py",
+        "tests/infrastructure/test_cockpit_board_static_guards.py",
         "tests/core/test_cockpit_board_release_page.py",
         "tests/core/test_cockpit_board_runner.py",
         "tests/core/test_cockpit_board_shell.py",
         "tests/core/test_cockpit_board_tools.py",
         "tests/core/test_cockpit_no_window.py",
-        "tests/core/test_pm_dashboard_gui.py",
         "tests/test_layer_import_direction.py",
         "tests/cli/test_caller_path.py",
         "tests/contract/test_interlock_matrix.py",
@@ -108,22 +107,29 @@ def test_manifest_scopes_exclude_gui_and_board_tests_on_script_and_test_changes(
     assert excluded_on_pilot.isdisjoint(pilot_matched)
     assert pilot_matched.isdisjoint(NON_SOURCE_GUARD_ALLOWLIST)
 
+    manifest_set = {rel for _, rel in entries}
+    assert {"tests/core/test_cockpit_board.py", "tests/core/test_pm_dashboard_gui.py"}.isdisjoint(
+        manifest_set
+    )
+
     board_matched = {rel for scope, rel in entries if _guard_scope_matches(scope, ["scripts/cockpit_board/app.py"])}
     assert {
-        "tests/core/test_cockpit_board.py",
+        "tests/infrastructure/test_cockpit_board_static_guards.py",
         "tests/core/test_cockpit_board_release_page.py",
         "tests/core/test_cockpit_board_runner.py",
         "tests/core/test_cockpit_board_shell.py",
         "tests/core/test_cockpit_board_tools.py",
         "tests/core/test_cockpit_no_window.py",
-        "tests/core/test_pm_dashboard_gui.py",
     } <= board_matched
+    assert "tests/core/test_cockpit_board.py" not in board_matched
+    assert "tests/core/test_pm_dashboard_gui.py" not in board_matched
 
     pm_dash_matched = {rel for scope, rel in entries if _guard_scope_matches(scope, ["scripts/pm_dashboard.py"])}
     assert "tests/core/test_cockpit_no_window.py" in pm_dash_matched
 
     gui_entry_matched = {rel for scope, rel in entries if _guard_scope_matches(scope, ["scripts/pm_dashboard_gui.py"])}
-    assert "tests/core/test_pm_dashboard_gui.py" in gui_entry_matched
+    assert "tests/infrastructure/test_cockpit_board_static_guards.py" in gui_entry_matched
+    assert "tests/core/test_pm_dashboard_gui.py" not in gui_entry_matched
     assert "tests/core/test_cockpit_board.py" not in gui_entry_matched
 
     cli_matched = {rel for scope, rel in entries if _guard_scope_matches(scope, ["auto_pm/ui/cli/pm.py"])}

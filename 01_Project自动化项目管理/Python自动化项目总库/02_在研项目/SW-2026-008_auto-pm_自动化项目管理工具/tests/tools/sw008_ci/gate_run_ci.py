@@ -142,12 +142,15 @@ def cmd_merge(args: argparse.Namespace) -> int:
     )
     worktree = Path(args.worktree) if args.worktree else None
     judged = GateRunService().judge_dir(out, worktree=worktree)
-    if args.plugin_result and args.plugin_result != "success":
+    plugin_result = str(getattr(args, "plugin_result", "") or "").strip()
+    if plugin_result and plugin_result != "success":
         judged.verdict = "FAIL"
-        judged.reasons.append(f"Siemens LSP 插件检查：{args.plugin_result}")
+        judged.reasons.append(f"Siemens LSP 插件检查：{plugin_result}")
     final = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8"))
     final.update(
         {
+            "tier": "L3",
+            "plugin_result": plugin_result,
             "verdict": judged.verdict,
             "complete": judged.complete,
             "reasons": judged.reasons,

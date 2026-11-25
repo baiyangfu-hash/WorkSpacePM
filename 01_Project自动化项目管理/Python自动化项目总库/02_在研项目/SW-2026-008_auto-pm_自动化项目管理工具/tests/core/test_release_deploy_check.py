@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from auto_pm.application.core import release_deploy_check as rdc
+from auto_pm.application.core.gate_run_service import GROUPS
 
 PYPROJECT = 'name = "auto-pm"\nversion = "1.3.3"\n'
 
@@ -71,9 +72,34 @@ class Repo:
             for p in sorted(self.root.rglob("*")) if p.is_file() and ".git" not in p.parts
         }
 
-    def verdict(self, tmp: Path, commit: str, text: str = "PASS (9 groups)", name: str = "verdict.json") -> Path:
+    def verdict(
+        self,
+        tmp: Path,
+        commit: str,
+        text: str = "PASS",
+        name: str = "verdict.json",
+        *,
+        extra: dict[str, object] | None = None,
+    ) -> Path:
         path = tmp / name
-        path.write_text(json.dumps({"commit": commit, "verdict": text}), encoding="utf-8")
+        payload: dict[str, object] = {
+            "schema": "gate-run.v1",
+            "commit": commit,
+            "commit_end": commit,
+            "verdict": text,
+            "complete": True,
+            "tier": "L3",
+            "plugin_result": "success",
+            "git_dirty": False,
+            "git_dirty_end": False,
+            "manifest_sha256": "a" * 64,
+            "reasons": [],
+            "groups_run": [g.name for g in GROUPS],
+            "results": {g.name: {"verdict": "PASS"} for g in GROUPS},
+        }
+        if extra:
+            payload.update(extra)
+        path.write_text(json.dumps(payload), encoding="utf-8")
         return path
 
     def audit(self, tmp: Path, commit: str, token: str = "PASS", verdict_name: str = "verdict.json", sha: str | None = None, prose: str = "") -> Path:
@@ -196,12 +222,13 @@ def test_only_the_original_rolled_back_release_can_reuse_its_slot(
         assert _by_name(report)["已装候选逐文件校验"].status == rdc.PASS
 
 
-@pytest.mark.parametrize("case", ["missing", "other_commit", "short_commit", "not_pass", "unreadable"])
+@pytest.mark.parametrize("case", ["missing", "other_commit", "short_commit", "prefix_12", "not_pass", "unreadable"])
 def test_the_gate_verdict_must_name_this_commit_and_pass(repo: Repo, tmp_path: Path, case: str) -> None:
     gate = {
         "missing": None,
         "other_commit": repo.verdict(tmp_path, "0" * 40, name="other.json"),
         "short_commit": repo.verdict(tmp_path, repo.merge[:8], name="short.json"),
+        "prefix_12": repo.verdict(tmp_path, repo.merge[:12], name="prefix12.json"),
         "not_pass": repo.verdict(tmp_path, repo.merge, "FAIL (core)", name="fail.json"),
         "unreadable": tmp_path / "nowhere.json",
     }[case]
@@ -210,10 +237,62 @@ def test_the_gate_verdict_must_name_this_commit_and_pass(repo: Repo, tmp_path: P
 
     gate_check = _by_name(report)["门禁判决"]
     assert not report.ok and gate_check.status == rdc.FAIL
-    if case == "other_commit":
+    if case in ("other_commit", "short_commit", "prefix_12"):
         assert "不是待发布提交" in gate_check.detail, "must fail on the commit, not on the result text"
     if case == "not_pass":
         assert "不是 PASS" in gate_check.detail
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "wrong_commit_end",
+        "pass_prefix_spoof",
+        "missing_tier",
+        "l2_tier",
+        "incomplete",
+        "dirty_start",
+        "dirty_end",
+        "empty_manifest",
+        "short_manifest",
+        "missing_group",
+        "failed_group",
+        "plugin_empty",
+        "plugin_skipped",
+        "plugin_failure",
+        "nonempty_reasons",
+    ],
+)
+def test_gate_verdict_requires_complete_clean_l3_full_receipt(repo: Repo, tmp_path: Path, case: str) -> None:
+    missing_groups_results = {g.name: {"verdict": "PASS"} for g in GROUPS[:-1]}
+    failed_group_results = {g.name: {"verdict": "PASS"} for g in GROUPS}
+    failed_group_results["core"] = {"verdict": "FAIL"}
+    cases: dict[str, dict[str, object]] = {
+        "wrong_commit_end": {"commit_end": "0" * 40},
+        "pass_prefix_spoof": {"verdict": "PASS (L2)"},
+        "missing_tier": {"tier": None},
+        "l2_tier": {"tier": "L2"},
+        "incomplete": {"complete": False},
+        "dirty_start": {"git_dirty": True},
+        "dirty_end": {"git_dirty_end": True},
+        "empty_manifest": {"manifest_sha256": ""},
+        "short_manifest": {"manifest_sha256": "abc123"},
+        "missing_group": {"results": missing_groups_results},
+        "failed_group": {"results": failed_group_results},
+        "plugin_empty": {"plugin_result": ""},
+        "plugin_skipped": {"plugin_result": "skipped"},
+        "plugin_failure": {"plugin_result": "failure"},
+        "nonempty_reasons": {"reasons": ["有残余失败"]},
+    }
+    gate = repo.verdict(tmp_path, repo.merge, name=f"{case}.json", extra=cases[case])
+    report = rdc.preflight(
+        repo.root,
+        repo.merge,
+        gate_verdict=gate,
+        audit_signoff=repo.audit(tmp_path, repo.merge, verdict_name=gate.name),
+    )
+    gate_check = _by_name(report)["门禁判决"]
+    assert not report.ok and gate_check.status == rdc.FAIL, (case, gate_check)
 
 
 def _audit_check(repo: Repo, tmp_path: Path, *, token: str = "PASS", sha: str | None = None, prose: str = "") -> rdc.Check:

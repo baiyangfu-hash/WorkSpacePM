@@ -51,7 +51,6 @@ BAT_DIR = REPO_ROOT / "00_Infrastructure" / "auto_pm" / "environment"
 BAT = BAT_DIR / "双击打开驾驶舱看板.bat"
 BC_TEMPLATE = REPO_ROOT / "0100_PLC自动化" / "00_通用规范" / "项目文档模板" / "02_业务变更记录模板.md"
 NOW = base.NOW
-WRITES = r"(?<![\w.])open\(|write_bytes\(|write_text\("
 
 
 def _load() -> ModuleType:
@@ -499,29 +498,7 @@ def test_double_click_launcher_is_outside_releases() -> None:
     assert "releases" not in SCRIPT.relative_to(REPO_ROOT).parts
 
 
-def test_process_and_file_writes_live_only_in_actions() -> None:
-    sources = {path: path.read_text(encoding="utf-8") for path in [SCRIPT, *PACKAGE.rglob("*.py")]}
-    for path, source in sources.items():
-        for forbidden in ("urllib", "requests", "socket", "QNetwork", "QProcess", "os.system"):
-            assert forbidden not in source, (path.name, forbidden)
-        for forbidden in ("start_execution", "confirm_start", "approve_scope", "close_accepted"):
-            assert forbidden not in source, (path.name, forbidden)
-        if path.name != "policy.py":  # 规矩文件列的是禁用词本身
-            assert "no-verify" not in source, path.name
-        # 起子进程的只有 actions.py（决定类按钮）和 tool_actions.py（工程工具）；后者另有 test_cockpit_board_tools 逐文件数
-        if path.name not in ("actions.py", "tool_actions.py"):
-            assert "subprocess" not in source, path.name
-        if path.name not in ("actions.py", "app.py"):
-            assert not re.search(WRITES, source), path.name
-    # 写文件只有三处：actions.py 追加一行 BC（带预览）、actions.write_snapshot 存“上次读取”快照（只写
-    # .auto-pm/cache/cockpit_board/，CHG-SCPT-2026-628 骨架 B）；app.py 只在启动出错时写系统临时目录
-    app_source = sources[PACKAGE / "app.py"]
-    assert app_source.count("write_text(") == 1
-    assert "tempfile.gettempdir()" in app_source.split("def _crash_report", 1)[1]
-    actions_source = sources[PACKAGE / "actions.py"]
-    assert len(re.findall(WRITES, actions_source)) == 2
-    assert len(re.findall(WRITES, actions_source.split("def write_snapshot", 1)[1])) == 1  # 快照那一处在 write_snapshot 里
-    assert len(re.findall(WRITES, app_source)) == 1
+# test_process_and_file_writes_live_only_in_actions 已拆出至 tests/infrastructure/test_cockpit_board_static_guards.py
 
 
 def test_github_block_shows_as_of_and_never_green_when_stale(qapp: QApplication, tmp_path: Path) -> None:
