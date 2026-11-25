@@ -11,19 +11,25 @@
     "STD-817"
   ],
   "allowed_commands": [
+    "pm_flows.py checkup",
     "pm resume",
     "pm verify",
     "plc check",
     "doc check",
+    "gate status",
     "pytest",
     "ruff check",
     "mypy",
+    "python -I -S",
     "continuity checkpoint",
     "pm handoff",
+    "pm_merge.py audit-record",
     "audit_pr.py"
   ],
   "gates": [
     "main.py pm verify --mission-id <ID> --lease-wallet",
+    "main.py gate status --worktree <W>",
+    "python SW8/scripts/pm_merge.py audit-record <工位> --verdict PASS --report <路径>",
     "python reviews/tools/audit_pr.py <PR号>"
   ],
   "receipt_fields": [
@@ -35,11 +41,10 @@
   "owned_paths_patterns": [
     "reviews/**"
   ],
-  "owned_paths_note": "审计者只写 reviews/，不往被审分支推提交",
+  "owned_paths_note": "PR 线写 reviews/，本地合并/发版审计报告写 .auto-pm/reports/ 与 release-candidates/ 签核，不往被审分支推提交",
   "enforcement": {
-    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
-    "trae": "仅说明文字，无机器拦截",
-    "cursor": "仅说明文字，无机器拦截"
+    "role_json": "能力边界与门禁元数据声明",
+    "runtime": "实际硬拦截由 AGENTS.md AUD-001、pm_merge.py 会话隔离校验与提交钩子执行（适配多平台）"
   },
   "legacy": {
     "retired": true,

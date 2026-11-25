@@ -6,28 +6,42 @@
   "legacy_names": [],
   "required_specs": [
     "PM-033",
-    "PM-042"
+    "PM-042",
+    "PM-056"
   ],
   "allowed_commands": [
+    "pm_flows.py entry",
+    "pm_flows.py checkup",
     "pm orient",
     "pm resume",
+    "pm triage",
     "pm inbox add",
     "pm inbox list",
     "pm inbox show",
-    "pm inbox confirm",
     "pm plan",
-    "pm approve",
-    "pm confirm-start",
     "pm verify",
     "pm close",
     "pm handoff",
     "pm takeover",
+    "change create",
+    "change transition",
+    "worktree open",
+    "worktree list",
+    "worktree close",
+    "gate precheck",
+    "gate start",
+    "gate status",
+    "pm_merge.py",
+    "plan_status.py",
+    "pm_handoff.py",
     "ledger reconcile",
     "doc check"
   ],
   "gates": [
+    "pm_flows.py checkup <PID>",
     "main.py doc check",
-    "main.py ledger reconcile <PID>"
+    "main.py ledger reconcile <PID>",
+    "python SW8/scripts/plan_status.py <PID> --json"
   ],
   "receipt_fields": [
     "需求原文",
@@ -36,14 +50,14 @@
     "是否涉及安全回路",
     "风险",
     "回退办法",
+    "合并提交号与git revert命令",
     "需要用户决定的点"
   ],
   "owned_paths_patterns": [],
   "owned_paths_note": "项目经理不写业务代码，不占 owned paths",
   "enforcement": {
-    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
-    "trae": "仅说明文字，无机器拦截",
-    "cursor": "仅说明文字，无机器拦截"
+    "role_json": "能力边界与门禁元数据声明",
+    "runtime": "实际硬拦截由 AGENTS.md、驾驶舱状态机 guards、提交钩子与 pm_merge.py 执行（适配多平台）"
   },
   "legacy": {
     "mode": "pointer",

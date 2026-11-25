@@ -1,38 +1,44 @@
-# Agent 协同与连续性通用契约
+# Agent 协同、分诊路由与门禁分档契约
 
-> 来源：CHG-SCPT-2026-032。适用于 `fullstack-engineer` 与 `plc-electrical-engineer`；`pm-workflow` 已退役隔离，不属于本契约消费者。
+> 跨角色通用路由正本。适用于 `product-pm`、`fullstack-engineer`、`plc-electrical-engineer`、`ui-designer`、`test-engineer`；已隔离的 `pm-workflow` 不属于消费者。
 
 ## 1. 角色与真源
 
-- **PM 是治理角色，不是独占技能**：当前主 Agent 负责需求澄清、变更单（CHG）报批、验收和关闭；走 Run 的卡另管 Decision 和 Work 授权。
-- **执行技能不持有治理权**：只能在变更单已经用户批准、领卡占位已登记可改范围之后修改已授权范围；走 Run 的卡另需匹配的 `project_id`、`work_id`、`run_id`、`decision_id`、`owned_paths` 与 lease。
-- **机器真源**：CHG（变更单）和 Decision 管授权；领卡占位（远程分支 `claims/<卡号>`）管可改范围；走 Run 的卡由 Continuity Store 中的 Work/Run/Checkpoint/lease 管执行状态；Git 管代码基线；发布 manifest 与 active/previous 指针管运行版本。
-- **人工投影**：`PM_SESSION_*.md` 仅用于项目摘要，不是 Work/Run/审批真源；执行技能不得修改。
-- **适配层无状态**：Agent、IDE、技能和聊天上下文不得创建平行账本，不得写 `.auto-pm/ai_feedback.json` 或 handoff.v1 文件。
+- **PM 是治理角色**：主 Agent 负责需求澄清、范围拆解、变更单（CHG）报批、分诊派活、结果验收与收口汇总。
+- **执行岗位不持有治理权**：只在已获授权范围与隔离工位内改文件并自检，不自批变更单、不代用户点验收、不改控制根 `main`。
+- **机器真源**：`AGENTS.md`（`FLOW-001`、`FLOW-002`、`WS-001`）与受控变更单管授权；Git 提交与实施卡管改动事实；WBS 项目计划表状态由 `SW8/scripts/plan_status.py` 与 `card_status.py` 按 `main` 现场现算；Run 租约卡另由 Continuity Store 的 Work/Run/Decision/lease 管状态。
+- **人工摘要非授权**：`PM_SESSION_*.md`、旧 handoff.v1 与交接交换区（`pm_handoff.py`）均不构成执行授权或审批凭据。
 
-## 2. 统一入口
+## 2. 统一进门入口
 
-所有驾驶舱命令从工作区根目录执行：
+新会话或换班接手，按 `.trae/skills/cockpit-entry/SKILL.md` 先从控制根执行只读进门：
 
 ```powershell
-& "<workspace>\.venv\Scripts\python.exe" "<workspace>\main.py" pm resume <PID> --json
+.\.venv\Scripts\python.exe ".\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具\scripts\pm_flows.py" entry <PID>
 ```
 
-禁止以 `python -m auto_pm`、研发母体目录或某个 IDE 私有脚本作为生产入口。Resume 的 `context.release_id` 必须对应 active release；存在 conflict 时 fail closed。
+无项目计划表或仅做单项目排查时，按需辅以 `.\main.py pm orient <PID> --json` 与 `pm_flows.py checkup <PID>`；严禁从隔离工位直接运行 `main.py` 主命令，也严禁绕过控制根 `.venv`。
 
-## 3. 四阶段流程
+## 3. PM 分诊与门禁分档决策表
 
-1. **Grooming**：先运行 `pm resume <PID> --json`，再只读勘测源码、配置、接口和测试。变更单未经用户批准时只能返回事实，不得修改（快线例外，见 `AGENTS.md` FLOW-001）。
-2. **Approval**：PM 角色建立 CHG、出《需求分析与技术实施计划》报批（走 Run 的卡另建 Decision 并创建/授权 Work）；User 明示批准前不得进入 Execution。
-3. **Execution**：执行技能核对已批准的变更单、领卡占位的可改范围和 Git baseline（走 Run 的卡另核 Work/Run/Decision 与 lease），只修改可改范围内的文件；dirty tree 未声明、lease 过期或 schema 未知时停止。
-4. **Acceptance**：执行端运行领域门禁，创建 Checkpoint；需要换 Agent 时创建 checkpoint-bound handoff.v2。PM 角色核验代码、证据、状态和台账后关闭 Work/CHG。
+| 决策维度 | 路由条件 | 执行路径与门禁要求 |
+|---|---|---|
+| 改动分级（`FLOW-001`） | 命中受保护路径（PLC/规则/合并脚本/删改外部文件/发版） | 走“要你点头”：先建 CHG 填齐 `§5`、经用户批准后开工位、必须 `AUD-001` 独立审计与用户推到完成 |
+| 改动分级（`FLOW-001`） | 驾驶舱普通代码、测试、脚本、文档与工程自身清理 | 走“直接做，事后告诉你”：领卡号入分支与提交说明，本机门禁过即合并，当天汇报提交号与回退指令 |
+| 任务组织（单卡 vs WBS） | 独立单点需求或缺陷 | 单张实施卡闭环 |
+| 任务组织（单卡 vs WBS） | 多任务有前后依赖、需跟踪里程碑交付 | 在 `<项目>/00_项目管理/01_立项与需求/NNN_<PID>_项目计划表.md` 挂卡，`证据` 列挂含卡号的独立回执，用 `plan_status.py <PID>` 现算进度 |
+| 流程轨（轻轨 vs 重轨 Run） | 日常开发、文档、修复与规则调整 | 走隔离工位 + 本地/云端门禁 + `pm_merge.py merge` 轻轨 |
+| 流程轨（轻轨 vs 重轨 Run） | 看板“确认开工”一键流或命令硬要求 Run/租约 | 走 Work/Run/Checkpoint/lease、`pm verify` 与 `pm_flows.py closeout` |
+| 门禁三档（`gate precheck`） | **L1**：仅纯文档或已核实样板（`L1_VERIFIED_PILOT_PATHS`） | 本机自检 + `gate precheck` 通过即可本地合并 |
+| 门禁三档（`gate precheck`） | **L2**：非核心脚本/测试/总控屏增量 | 先 `git push` 分支，再跑 `main.py gate start --worktree <W>` 仅测受影响组 |
+| 门禁三档（`gate precheck`） | **L3**：受保护路径、核心模块、配置及非 `.md/.py` 资产 | 强制 `main.py gate start --worktree <W> --full`（全量 11 组 + plugin）+ 跨会话独立审计 |
 
-## 4. 交接契约
+## 4. 四阶段流水线与交接约定
 
-- 对话回执必须包含：`project_id`、`work_id`、`run_id`、`checkpoint_id`、`decision_id`、`owner`、`owned_paths`、`git_head`、`dirty_paths`、`changed_files`、`verification`、`risks`、`next_legal_action`。
-- 物理交接只能使用 `main.py continuity checkpoint create`、`continuity handoff create` 和 `continuity handoff accept`；handoff.v1 仅可读历史，不得新增。
-- 执行技能不得自行宣布验收、关闭 CHG、切换 release 或修改 Obsidian；这些动作由 PM 角色在授权范围内完成。
+1. **Grooming（只读）**：执行进门检查，只读源码、配置、点表与测试，识别 `FLOW-001` 分类、预计 `owned_paths` 与 `L1/L2/L3` 档次；缺授权时不写任何生产文件。
+2. **Approval（报批）**：`要你点头` 类由 PM 产出实施计划并建 CHG（填齐 `§5` 后报批）；轻轨可直接定卡号开工位；Run 卡另备 Decision/Work。
+3. **Execution（隔离执行）**：在 `R/.auto-pm/worktrees/<agent>` 分支实施，只动卡内路径，跑完本机单测/`ruff`/`mypy`/专用检查与 `gate precheck`（必要时推分支触发云端 `gate start`）。
+4. **Audit & Acceptance（审计与收口）**：`要你点头` 类由独立会话的 `test-engineer` 审计放行；控制根跑 `pm_merge.py merge` 合入 `main` 并按 GitHub 档备份；按 `start_and_handoff.md` 更新单机交接或收口，Run 卡再创 Continuity Checkpoint。
 
-## 5. 独立触发
-
-用户直接调用执行技能时，技能仍先执行 `pm resume <PID> --json`。若没有用户批准过的变更单（走 Run 的卡：没有可执行的已授权 Work/Run），则降级为只读 Grooming，返回需要 PM 角色建立的授权对象；不得借用 PM_SESSION、旧 handoff 或聊天文字推定执行权。
+- 对话回执须包含：卡号/变更单号、改动范围、门禁退出码或 Run ID、独立审计结论（若适用）、合并提交号与 `git revert` 回退指令、风险与下一步。
+- 物理交接按模式选用 `pm_handoff.py`、`claim note` 或 Continuity `checkpoint/handoff.v2`（严禁新增 `handoff.v1`）。

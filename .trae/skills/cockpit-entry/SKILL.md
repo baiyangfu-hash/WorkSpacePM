@@ -11,7 +11,7 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 驾驶舱靠环境变量 `AUTO_PM_AGENT`（值写基名，冒号后是备注）认出调用方是 agent：不带标记会被当成用户本人。Claude Code 和 Codex 自带环境变量可被自动认出，其他 agent（Trae、Cursor、VS Code 里的 AI 等）必须自己声明。下面各步里写的 `main.py` 都按这个方式运行：
 
-- 通用：`.\00_Infrastructure\bin\pm-as-agent.ps1 <基名> <命令参数>`，例如 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor pm orient <项目编号> --json`；基名取自 `AGENTS.md` WS-001 表（claude、trae、cursor、vscode、codex）。它只在这一条命令期间设置变量，结束即还原。
+- 通用：`.\00_Infrastructure\bin\pm-as-agent.ps1 <基名> <命令参数>`，例如 `.\00_Infrastructure\bin\pm-as-agent.ps1 cursor pm orient <项目编号> --json`；基名取自 `AGENTS.md` WS-001 表（claude、trae、cursor、vscode、codex、antigravity）。它只在这一条命令期间设置变量，结束即还原。
 - Trae 里的 AI：`.\.trae\bin\pm-as-trae.ps1 <命令参数>`，等价于 `& ".\.venv\Scripts\python.exe" ".\main.py" <命令参数>`，只是这一条命令期间带上 `AUTO_PM_AGENT=trae:cn`，结束即还原。命令只认冒号前面那段（trae），冒号后面的 `cn` 只是备注，国际版同样适用；效果和上面的通用脚本取 `trae:cn` 相同。
 - 非 Windows 的 shell：只对单条命令设置，如 `AUTO_PM_AGENT=cursor python main.py pm orient <项目编号> --json`。
 
@@ -49,7 +49,9 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 ## 变更单被批准之前，只能用这些只读命令
 
-`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`、`claim list`、`claim log`，AGENTS.md FLOW-002 的 `pm_flows.py entry`、`checkup`、`steps`（脚本只串命令分类表里归“读”的命令），以及 `git status`、`git log`、`git diff`。全流程、标准线在批准前另可做两样写：建变更单（`change create`）和领卡占位（`claim number`、`claim open`），除此之外不写。
+`pm orient`、`pm resume`、`pm inbox list`、`pm inbox show`、`pm triage`（只读：开着的卡和收件箱按建议顺序排好，每条写明下一步）、`context resolve`、`project list`、`project show`、`ledger reconcile`（只对账，不加 `--fix`）、`doc check`、`gate precheck`、`claim list`、`claim log`，AGENTS.md FLOW-002 的 `pm_flows.py entry`、`checkup`、`steps`（脚本只串命令分类表里归“读”的命令），以及 `git status`、`git log`、`git diff`。按 `AGENTS.md` FLOW-001，“要你点头”一类在批准前另可建变更单（`change create`）；“多机”档按 D-101 领卡占位（`claim number`、`claim open`），除此之外不写。
+
+门禁分档（`gate precheck` / `gate start [--full]`）与角色分诊决策见 `roles/shared/refs/skill_coordination.md`。
 
 这些命令出错或报差异时，输出里可能建议你运行修复命令（例如 `ledger reconcile --fix`、`doc sync`）。这些修复命令会写文件，不在清单里：不要运行，把输出原文报告给用户并停下。
 
@@ -118,7 +120,9 @@ description: "驾驶舱薄入口：任何 IDE 或 agent 进入本工作区的第
 
 ## 换 agent
 
-交出去之前，在卡上用 `main.py claim note` 记一笔（最后一笔、下一棒、先读什么，规矩见 AGENTS.md FLOW-002“交接记录”）；接手方先做上面的进门，读完交接记录列出的文件，再记一笔 `--kind takeover`。卡上有带租约的 Run 时，还要由当前持有者运行 `main.py pm handoff` 交租约（不用 `reclaim`），把输出的 handoff_id 告诉用户后停止写入；接手方用 `main.py pm takeover` 接手，从对方的 Checkpoint 接着做，不重做已完成的部分。不要自己编造口令，也不要读取别人的口令文件。
+- **单机日常（PM-056 轻轨）**：在工位内用 `SW8/scripts/pm_handoff.py` 的 `set-focus` / `log` 更新 `<项目>/{04|11}_监控/交接交换区/`（`focus.json`、`journal.jsonl`）并随分支提交合并；
+- **多机档**：在占位卡上用 `main.py claim note` 记引用与下一棒，接手方读完后记 `--kind takeover`；
+- **Run 租约卡**：持有者跑 `main.py pm handoff` 交租约、停写，接手方跑 `main.py pm takeover` 续作。不要自造口令或读他人钱包文件；详细写法与驾驶舱避坑见 `roles/shared/refs/start_and_handoff.md`。
 
 ## 不要做
 

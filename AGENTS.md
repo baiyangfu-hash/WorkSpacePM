@@ -186,7 +186,7 @@
 | 无 AI、断网时的电气/PLC 人工路线 | `0100_PLC自动化/00_通用规范/无AI离线手册.md` |
 | 角色包总览（进门按卡类型提示读哪个；每个包的规范、命令、门禁在同目录 `role.json`） | `roles/`；跨技能契约 `roles/shared/refs/skill_coordination.md` |
 | 角色：PM 治理（需求、计划、事实核验、CHG、Decision、变更单授权与验收） | `roles/product-pm/SKILL.md`；本文件红线 1、2 |
-| 角色：PLC 执行（LSP-903～908、STD-830/840/850/860；定时器以 LSP-903 为准） | `roles/plc-electrical-engineer/SKILL.md` |
+| 角色：PLC 执行（LSP-903～907、TOOL-908、STD-830/840/850/860；定时器以 LSP-903 为准） | `roles/plc-electrical-engineer/SKILL.md` |
 | 角色：全栈执行（DEV-300 SRE、DEV-210/216/218 PySide6+QML） | `roles/fullstack-engineer/SKILL.md` |
 | 角色：测试审计（测试验证与独立审计 AUD-001；DEV-031/032、STD-816/817） | `roles/test-engineer/SKILL.md` |
 | 角色：UI 画面（HTML 原型、HMI 画面、QML 视图；STD-909～911、DEV-301） | `roles/ui-designer/SKILL.md` |

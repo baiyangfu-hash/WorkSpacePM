@@ -27,9 +27,10 @@ description: "执行已授权的 Python、PySide6、QML 与 Web 工程任务；�
 
 ```powershell
 & "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" python check <PID>
-& "<ws>\.venv\Scripts\python.exe" -m pytest --no-cov -q
+& "<ws>\.venv\Scripts\python.exe" -m pytest --no-cov -q <tests>
 & "<ws>\.venv\Scripts\python.exe" -m ruff check <owned_paths>
-& "<ws>\.venv\Scripts\python.exe" -m mypy <owned_paths>
+& "<ws>\.venv\Scripts\python.exe" -m mypy --platform win32 --no-incremental --no-sqlite-cache --cache-dir=/dev/null <owned_paths>
+& "<ws>\.venv\Scripts\python.exe" "<ws>\main.py" gate precheck --worktree <工位>
 ```
 
-所有适用门禁 Exit 0 后，交接照 `../shared/refs/start_and_handoff.md` 的“交接”做。
+先跑 `gate precheck` 判档：L1 本机闭环；L2/L3 先 `git push` 再于控制根触发 `gate start [--full]`；Windows `mypy` 分离、零依赖脚本 `-I -S` 测试等注意事项见 `../shared/refs/start_and_handoff.md`。适用门禁全绿后照同文件“交接”收尾。
