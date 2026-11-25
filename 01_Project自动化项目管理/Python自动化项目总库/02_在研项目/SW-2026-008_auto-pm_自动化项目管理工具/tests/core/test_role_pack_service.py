@@ -584,3 +584,14 @@ def test_replacement_character_is_reported_in_shared(tmp_path: Path) -> None:
     roles, workspace = _workspace(tmp_path)
     (roles / "shared" / "refs" / "skill_coordination.md").write_text("共享\ufffd契约\n", encoding="utf-8")
     assert ("RP-009", FAIL) in _codes(roles, workspace)
+
+
+def test_role_pack_governance_guards_stay_aligned() -> None:
+    """Lock user-only command exclusions in product-pm and spec registry fixes in plc-electrical-engineer."""
+    pm_cfg = json.loads((_roles_dir() / "product-pm" / "role.json").read_text(encoding="utf-8"))
+    pm_cmds = set(pm_cfg["allowed_commands"])
+    assert {"pm approve", "pm confirm-start", "pm inbox confirm"}.isdisjoint(pm_cmds)
+    plc_cfg = json.loads((_roles_dir() / "plc-electrical-engineer" / "role.json").read_text(encoding="utf-8"))
+    plc_specs = set(plc_cfg["required_specs"])
+    assert "TOOL-908" in plc_specs and "LSP-908" not in plc_specs
+    assert {"LSP-903", "LSP-904", "LSP-905", "LSP-906", "LSP-907"}.issubset(plc_specs)

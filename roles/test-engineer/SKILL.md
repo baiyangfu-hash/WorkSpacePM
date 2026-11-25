@@ -17,19 +17,19 @@ description: "测试验证与独立审计合一：跑门禁与测试、审 PR；
 
 照 `../shared/refs/start_and_handoff.md` 的“开工门禁”做。
 
-用 `pm verify` 做的交付验证需要匹配的 Work/Run 与有效 lease；单 PR 审计和云端门禁不占 Run，审计只写 `reviews/`。
+用 `pm verify` 做的交付验证需要匹配的 Work/Run 与有效 lease；单 PR 审计写 `reviews/`，本地合并审计报告写 `.auto-pm/reports/`。
 
 ## 测试验证
 
-- 用适用门禁：`pm verify --mission-id <ID> --lease-wallet`、`plc check <PID>`、`doc check`，Python 项目跑 pytest、ruff、mypy；PLC 项目的上机复核清单参照 STD-816，移植一致性参照 STD-817，测试规范参照 DEV-031、DEV-032。
+- 用适用门禁：`pm verify --mission-id <ID> --lease-wallet`、`plc check <PID>`、`doc check`、`pm_flows.py checkup <PID>`、`gate status`；Python 项目跑 pytest、ruff、mypy（零依赖 CI 脚本须用 `python -I -S` 验证隔离）；PLC 项目的上机复核清单参照 STD-816，移植一致性参照 STD-817，测试规范参照 DEV-031、DEV-032。
 - 门禁只认退出码，非零就退回，不听口头解释。
 
-## 独立审计
+## 独立审计（三场景）
 
-1. 先跑机械检查：`python reviews/tools/audit_pr.py <PR号>`（退出码 0 无 FAIL，1 有 FAIL 不能合并，2 用法或 Git 出错；WARN 要点名，UNVERIFIED 要人工补查）。
-2. 再照 `reviews/21_audit_checklist.md` 逐项核对：范围、受保护路径、内容是否属实、修复卡的同类排查清单（FIX-001）。
-3. 报告写到 `reviews/`，推到审计者自己的分支，结论贴到 PR 评论。每段结论末尾单独一行：`放行判定: <头提交前8位> 过|有条件过|不过`。
-4. 合并不是审计者的事：合并由合并线程按条件执行，条件是审计通过、CI 全绿、评审对话全部解决，只用 Merge commit。审计者只负责把结论和条件写清。
+1. **本地合并审计**：另起独立会话子代理（独立 `AUTO_PM_SESSION_ID` 与 `AUTO_PM_AGENT=<基名>-<6位ID>`），只读核验候选 `diff`、实施卡、`CHG §5` 一致性与门禁结果，将报告写入 `.auto-pm/reports/audit-<卡号>.md`，再以审计者自己身份在控制根跑 `pm_merge.py audit-record <工位> --verdict PASS --report <报告路径>`。
+2. **发版独立审计**：核对云端 `main` 全量判决回执（`complete == true` 且含 `plugin_result`）与发版候选目录一致性，落盘 `audit-release-<sha7>.md` 与 `.auto-pm/release-candidates/<release_id>/audit_signoff.md`，签核行格式固定为 `audit:AUD-001 independent-audit PASS <run_id> <40-sha> verdict-sha256=<16-hex>`。
+3. **多机 PR 线审计**：跑 `python reviews/tools/audit_pr.py <PR号>` 并按 `reviews/21_audit_checklist.md` 核查，报告写 `reviews/` 并推审计者自有分支。
+4. 审计结论末尾单独写一行：`放行判定: <头提交前8位> 过|有条件过|不过`（本地审计可标明 `放行判定: PASS|FAIL`）。审计只给结论与凭据，合并动作交由控制根合并线程执行。
 
 ## 交接
 

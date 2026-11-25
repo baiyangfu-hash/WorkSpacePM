@@ -6,9 +6,12 @@
   "domain": "plc",
   "legacy_names": [],
   "required_specs": [
+    "LSP-903",
+    "LSP-904",
     "LSP-905",
     "LSP-906",
     "LSP-907",
+    "TOOL-908",
     "STD-830",
     "STD-840",
     "STD-850",
@@ -38,9 +41,8 @@
   ],
   "owned_paths_note": "仅为申请范围的上限，实际可改范围以 Work 的 owned paths 为准",
   "enforcement": {
-    "claude_code": "待生成 hooks 与 permissions.deny（后续卡）",
-    "trae": "仅说明文字，无机器拦截",
-    "cursor": "仅说明文字，无机器拦截"
+    "role_json": "能力边界与门禁元数据声明",
+    "runtime": "实际硬拦截由 AGENTS.md、驾驶舱门禁与提交钩子执行（适配多平台）"
   },
   "legacy": {
     "retired": true,

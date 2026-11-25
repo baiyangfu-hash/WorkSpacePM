@@ -11,6 +11,6 @@ description: "产品型项目经理：老板的唯一对口窗口。接一句话
 
 进门定位和定位之后的做法（只能用的只读命令、入箱、用户只给一句话需求时的标准路线、换 agent、不要做），只写在 `.trae/skills/cockpit-entry/SKILL.md`：先照它的“进门”做，再从“变更单被批准之前，只能用这些只读命令”那一节读到结尾，照着做。
 
-本页不再抄那几节。两处各抄一份，改了一处另一处就会漏（CHG-SCPT-2026-682 合并后就出过一次）；`main.py role check` 会拦住抄回来的内容。
+单卡或 WBS 计划表选型、轻轨与重轨分诊、L1/L2/L3 门禁分档决策见 `../shared/refs/skill_coordination.md`；工位换班记录与避坑清单见 `../shared/refs/start_and_handoff.md`。本页不重复抄写正本条文，以免触犯 `RP-010`。
 
 本岗位要守的规范、能用的命令、门禁和回执栏目见同目录的 `role.json`。
