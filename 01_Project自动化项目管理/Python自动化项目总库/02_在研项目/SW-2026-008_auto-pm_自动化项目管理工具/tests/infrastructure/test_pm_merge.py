@@ -1241,3 +1241,177 @@ def test_run_gates_still_requires_managed_receipt_for_l2_and_l3(
     assert ok_res.ok
     assert any(f"门禁分级：{tier}（建议组：" in line for line in ok_res.lines)
     assert any(f"托管凭证已核对({tier})" in line for line in ok_res.lines)
+
+
+def _local_live_release_pointers(
+    repo: SimpleNamespace,
+    *,
+    dirty_manifest: bool = True,
+    release_id: str = "1.3.3-beef123",
+) -> tuple[dict[str, bytes], str]:
+    infra = "00_Infrastructure/auto_pm"
+    initial_manifest = json.dumps(
+        {
+            "schema_version": "deployment_manifest.v1",
+            "releases": {
+                "1.3.3-aaaa111": {"source_commit": "a" * 40},
+                release_id: {"source_commit": "b" * 40},
+            },
+        },
+        ensure_ascii=False,
+    ) + "\n"
+    commit(
+        repo.root,
+        {
+            f"{infra}/active_release.json": json.dumps({"release_id": "1.3.3-aaaa111"}) + "\n",
+            f"{infra}/previous_release.json": json.dumps({"release_id": "1.3.3-0000000"}) + "\n",
+            f"{infra}/deployment_manifest.json": initial_manifest,
+        },
+        "committed release pointers",
+    )
+    git(repo.wt, "merge", "--quiet", "main")
+    pointer_bytes = {
+        f"{infra}/active_release.json": (
+            json.dumps({"release_id": release_id}) + "\r\n"
+        ).encode("utf-8"),
+        f"{infra}/previous_release.json": (
+            json.dumps({"release_id": "1.3.3-aaaa111"}) + "\r\n"
+        ).encode("utf-8"),
+        f"{infra}/deployment_manifest.json": (
+            (
+                json.dumps(
+                    {
+                        "schema_version": "deployment_manifest.v1",
+                        "releases": {
+                            "1.3.3-aaaa111": {"source_commit": "a" * 40},
+                            release_id: {"source_commit": "b" * 40, "note": "gui-ship"},
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\r\n"
+            ).encode("utf-8")
+            if dirty_manifest
+            else initial_manifest.encode("utf-8")
+        ),
+    }
+    for rel, raw in pointer_bytes.items():
+        if dirty_manifest or not rel.endswith("deployment_manifest.json"):
+            (repo.root / rel).write_bytes(raw)
+    payload_rel = f"{infra}/releases/{release_id}/payload.txt"
+    payload_file = repo.root / payload_rel
+    payload_file.parent.mkdir(parents=True, exist_ok=True)
+    payload_file.write_bytes(b"live payload\n")
+    return pointer_bytes, payload_rel
+
+
+def test_merge_preserves_unrelated_live_release_pointers(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    gov_paths = _local_governance_records(pm, repo)
+    pointer_bytes, payload_rel = _local_live_release_pointers(repo)
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    out = capsys.readouterr().out
+    assert all((repo.root / path).read_bytes() == raw for path, raw in pointer_bytes.items())
+    assert (repo.root / payload_rel).read_bytes() == b"live payload\n"
+    assert all((repo.root / path).read_bytes() == b"local record\r\n" for path in gov_paths)
+    assert git(repo.root, "ls-tree", "--name-only", "main", "--", payload_rel).stdout == ""
+    assert git(repo.root, "diff", "--name-only", "main^1", "main").stdout.strip() == "docs/new.md"
+    entry = pm.read_log(repo.root)[-1]
+    assert set(entry["preserved_release_pointers"]) == set(pointer_bytes)
+    assert entry["preserved_release_id"] == "1.3.3-beef123"
+    assert entry["release_pointer_drift"] == []
+    assert set(entry["preserved_governance"]) == set(gov_paths)
+    assert entry["governance_drift"] == []
+    assert "原样保留" in out
+
+
+def test_merge_preserves_partial_dirty_release_pointers(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    pointer_bytes, payload_rel = _local_live_release_pointers(repo, dirty_manifest=False)
+    commit(repo.wt, {"docs/partial.md": "partial\n"}, f"docs\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert all((repo.root / path).read_bytes() == raw for path, raw in pointer_bytes.items())
+    assert (repo.root / payload_rel).read_bytes() == b"live payload\n"
+    entry = pm.read_log(repo.root)[-1]
+    assert set(entry["preserved_release_pointers"]) == set(pointer_bytes)
+    assert entry["release_pointer_drift"] == []
+
+
+@pytest.mark.parametrize("problem", ["overlap_pointer", "overlap_payload", "staged"])
+def test_release_pointer_preservation_refuses_overlap_and_staged_index(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, problem: str
+) -> None:
+    pointer_bytes, payload_rel = _local_live_release_pointers(repo)
+    base = rev(repo.root, "main")
+    active = "00_Infrastructure/auto_pm/active_release.json"
+    if problem == "overlap_pointer":
+        commit(repo.wt, {active: '{"release_id":"1.3.3-beef123"}\n'}, f"touch ptr\n\n{CARD}")
+    elif problem == "overlap_payload":
+        tip = commit(repo.wt, {payload_rel: "override\n"}, f"touch payload\n\n{CARD}")
+        with pytest.raises(pm.RefusedError, match="候选不能同时改动发布文件"):
+            pm._control_root_copies(pm.Git(repo.root), repo.root, tip, [payload_rel])
+    else:
+        commit(repo.wt, {"other.md": "incoming\n"}, f"docs\n\n{CARD}")
+        (repo.root / "other.md").write_bytes(b"incoming\n")
+        git(repo.root, "add", "--", "other.md")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    expected = (
+        "有已暂存内容"
+        if problem == "staged"
+        else "没有本卡的实施卡"
+        if problem == "overlap_payload"
+        else "候选不能同时改动发布文件"
+    )
+    assert expected in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert all((repo.root / path).read_bytes() == raw for path, raw in pointer_bytes.items())
+
+
+@pytest.mark.parametrize("problem", ["bad_json", "missing_manifest_entry", "missing_payload_dir"])
+def test_release_pointer_preservation_refuses_corrupt_or_missing_payload(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, problem: str
+) -> None:
+    pointer_bytes, payload_rel = _local_live_release_pointers(repo)
+    base = rev(repo.root, "main")
+    active = "00_Infrastructure/auto_pm/active_release.json"
+    manifest = "00_Infrastructure/auto_pm/deployment_manifest.json"
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+    if problem == "bad_json":
+        (repo.root / active).write_bytes(b"{not-json")
+    elif problem == "missing_manifest_entry":
+        (repo.root / manifest).write_bytes(b'{"schema_version":"deployment_manifest.v1","releases":{}}\n')
+    else:
+        shutil.rmtree((repo.root / payload_rel).parent)
+    before_active = (repo.root / active).read_bytes()
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "控制根现役发布" in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / active).read_bytes() == before_active
+    assert (repo.root / "00_Infrastructure/auto_pm/previous_release.json").read_bytes() == pointer_bytes[
+        "00_Infrastructure/auto_pm/previous_release.json"
+    ]
+
+
+def test_release_pointer_change_during_precheck_leaves_main_and_new_bytes_intact(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _local_live_release_pointers(repo)
+    base = rev(repo.root, "main")
+    active = "00_Infrastructure/auto_pm/active_release.json"
+    rel2 = repo.root / "00_Infrastructure/auto_pm/releases/1.3.3-cafe456"
+    rel2.mkdir(parents=True, exist_ok=True)
+    (rel2 / "payload.txt").write_bytes(b"v2\n")
+    commit(repo.wt, {"docs/new.md": "docs\n"}, f"docs\n\n{CARD}")
+    switched = b'{"release_id":"1.3.3-cafe456"}\n'
+
+    def concurrent_ship(_root: Path, _worktree: Path, _full: bool) -> Any:
+        (repo.root / active).write_bytes(switched)
+        return pm.GateResult(True)
+
+    monkeypatch.setattr(pm, "run_gates", concurrent_ship)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert rev(repo.root, "main") == base
+    assert (repo.root / active).read_bytes() == switched

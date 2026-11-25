@@ -16,8 +16,8 @@
    的已入库文件），以及明确绑定变更单的分支，核对实施卡、变更单、实际路径和独立审计凭证。
    审计绑定候选提交和当前 main。
 3. GitHub 开启且可达时，``origin/main`` 必须已在本机 main 里；多机档无法对账时拒绝合并。
-4. 控制根同路径副本须与候选相符。控制根索引干净且候选完全避开未提交的驾驶舱变更单和台账时，
-   原样保留这些记录，合并前后核对摘要。其他无关未提交改动仍拒绝。
+4. 控制根同路径副本须与候选相符。控制根索引干净且候选完全避开控制根未提交的驾驶舱变更单、
+   台账以及合法的现役发布指针时，原样保留这些文件，合并前后核对摘要。其他无关未提交改动仍拒绝。
 5. 适用的轻量自检与根目录检查通过。受保护改动、``--full-gate`` 或预检扩大为大范围选测时，
    核对驾驶舱持久任务里的全量门禁凭证。
 都过了才 ``git merge --no-ff``，在 ``.auto-pm/reports/local_merge/merge_log.jsonl`` 记一笔；“备份”“多机”档
@@ -409,6 +409,8 @@ class Plan:
     audit: dict[str, Any] | None = None
     formal_change: str = ""
     preserved_governance: dict[str, str] = field(default_factory=dict)
+    preserved_release_pointers: dict[str, str] = field(default_factory=dict)
+    preserved_release_id: str = ""
 
     @property
     def requires_audit(self) -> bool:
@@ -656,50 +658,136 @@ def _chunk_paths(paths: Sequence[str], max_chars: int | None = None) -> list[lis
 class ControlRootCopies:
     replace: list[str]
     preserved: dict[str, str]
+    preserved_release_pointers: dict[str, str] = field(default_factory=dict)
+    preserved_release_id: str = ""
 
 
 def _is_governance_record(path: str) -> bool:
     return path == GOVERNANCE_LEDGER or GOVERNANCE_CHANGE.fullmatch(path) is not None
 
 
-def _governance_digest(root: Path, path: str) -> str:
+def _is_release_pointer(path: str) -> bool:
+    return path in RELEASE_POINTERS
+
+
+def _touches_release_area(path: str) -> bool:
+    return (
+        path in RELEASE_POINTERS
+        or path == RELEASE_ROOT
+        or path == f"{RELEASE_ROOT}/releases"
+        or path.startswith(f"{RELEASE_ROOT}/releases/")
+    )
+
+
+def _plain_file_digest(root: Path, path: str, *, label: str) -> str:
     local = root / path
     try:
         if local.resolve() != local.absolute() or not local.is_file():
-            raise RefusedError(f"只能保全控制根中的普通变更记录文件：{path}")
+            raise RefusedError(f"只能保全控制根中的普通{label}文件：{path}")
         return hashlib.sha256(local.read_bytes()).hexdigest()
     except (OSError, RuntimeError) as exc:
-        raise RefusedError(f"无法核对控制根变更记录：{path}") from exc
+        raise RefusedError(f"无法核对控制根{label}：{path}") from exc
+
+
+def _governance_digest(root: Path, path: str) -> str:
+    return _plain_file_digest(root, path, label="变更记录")
+
+
+def _preserve_release_pointers(root: Path, paths: Sequence[str]) -> tuple[dict[str, str], str]:
+    """Validate and snapshot live release pointers when ordinary merges avoid release paths."""
+    overlap = sorted(path for path in paths if _touches_release_area(path))
+    if overlap:
+        raise RefusedError(
+            "控制根有现役发布指针，候选不能同时改动发布文件；归档请使用 --archive-existing"
+        )
+    digests = {
+        path: _plain_file_digest(root, path, label="现役发布指针")
+        for path in sorted(RELEASE_POINTERS)
+    }
+    try:
+        active = json.loads((root / RELEASE_ROOT / "active_release.json").read_text(encoding="utf-8"))
+        prev = json.loads((root / RELEASE_ROOT / "previous_release.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (root / RELEASE_ROOT / "deployment_manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise RefusedError(f"控制根现役发布指针无效，先核对或处理再合并：{exc}") from exc
+    release_id = active.get("release_id") if isinstance(active, dict) else None
+    prev_id = prev.get("release_id") if isinstance(prev, dict) else None
+    releases = manifest.get("releases") if isinstance(manifest, dict) else None
+    if (
+        not isinstance(release_id, str)
+        or not NAME_RE.fullmatch(release_id)
+        or not isinstance(prev_id, str)
+        or not NAME_RE.fullmatch(prev_id)
+        or not isinstance(releases, dict)
+        or release_id not in releases
+    ):
+        raise RefusedError("控制根现役发布指针无效或清单缺少现役版本条目，先核对或处理再合并")
+    rel_dir = root / RELEASE_ROOT / "releases" / release_id
+    try:
+        valid_dir = (
+            rel_dir.resolve() == rel_dir.absolute()
+            and rel_dir.is_dir()
+            and any(item.is_file() for item in rel_dir.rglob("*"))
+        )
+    except (OSError, RuntimeError) as exc:
+        raise RefusedError(f"控制根现役发布载荷不可读：{release_id}") from exc
+    if not valid_dir:
+        raise RefusedError(f"控制根现役发布载荷目录缺失或为空：releases/{release_id}")
+    return digests, release_id
 
 
 def _control_root_copies(
     root_git: Git, root: Path, sha: str, paths: list[str], *, archive_existing: bool = False
 ) -> ControlRootCopies:
-    """Identify matching copies and snapshot any governance records left on disk."""
+    """Identify matching copies and snapshot governance or live release pointers left on disk."""
     tracked = root_git.run(
         "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=no", check=True
     ).stdout
     dirty = {entry[3:]: entry[:2] for entry in tracked.split("\0") if len(entry) > 3}
     unresolved = sorted(set(dirty) - set(paths))
     preserved: dict[str, str] = {}
+    preserved_rel: dict[str, str] = {}
+    preserved_rel_id = ""
     if unresolved and not archive_existing:
-        other = [path for path in unresolved if dirty[path] != " M" or not _is_governance_record(path)]
+        unresolved_gov = [
+            path for path in unresolved if dirty[path] == " M" and _is_governance_record(path)
+        ]
+        unresolved_rel = [
+            path for path in unresolved if dirty[path] == " M" and _is_release_pointer(path)
+        ]
+        other = [
+            path for path in unresolved if path not in set(unresolved_gov) | set(unresolved_rel)
+        ]
         if other:
             raise RefusedError("控制根有未提交的改动，先处理再合并：" + "、".join(other[:10]))
         if not root_git.ok("diff", "--cached", "--quiet"):
-            raise RefusedError("控制根有已暂存内容，不能保全台账后合并")
-        pending = root_git.run(
-            "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--",
-            GOVERNANCE_DIR, check=True,
-        ).stdout
-        records = {entry[3:] for entry in pending.split("\0") if len(entry) > 3 and _is_governance_record(entry[3:])}
-        overlap = sorted(
-            record for record in records
-            if any(record == path or record.startswith(f"{path}/") or path.startswith(f"{record}/") for path in paths)
-        )
-        if overlap:
-            raise RefusedError("候选与控制根未提交的变更记录重叠：" + "、".join(overlap[:10]))
-        preserved = {path: _governance_digest(root, path) for path in sorted(records | set(unresolved))}
+            raise RefusedError("控制根有已暂存内容，不能保全台账或发布指针后合并")
+        if unresolved_gov:
+            pending = root_git.run(
+                "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--",
+                GOVERNANCE_DIR, check=True,
+            ).stdout
+            records = {
+                entry[3:]
+                for entry in pending.split("\0")
+                if len(entry) > 3 and _is_governance_record(entry[3:])
+            }
+            overlap = sorted(
+                record for record in records
+                if any(
+                    record == path or record.startswith(f"{path}/") or path.startswith(f"{record}/")
+                    for path in paths
+                )
+            )
+            if overlap:
+                raise RefusedError("候选与控制根未提交的变更记录重叠：" + "、".join(overlap[:10]))
+            preserved = {
+                path: _governance_digest(root, path) for path in sorted(records | set(unresolved_gov))
+            }
+        if unresolved_rel:
+            preserved_rel, preserved_rel_id = _preserve_release_pointers(root, paths)
     replace = []
     candidates = set(dirty) - set(unresolved)
     for batch in _chunk_paths(paths):
@@ -735,7 +823,7 @@ def _control_root_copies(
                 f"控制根里 {path} 的未提交内容和分支里的不一样（不只差行尾），先把控制根的版本放进分支再合并"
             )
         replace.append(path)
-    return ControlRootCopies(replace, preserved)
+    return ControlRootCopies(replace, preserved, preserved_rel, preserved_rel_id)
 
 
 def _archive_ledger_preserves_rows(
@@ -862,6 +950,8 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
         branch, sha, card, chgs, paths, user_paths, copies.replace, notes,
         archive_existing=archive_existing, base=base, formal_change=formal_change,
         preserved_governance=copies.preserved,
+        preserved_release_pointers=copies.preserved_release_pointers,
+        preserved_release_id=copies.preserved_release_id,
     )
 
 
@@ -1012,7 +1102,12 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
         copies = _control_root_copies(
             root_git, root, plan.sha, plan.paths, archive_existing=plan.archive_existing,
         )
-        if copies.replace != plan.replace or copies.preserved != plan.preserved_governance:
+        if (
+            copies.replace != plan.replace
+            or copies.preserved != plan.preserved_governance
+            or copies.preserved_release_pointers != plan.preserved_release_pointers
+            or copies.preserved_release_id != plan.preserved_release_id
+        ):
             raise RefusedError("控制根副本范围在检查后变化，请重新核对")
         if plan.archive_existing:
             _check_release_archive(root, root_git, base, plan.sha, plan.paths, copies.replace)
@@ -1028,6 +1123,14 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
                 same = False
             if not same:
                 governance_drift.append(path)
+        release_pointer_drift = []
+        for path, before in plan.preserved_release_pointers.items():
+            try:
+                same = _plain_file_digest(root, path, label="现役发布指针") == before
+            except RefusedError:
+                same = False
+            if not same:
+                release_pointer_drift.append(path)
     entry: dict[str, Any] = {
         "time": _now(),
         "branch": plan.branch,
@@ -1048,6 +1151,10 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
     if plan.preserved_governance:
         entry["preserved_governance"] = plan.preserved_governance
         entry["governance_drift"] = governance_drift
+    if plan.preserved_release_pointers:
+        entry["preserved_release_pointers"] = plan.preserved_release_pointers
+        entry["preserved_release_id"] = plan.preserved_release_id
+        entry["release_pointer_drift"] = release_pointer_drift
     if mode != "关":
         push = root_git.run("push", "--quiet", "origin", f"{merge_sha}:{MAIN_REF}", timeout=NET_TIMEOUT * 2)
         entry["pushed"] = push.returncode == 0
@@ -1201,6 +1308,13 @@ def cmd_merge(root: Path, name: str, pid: str, full_gate: bool, *, archive_exist
         print("合并后发现本机变更记录有并发更新，请核对：" + "、".join(entry["governance_drift"]))
     elif plan.preserved_governance:
         print(f"已核对 {len(plan.preserved_governance)} 份本机变更记录原样保留")
+    if entry.get("release_pointer_drift"):
+        print("合并后发现本机现役发布指针有并发更新，请核对：" + "、".join(entry["release_pointer_drift"]))
+    elif plan.preserved_release_pointers:
+        print(
+            f"已核对 {len(plan.preserved_release_pointers)} 份本机现役发布指针（{plan.preserved_release_id}）"
+            "原样保留；如需归档该版本快照可后续使用 --archive-existing"
+        )
     if mode == "关":
         print("GitHub 关着，没有推送")
     elif entry["pushed"]:
