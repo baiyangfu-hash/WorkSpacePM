@@ -1,19 +1,14 @@
 {
   "schema": "local-handoff-focus.v1",
   "project_id": "SW-2026-008",
-  "updated_at": "2026-11-25T13:34:15Z",
-  "updated_by": "antigravity",
-  "stage_goal": "完成角色包与入口修订（CHG-SCPT-2026-744）并启动 SW-2026-008 WBS 最小两卡试点",
+  "updated_at": "2026-11-26T00:11:48Z",
+  "updated_by": "codex",
+  "stage_goal": "复验 SW-2026-008 的 WBS 与换班交接两卡试点",
   "priorities": [
     {
       "rank": 1,
-      "item": "完成角色包与入口修订（CHG-SCPT-2026-744）并经 AUD-001 合并",
-      "ref": "CHG-SCPT-2026-744"
-    },
-    {
-      "rank": 2,
-      "item": "按 user 批准启动 SW-2026-008 WBS 两卡试点",
-      "ref": "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+      "item": "核对两张卡的交付与门禁，复验进门与交接",
+      "ref": "SW-2026-008 L1"
     },
     {
       "rank": 3,
@@ -21,12 +16,7 @@
       "ref": "0100_PLC自动化/DJ-2026-005"
     }
   ],
-  "active_work": {
-    "card": "CARD-SW-2026-008-744",
-    "branch": "antigravity/CHG-SCPT-2026-744",
-    "chg": "CHG-SCPT-2026-744",
-    "breakpoint": "已基于 1.3.3-1359a6f 归档 739-743（9c8ae021），在工位修订角色包与入口正本"
-  },
+  "active_work": null,
   "waiting_for_user": [],
-  "next_action": "阶段一合入并推到完成后，依 SW8 WBS 计划表启动 L1.1（L1）与 L1.2（L2）试点"
+  "next_action": "由新会话从控制根执行 entry SW-2026-008，按先读核对 L1 的两张卡、回执与合并事实，随后把复验结论交用户确认。"
 }

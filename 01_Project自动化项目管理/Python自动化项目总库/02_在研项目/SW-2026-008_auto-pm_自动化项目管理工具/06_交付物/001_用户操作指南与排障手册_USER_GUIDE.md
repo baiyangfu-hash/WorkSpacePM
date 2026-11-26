@@ -189,17 +189,23 @@ title: "auto-pm 自动化项目管理工具 - 用户操作指南与排障手册"
 
 ### 6.1 进门定位、单机轻轨交接与 WBS 进度核算
 
-1. **新会话进门与体检**：在控制根用 `.\.venv\Scripts\python.exe` 运行 `SW8/scripts/pm_flows.py entry <项目编号>`（只读定位）与 `pm_flows.py checkup <项目编号>`（12 步只读体检）。
+1. **新会话进门**：在控制根运行 `pm_flows.py entry <项目编号>`。一次就能看到项目体检、项目计划状态、本机交接和「先读」文件。只做体检时用 `checkup`。下面以 `SW-2026-008` 为例：
+
+   ```powershell
+   .\.venv\Scripts\python.exe -B '.\01_Project自动化项目管理\Python自动化项目总库\02_在研项目\SW-2026-008_auto-pm_自动化项目管理工具\scripts\pm_flows.py' entry SW-2026-008
+   ```
 2. **单机轻轨交接（PM-056）**：日常单机模式下，在隔离工位内通过 `SW8/scripts/pm_handoff.py set-focus` / `log` 更新 `<项目>/{04|11}_监控/交接交换区/`（`focus.json` 与 `journal.jsonl`），并用 `pm_handoff.py validate <项目编号> --root <工位> --require-exists` 校验；禁止直接写控制根交接区。
-3. **WBS 项目计划表（现算状态）**：当项目包含有依赖的多卡里程碑时，在 `<项目>/00_项目管理/01_立项与需求/NNN_<项目编号>_项目计划表.md` 登记任务行与独立证据回执，由 `SW8/scripts/plan_status.py <项目编号> [--json]` 按 `main` 与分支事实自动计算 `未开始 / 在干 / 已合并未验证 / 已完成 / 待用户验收 / 已达成`。
+3. **WBS 项目计划表**：在「项目计划状态」找到任务和卡号，按交接的「先读」打开计划表、实施卡和回执。计划状态按 `main`、分支和证据现算。里程碑进入「待用户验收」后，由用户本人确认，通过后把确认时间和凭据登记在计划表末尾的「验收记录」。记录入库后，计划状态显示「已达成」。
 
 ### 6.2 三级门禁分档（L1 / L2 / L3）
 
 提交前统一在控制根运行 `.\.venv\Scripts\python.exe .\main.py gate precheck --worktree <工位> --defer-full [--json]` 自动判档：
 
-- **L1（本地快速闭环）**：仅修改纯文档（`.md` / `.rst`）或已核实样板路径（`L1_VERIFIED_PILOT_PATHS`）。通过本机自检与 `gate precheck` 后即可由 `pm_merge.py merge <工位>` 合入 `main`，无需云端排队。
-- **L2（云端按组门禁）**：非核心脚本、测试或总控屏文档/代码改动。先 `git push` 工位分支，再运行 `.\main.py gate start --worktree <工位>`（不带 `--full`），云端仅跑受影响测试分组并签发 `gate-l2` 凭证。
-- **L3（云端全量 + 插件）**：规则文件、核心门禁/发版/状态机/PLC/QML、配置文件或非 `.md/.py` 运行资产（含 `.json` / `.jsonl`）。强制 `.\main.py gate start --worktree <工位> --full`（全量 11 组 + 西门子插件）；命中 `FLOW-001`“要你点头”受保护类还须另起独立会话完成 `AUD-001` 审计与 `pm_merge.py audit-record` 登记。
+- **L1（本地快速闭环）**：命中文档路径规则且分档结果为 L1，或命中已核实样板路径。通过本机自检与 `gate precheck` 后可由 `pm_merge.py merge <工位>` 合入 `main`。
+- **L2（云端按组门禁）**：例如总控屏目录的 README，按目录规则属于 L2。先推送工位分支，再从控制根用 `.\.venv\Scripts\python.exe -B .\main.py gate start --worktree <工位>` 派发。
+- **L3（云端全量与插件）**：例如核心模块、受保护规则和本机交接 JSON 文件。在 `gate start` 加 `--full`。命中 `FLOW-001` 的「要你点头」范围时，还须按 `AUD-001` 取得独立审计。
+
+L2/L3 的本机轻量检查通过后，`--defer-full` 仍可能返回 `UNVERIFIED` 和退出码 `1`，表示还需托管门禁。派发后保存任务号，从控制根运行 `.\.venv\Scripts\python.exe -B .\main.py gate status <任务号>` 对账。状态为 `passed` 且回执对应同一候选和 `main` 基线后，再走本机合并。
 
 ### 6.3 高频实操排障清单
 
