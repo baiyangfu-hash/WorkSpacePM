@@ -1,15 +1,10 @@
 {
   "schema": "local-handoff-focus.v1",
   "project_id": "SW-2026-008",
-  "updated_at": "2026-11-26T00:11:48Z",
+  "updated_at": "2026-11-26T01:39:42Z",
   "updated_by": "codex",
-  "stage_goal": "复验 SW-2026-008 的 WBS 与换班交接两卡试点",
+  "stage_goal": "SW-2026-008 WBS 与换班交接两卡试点，用户已确认验收",
   "priorities": [
-    {
-      "rank": 1,
-      "item": "核对两张卡的交付与门禁，复验进门与交接",
-      "ref": "SW-2026-008 L1"
-    },
     {
       "rank": 3,
       "item": "按用户排期推进 PLC 工程项目与 TIA 实测联调",
@@ -18,5 +13,5 @@
   ],
   "active_work": null,
   "waiting_for_user": [],
-  "next_action": "由新会话从控制根执行 entry SW-2026-008，按先读核对 L1 的两张卡、回执与合并事实，随后把复验结论交用户确认。"
+  "next_action": "从项目计划表查看 L1 验收凭据及两张卡回执。接续任务按用户排期从对应项目的进门入口定位。"
 }
