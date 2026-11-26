@@ -197,7 +197,13 @@ def preview_gate_candidate(worktree: Path, *, root: Path | None = None) -> GateP
         raise GateRunError("工位与控制根不属于同一本 Git 仓库")
     project = project_dir_in(worktree)
     commit = git(worktree, "rev-parse", "HEAD")
-    base = git(control, "rev-parse", "refs/heads/main")
+    base = commit
+    for ref in ("refs/heads/main", "refs/remotes/origin/main"):
+        try:
+            base = git(control, "rev-parse", ref)
+            break
+        except GateRunError:
+            continue
     try:
         aligned = commit == base or git(control, "merge-base", base, commit) == base
     except GateRunError:
