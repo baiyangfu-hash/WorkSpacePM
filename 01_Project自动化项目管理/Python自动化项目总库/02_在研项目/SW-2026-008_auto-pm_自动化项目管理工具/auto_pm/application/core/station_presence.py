@@ -17,6 +17,7 @@ mistaken for live sessions, and nothing crosses computers (that is a separate, l
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -217,3 +218,68 @@ def orient_lines(control_root: str | Path) -> tuple[str, ...]:
     more = f" 等 {len(others)} 个" if len(others) > 4 else ""
     root_note = f"，其中 {at_root} 个站在控制根上" if at_root else ""
     return (f"[在场] 本机另有 {len(others)} 个会话在场{root_note}：{names}{more}；详情 `main.py worktree who`",)
+
+
+def clear_presence(control_root: str | Path, *, alias: str = "", key: str = "") -> int:
+    """Remove local-machine presence record(s) when a conversation closes/releases/reclaims its station.
+
+    Best-effort: never raises and never touches records written by another computer.
+    """
+
+    target_alias = alias.strip()
+    target_key = key.strip()
+    if not target_alias and not target_key:
+        return 0
+    folder = _folder(control_root)
+    if not folder.is_dir():
+        return 0
+    here = platform.node()
+    removed = 0
+    try:
+        entries = sorted(folder.glob("*.json"))
+    except OSError:
+        return 0
+    for entry in entries:
+        note = _read(entry)
+        if note.get("schema") != SCHEMA:
+            continue
+        machine = str(note.get("machine", ""))
+        if machine and machine != here:
+            continue
+        entry_key = str(note.get("key", entry.stem))
+        entry_alias = str(note.get("alias", ""))
+        matched = (bool(target_key) and (entry.stem == target_key or entry_key == target_key)) or (
+            bool(target_alias) and entry_alias == target_alias
+        )
+        if not matched:
+            continue
+        with contextlib.suppress(OSError):
+            entry.unlink()
+            removed += 1
+    return removed
+
+
+def prune_orphan_presence(control_root: str | Path, *, orphan_hours: float | None = None) -> int:
+    """Remove local-machine presence records already judged ``orphan`` (explicit reclaim only; listing stays read-only).
+
+    Only deletes entries whose verdict is ``orphan`` (same machine, dead or undeclared PID, silent past the limit).
+    Never raises and never touches ``alive``, ``quiet``, or ``elsewhere`` entries.
+    """
+
+    folder = _folder(control_root)
+    if not folder.is_dir():
+        return 0
+    removed = 0
+    try:
+        entries = list_presence(control_root, orphan_hours=orphan_hours)
+    except Exception:  # noqa: BLE001 - best-effort housekeeping must never block station reclaim
+        return 0
+    for entry in entries:
+        if entry.verdict != "orphan":
+            continue
+        path = folder / f"{entry.key}.json"
+        with contextlib.suppress(OSError):
+            if path.is_file():
+                path.unlink()
+                removed += 1
+    return removed

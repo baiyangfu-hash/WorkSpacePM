@@ -12,8 +12,10 @@ import pytest
 
 from auto_pm.application.core.station_presence import (
     SCHEMA,
+    clear_presence,
     list_presence,
     orient_lines,
+    prune_orphan_presence,
     record_presence,
 )
 
@@ -174,3 +176,32 @@ def test_a_record_that_cannot_be_written_is_not_an_error(tmp_path: Path, monkeyp
     assert record_presence(tmp_path) is False
     assert list_presence(tmp_path) == []
     assert orient_lines(tmp_path) == ()
+
+
+def test_clear_presence_removes_matching_local_alias_and_keeps_others_and_other_machines(tmp_path: Path) -> None:
+    mine = _write(tmp_path, "k1", hours=0.2, alias="claude-aaaaaa")
+    other = _write(tmp_path, "k2", hours=0.2, alias="claude-bbbbbb")
+    remote = _write(tmp_path, "k3", hours=0.2, alias="claude-aaaaaa", machine="SOME-OTHER-PC")
+
+    assert clear_presence(tmp_path, alias="claude-aaaaaa") == 1
+    assert not mine.exists()
+    assert other.exists()
+    assert remote.exists()
+    assert clear_presence(tmp_path, key="k2") == 1
+    assert not other.exists()
+    assert clear_presence(tmp_path, alias="claude-missing") == 0
+
+
+def test_prune_orphan_presence_removes_only_local_orphans(tmp_path: Path) -> None:
+    alive = _write(tmp_path, "alive", hours=0.0, pid=os.getpid(), alias="claude-111111")
+    quiet = _write(tmp_path, "quiet", hours=1.0, pid=DEAD_PID, alias="claude-222222")
+    orphan = _write(tmp_path, "orphan", hours=5.0, pid=DEAD_PID, alias="claude-333333")
+    orphan_nopid = _write(tmp_path, "orphan0", hours=5.0, pid=0, alias="claude-444444")
+    elsewhere = _write(tmp_path, "remote", hours=50.0, pid=0, machine="SOME-OTHER-PC", alias="claude-555555")
+
+    assert prune_orphan_presence(tmp_path) == 2
+    assert alive.exists()
+    assert quiet.exists()
+    assert elsewhere.exists()
+    assert not orphan.exists()
+    assert not orphan_nopid.exists()

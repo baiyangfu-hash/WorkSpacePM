@@ -232,3 +232,27 @@ def test_the_list_command_shows_the_broken_directory_and_a_warning(lab: Lab) -> 
     as_json = runner.invoke(cli, [*base, "worktree", "list", "--deep", "--json"])
     assert as_json.exit_code == 0, as_json.output
     assert '"broken": "目录里没有 .git' in as_json.output
+
+
+def test_sweep_apply_pruning_gone_alias_station_clears_holder_and_presence(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_pm.application.core.station_presence import list_presence, record_presence
+
+    opened = lab.service().open("claude-aaaaaa", "CARD-2", fetch=False)
+    shutil.rmtree(opened.path)
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "aaaaaa00-0000-0000-0000-000000000000")
+    assert record_presence(lab.root, cwd=lab.root, min_interval_seconds=0) is True
+    monkeypatch.delenv("AUTO_PM_AGENT")
+    monkeypatch.delenv("AUTO_PM_SESSION_ID")
+    holder = lab.root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json"
+    assert holder.is_file()
+    assert len(list_presence(lab.root)) == 1
+
+    report = lab.service().sweep(apply=True, fetch=False)
+
+    assert report.failed == []
+    assert str(opened.path) not in _registered(lab)
+    assert not holder.exists()
+    assert list_presence(lab.root) == []

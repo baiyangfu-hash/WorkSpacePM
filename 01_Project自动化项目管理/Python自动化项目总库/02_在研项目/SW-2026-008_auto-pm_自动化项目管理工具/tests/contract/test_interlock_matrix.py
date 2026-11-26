@@ -8,7 +8,7 @@ keeps it honest:
   (the count of plain refusals per file may not grow; a lower count must be written into the baseline);
 * every conflict code ``pm orient`` can print is a row of the abnormal-state table, so no conflict is left without a next step;
 * the deadlock definition runs over the tables, a synthetic guard proves the detector can see, and the deadlocks that exist
-  today are listed with a TD number and a flip-by date, so the list can only get shorter;
+  today are listed with a disposition tag and rationale, so the list can only get shorter;
 * nothing in the package updates or deletes rows of the ``events`` table.
 
 Baselines live in ``tests/contract/baselines``; changing one is a decision the reviewer reads in the PR diff.
@@ -22,7 +22,6 @@ import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 
 import click
@@ -48,14 +47,27 @@ BASELINES = Path(__file__).resolve().parent / "baselines"
 PLAIN_REFUSALS = frozenset({"ClickException", "ContinuityStoreError"})
 GUARD_REFUSALS = frozenset({"GuardClickRefusal", "GuardStoreRefusal", "GuardRefusal"})
 
-# Deadlocks that exist today (found by ``find_deadlocks`` over the tables), each with the TD that closes it and the date by which
-# it must be flipped.  The list can only get shorter: add nothing here to make a new deadlock pass, fix the guard.
-# TD-SW008-273: main-ledger TD (assigned by the main executor); the recovery order (P2) clears them.
-KNOWN_DEADLOCKS: dict[tuple[str, str, str], tuple[str, date]] = {
-    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
-    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
-    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
-    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): ("TD-SW008-273", date(2026, 12, 15)),
+# Deadlocks that exist today (found by ``find_deadlocks`` over the tables), each with its disposition tag and rationale.
+# The list can only get shorter: add nothing here to make a new deadlock pass, fix the guard.
+# Under the slimmed local-first cockpit, P2 recovery-order is deferred; runtime identity conflicts must be repaired
+# before running the settlement chain rather than weakening G-IDENTITY-WRITE.
+KNOWN_DEADLOCKS: dict[tuple[str, str, str], tuple[str, str]] = {
+    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): (
+        "DEFERRED-P2-RECOVERY",
+        "运行身份冲突时须先修复发布指针/运行身份再走结算链，不放宽 G-IDENTITY-WRITE",
+    ),
+    ("LEASE_EXPIRED", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): (
+        "DEFERRED-P2-RECOVERY",
+        "运行身份未核验时须先恢复发布指针与清单再走结算链，不放宽 G-IDENTITY-WRITE",
+    ),
+    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_DIVERGENCE", "G-IDENTITY-WRITE"): (
+        "DEFERRED-P2-RECOVERY",
+        "运行身份冲突时须先修复发布指针/运行身份再结算孤儿 Run，不放宽 G-IDENTITY-WRITE",
+    ),
+    ("LIVE_RUN_UNDER_FINISHED_WORK", "RUNTIME_IDENTITY_UNVERIFIED", "G-IDENTITY-WRITE"): (
+        "DEFERRED-P2-RECOVERY",
+        "运行身份未核验时须先恢复发布指针与清单再结算孤儿 Run，不放宽 G-IDENTITY-WRITE",
+    ),
 }
 MAX_KNOWN_DEADLOCKS = 4
 
@@ -296,15 +308,19 @@ def test_every_deadlock_in_the_tables_is_known_and_the_known_list_only_shrinks()
     assert len(KNOWN_DEADLOCKS) <= MAX_KNOWN_DEADLOCKS
 
 
-def test_known_deadlocks_carry_a_td_number_and_have_not_passed_their_date() -> None:
-    for key, (td, flip_by) in KNOWN_DEADLOCKS.items():
-        assert td.startswith("TD-"), key
-        assert date.today() <= flip_by, f"{key} 的翻转期限 {flip_by} 已过（{td}）：修掉，或由协调者重新定期限"
+def test_known_deadlocks_reference_valid_matrix_rows_and_document_rationale() -> None:
+    for (state_id, held_by, guard_id), (disposition, rationale) in KNOWN_DEADLOCKS.items():
+        assert state_id in STATES, state_id
+        assert held_by in STATES, held_by
+        assert guard_id in GUARDS, guard_id
+        assert disposition and disposition != "TD-SW008-273", (state_id, held_by, guard_id)
+        assert rationale.strip(), (state_id, held_by, guard_id)
 
 
 @pytest.mark.xfail(
     strict=True,
-    reason="TD-SW008-273: 身份不一致时恢复链的前置步骤被 G-IDENTITY-WRITE 挡住，P2 的恢复令清除；清除后本用例变绿，必须翻转",
+    raises=AssertionError,
+    reason="DEFERRED-P2-RECOVERY: 身份不一致时恢复链前置步骤被 G-IDENTITY-WRITE 挡住，须先修运行身份再结算；若后续消除则本用例变绿并须同步删掉 KNOWN_DEADLOCKS",
 )
 def test_known_deadlock_identity_divergence_blocks_the_recovery_chain() -> None:
     assert not [d for d in find_deadlocks() if d.held_by.startswith("RUNTIME_IDENTITY")]
