@@ -29,9 +29,7 @@
 | 任务组织（单卡 vs WBS） | 多任务有前后依赖、需跟踪里程碑交付 | 在 `<项目>/00_项目管理/01_立项与需求/NNN_<PID>_项目计划表.md` 挂卡，`证据` 列挂含卡号的独立回执，用 `plan_status.py <PID>` 现算进度 |
 | 流程轨（轻轨 vs 重轨 Run） | 日常开发、文档、修复与规则调整 | 走隔离工位 + 本地/云端门禁 + `pm_merge.py merge` 轻轨 |
 | 流程轨（轻轨 vs 重轨 Run） | 看板“确认开工”一键流或命令硬要求 Run/租约 | 走 Work/Run/Checkpoint/lease、`pm verify` 与 `pm_flows.py closeout` |
-| 门禁三档（`gate precheck`） | **L1**：仅纯文档或已核实样板（`L1_VERIFIED_PILOT_PATHS`） | 本机自检 + `gate precheck` 通过即可本地合并 |
-| 门禁三档（`gate precheck`） | **L2**：非核心脚本/测试/总控屏增量 | 先 `git push` 分支，再跑 `main.py gate start --worktree <W>` 仅测受影响组 |
-| 门禁三档（`gate precheck`） | **L3**：受保护路径、核心模块、配置及非 `.md/.py` 资产 | 强制 `main.py gate start --worktree <W> --full`（全量 11 组 + plugin）+ 跨会话独立审计 |
+| 门禁分档（`gate precheck`） | 按候选路径自动判 L1/L2/L3 | `gate plan --preview` 先看档次、理由和检查组；L1 本机 `gate precheck`，L2/L3 `gate start`；细则见命令总目录 |
 
 ## 4. 四阶段流水线与交接约定
 

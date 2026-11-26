@@ -22,7 +22,7 @@
 5. **规范库 `00_Obsidian_Base` AI 不擅自覆写**：规范不适用或要沉淀新经验，走 PM 流程提变更单，用户亲自批了才通过驾驶舱脚本生效。
 6. **PLC 交付停在静态检查全绿**（`main.py plc check <项目编号>`，有失败项退出 1），逻辑自洽、符合 LSP 规范；导入 TIA Portal/InoProShop、编译、下载和硬件测试归用户，结果由用户回传。
 7. **不为绿灯写死结果或 Mock**，核心逻辑按物理法则和业务规范真算；验证逻辑只读，不在断言前生成或覆写文件。文档骨架由 Copier 脚手架生成后填空，不在对话里写长篇说明书草稿。
-8. **不交半成品**：交用户前自己跑完检查（PLC `plc check`、文档 `main.py doc check`、HMI 原型查死链、Python 全量 pytest 和 ruff/mypy），不是退出码 0 不交；执行代理回复前同样自检，有界重试。“完成”“可承诺”附证据（提交号、对账结果、门禁结果，至少一样），拿不出写“未核实”。发现一处缺陷先溯源模板、生成器和门禁，补防御测试。只报成果和要用户定的事。
+8. **不交半成品**：交用户前自己跑完检查（PLC `plc check`、文档 `main.py doc check`、HMI 原型查死链、Python 按 `gate precheck` 判档跑适用组，ruff/mypy 由 precheck 执行，L2/L3 走托管门禁），不是退出码 0 不交；执行代理回复前同样自检，有界重试。“完成”“可承诺”附证据（提交号、对账结果、门禁结果，至少一样），拿不出写“未核实”。发现一处缺陷先溯源模板、生成器和门禁，补防御测试。只报成果和要用户定的事。
 9. **修复与汇报 (FIX-001，用户 2026-10-22 批)**：修缺陷先写根因，把全库同类写法一次查全写进卡里，逐条修或写明不修的理由，独立审计逐条核，只修挡路的那一处不许报“已修好”；样件联调查出的缺陷本周要碰就先修。提问前先查项目《用户已定事项台账》和用户给的图纸、手册，同一个问题不问第二次。交给用户的操作写清哪台电脑、哪个窗口或对话（全名）、点什么或贴什么、做完会看到什么；AI 能用命令行做的不交给用户。
 10. **文件编码 (DEV-ENC-001)**：脚本读写文本写明 `encoding="utf-8", errors="replace"`；驾驶舱 `auto_pm` 包里新增 `errors="replace"`/`"ignore"` 要在同一调用写 `# lenient-decode: <理由>`（`SW8/tests/infrastructure/test_no_new_lenient_decoding.py` 查）。
 11. **临时文件 (DEV-TMP-001)**：`tmp_*`、`.coverage`、`htmlcov/`、临时日志用完即删，不留在工作区根目录（体检会点名）；要留的报告放 `.auto-pm/reports/`；`.gitignore` 覆盖临时和编译缓存；多 agent 过程文件（`handoff.md`、`progress.md` 等）只放 `.agents/`，除 `skills.json` 外不入库。
@@ -46,47 +46,9 @@
 
 像设备一样，正常生产走自动流程，点动只在维修和调试时用：agent 日常先走下面的流程，流程里没有的事才查点动。流程由 `SW8/scripts/pm_flows.py` 跑（在控制根，用控制根 `.venv` 里的 Python），只把已有命令按顺序串起来，会改状态的步骤都是停点；脚本不在发布载荷里，控制根 `main` 拉到最新就是最新的。每条流程的完整步骤用 `pm_flows.py steps <entry|checkup|closeout|closeout-pr>` 列出（只列不跑）；脚本用不了时照列出的步骤在控制根逐条手敲 `main.py …`，顺序相同。
 
-**项目体检**：`pm_flows.py checkup <项目编号>`，全程只读，进门后、动手前、交卷前各跑一次。每一步都跑完，哪一步红了也接着跑，最后列小结：每步通过、红或跳过，红的写出整条命令和退出码；有红的照原样报告。没有账本的克隆（云端会话）查卡那一步会红，是查不到账本，不是项目有问题。
+**项目体检与本机收口**：`pm_flows.py checkup <项目编号>` 全程只读，进门后、动手前、交卷前各跑一次；本机收口在控制根跑 `pm_merge.py merge <工位名>`，门禁由驾驶舱管理。完整步骤、停点、独立审计和收工位顺序见 `roles/shared/refs/start_and_handoff.md`。
 
-**本机收口**（日常的常态，两类都用；GitHub 在哪一档都一样）：
-1. 在工位分支上提交，提交说明里单独一行 `领卡占位: <卡号>`；“要你点头”那一类再写上变更单号。工位里先 `git merge main` 跟上最新的 `main`。
-2. 在控制根跑 `pm_merge.py merge <你的工位名>`（脚本在 `SW8/scripts/`，用控制根 `.venv` 里的 Python）。它查分支、控制根副本，并在联网档对账。受保护改动和正式绑定了变更单的分支还查实施卡、批准范围和独立审计。正式绑定可写在分支尾段、领卡号、提交标题的 `[CHG-…]` 或单独一行 `变更单: CHG-…`。新卡放在项目的 `04_监控` 或 `11_监控` 下的 `01_变更管理/03_实施卡/`，已有的旧规划卡继续按原路径表核对。门禁由驾驶舱管理，合并执行 `gate precheck`，受保护改动还核对同一候选的 `gate start` 全量结果。都过了才合进 `main`，记一笔，按 GitHub 档推备份。
-3. 走变更单的改动在合并前要有独立审计放行（AUD-001）。合并后 agent 把变更单推到验收中（implementing → pending_acceptance → accepting），推到完成只有用户本人（看板“决定”页点“推到完成”，或用户在本机主对话里说“把 <变更单号> 推到完成”，agent 带上那句话的位置再跑）。推到完成后驾驶舱改写的变更单原件和台账，放进下一个工位分支一起合并，不为它单开一次。
-4. 当天一行告诉用户：合并了什么、合并提交号、怎么退。
-5. 用户说“同意收工位”后 `worktree close <你的名字>`。
-
-控制根的 `main` 只由 `pm_merge.py merge` 改（从 GitHub 同步用 `pm_merge.py sync`）。每台电脑装一次本机钩子 `pm_merge.py install-hook`，拦住直接提交到 `main`；`pm_flows.py checkup` 的“本机合并对账”一步核对 `main` 上每个提交的来历，对不上的报给用户，由用户定留还是退，agent 不自己退。
-
-**交卷到收口**（走 Run 的卡，即看板“确认开工”一键流开出来的卡；一步红就停）：`pm_flows.py closeout <项目编号> --mission-id <卡号> [--done <停点名>]`
-
-| 步 | 命令 | 谁来做 |
-|---|---|---|
-| 1 | `pm acceptance-scan --pid <项目编号>` | agent |
-| 2 | `pm control-root-status <项目编号>` | agent |
-| 3 | `pm verify --mission-id <卡号> --lease-wallet` | **停**：用户说“同意 <卡号> 交卷验证”后 agent 跑 |
-| 4 | `pm missions --pid <项目编号>` | agent |
-| 5 | `pm accept --mission-id <卡号>` | **停，只有用户本人批**：看板点“确认验收”（验收和收口一步做完），或在自己的终端跑；用户在本机主对话里亲口说了验收，agent 带上那句话的位置再跑 |
-| 6 | `pm close --mission-id <卡号>` | **停**：用户说“同意 <卡号> 收口”后 agent 跑；看板已一步收口的跳过 |
-| 7 | `pr settle-scan <项目编号>` | agent；输出里有变更单号 |
-| 8 | `change transition <变更单号> --to completed --pid <项目编号>` | **停，只有用户本人批**：看板“决定”页点“推到完成”；看板上还没有这个按钮时，用户在本机主对话里说“把 <变更单号> 推到完成”，agent 带上那句话的位置再跑 |
-| 9 | `ledger reconcile <项目编号>` | agent；不加 `--fix` |
-| 10 | `worktree close <你的名字>` | **停**：用户说“同意收工位”后 agent 跑 |
-
-停下后接着走：那一步做完，在原命令后加 `--done <停点名>`（verify、accept、close、transition、worktree）。终端里 `pm accept` 只记下验收、停在 ACCEPTED，要再跑 `pm close` 才收口；一步收口只发生在看板“确认验收”按钮。收口时工作树里验收过的文件由驾驶舱按字节并回控制根，不替用户提交。
-
-**PR 线收口**（只在“多机”档开 PR 时用，见 GH-001；PR 经 CI 全绿、独立审计通过合进 `main` 之后跑；一步红就停）：`pm_flows.py closeout-pr <项目编号> --chg <变更单号> --card <占位卡号> [--done <停点名>]`
-
-| 步 | 命令 | 谁来做 |
-|---|---|---|
-| 1 | `pm control-root-status <项目编号>` | agent |
-| 2 | `pr settle-scan <项目编号>` | agent；退出码 1 只说明有等收口的卡，不算红 |
-| 3 | `change transition <变更单号> --to accepting --pid <项目编号>` | **停**：agent 依次推 implementing、pending_acceptance、accepting，不需要用户批 |
-| 4 | `change transition <变更单号> --to completed --pid <项目编号>` | **停，只有用户本人批**：同上表第 8 步 |
-| 5 | `ledger reconcile <项目编号>` | agent；不加 `--fix` |
-| 6 | `claim release <占位卡号>` | **停**：PR 已合并后 agent 跑 |
-| 7 | `worktree close <你的名字>` | **停**：用户说“同意收工位”后 agent 跑 |
-
-停点名：accepting、transition、claim_release、worktree。变更单的批准（`--to approved`）在开工前就要有：用户在看板“决定”页点“批准变更单”，或在本机主对话里说了同意，agent 带上那句话的位置去跑。
+**交卷到收口 / PR 线收口**：走 Run 的卡用 `pm_flows.py closeout …`，PR 线用 `pm_flows.py closeout-pr …`；完整步骤、停点和谁来做见 `roles/shared/refs/start_and_handoff.md`。停点只由用户本人批；`pm accept` 只记验收，收口要 `pm close`。
 
 **交接记录**：卡每次换手，交出去的人记一笔，接手的人先读再干。单机「关」或「备份」档走 `pm_handoff.py` 的项目交接交换区（PM-056），交接随工位提交。启用远程占位时，以下步骤使用 `claim note`、`claim log`。
 1. 交给另一个 agent、对话或用户之前（起草完、预核完、建单后、开 PR 后、交卷、审计完、搁置）记，接手之后记 `--kind takeover`；用法看 `claim note --help`。
@@ -97,46 +59,11 @@
 
 **卡号写进分支名和提交说明**：状态按 Git 上的事实现算，认卡号靠分支名 `<前缀><卡号>` 和提交说明里单独一行 `领卡占位: <卡号>`；工位分支上至少一个提交带这一行。本机合并的标题由 `pm_merge.py` 写；“多机”档在 GitHub 上合并用默认标题（`Merge pull request #N from <账号>/<分支名>`），不改写。两样都没有的合并算不到这张卡头上。
 
-**点动**：全部命令、谁能跑、会不会写，查命令总目录 `SW8/06_交付物/003_命令总目录_COMMANDS.md`（按分类查），用法看各命令 `--help`；常用速查和要先知道的提醒在附录 `01_命令速查.md`。下面这些**只能请用户做**：知道有这些，好告诉用户“这一步要你来”。看板上有按钮的请用户点按钮；没有按钮的，用户在本机主对话里亲口批准了，agent 带上那句话的位置去跑（红线 1；能带 `--approval-evidence-ref` 的写成 `user-confirmation:<用户那条消息的时间或编号>`）；用户没说过的不跑、不代填，也不替用户点看板按钮。`pm sign-risk` 驾驶舱带凭据也拒 agent，只能交给用户在自己的终端跑。
-
-| 场合 | 命令 |
-|---|---|
-| 批准和开工 | `pm approve`、`pm confirm-start`、`pm inbox confirm`、`pm inbox reject`、`decision create` |
-| 验收、搁卡、收占位 | `pm accept`（日常是看板“确认验收”）、`pm park`（带凭据时）、`pm unpark`、`pm switch`、`claim reclaim` |
-| 项目、发版、账本 | `project archive`、`project reactivate`、`project delete`、`project restore`、`release deploy`、`release rollback`、`continuity restore-backup` |
-| 租约和风险 | `continuity lease extend-hold`、`pm sign-risk` |
-
-变更单批准（`change transition … approved`）和推到完成，看板上有按钮的由用户点按钮；还没有按钮的由用户在本机主对话里亲口说。其余写命令只在本节和 FLOW-001 说可以时跑：`claim release` PR 没合不放，变更单只在本机建，`gate precheck` 跑得久、占内存算重任务。
+**点动**：全部命令查命令总目录 `SW8/06_交付物/003_命令总目录_COMMANDS.md`；哪些只能请用户做，见附录 `01_命令速查.md`。用户没说过的不跑、不代填，也不替用户点看板按钮。
 
 ## 多 agent 工位与控制根规则 (WS-001)
 
-每台电脑分两层。两个 agent 站在同一个工位上，等于两个人同时改一张接线图，所以工位分开；账本只能有一本，所以控制根只能有一个。这些规矩不管驾驶舱有没有拦得住都要守。
-
-| 层 | 位置 | 每台电脑几个 | 用途 |
-|------|------|------|------|
-| 控制根 `R` | 本机唯一一份仓库克隆，停在 `main` | **1 个** | 持本机账本 `R/.auto-pm/continuity.db`；只跑驾驶舱命令，不写业务代码 |
-| 工位 `W` | `R/.auto-pm/worktrees/<agent>` | 每个会改文件的 agent 1 个 | 在自己的分支上写代码、跑测试、提交、推送 |
-
-| agent | 工位 | 分支前缀 |
-|------|------|------|
-| 本机 Claude Code（含在 VS Code 里跑的） | `R/.auto-pm/worktrees/claude` | `claude/` |
-| Trae 里的 AI | `R/.auto-pm/worktrees/trae` | `trae/` |
-| Cursor 里的 AI | `R/.auto-pm/worktrees/cursor` | `cursor/` |
-| VS Code 里的其他 AI（如 Copilot） | `R/.auto-pm/worktrees/vscode` | `vscode/` |
-| Codex（当前只做 PR 自动审查；将来写代码时） | `R/.auto-pm/worktrees/codex` | `codex/` |
-| Antigravity（含其中运行的 Gemini） | `R/.auto-pm/worktrees/antigravity` | `antigravity/` |
-| 项目 Claude、云端会话 | 不占本机工位；每个云端克隆就是它自己的控制根 | `project/`（项目 Claude）、`claude/`（云端会话） |
-
-表外的 AI 先由用户登记名字和前缀（加一行到上表），再开工位。已合并的历史分支不改名。工位目录名用别名 `<基名>-<会话ID前6位>`，身份靠环境变量 `AUTO_PM_AGENT` 声明（只在一条命令期间设置）：Cursor、VS Code 里的 AI、Trae 等没有自带标记的必须自己带上，否则驾驶舱把它当成用户本人。名字规则、回收办法、发版切换前的手工 git 命令见附录 `03_工位细则.md`。
-
-1. **一台电脑只克隆一次**，工位一律从控制根 `git worktree add` 到 `R/.auto-pm/worktrees/<agent>`；另克隆一份等于一台电脑两本账，严禁；放到别处登记 Run 会被拒；不用 `.codex/worktrees/`。
-2. **驾驶舱命令只在控制根执行**；在工位里执行 `main.py` 会被拒。登记 Run 在控制根跑 `main.py continuity run start …`，`--worktree` 指向自己的工位绝对路径。
-3. **一个 agent 同一时刻只开一个工位，一个工位同一时刻只做一张卡**；一张卡同一时刻只派给一个 agent，派卡写明 owned paths，两个 agent 不同时改同一批文件。
-4. 在工位里提交，提交检查自动找到控制根；手工调用带 `--control-root R`。
-5. 台账、WBS、治理库、发布指针只由账本主机上的主执行写，工位里的 agent 不写。
-6. 跨电脑在需要时经 GitHub 交换代码（GH-001）：平时在一台电脑上干活；换电脑前在原来那台跑 `pm_merge.py push`（“备份”档每次合并后已自动推），到另一台先 `pm_merge.py sync`；两台同时干活时切到“多机”档，推自己的分支、开 PR，合进 `main` 后各控制根拉 `main`。
-
-开工 `main.py worktree open <agent> <卡号>`，看 `main.py worktree list`，收工 `main.py worktree close <agent>`（有未提交改动或没推送的提交不删），可清理的 `main.py worktree sweep`（加 `--apply` 才删）。只有用户自己的终端（没有 agent 标记）才能收别人的工位。
+一台电脑一个控制根、每个会改文件的 agent 一个工位；控制根只跑驾驶舱命令，工位里写代码。工位表、分支前缀、6 条隔离规则和开工/收工命令见 `roles/shared/refs/agents_附录/03_工位细则.md`。
 
 ## 插急活 (WS-002，TD-071)
 
@@ -171,7 +98,7 @@
 | 备份 | 每次本机合并后把 `main` 推到 GitHub 一次；推不上记“待推送”，不影响干活。`main` 推上去后 GitHub 上的 CI 会跑，结果只作参考，不挡任何事 |
 | 多机 | 两台电脑或云端会话同时干活：领卡占位（D-101）、推分支、`main.py pr open`、CI、独立审计（AUD-001）、`pr ready`，就是原来那一套 |
 
-两台电脑：账本每台一本，不自动同步；批准、验收、推到完成这些看板上的事在主电脑上做（WS-001 第 5 条）；代码靠 GitHub 在两台之间带，换电脑见 WS-001 第 6 条。GitHub 上的规则集 `main-protect`（`main` 必须经 PR、必须过 5 个检查）只有用户本人能改；它开着时“备份”档推不上去，只记待推送，本机合并照常能用。
+两台电脑：账本每台一本，不自动同步；批准、验收、推到完成这些看板上的事在主电脑上做（见 `03_工位细则.md` 第 5 条）；代码靠 GitHub 在两台之间带，换电脑见 `03_工位细则.md` 第 6 条。GitHub 上的规则集 `main-protect`（`main` 必须经 PR、必须过 5 个检查）只有用户本人能改；它开着时“备份”档推不上去，只记待推送，本机合并照常能用。
 
 ## 去哪查
 
