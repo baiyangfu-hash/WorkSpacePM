@@ -39,6 +39,7 @@ from auto_pm.infrastructure import memory_preflight
 
 SCHEMA = "gate-run.v1"
 SUMMARY_FILE = "gate_summary.json"
+EXECUTION_RECORD_FILE = "gate_execution.json"
 DEFAULT_TIMEOUT_SECONDS = 3 * 3600
 LOG_TAIL_BYTES = 64 * 1024
 MAX_SKIPPED = 40  # the deployment run had at most 15 skipped in one group
@@ -177,11 +178,15 @@ def child_environment(base: Mapping[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def group_argv(group: GateGroup, *, python: str, jobs: int) -> list[str]:
+def group_argv(
+    group: GateGroup, *, python: str, jobs: int, gate_execution: Path | None = None
+) -> list[str]:
     argv = [python, "-B", "-m", "pytest", *group.targets]
     argv += [f"--ignore={path}" for path in group.ignore]
     argv += [f"--deselect={node}" for node in group.deselect]
     argv += ["-p", "no:cacheprovider", "-p", PROGRESS_PLUGIN, "--no-cov", "-q"]
+    if gate_execution is not None:
+        argv.append(f"--gate-execution={gate_execution}")
     if group.parallel and jobs > 1:
         argv += ["-n", str(jobs), "--dist", "loadfile"]
     return argv
@@ -661,6 +666,21 @@ class GateRunService:
         out_dir.mkdir(parents=True, exist_ok=True)
         env = child_environment(base_env)
         before = tree_state(worktree, project)
+        execution_record = out_dir / EXECUTION_RECORD_FILE
+        execution_record.write_text(
+            json.dumps(
+                {
+                    "schema": "gate-execution.v1",
+                    "kind": "gate-run",
+                    "project": str(project.resolve()),
+                    "worktree": str(worktree),
+                    "commit": before.commit,
+                    "groups": [g.name for g in selected],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         summary = GateSummary(
             commit=before.commit,
             git_dirty=before.dirty,
@@ -673,7 +693,7 @@ class GateRunService:
         for group in selected:
             available = self._available_memory() if group.parallel else None
             group_jobs = jobs_for_memory(jobs, available) if group.parallel else jobs
-            argv = group_argv(group, python=self._python, jobs=group_jobs)
+            argv = group_argv(group, python=self._python, jobs=group_jobs, gate_execution=execution_record)
             result = GroupResult(
                 group.name, argv, str(project), started=_now(),
                 jobs_requested=jobs, jobs_used=group_jobs, available_memory_bytes=available,

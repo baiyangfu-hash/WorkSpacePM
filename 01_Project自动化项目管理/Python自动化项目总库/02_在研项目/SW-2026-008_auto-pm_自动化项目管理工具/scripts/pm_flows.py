@@ -582,6 +582,105 @@ def _print_local_handoff(
             out(f"  {path}")
 
 
+def gate_preview_summary(
+    root: Path, python: Path, runner: Runner
+) -> tuple[list[dict[str, Any]], str]:
+    """Read-only preview of the gate tier for every active worktree (best effort; never a red step)."""
+
+    worktrees_dir = root / ".auto-pm" / "worktrees"
+    if not worktrees_dir.is_dir():
+        return [], ""
+    try:
+        listed = runner(
+            ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+            cwd=root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GIT_READ_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return [], "工位列表读不出来"
+    if listed.returncode:
+        return [], "工位列表读不出来"
+    worktrees: list[Path] = []
+    for line in (listed.stdout or "").splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = Path(line[len("worktree ") :].strip())
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved == root.resolve() or (root / ".auto-pm" / "worktrees") not in resolved.parents:
+            continue
+        worktrees.append(resolved)
+    previews: list[dict[str, Any]] = []
+    note = ""
+    for worktree in worktrees:
+        try:
+            result = runner(
+                [
+                    str(python),
+                    "-B",
+                    str(root / "main.py"),
+                    "gate",
+                    "plan",
+                    "--preview",
+                    "--worktree",
+                    str(worktree),
+                ],
+                cwd=root,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            note = note or f"工位 {worktree.name} 的预览没跑完"
+            continue
+        if result.returncode:
+            text = f"{result.stderr or ''}\n{result.stdout or ''}"
+            if "No such option" in text or "No such command" in text:
+                note = "本机生效的发布版本还没有 gate plan --preview"
+            else:
+                note = note or f"工位 {worktree.name} 的预览失败"
+            continue
+        text = (result.stdout or "").strip()
+        start = text.find("{")
+        if start < 0:
+            note = note or f"工位 {worktree.name} 的预览输出读不懂"
+            continue
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text[start:])
+        except ValueError:
+            note = note or f"工位 {worktree.name} 的预览输出读不懂"
+            continue
+        if isinstance(data, dict):
+            previews.append(data)
+    return previews, note
+
+
+def _print_gate_preview(
+    previews: Sequence[Mapping[str, Any]], note: str, out: Callable[[str], None]
+) -> None:
+    out("\n【候选门禁预览】（只读；未提交差异仅供预览，派发和回执用已提交候选）")
+    if note:
+        out(f"- ⚠ {note}")
+    if not previews:
+        out("- 没有可预览的工位（控制根之外没有活跃工位）。")
+        return
+    for item in previews:
+        dirty = "有未提交改动" if item.get("dirty") else "已提交"
+        groups = ",".join(str(group) for group in item.get("groups") or []) or "无"
+        out(
+            f"- {item.get('worktree', '?')}：{item.get('tier', '?')}（{dirty}）；"
+            f"组：{groups}；下一步：{item.get('next_step', '')}"
+        )
+
+
 def _print_change_archive_summary(summary: Mapping[str, Any], out: Callable[[str], None]) -> None:
     """进门与体检小结后展示只读变更单入库积压与主线同步状态。"""
     if not summary.get("available"):
@@ -1237,6 +1336,8 @@ def run_flow(
             if flow == "entry":
                 record["local_handoff"] = local_handoff
                 _print_local_handoff(local_handoff, local_handoff_red, out)
+                record["gate_preview"], gate_preview_note = gate_preview_summary(root, python, runner)
+                _print_gate_preview(record["gate_preview"], gate_preview_note, out)
                 record["handover"] = handover
                 if github_mode == "多机":
                     _print_handover(handover, out)

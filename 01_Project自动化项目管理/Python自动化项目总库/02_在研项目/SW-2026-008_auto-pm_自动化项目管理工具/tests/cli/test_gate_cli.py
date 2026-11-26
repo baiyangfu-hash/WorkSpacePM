@@ -32,6 +32,18 @@ def test_plan_rejects_an_unknown_group() -> None:
     assert result.exit_code != 0 and "未知的组" in result.output
 
 
+def test_plan_preview_reports_tier_reasons_executors_and_next_step() -> None:
+    result = CliRunner().invoke(cli, ["gate", "plan", "--worktree", str(_repo_top()), "--preview"])
+    assert result.exit_code == 0, result.output
+    preview = json.loads(result.output)
+    assert preview["tier"] in {"L1", "L2", "L3"}
+    assert isinstance(preview["groups"], list)
+    assert isinstance(preview["reasons"], list) and preview["reasons"]
+    assert isinstance(preview["executors"], list)
+    assert preview["next_step"]
+    assert preview["base"] and preview["commit"]
+
+
 def test_judge_on_an_empty_folder_exits_two(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["gate", "judge", str(tmp_path)])
     assert result.exit_code == 2
@@ -66,7 +78,12 @@ def test_d168_gate_run_and_precheck_arm_the_memory_gate_before_the_heavy_work(mo
     from auto_pm.ui.cli import gate as gate_module
 
     order: list[str] = []
-    monkeypatch.setattr(gate_module, "arm_for_heavy_job", lambda label: order.append(f"arm:{label}"))
+
+    def require_heavy(label: str) -> str:
+        order.append(f"arm:{label}")
+        return ""
+
+    monkeypatch.setattr(gate_module, "require_for_heavy_job", require_heavy)
     monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": None)
 
     def stop_run(*_args: object, **_kwargs: object) -> None:
@@ -83,6 +100,27 @@ def test_d168_gate_run_and_precheck_arm_the_memory_gate_before_the_heavy_work(mo
     CliRunner().invoke(cli, ["gate", "precheck", "--worktree", str(tmp_path)])
 
     assert order == ["arm:long-gate", "run", "arm:full-tests", "precheck"]
+
+
+def test_gate_refuses_to_start_a_heavy_job_when_the_memory_gate_has_no_headroom(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from auto_pm.application.core.gate_precheck_service import PrecheckService
+    from auto_pm.application.core.memory_gate_arming import MemoryPreflightRefusedError
+    from auto_pm.ui.cli import gate as gate_module
+
+    def refuse(_label: str) -> str:
+        raise MemoryPreflightRefusedError("拒绝启动：内存不足")
+
+    monkeypatch.setattr(gate_module, "require_for_heavy_job", refuse)
+    ran: list[str] = []
+    monkeypatch.setattr(PrecheckService, "run", lambda *_a, **_k: ran.append("run"))
+
+    result = CliRunner().invoke(cli, ["gate", "precheck", "--worktree", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert "拒绝启动" in result.output
+    assert ran == []
 
 
 
@@ -109,7 +147,7 @@ def _gate_run_with_low_memory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *
 
     clean = service_module.TreeState(commit="c" * 40, dirty=False, ignored_code=())
     monkeypatch.setattr(gate_module, "require_runtime_identity_for_workspace", lambda _ctx, candidate_release="": None)
-    monkeypatch.setattr(gate_module, "arm_for_heavy_job", lambda _label: None)
+    monkeypatch.setattr(gate_module, "require_for_heavy_job", lambda _label: "")
     monkeypatch.setattr(gate_module, "GateRunService", service)
     monkeypatch.setattr(service_module, "tree_state", lambda _worktree, _project: clean)
     monkeypatch.setattr(service_module, "project_dir_in", lambda worktree: worktree)

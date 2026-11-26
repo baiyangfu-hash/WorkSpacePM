@@ -6,6 +6,24 @@ import os
 from pathlib import Path
 
 from auto_pm.infrastructure import memory_preflight
+from auto_pm.infrastructure.memory_preflight import MemoryPreflightRefusedError
+
+__all__ = (
+    "MemoryPreflightRefusedError",
+    "arm_for_heavy_job",
+    "disarm_this_process",
+    "require_for_heavy_job",
+)
+
+
+def require_for_heavy_job(label: str, *, timeout_seconds: float | None = None) -> str:
+    """Refuse a heavy local command when the memory preflight says there is no headroom; arm it on pass.
+
+    Unlike :func:`arm_for_heavy_job`, this is a gate: an unreadable or short machine is refused with the preflight's refusal
+    text, and the caller must stop.  The returned note is the "unverified" wording the preflight produced (possibly empty).
+    """
+
+    return memory_preflight.require_headroom(label=label, timeout_seconds=timeout_seconds)
 
 
 def arm_for_heavy_job(label: str) -> None:

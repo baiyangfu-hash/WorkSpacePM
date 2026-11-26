@@ -7,6 +7,7 @@ make the report PASS; that the command is read-only.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -187,6 +188,28 @@ def test_a_docs_only_change_has_no_related_tests(tmp_path: Path) -> None:
     assert _graph(_project(tmp_path), ["README.md", "docs/x.md", "notes/y.rst"]) == ([], "")
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "04_监控/交接交换区/focus.json",
+        "04_监控/交接交换区/journal.jsonl",
+        "11_监控/交接交换区/focus.json",
+    ],
+)
+def test_handoff_exchange_data_files_do_not_trigger_full_suite(tmp_path: Path, path: str) -> None:
+    project = _project(tmp_path)
+    handoff_test = project / "tests/infrastructure/test_pm_handoff.py"
+    handoff_test.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    tests, note = related_tests(project, [path])
+    assert tests == ["tests/infrastructure/test_pm_handoff.py"]
+    assert note == ""
+
+    combined, _ = related_tests(project, [path, "auto_pm/z/deep.py"])
+    assert combined != ["tests"]
+    assert {"tests/infrastructure/test_pm_handoff.py", "tests/core/test_deep.py"} <= set(combined)
+
+
 # ── changed files (real git) ────────────────────────────
 
 
@@ -300,7 +323,7 @@ def test_a_clean_change_runs_ruff_mypy_and_the_related_tests_with_ci_flags_in_th
     by_name = {name: argv for name, argv, _, _ in recorder.calls}
     assert by_name["ruff"][-5:] == ["ruff", "check", "--no-cache", "auto_pm", "tests"]
     assert "--platform" in by_name["mypy"] and "win32" in by_name["mypy"]
-    assert {"--no-incremental", "--cache-dir=/dev/null"} <= set(by_name["mypy"])
+    assert {"--no-incremental", f"--cache-dir={os.devnull}"} <= set(by_name["mypy"])
     assert by_name["pytest"][3:5] == ["pytest", "tests/core/test_x.py"] and "no:cacheprovider" in by_name["pytest"]
     assert all((cwd / "tests").is_dir() for _, _, cwd, _ in recorder.calls)
     assert all(not [k for k in env if k.upper().startswith("AUTO_PM_")] for *_, env in recorder.calls)
