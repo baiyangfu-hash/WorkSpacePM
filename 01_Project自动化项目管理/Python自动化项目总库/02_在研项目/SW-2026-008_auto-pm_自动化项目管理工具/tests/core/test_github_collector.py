@@ -270,6 +270,20 @@ def test_no_net_option_reads_cache_only(tmp_path: Path) -> None:
     assert fake.calls == [] and snap.state == "offline" and snap.from_cache
 
 
+def test_unexpected_exception_becomes_explicit_error_snapshot(tmp_path: Path) -> None:
+    """预期名单外的异常（如传输中断 IncompleteRead）逃出 _collect 时，collect() 兜底成错误态，不打死采集线程。"""
+    import http.client
+
+    fake = FakeGitHub({f"{API}/pulls?state=open&per_page=100": http.client.IncompleteRead(b"12345")})
+    snap = _collect(tmp_path, fake)
+    assert snap.state == "error" and not snap.fresh and snap.pulls == []
+    assert any("读取出错" in e and "IncompleteRead" in e for e in snap.errors)
+    assert snap.audits  # 审计是本机文件，不受影响
+    home = _home(tmp_path, snap)
+    assert home.github is not None and home.github.state == "error" and not home.github.fresh
+    assert "这次没读成" in home.github.headline
+
+
 def test_corrupt_cache_is_ignored(tmp_path: Path) -> None:
     cache = tmp_path / "cache" / "github.json"
     cache.parent.mkdir(parents=True)

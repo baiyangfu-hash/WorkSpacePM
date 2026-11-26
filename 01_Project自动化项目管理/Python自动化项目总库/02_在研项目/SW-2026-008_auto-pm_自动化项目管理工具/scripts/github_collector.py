@@ -849,7 +849,10 @@ def collect(
     审计报告读不到的目录或文件记在快照的 audit_problems 上（D-317），不管 GitHub 读没读到。
     """
     audits, audit_problems = read_audits_checked(reviews_dirs)
-    snapshot = _collect(repo, repo_root, audits, cache_path, now, fetch, env, offline, token)
+    try:
+        snapshot = _collect(repo, repo_root, audits, cache_path, now, fetch, env, offline, token)
+    except Exception as error:  # 意料外异常（如传输中断 IncompleteRead）兜底成显式错误态，采集线程不静默打死
+        snapshot = _fallback(repo, "error", now, None, audits, f"读取出错：{type(error).__name__}: {error}")
     snapshot.audit_problems = audit_problems
     return snapshot
 

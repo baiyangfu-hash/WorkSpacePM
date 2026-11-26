@@ -52,7 +52,13 @@ def github_block(github: GithubVM, rows: list[PrRow], empty: str) -> QFrame:
     if github.main_ci:
         layout.addWidget(c.flow(c.label("main 上最近一次", "q", wrap=False), *ci_pairs(github.main_ci)))
     if not rows:
-        layout.addWidget(c.label(empty, "muted"))
+        # 只有这次真读完（fresh）才许断“没有 PR”；正在读或没读成时数量保持待查（复测结论 2026-11-26）
+        if github.fresh:
+            layout.addWidget(c.label(empty, "muted"))
+        elif github.state == "pending":
+            layout.addWidget(c.label("正在读 GitHub，开着的 PR 数量待查……", "muted"))
+        else:
+            layout.addWidget(c.label("开着的 PR 待查（这次没读成）", "muted"))
     for row in rows:
         layout.addWidget(pr_line(row))
     layout.addWidget(c.label(" · ".join(github.notes), "small"))
