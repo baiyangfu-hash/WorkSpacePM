@@ -729,6 +729,23 @@ class AgentWorktreeService:
         except (OSError, ValueError):
             pass  # 记不下来只会让兜底回收少一条依据，不能挡住开工位
 
+    def _clear_station_artifacts(self, name: str) -> None:
+        """Delete the station holder record and (for alias stations) its local presence record; best-effort."""
+
+        with contextlib.suppress(OSError):
+            (self._notes_dir / f"{name}.json").unlink()
+        if is_alias(name):
+            from auto_pm.application.core.station_presence import clear_presence
+
+            clear_presence(self._root, alias=name)
+
+    def _prune_orphan_presence(self) -> int:
+        """During explicit stale reclaim, also remove local-machine presence records already judged orphan."""
+
+        from auto_pm.application.core.station_presence import prune_orphan_presence
+
+        return prune_orphan_presence(self._root)
+
     def _read_holder_note(self, agent: str) -> dict[str, object]:
         try:
             loaded = json.loads((self._notes_dir / f"{agent}.json").read_text(encoding="utf-8"))
@@ -792,10 +809,11 @@ class AgentWorktreeService:
         record["rescue_ref"] = rescue
         removed = self._git("worktree", "remove", "--force", str(path))
         if removed.returncode != 0:
+            if not path.exists():
+                self._clear_station_artifacts(agent)
             raise AgentWorktreeError(f"回收失败：{_detail(removed)}；救援引用 {rescue or '(无改动，没建)'} 已保留")
         self._git("worktree", "prune")
-        with contextlib.suppress(OSError):
-            (self._notes_dir / f"{agent}.json").unlink()
+        self._clear_station_artifacts(agent)
         return ReleaseResult(path=path, branch=info.branch, rescue_ref=rescue)
 
     def _require_no_live_lease(self, path: Path) -> None:
@@ -953,6 +971,7 @@ class AgentWorktreeService:
                         continue  # D-169: a live Run lease keeps this one (logged as refused); the others are still reclaimed
                 for name, reason in orphans:
                     self._drop_orphan_record(name, reason)
+                self._prune_orphan_presence()
             return stale + orphans
 
     def _drop_orphan_record(self, name: str, reason: str) -> None:
@@ -971,6 +990,10 @@ class AgentWorktreeService:
             return  # someone else removed it meanwhile: nothing to log
         except OSError as error:
             record.update(outcome="failed", reason=f"{reason}；删除失败：{error}")
+        if record.get("outcome") == "removed" and is_alias(name):
+            from auto_pm.application.core.station_presence import clear_presence
+
+            clear_presence(self._root, alias=name)
         self._log_reclaim(record)
 
     def count(self) -> int:
@@ -1223,6 +1246,15 @@ class AgentWorktreeService:
                 except AgentWorktreeError as error:
                     report.failed.append(f"{item.target}: {error}")
             self._git("worktree", "prune")
+            still_registered = {_same_path_key(path) for path in self._worktrees()}
+            for _item, station in plans:
+                if (
+                    station is not None
+                    and station.registered
+                    and not station.path.exists()
+                    and _same_path_key(station.path) not in still_registered
+                ):
+                    self._clear_station_artifacts(station.name)
         return report
 
     def _sweep_station(self, station: Station, agent: str | None) -> SweepItem:
@@ -1416,14 +1448,15 @@ class AgentWorktreeService:
                 raise StationRefusedError(f"不删 {station.path}：手工开的 detached 目录只由用户 sweep 清，{via} 不动它")
             result = self._remove_station_checked(station, require_merged=require_merged)
         except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
+            if not station.path.exists():
+                self._clear_station_artifacts(station.name)
             record.update(
                 outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error)
             )
             self._log_reclaim(record)
             raise
-        # The holder record belongs to the directory that is gone: leaving it behind misleads the next investigation.
-        with contextlib.suppress(OSError):
-            (self._notes_dir / f"{station.name}.json").unlink()
+        # The holder and presence records belong to the directory that is gone: leaving them behind misleads the next investigation.
+        self._clear_station_artifacts(station.name)
         record["outcome"] = "removed"
         self._log_reclaim(record)
         return result

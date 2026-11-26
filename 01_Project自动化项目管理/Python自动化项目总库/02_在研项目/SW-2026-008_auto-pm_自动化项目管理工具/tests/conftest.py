@@ -4,6 +4,7 @@ import gc
 import json
 import os
 import random
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Generator
@@ -37,10 +38,98 @@ if TYPE_CHECKING:
 TEST_AWS_REGION = "us-east-1"
 TEST_S3_BUCKET = "test-bucket"
 _TEST_QAPPLICATION: object | None = None
+FULL_SUITE_MAX_WORKERS = 4
+_GATE_EXECUTION_SCHEMA = "gate-execution.v1"
+
+
+def _requested_workers(config: pytest.Config) -> int:
+    value = getattr(config.option, "numprocesses", None)
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    text = str(value or "").strip().lower()
+    if text.isdigit():
+        return int(text)
+    return 999 if text else 0
+
+
+def _is_full_suite(config: pytest.Config) -> bool:
+    positional = [
+        str(arg)
+        for arg in getattr(config, "args", ())
+        if not str(arg).startswith("-") and "::" not in str(arg)
+    ]
+    if not positional:
+        return True
+    normalized = {Path(arg.rstrip("/\\")).as_posix() for arg in positional}
+    return normalized <= {"tests", "."}
+
+
+def _is_controlled_run(config: pytest.Config) -> bool:
+    raw = config.getoption("gate_execution", default="")
+    if not raw:
+        return False
+    path = Path(str(raw))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or data.get("schema") != _GATE_EXECUTION_SCHEMA:
+        return False
+    project = data.get("project")
+    commit = data.get("commit")
+    if not isinstance(project, str) or not isinstance(commit, str):
+        return False
+    try:
+        cwd = Path.cwd().resolve()
+        recorded = Path(project).resolve()
+    except OSError:
+        return False
+    if cwd != recorded:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "HEAD"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == commit
+
+
+def _refuse_uncontrolled_full_suite(config: pytest.Config) -> None:
+    """Refuse a full-tree run with too many xdist workers unless a gate execution record vouches for it."""
+    if os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return
+    if not _is_full_suite(config):
+        return
+    workers = _requested_workers(config)
+    if workers <= FULL_SUITE_MAX_WORKERS:
+        return
+    if _is_controlled_run(config):
+        return
+    raise pytest.UsageError(
+        f"拒绝未经受控入口的全目录高并发测试：{workers} 个 worker 跑整个 tests/。"
+        "请改用 gate precheck / gate run（会带执行记录），或缩小到具体测试目录/文件，或把 -n 降到 4 以下。"
+    )
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--gate-execution",
+        default="",
+        help="受控门禁执行记录（gate precheck / gate run 内部使用）",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """在模块级 fixture 创建 QCoreApplication 前固定唯一 QApplication。"""
+    _refuse_uncontrolled_full_suite(config)
     del config
     global _TEST_QAPPLICATION
     pytest.importorskip("PySide6")

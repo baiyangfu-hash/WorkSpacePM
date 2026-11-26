@@ -385,3 +385,117 @@ def test_a_borrow_record_with_a_roster_name_is_honoured(tmp_path: Path, as_user:
     service._borrow_file("claude").write_text(json.dumps({"by": "claude-b89bc8", "branch": "claude/c1"}), encoding="utf-8")
 
     assert service.borrower("claude") == "claude-b89bc8"
+
+
+def test_close_and_release_clear_presence_so_orient_does_not_report_ghost_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None
+) -> None:
+    from auto_pm.application.core.station_presence import orient_lines, record_presence
+
+    root = _control_root(tmp_path)
+    service = _service(root)
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "aaaaaa00-0000-0000-0000-000000000000")
+    service.open("claude-aaaaaa", "c1", fetch=False)
+    assert record_presence(root, cwd=root, min_interval_seconds=0) is True
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "bbbbbb00-0000-0000-0000-000000000000")
+    assert any("claude-aaaaaa" in line for line in orient_lines(root))
+
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "aaaaaa00-0000-0000-0000-000000000000")
+    service.close("claude-aaaaaa", fetch=False)
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "bbbbbb00-0000-0000-0000-000000000000")
+    assert not any("claude-aaaaaa" in line for line in orient_lines(root))
+    assert not (root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json").exists()
+
+    service.open("claude-bbbbbb", "c2", fetch=False)
+    assert record_presence(root, cwd=root, min_interval_seconds=0) is True
+    service.release("claude-bbbbbb")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "cccccc00-0000-0000-0000-000000000000")
+    assert not any("claude-bbbbbb" in line for line in orient_lines(root))
+    assert not (root / ".auto-pm" / "station-holders" / "claude-bbbbbb.json").exists()
+
+
+def test_close_clears_holder_and_presence_when_git_remove_fails_after_deleting_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None
+) -> None:
+    import shutil
+
+    from auto_pm.application.core.station_presence import list_presence, record_presence
+
+    root = _control_root(tmp_path)
+    service = _service(root)
+    monkeypatch.setenv("AUTO_PM_AGENT", "claude")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "aaaaaa00-0000-0000-0000-000000000000")
+    station = service.open("claude-aaaaaa", "c1", fetch=False)
+    assert record_presence(root, cwd=root, min_interval_seconds=0) is True
+    original_git = AgentWorktreeService._git
+
+    def fails_after_rmdir(
+        self: AgentWorktreeService, *args: str, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ("worktree", "remove"):
+            shutil.rmtree(station.path)
+            return subprocess.CompletedProcess(args, 1, "", "error: failed to delete .git/worktrees metadata")
+        return original_git(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", fails_after_rmdir)
+    with pytest.raises(AgentWorktreeError, match="删工作树失败"):
+        service.close("claude-aaaaaa", fetch=False)
+
+    assert not (root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json").exists()
+    assert list_presence(root) == []
+
+
+def test_reclaim_stale_apply_also_prunes_local_orphan_presence_records(
+    tmp_path: Path, as_user: None
+) -> None:
+    import platform
+
+    from auto_pm.application.core.station_presence import SCHEMA, list_presence
+
+    root = _control_root(tmp_path)
+    service = _service(root)
+    folder = root / ".auto-pm" / "presence"
+    folder.mkdir(parents=True, exist_ok=True)
+    old = _hours_ago(10)
+    fresh = _hours_ago(0.2)
+    (folder / "dead.json").write_text(
+        json.dumps(
+            {
+                "schema": SCHEMA,
+                "key": "dead",
+                "alias": "claude-111111",
+                "source": "claude",
+                "machine": platform.node(),
+                "pid": 0,
+                "where": "control-root",
+                "title": "",
+                "opened_at": old,
+                "seen_at": old,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (folder / "live.json").write_text(
+        json.dumps(
+            {
+                "schema": SCHEMA,
+                "key": "live",
+                "alias": "claude-222222",
+                "source": "claude",
+                "machine": platform.node(),
+                "pid": 0,
+                "where": "control-root",
+                "title": "",
+                "opened_at": fresh,
+                "seen_at": fresh,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert service.reclaim_stale(apply=False) == []
+    assert sorted(e.key for e in list_presence(root)) == ["dead", "live"]
+
+    service.reclaim_stale(apply=True)
+    assert [e.key for e in list_presence(root)] == ["live"]

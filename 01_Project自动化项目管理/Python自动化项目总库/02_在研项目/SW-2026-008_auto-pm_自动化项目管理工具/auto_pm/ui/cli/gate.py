@@ -35,15 +35,31 @@ from auto_pm.application.core.gate_task_service import (
     GateCandidate,
     GateTaskService,
     open_gate_task_service,
+    preview_gate_candidate,
     task_record,
 )
-from auto_pm.application.core.memory_gate_arming import arm_for_heavy_job
+from auto_pm.application.core.memory_gate_arming import (
+    MemoryPreflightRefusedError,
+    require_for_heavy_job,
+)
 from auto_pm.ui.cli.caller_path import CallerPath
 from auto_pm.ui.cli.runtime_identity_guard import require_runtime_identity_for_workspace
 
 
 def _only(value: str) -> tuple[str, ...]:
     return tuple(name.strip() for name in value.split(",") if name.strip())
+
+
+def _require_heavy(label: str) -> None:
+    """Refuse to start a heavy local job when the memory gate says this machine has no headroom."""
+
+    try:
+        note = require_for_heavy_job(label)
+    except MemoryPreflightRefusedError as error:
+        click.echo(str(error), err=True)
+        raise SystemExit(2) from error
+    if note:
+        click.echo(f"⚠ {note}", err=True)
 
 
 def _fail(error: GateRunError) -> click.ClickException:
@@ -75,8 +91,27 @@ def gate_group() -> None:
 )
 @click.option("--jobs", default=8, show_default=True, help="并行组的 xdist 进程数")
 @click.option("--only", default="", help="只列这些组（逗号分隔）")
-def plan_command(worktree: Path, jobs: int, only: str) -> None:
-    """只读：列出每组的命令和工作目录。"""
+@click.option("--preview", is_flag=True, help="只读预览：工位、候选、基线、档次、理由、检查组、执行端和下一步")
+@click.pass_context
+def plan_command(ctx: click.Context, worktree: Path, jobs: int, only: str, preview: bool) -> None:
+    """只读：列出每组的命令和工作目录；--preview 时给出候选门禁预览。"""
+    if preview:
+        try:
+            root: Path | None
+            try:
+                root = Path(ctx.find_root().obj.control_root)
+            except (AttributeError, TypeError):
+                root = None
+            click.echo(
+                json.dumps(
+                    preview_gate_candidate(worktree.resolve(), root=root).to_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        except GateRunError as error:
+            raise _fail(error) from error
+        return
     try:
         click.echo(
             json.dumps(
@@ -126,7 +161,7 @@ def run_command(
 ) -> None:  # fmt: skip
     """依次跑各组；测试子进程只拿白名单环境变量，AUTO_PM_* 一律不传。"""
     require_runtime_identity_for_workspace(ctx, candidate_release)
-    arm_for_heavy_job("long-gate")  # D-168: the full regression (eleven pytest groups, hours) is the heavy job the memory gate protects; never raises
+    _require_heavy("long-gate")
     service = GateRunService()
     service.announce = lambda note: click.echo(f"⚠ {note}", err=True)  # D-235: said when it happens, not after the round (set after construction, so a stand-in service class needs no constructor arguments)
     try:
@@ -211,7 +246,7 @@ def _precheck_report(report: PrecheckReport) -> None:
 @click.option("--defer-full", is_flag=True, help="遇到大范围选测时交给托管全量")
 def precheck_command(worktree: Path, base: str, jobs: int, out_dir: Path | None, as_json: bool, defer_full: bool) -> None:
     """只读：推送前一条命令跑 ruff + mypy(win32) + 与改动相关的 pytest；不写账本、不写工作树。"""
-    arm_for_heavy_job("full-tests")  # D-168: mypy plus the related pytest is a heavy job; never raises
+    _require_heavy("full-tests")
     try:
         report = PrecheckService().run(worktree, base=base, out_dir=out_dir, jobs=jobs, defer_full=defer_full)
     except GateRunError as error:

@@ -5,11 +5,11 @@ that the change broke.  ``precheck`` runs, in the worktree's project folder and 
 official gate (:func:`gate_run_service.child_environment`):
 
 1. ``ruff check --no-cache auto_pm tests``;
-2. ``mypy --platform win32 --no-incremental --cache-dir=/dev/null auto_pm tests``;
+2. ``mypy --platform win32 --no-incremental --cache-dir=<os.devnull> auto_pm tests``;
 3. the pytest files that belong to the change (see :func:`related_tests`).
 
 It is the quick check before a push, **not** the release gate: ``gate run`` stays the full pre-deploy gate.  It never writes the
-ledger; its own arguments write nothing into the worktree (no caches: ``--no-cache``, ``--cache-dir=/dev/null``,
+ledger; its own arguments write nothing into the worktree (no caches: ``--no-cache``, ``--cache-dir=<os.devnull>``,
 ``-p no:cacheprovider``, ``PYTHONDONTWRITEBYTECODE``; junit goes to the log folder).  A test inside a full run that starts pytest in
 the worktree again can still leave a git-ignored ``coverage/junit/test-results.xml``; ``git status`` and the index do not change.  The
 step logs go to a temporary folder (or ``--out``).  A change outside the project folder (``AGENTS.md``, ``reviews/``, workflows) has no
@@ -19,6 +19,8 @@ step here: it is listed and the verdict is at best ``UNVERIFIED``.  A step whose
 from __future__ import annotations
 
 import ast
+import json
+import os
 import re
 import subprocess
 import sys
@@ -44,6 +46,9 @@ FULL_TIMEOUT_SECONDS = 120 * 60  # Windows local parallel runs need headroom bey
 PARALLEL_FROM = 4  # this many test files or more (or the whole tree): run them with xdist
 # A change to one of these can break any test: the related set is everything (slow, said out loud in the report).
 EVERYTHING_FILES = frozenset({"tests/conftest.py", "pyproject.toml", "requirements.txt"})
+# Local handoff exchange files (PM-056 Track B, card 318) are data records validated by test_pm_handoff.py, not full-suite triggers.
+_HANDOFF_EXCHANGE_PREFIXES = ("04_监控/交接交换区/", "11_监控/交接交换区/")
+_HANDOFF_TEST = "tests/infrastructure/test_pm_handoff.py"
 SOURCE_GUARDS_MANIFEST = Path("tests") / "tools" / "sw008_ci" / "source_guards_manifest.txt"
 _NO_MODULE = re.compile(r"No module named")
 
@@ -390,12 +395,16 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
     changes = [path for path in project_relative_changes if path and not path.endswith((".md", ".rst"))]
     if any(path in EVERYTHING_FILES for path in changes):
         return ["tests"], "改到了 conftest/pyproject/requirements：相关测试 = 全部 tests（并行跑，会比较慢）"
-    others = [path for path in changes if not path.endswith(".py")]
+    handoff_changes = [
+        path for path in changes if path.startswith(_HANDOFF_EXCHANGE_PREFIXES) and path.endswith((".json", ".jsonl"))
+    ]
+    handoff_set = set(handoff_changes)
+    others = [path for path in changes if path not in handoff_set and not path.endswith(".py")]
     if others:
         return ["tests"], f"改到了非 Python 文件（{others[0]} 等 {len(others)} 个），没有可靠的办法知道哪些测试读它：相关测试 = 全部 tests"
     # a deleted or renamed module stays in the list (D-128): the tests that import its old name now fail with ImportError, and mypy's
     # ignore_missing_imports hides that, so only a test run shows it
-    python = list(changes)
+    python = [path for path in changes if path not in handoff_set]
     test_files = sorted(p.relative_to(project).as_posix() for p in (project / "tests").rglob("*.py")) if (project / "tests").is_dir() else []
     imports: dict[str, set[str]] = {}
     strings: dict[str, set[str]] = {}
@@ -453,7 +462,9 @@ def related_tests(project: Path, project_relative_changes: Sequence[str]) -> tup
                 changed.add(relative)
                 grew = True
     related.update(t for t in changed if Path(t).name.startswith("test_"))
-    if changes:
+    if handoff_changes and (project / _HANDOFF_TEST).is_file():
+        related.add(_HANDOFF_TEST)
+    if python:
         manifest_path = project / SOURCE_GUARDS_MANIFEST
         if manifest_path.is_file():
             try:
@@ -546,7 +557,7 @@ class PrecheckService:
             ("ruff", [python, "-B", "-m", "ruff", "check", "--no-cache", "auto_pm", "tests", *changed_scripts]),
             (
                 "mypy",
-                [python, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-sqlite-cache", "--cache-dir=/dev/null", "auto_pm", "tests"],
+                [python, "-B", "-m", "mypy", "--platform", "win32", "--no-incremental", "--no-sqlite-cache", f"--cache-dir={os.devnull}", "auto_pm", "tests"],
             ),
         ]
         report.full_gate_required = defer_full and bool(changed) and (report.tier != "L1" or tests == ["tests"])
@@ -556,6 +567,22 @@ class PrecheckService:
             # the project's addopts write coverage/junit/test-results.xml into the worktree and --no-cov does not stop that: point it at the logs
             junit = f"--junitxml={logs / 'pytest-junit.xml'}"
             pytest_argv = [python, "-B", "-m", "pytest", *tests, "-p", "no:cacheprovider", "--no-cov", "-q", junit]
+            if tests == ["tests"]:
+                execution_record = logs / "gate_execution.json"
+                execution_record.write_text(
+                    json.dumps(
+                        {
+                            "schema": "gate-execution.v1",
+                            "kind": "gate-precheck",
+                            "project": str(project.resolve()),
+                            "worktree": str(worktree),
+                            "commit": _git(worktree, "rev-parse", "HEAD"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                pytest_argv.append(f"--gate-execution={execution_record}")
             effective_jobs = min(jobs, 2) if (defer_full and report.tier == "L1") else jobs
             if (len(tests) >= PARALLEL_FROM or tests == ["tests"]) and effective_jobs > 1:
                 pytest_argv += ["-n", str(effective_jobs), "--dist", "loadfile"]
