@@ -21,7 +21,7 @@ description: "测试验证与独立审计合一：跑门禁与测试、审 PR；
 
 ## 测试验证
 
-- 用适用门禁：`pm verify --mission-id <ID> --lease-wallet`、`plc check <PID>`、`doc check`、`pm_flows.py checkup <PID>`、`gate status`；Python 项目跑 pytest、ruff、mypy（零依赖 CI 脚本须用 `python -I -S` 验证隔离）；PLC 项目的上机复核清单参照 STD-816，移植一致性参照 STD-817，测试规范参照 DEV-031、DEV-032。
+- 用适用门禁：`pm verify --mission-id <ID> --lease-wallet`、`plc check <PID>`、`doc check`、`pm_flows.py checkup <PID>`、`gate status`；Python 项目按 `gate precheck`/`gate run` 跑适用组，ruff/mypy 由 precheck 执行（零依赖 CI 脚本须用 `python -I -S` 验证隔离）；PLC 项目的上机复核清单参照 STD-816，移植一致性参照 STD-817，测试规范参照 DEV-031、DEV-032。
 - 门禁只认退出码，非零就退回，不听口头解释。
 
 ## 独立审计（三场景）
