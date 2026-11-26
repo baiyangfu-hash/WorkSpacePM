@@ -132,7 +132,7 @@ def test_e11_cli_prints_the_preflight_warning_even_when_the_gate_cannot_start(
 
     monkeypatch.setattr(gate_cli, "GateRunService", Service)
     monkeypatch.setattr(gate_cli, "require_runtime_identity_for_workspace", lambda *_a, **_k: None)
-    monkeypatch.setattr(gate_cli, "arm_for_heavy_job", lambda *_a, **_k: None)
+    monkeypatch.setattr(gate_cli, "require_for_heavy_job", lambda *_a, **_k: "")
     result = CliRunner().invoke(
         gate_cli.gate_group, ["run", "--worktree", str(tmp_path), "--out", str(tmp_path / "o")]
     )

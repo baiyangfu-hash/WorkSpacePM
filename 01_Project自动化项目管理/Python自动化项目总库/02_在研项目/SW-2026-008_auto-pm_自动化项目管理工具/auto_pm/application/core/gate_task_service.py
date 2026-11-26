@@ -24,7 +24,7 @@ from auto_pm.application.core.gate_run_service import (
     pytest_counts,
     sha256_file,
 )
-from auto_pm.application.core.gate_tier_policy import classify_gate_tier
+from auto_pm.application.core.gate_tier_policy import ALL_GATE_GROUPS, classify_gate_tier
 from auto_pm.infrastructure.executable_lookup import find_on_path
 from auto_pm.infrastructure.gate_executors import run_command
 from auto_pm.infrastructure.gate_task_store import GateAttempt, GateTaskStore
@@ -132,6 +132,126 @@ class GateCandidate:
             payload["tier"] = self.tier
             payload["groups"] = list(self.groups)
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class GatePreview:
+    """Read-only gate preview for one worktree: tier, reasons, groups, executors and the next legal step."""
+
+    worktree: str
+    commit: str
+    base: str
+    dirty: bool
+    aligned: bool
+    tier: str
+    m2_tier: str
+    groups: tuple[str, ...]
+    reasons: tuple[str, ...]
+    executors: tuple[str, ...]
+    next_step: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "worktree": self.worktree,
+            "commit": self.commit,
+            "base": self.base,
+            "dirty": self.dirty,
+            "aligned": self.aligned,
+            "tier": self.tier,
+            "m2_tier": self.m2_tier,
+            "groups": list(self.groups),
+            "reasons": list(self.reasons),
+            "executors": list(self.executors),
+            "next_step": self.next_step,
+        }
+
+
+def _changed_paths(worktree: Path, base: str, commit: str) -> list[str]:
+    """Committed changes since ``base`` plus the working tree and untracked files (preview only)."""
+
+    paths: set[str] = set()
+    for args in (
+        ("-c", "core.quotepath=false", "diff", "--name-only", "--no-renames", f"{base}..{commit}"),
+        ("-c", "core.quotepath=false", "diff", "--name-only", "--no-renames"),
+        ("-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"),
+    ):
+        paths.update(line.strip() for line in git(worktree, *args).splitlines() if line.strip())
+    return sorted(paths)
+
+
+def preview_gate_candidate(worktree: Path, *, root: Path | None = None) -> GatePreview:
+    """Preview the gate tier of a worktree without building a dispatchable candidate.
+
+    Uncommitted changes are allowed here (the plan and the entry summary show them); ``gate start`` still requires a
+    committed candidate.  The control root's tier rules are preferred so a worktree cannot weaken them.
+    """
+
+    worktree = worktree.resolve()
+    top = Path(git(worktree, "rev-parse", "--show-toplevel")).resolve()
+    if top != worktree:
+        raise GateRunError("请指定工位的 Git 根目录")
+    control = (root or top).resolve()
+    if Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve() != (
+        Path(git(control, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+    ):
+        raise GateRunError("工位与控制根不属于同一本 Git 仓库")
+    project = project_dir_in(worktree)
+    commit = git(worktree, "rev-parse", "HEAD")
+    base = git(control, "rev-parse", "refs/heads/main")
+    try:
+        aligned = commit == base or git(control, "merge-base", base, commit) == base
+    except GateRunError:
+        aligned = False
+    paths = _changed_paths(worktree, base, commit) if aligned else _changed_paths(worktree, commit, commit)
+    top_resolved = worktree.resolve()
+    project_resolved = project.resolve()
+    prefix = (project_resolved.relative_to(top_resolved).as_posix() + "/") if project_resolved != top_resolved else ""
+    inside = [path[len(prefix) :] for path in paths if not prefix or path.startswith(prefix)]
+    outside = [path for path in paths if prefix and not path.startswith(prefix)]
+    dirty = bool(git(worktree, "status", "--porcelain", "--untracked-files=all"))
+    tier: str
+    m2_tier: str
+    groups: tuple[str, ...]
+    reasons: tuple[str, ...]
+    if not aligned:
+        tier, m2_tier = "L3", "core"
+        groups = ALL_GATE_GROUPS
+        reasons = ("候选不是基于当前 main，预览按 L3 失败关闭",)
+    else:
+        decision = classify_gate_tier(
+            inside,
+            project=_trusted_rules_project(control, project),
+            outside_changes=outside,
+        )
+        tier, m2_tier = decision.tier, decision.m2_tier
+        groups = decision.recommended_groups
+        reasons = decision.reasons
+    if tier == "L1":
+        executors: tuple[str, ...] = ()
+        next_step = "直接 gate precheck（L1 本地闭环）"
+    elif tier == "L2":
+        executors = ("github",)
+        next_step = "gate start（GitHub L2）"
+    else:
+        executors = ("github", "local（需用户确认）")
+        next_step = "gate start（GitHub L3；不可用时经用户确认切本机）"
+    if not aligned:
+        next_step = "先把 main 合进工位，再重新预览"
+    elif dirty:
+        next_step = "先提交候选；未提交差异仅供预览，不能作为派发凭证"
+    return GatePreview(
+        worktree=str(worktree),
+        commit=commit,
+        base=base,
+        dirty=dirty,
+        aligned=aligned,
+        tier=tier,
+        m2_tier=m2_tier,
+        groups=tuple(groups),
+        reasons=tuple(reasons),
+        executors=executors,
+        next_step=next_step,
+    )
 
 
 @dataclass(frozen=True)
