@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, cast
 
 from auto_pm.change.constants import (
@@ -31,6 +32,243 @@ from auto_pm.models.enums import BusinessNature, ChangeStatus, Domain, ImpactSco
 from auto_pm.utils.file_utils import get_mtime, read_file
 
 log = logging.getLogger(__name__)
+
+SECTION5_FILES_ROW_RE = re.compile(
+    r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|",
+    re.MULTILINE,
+)
+SECTION5_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "（待填写）",
+        "(待填写)",
+        "待填写",
+        "待补充",
+        "（待补充）",
+        "(待补充)",
+        "无涉及文件记录",
+        "-",
+        "—",
+    }
+)
+_SW8_SHORTHAND_PREFIX = (
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/"
+)
+_SECTION5_FORBIDDEN_CHARS_RE = re.compile(r"[\s,，、;；。:：!！?？`\"'|\\*<>]")
+_COPIER_JINJA_TOKEN_RE = re.compile(r"\{\{\s*[A-Za-z_][A-Za-z0-9_.]*\s*\}\}")
+_SECTION5_ANNOTATION_RE = re.compile(r"\.[A-Za-z0-9]{1,12}[（(]")
+_ROOT_ASCII_PATH_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_SECTION5_SUBHEADING_RE = re.compile(r"^###\s*§?\s*(5\.\d+)\b", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class Section5PathReport:
+    """§5.1/§5.2/§5.3 机读路径清单校验结果（CHG-SCPT-2026-746）。"""
+
+    status: str  # "ok" | "placeholder" | "invalid"
+    paths: tuple[str, ...]
+    section5_2_paths: tuple[str, ...] = ()
+    section5_3_paths: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+
+
+def _split_section5_subsections(section5_text: str) -> dict[str, str]:
+    matches = list(_SECTION5_SUBHEADING_RE.finditer(section5_text))
+    parts: dict[str, str] = {}
+    for idx, match in enumerate(matches):
+        key = match.group(1)
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(section5_text)
+        parts[key] = section5_text[start:end]
+    return parts
+
+
+def _validate_section5_path_entry(raw: str) -> tuple[str | None, str | None]:
+    """校验单条 §5 机读仓库相对路径；散文、标点分隔、反引号、越界与通配符均拒绝。"""
+    cleaned = raw.strip()
+    if not cleaned:
+        return None, "存在空路径条目（检查多余的 <br>）"
+    if cleaned in SECTION5_PLACEHOLDERS:
+        return None, f"混入占位符 {cleaned!r}"
+    sanitized = _COPIER_JINJA_TOKEN_RE.sub("JINJA", cleaned)
+    if _SECTION5_FORBIDDEN_CHARS_RE.search(sanitized):
+        return None, f"含空白、散文标点、反引号或非法路径字符：{cleaned!r}"
+    if cleaned.startswith(("（", "(")) or _SECTION5_ANNOTATION_RE.search(cleaned):
+        return None, f"含括号说明文字而非纯路径：{cleaned!r}"
+    if cleaned.startswith("/"):
+        return None, f"不允许绝对路径：{cleaned!r}"
+    had_slash = "/" in cleaned
+    normalized = cleaned.rstrip("/")
+    if not normalized:
+        return None, f"路径为空：{cleaned!r}"
+    segments = normalized.split("/")
+    if any(seg in ("", ".", "..") for seg in segments):
+        return None, f"路径含空段或相对跳转（./..）：{cleaned!r}"
+    if not had_slash and not _ROOT_ASCII_PATH_RE.fullmatch(normalized):
+        return None, f"疑似散文描述而非仓库相对路径：{cleaned!r}"
+    return normalized, None
+
+
+def _is_path_covered(target: str, scopes: tuple[str, ...] | list[str]) -> bool:
+    return any(target == scope or target.startswith(f"{scope}/") for scope in scopes)
+
+
+def _extract_section5_3_paths(section5_3_text: str) -> tuple[str, ...]:
+    """从 §5.3 清单提取显式引用的仓库路径（含 SW8/ 缩写展开）。"""
+    found: list[str] = []
+    seen: set[str] = set()
+    file_col: int | None = None
+
+    def _try_add(token: str) -> None:
+        cand = token.strip()
+        cand = re.sub(r"#L\d+(?:-L?\d+)?$", "", cand)
+        cand = re.sub(r":\d+(?:-\d+)?$", "", cand)
+        if cand.startswith("SW8/"):
+            cand = _SW8_SHORTHAND_PREFIX + cand[4:]
+        # §5.3 中普通代码标识符不带 "/" 且不带扩展名；仅收集带 "/" 或带文件扩展名的显式路径
+        if "/" not in cand and not re.fullmatch(r"\.?[A-Za-z0-9._-]+\.[A-Za-z0-9]{1,12}", cand):
+            return
+        normalized, err = _validate_section5_path_entry(cand)
+        if err is None and normalized is not None and normalized not in seen:
+            seen.add(normalized)
+            found.append(normalized)
+
+    for line in section5_3_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            file_col = None
+            target_text = stripped
+        else:
+            if re.match(r"^\|[\s\-:|]+\|$", stripped):
+                continue
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if file_col is None and any("文件" in cell or "路径" in cell for cell in cells):
+                for idx, cell in enumerate(cells):
+                    if "文件" in cell or "路径" in cell:
+                        file_col = idx
+                        break
+                continue
+            target_text = cells[file_col] if (file_col is not None and file_col < len(cells)) else stripped
+
+        backticks = re.findall(r"`([^`\n]+)`", target_text)
+        if backticks:
+            for tok in backticks:
+                _try_add(tok)
+        elif file_col is not None and target_text:
+            first_tok = target_text.split()[0]
+            _try_add(first_tok)
+
+    return tuple(found)
+
+
+def validate_section5_paths(section5_text: str) -> Section5PathReport:
+    """校验变更单 §5.1/§5.2/§5.3 的 `<br>` 机读路径清单与覆盖一致性（CHG-SCPT-2026-746）。"""
+    subsections = _split_section5_subsections(section5_text)
+    s53_text = subsections.get("5.3", "")
+    s53_paths = _extract_section5_3_paths(s53_text) if s53_text else ()
+
+    before_53 = section5_text
+    if "5.3" in subsections:
+        m53 = re.search(r"^###\s*§?\s*5\.3\b", section5_text, re.MULTILINE)
+        if m53:
+            before_53 = section5_text[: m53.start()]
+
+    s51_match = SECTION5_FILES_ROW_RE.search(subsections["5.1"]) if "5.1" in subsections else None
+    s52_match = SECTION5_FILES_ROW_RE.search(subsections["5.2"]) if "5.2" in subsections else None
+    if s51_match is None or s52_match is None:
+        all_rows = list(SECTION5_FILES_ROW_RE.finditer(before_53))
+        if s51_match is None and all_rows:
+            s51_match = all_rows[0]
+        if s52_match is None and len(all_rows) >= 2:
+            s52_match = all_rows[1]
+
+    if s51_match is None:
+        return Section5PathReport(
+            status="invalid",
+            paths=(),
+            section5_3_paths=s53_paths,
+            errors=("§5.1 缺少「涉及文件/交付物」机读路径行，请用 <br> 分隔仓库相对路径",),
+        )
+
+    s51_raw = s51_match.group(1).strip()
+    s52_raw = s52_match.group(1).strip() if s52_match is not None else ""
+
+    s52_valid: list[str] = []
+    if s52_raw and s52_raw not in SECTION5_PLACEHOLDERS:
+        for item in s52_raw.split("<br>"):
+            norm, err = _validate_section5_path_entry(item)
+            if err is None and norm is not None and norm not in s52_valid:
+                s52_valid.append(norm)
+
+    if not s51_raw:
+        return Section5PathReport(
+            status="invalid",
+            paths=(),
+            section5_2_paths=tuple(s52_valid),
+            section5_3_paths=s53_paths,
+            errors=("§5.1 涉及文件/交付物为空，请填写 <br> 分隔的仓库相对路径清单",),
+        )
+
+    if s51_raw in SECTION5_PLACEHOLDERS:
+        if s52_valid or s53_paths:
+            return Section5PathReport(
+                status="invalid",
+                paths=(),
+                section5_2_paths=tuple(s52_valid),
+                section5_3_paths=s53_paths,
+                errors=(
+                    "§5.1 涉及文件/交付物仍为占位符，但 §5.2 或 §5.3 已列出具体路径；"
+                    "批准前须在 §5.1 写明 <br> 分隔的仓库相对路径清单",
+                ),
+            )
+        return Section5PathReport(
+            status="placeholder",
+            paths=(),
+            section5_2_paths=(),
+            section5_3_paths=(),
+            errors=(),
+        )
+
+    errors: list[str] = []
+    s51_valid: list[str] = []
+    for part in s51_raw.split("<br>"):
+        norm, err = _validate_section5_path_entry(part)
+        if err is not None:
+            errors.append(
+                f"§5.1 涉及文件/交付物不是合法的 <br> 机读路径清单（{err}）；"
+                "请用 `main.py change edit <单号> --files-from <清单>` 写入仓库相对路径"
+            )
+        elif norm is not None and norm not in s51_valid:
+            s51_valid.append(norm)
+
+    if not errors and s52_valid:
+        uncovered_52 = [path for path in s52_valid if not _is_path_covered(path, s51_valid)]
+        if uncovered_52:
+            errors.append(
+                "§5.1 涉及文件/交付物未覆盖 §5.2 列出的路径：" + "、".join(uncovered_52[:5])
+            )
+
+    if not errors and s53_paths:
+        uncovered_53 = [path for path in s53_paths if not _is_path_covered(path, s51_valid)]
+        if uncovered_53:
+            errors.append(
+                "§5.1 涉及文件/交付物未覆盖 §5.3 清单中的路径：" + "、".join(uncovered_53[:5])
+            )
+
+    if errors:
+        return Section5PathReport(
+            status="invalid",
+            paths=tuple(s51_valid),
+            section5_2_paths=tuple(s52_valid),
+            section5_3_paths=s53_paths,
+            errors=tuple(errors),
+        )
+    return Section5PathReport(
+        status="ok",
+        paths=tuple(s51_valid),
+        section5_2_paths=tuple(s52_valid),
+        section5_3_paths=s53_paths,
+        errors=(),
+    )
 
 
 class ChgParser:

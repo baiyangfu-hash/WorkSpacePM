@@ -38,7 +38,12 @@ from auto_pm.application.core.gate_run_service import (
     project_dir_in,
     pytest_counts,
 )
-from auto_pm.application.core.gate_tier_policy import classify_gate_tier
+from auto_pm.application.core.gate_tier_policy import (
+    classify_gate_tier,
+    is_complete_release_pointer_set,
+    is_l1_inside_record_path,
+    is_l1_outside_record_path,
+)
 
 DEFAULT_BASE = "origin/main"
 STEP_TIMEOUT_SECONDS = 20 * 60
@@ -509,6 +514,97 @@ def _missing_module_line(tail: str) -> str:
     return next((line.strip()[:160] for line in tail.splitlines() if _NO_MODULE.search(line)), "No module named")
 
 
+def _validate_record_files(
+    worktree: Path,
+    project: Path,
+    outside_records: Sequence[str],
+    inside_records: Sequence[str],
+    log_path: Path,
+) -> StepResult:
+    """Validate whitelisted JSON/JSONL record files strictly (UTF-8 + schema) for L1 local closeout."""
+    checked = 0
+    errors: list[str] = []
+    lines: list[str] = []
+
+    targets: list[tuple[str, Path]] = [
+        *((rel, worktree / rel) for rel in outside_records),
+        *((rel, project / rel) for rel in inside_records),
+    ]
+    pointer_objs: dict[str, dict[str, object]] = {}
+    for rel, path in targets:
+        checked += 1
+        if not path.is_file():
+            errors.append(f"{rel}: 文件不存在或被删除")
+            lines.append(f"FAIL {rel}: missing")
+            continue
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"{rel}: UTF-8 读取失败（{exc}）")
+            lines.append(f"FAIL {rel}: utf8 error {exc}")
+            continue
+
+        name = path.name.lower()
+        if name.endswith(".jsonl"):
+            for line_no, raw_line in enumerate(text.splitlines(), start=1):
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    parsed = json.loads(stripped)
+                except ValueError as exc:
+                    errors.append(f"{rel}:{line_no} JSONL 语法错误（{exc}）")
+                    lines.append(f"FAIL {rel}:{line_no}: {exc}")
+                    break
+                if not isinstance(parsed, dict):
+                    errors.append(f"{rel}:{line_no} 必须是 JSON 对象")
+                    lines.append(f"FAIL {rel}:{line_no}: not an object")
+                    break
+            else:
+                lines.append(f"PASS {rel}")
+        else:
+            try:
+                parsed = json.loads(text)
+            except ValueError as exc:
+                errors.append(f"{rel}: JSON 语法错误（{exc}）")
+                lines.append(f"FAIL {rel}: {exc}")
+                continue
+            if not isinstance(parsed, dict):
+                errors.append(f"{rel}: 顶层必须是 JSON 对象")
+                lines.append(f"FAIL {rel}: not an object")
+                continue
+            if name in ("active_release.json", "previous_release.json"):
+                rel_id = parsed.get("release_id")
+                if not isinstance(rel_id, str) or not rel_id.strip():
+                    errors.append(f"{rel}: 缺少非空字符串字段 release_id")
+                    lines.append(f"FAIL {rel}: missing release_id")
+                    continue
+                pointer_objs[name] = parsed
+            elif name == "deployment_manifest.json":
+                if not isinstance(parsed.get("releases"), dict):
+                    errors.append(f"{rel}: 缺少对象字段 releases")
+                    lines.append(f"FAIL {rel}: missing releases")
+                    continue
+                pointer_objs[name] = parsed
+            lines.append(f"PASS {rel}")
+
+    if (
+        not errors
+        and "active_release.json" in pointer_objs
+        and "deployment_manifest.json" in pointer_objs
+    ):
+        active_id = pointer_objs["active_release.json"].get("release_id")
+        manifest_releases = pointer_objs["deployment_manifest.json"].get("releases")
+        if isinstance(active_id, str) and isinstance(manifest_releases, dict) and active_id not in manifest_releases:
+            errors.append(f"deployment_manifest.json 缺少 active_release.json 指向的版本条目：{active_id}")
+            lines.append(f"FAIL pointer consistency: {active_id} missing in deployment_manifest.json")
+
+    log_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    if errors:
+        return StepResult("records", "FAIL", 1, "；".join(errors[:5]), [], str(log_path))
+    return StepResult("records", "PASS", 0, f"校验 {checked} 个记录类文件通过", [], str(log_path))
+
+
 class PrecheckService:
     def __init__(self, *, runner: Runner = default_runner, python: str = sys.executable) -> None:
         self._runner = runner
@@ -533,7 +629,16 @@ class PrecheckService:
         prefix = project.resolve().relative_to(Path(top).resolve()).as_posix() + "/" if top else ""
         inside = [path[len(prefix) :] for path in changed if path.startswith(prefix)]
         tests, note = related_tests(project, inside)
-        outside = [path for path in changed if not path.startswith(prefix)]
+        raw_outside = [path for path in changed if not path.startswith(prefix)]
+        outside_records = [path for path in raw_outside if is_l1_outside_record_path(path)]
+        non_record_outside = [path for path in raw_outside if not is_l1_outside_record_path(path)]
+        pure_pointer_sync = (
+            not inside
+            and not non_record_outside
+            and is_complete_release_pointer_set(outside_records)
+        )
+        outside = [] if pure_pointer_sync else raw_outside
+        inside_records = [path for path in inside if is_l1_inside_record_path(path)]
         report = PrecheckReport(base=base, changed=changed, related_tests=tests, scope_note=note, outside_changes=outside)
         if not changed:
             report.tier = "L1"
@@ -541,13 +646,17 @@ class PrecheckService:
             report.require_plugin = False
             report.tier_reasons = ["工作树相对基线无改动文件"]
         else:
-            decision = classify_gate_tier(inside, project=project, outside_changes=outside)
+            decision = classify_gate_tier(inside, project=project, outside_changes=raw_outside)
             report.tier = decision.tier
             report.recommended_groups = list(decision.recommended_groups)
             report.require_plugin = decision.require_plugin
             report.tier_reasons = list(decision.reasons)
         logs = out_dir or Path(tempfile.mkdtemp(prefix="gate-precheck-"))
         logs.mkdir(parents=True, exist_ok=True)
+        if outside_records or inside_records:
+            report.steps.append(
+                _validate_record_files(worktree, project, outside_records, inside_records, logs / "records.txt")
+            )
         env = child_environment()
         python = self._python
         changed_scripts = sorted(

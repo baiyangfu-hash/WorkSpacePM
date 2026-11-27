@@ -175,3 +175,55 @@ def test_change_facade_includes_change_and_application_groups_and_governed_card_
     assert card.m2_tier == "product"
     assert card.full_forced is False
     assert "change" in card.recommended_groups
+
+
+def test_release_pointers_and_handoff_records_classify_as_l1_while_other_outside_and_json_stay_l3() -> None:
+    """746: 三份发布指针与交接交换区 json/jsonl 走 L1；其余项目外路径、发布载荷与普通 json 仍失败关闭走 L3。"""
+    pointers = [
+        "00_Infrastructure/auto_pm/active_release.json",
+        "00_Infrastructure/auto_pm/previous_release.json",
+        "00_Infrastructure/auto_pm/deployment_manifest.json",
+    ]
+    ptr_dec = classify_gate_tier([], project=REPO_PROJECT, outside_changes=pointers)
+    assert ptr_dec.tier == "L1"
+    assert ptr_dec.full_forced is False
+    assert ptr_dec.require_plugin is False
+
+    for handoff in (
+        "04_监控/交接交换区/focus.json",
+        "04_监控/交接交换区/journal.jsonl",
+        "11_监控/交接交换区/focus.json",
+        "11_监控/交接交换区/journal.jsonl",
+    ):
+        h_dec = classify_gate_tier([handoff], project=REPO_PROJECT)
+        assert h_dec.tier == "L1", handoff
+        assert h_dec.full_forced is False
+        assert h_dec.require_plugin is False
+
+    # 混入发布载荷或项目外普通文件仍强制 L3
+    mixed_payload = classify_gate_tier(
+        [], project=REPO_PROJECT, outside_changes=[*pointers, "00_Infrastructure/auto_pm/releases/1.3.3-x/a.py"]
+    )
+    assert mixed_payload.tier == "L3" and mixed_payload.full_forced is True
+
+    mixed_rule = classify_gate_tier([], project=REPO_PROJECT, outside_changes=[*pointers, "AGENTS.md"])
+    assert mixed_rule.tier == "L3" and mixed_rule.full_forced is True
+
+    extra_protected = classify_gate_tier(
+        [], project=REPO_PROJECT, outside_changes=pointers, extra_protected_patterns=["00_Infrastructure/auto_pm/*"]
+    )
+    assert extra_protected.tier == "L3" and extra_protected.full_forced is True
+
+    # 单指针子集或与项目内文档/代码混改一律 fail-closed 走 L3
+    single_ptr_outside = classify_gate_tier([], project=REPO_PROJECT, outside_changes=[pointers[0]])
+    assert single_ptr_outside.tier == "L3" and single_ptr_outside.full_forced is True
+
+    single_ptr_changed = classify_gate_tier([pointers[0]], project=REPO_PROJECT)
+    assert single_ptr_changed.tier == "L3" and single_ptr_changed.full_forced is True
+
+    for mixed_in_proj in ("README.md", "scripts/command_catalog.py", "auto_pm/application/foo.py"):
+        mixed_dec = classify_gate_tier([mixed_in_proj], project=REPO_PROJECT, outside_changes=pointers)
+        assert mixed_dec.tier == "L3" and mixed_dec.full_forced is True, mixed_in_proj
+        mixed_flat = classify_gate_tier([*pointers, mixed_in_proj], project=REPO_PROJECT)
+        assert mixed_flat.tier == "L3" and mixed_flat.full_forced is True, mixed_in_proj
+

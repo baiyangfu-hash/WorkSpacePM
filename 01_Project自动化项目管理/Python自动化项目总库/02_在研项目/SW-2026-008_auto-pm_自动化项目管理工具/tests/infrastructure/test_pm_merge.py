@@ -1469,3 +1469,263 @@ def test_release_pointer_change_during_precheck_leaves_main_and_new_bytes_intact
     assert run(pm, repo.root, "merge", "w1") == 1
     assert rev(repo.root, "main") == base
     assert (repo.root / active).read_bytes() == switched
+
+
+def _write_station_holder(root: Path, station: str, *, session_id: str, pid: int = 0) -> None:
+    holders = root / ".auto-pm" / "station-holders"
+    holders.mkdir(parents=True, exist_ok=True)
+    (holders / f"{station}.json").write_text(
+        json.dumps(
+            {
+                "agent": station,
+                "session_id": session_id,
+                "pid": pid,
+                "opened_at": "2026-11-27T00:00:00+00:00",
+                "heartbeat_at": "2026-11-27T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_audit_record_enforces_real_session_for_same_window_positive_and_negative(
+    pm: ModuleType, repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """746: 审计独立性比真实作者会话——同窗口同会话拒、同窗口无会话 ID 退回同 PID 拒、同窗口双会话放行。"""
+    wt_dir = repo.root / ".auto-pm" / "worktrees" / "trae-111111"
+    git(repo.root, "worktree", "add", "-b", "trae/CHG-SCPT-2026-746", str(wt_dir), "main")
+    _identity(wt_dir)
+    base = rev(repo.root, "main")
+    candidate = commit(wt_dir, {"docs/a.md": "a\n"}, "docs\n\n领卡占位: CHG-SCPT-2026-746")
+    report = repo.tmp / "audit-746.md"
+    report.write_text(f"Audit {base}..{candidate}\n", encoding="utf-8")
+
+    for var in ("AUTO_PM_AGENT", "AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID", "VSCODE_PID"):
+        monkeypatch.delenv(var, raising=False)
+
+    # 1) 同窗口同会话（即便伪装成别的 agent 基名）必须拒绝
+    _write_station_holder(repo.root, "trae-111111", session_id="trae-chat-session-aaa", pid=9001)
+    monkeypatch.setenv("AUTO_PM_AGENT", "codex")
+    monkeypatch.setenv("TRAE_CHAT_SESSION_ID", "trae-chat-session-aaa")
+    monkeypatch.setenv("VSCODE_PID", "9001")
+    assert run(
+        pm, repo.root, "audit-record", "trae-111111", "--base", base,
+        "--candidate", candidate, "--verdict", "PASS", "--report", str(report),
+    ) == 1
+    assert "另一审计会话" in capsys.readouterr().out
+
+    # 2) 同窗口无 chat ID、退回同一 VSCODE_PID 必须拒绝（无论持有人同时记了 chat session_id 还是仅记了 vscode-<pid>）
+    for author_sid in ("vscode-9001", "trae-chat-session-aaa"):
+        _write_station_holder(repo.root, "trae-111111", session_id=author_sid, pid=9001)
+        monkeypatch.delenv("TRAE_CHAT_SESSION_ID", raising=False)
+        monkeypatch.setenv("AUTO_PM_AGENT", "trae")
+        monkeypatch.setenv("VSCODE_PID", "9001")
+        assert run(
+            pm, repo.root, "audit-record", "trae-111111", "--base", base,
+            "--candidate", candidate, "--verdict", "PASS", "--report", str(report),
+        ) == 1
+        assert "另一审计会话" in capsys.readouterr().out
+
+    # 3) 同窗口双会话（同 VSCODE_PID=9001、同 trae 基名，但 TRAE_CHAT_SESSION_ID 不同）必须放行
+    _write_station_holder(repo.root, "trae-111111", session_id="trae-chat-session-aaa", pid=9001)
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae")
+    monkeypatch.setenv("TRAE_CHAT_SESSION_ID", "trae-chat-session-bbb")
+    monkeypatch.setenv("VSCODE_PID", "9001")
+    assert run(
+        pm, repo.root, "audit-record", "trae-111111", "--base", base,
+        "--candidate", candidate, "--verdict", "PASS", "--report", str(report),
+    ) == 0
+    receipt_path = pm._audit_path(repo.root, base, candidate)
+    saved = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert isinstance(saved.get("reviewer_session_sha256"), str) and len(saved["reviewer_session_sha256"]) == 64
+
+    plan = pm.Plan("trae/CHG-SCPT-2026-746", candidate, "CHG-SCPT-2026-746", ["CHG-SCPT-2026-746"], ["docs/a.md"], [], [], [], base=base, formal_change="CHG-SCPT-2026-746")
+    verified = pm.audit_receipt(repo.root, "trae-111111", plan)
+    assert verified["verdict"] == "PASS"
+
+    # 4) 篡改凭证去掉 reviewer_session_sha256、改成空白/非法非64-hex串或改成作者会话/窗口 PID 哈希，audit_receipt 必须失败关闭
+    for bad_update in (
+        {"reviewer_session_sha256": None},
+        {"reviewer_session_sha256": "   "},
+        {"reviewer_session_sha256": "not-a-valid-sha256"},
+        {"reviewer_session_sha256": pm._session_digest("trae-chat-session-aaa")},
+        {"reviewer_session_sha256": pm._session_digest("vscode-9001")},
+    ):
+        tampered = dict(saved)
+        for k, v in bad_update.items():
+            if v is None:
+                tampered.pop(k, None)
+            else:
+                tampered[k] = v
+        receipt_path.write_text(json.dumps(tampered, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(pm.RefusedError, match="独立审计必须来自另一会话"):
+            pm.audit_receipt(repo.root, "trae-111111", plan)
+
+
+def test_check_card_refuses_divergent_candidate_change_order_and_prose_section5(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """746: 控制根与候选变更单不一致即拒；散文 §5.1 明确报机读路径格式错误。"""
+    change = "CHG-SCPT-2026-998"
+    chg_rel = f"SW-2026-008/04_监控/01_变更管理/01_变更单/CHG-SCPT/{change}.md"
+    card_rel = "SW-2026-008/04_监控/01_变更管理/03_实施卡/CARD-SW-2026-008-998_测试.md"
+    approved_text = (
+        f"| 变更状态 | approved |\n"
+        f"| 涉及文件/交付物 | {card_rel}<br>{chg_rel}<br>AGENTS.md |\n"
+    )
+    order = repo.root / chg_rel
+    order.parent.mkdir(parents=True, exist_ok=True)
+    order.write_text(approved_text, encoding="utf-8")
+
+    commit(
+        repo.wt,
+        {
+            card_rel: f"> 变更单：`{change}`\n",
+            chg_rel: approved_text + "\n<!-- drifted in candidate -->\n",
+            "AGENTS.md": "rules\n",
+        },
+        f"feat: [{change}] test\n\n领卡占位: {change}",
+    )
+    monkeypatch.setattr(pm, "_card_precheck", lambda *_: [card_rel, chg_rel, "AGENTS.md"])
+    monkeypatch.setattr(pm, "_check_card_tier", lambda *_: None)
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "控制根与候选分支的变更单" in capsys.readouterr().out
+
+    # 散文 §5.1 拒绝并给出清晰原因
+    prose_text = "| 变更状态 | approved |\n| 涉及文件/交付物 | 修改 AGENTS.md 和相关文档 |\n"
+    order.write_text(prose_text, encoding="utf-8")
+    commit(repo.wt, {chg_rel: prose_text}, f"sync prose\n\n领卡占位: {change}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "机读路径清单" in capsys.readouterr().out
+
+    # 对齐为合法 <br> 清单（仅行尾不同）且独立审计通过后允许合并
+    order.write_bytes(approved_text.replace("\n", "\r\n").encode("utf-8"))
+    commit(repo.wt, {chg_rel: approved_text}, f"sync valid\n\n领卡占位: {change}")
+    assert _audit(pm, repo, monkeypatch) == 0
+    assert run(pm, repo.root, "merge", "w1") == 0
+
+
+def test_find_change_orders_uses_workspace_registry_without_scanning_unrelated_dirs(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """746 / 交接 §4.7: 有 workspace_registry.json 时直接按登记项目找变更单，不扫描仓库无关目录。"""
+    chg_dir, _ledger, _proj = _setup_archive_project(tmp_path, "SW-2026-008")
+    target = chg_dir / "CHG-SCPT-2026-746.md"
+    target.write_text("| 变更状态 | approved |\n", encoding="utf-8")
+    unrelated = tmp_path / "huge_unrelated_dir"
+    unrelated.mkdir()
+
+    walked: list[str] = []
+    real_walk = pm.os.walk
+
+    def spy_walk(top: Any, *args: Any, **kwargs: Any) -> Any:
+        walked.append(str(top))
+        return real_walk(top, *args, **kwargs)
+
+    monkeypatch.setattr(pm.os, "walk", spy_walk)
+    found = pm.find_change_orders(tmp_path, "CHG-SCPT-2026-746", "SW-2026-008")
+    assert found == [target]
+    assert not any(str(tmp_path) == w or "huge_unrelated_dir" in w for w in walked)
+
+
+def test_merge_adopts_byte_identical_change_order_while_preserving_unrelated_dirty_ledger(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    """746: 控制根同时有未提交的 748 台账修改和同字节 746 变更单时，合并采纳 746 并原样保留台账。"""
+    ledger = pm.GOVERNANCE_LEDGER
+    chg_746 = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-746.md"
+    chg_748 = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-748.md"
+    commit(repo.root, {ledger: "base ledger\n"}, "base ledger")
+    git(repo.wt, "merge", "--quiet", "main")
+    (repo.root / ledger).write_bytes(b"base ledger\r\n748 pending row\r\n")
+    (repo.root / chg_746).parent.mkdir(parents=True, exist_ok=True)
+    (repo.root / chg_746).write_bytes("| 变更状态 | approved |\r\n".encode())
+    (repo.root / chg_748).write_bytes("| 变更状态 | implementing |\r\n".encode())
+
+    commit(repo.wt, {chg_746: "| 变更状态 | approved |\n", "docs/note.md": "ok\n"}, f"docs\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert (repo.root / ledger).read_bytes() == b"base ledger\r\n748 pending row\r\n"
+    assert (repo.root / chg_748).read_bytes() == "| 变更状态 | implementing |\r\n".encode()
+    assert git(repo.root, "show", f"main:{chg_746}").stdout == "| 变更状态 | approved |\n"
+
+
+def test_pointer_only_sync_adopts_three_live_pointers_without_full_gate_or_audit(
+    pm: ModuleType, repo: SimpleNamespace
+) -> None:
+    """746: 仅含三份与现役逐字一致发布指针的提交（如 25e9a04a）走索引采纳 + 非全量门禁，不动磁盘现役指针。"""
+    pointer_bytes, payload_rel = _local_live_release_pointers(repo)
+    files = {rel: raw.decode("utf-8").replace("\r\n", "\n") for rel, raw in pointer_bytes.items()}
+    commit(repo.wt, files, f"chore(release): 记录现役发布指针\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert repo.gates == [False]
+    assert all((repo.root / path).read_bytes() == raw for path, raw in pointer_bytes.items())
+    assert (repo.root / payload_rel).read_bytes() == b"live payload\n"
+    assert git(repo.root, "ls-tree", "--name-only", "main", "--", payload_rel).stdout == ""
+    entry = pm.read_log(repo.root)[-1]
+    assert "audit" not in entry
+    assert set(entry["adopted"]) == set(pointer_bytes)
+
+
+def test_clean_control_root_refuses_direct_release_pointer_overwrite(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    """746 审计复核回归: 控制根干净时，普通分支不得改写任一或全部现役发布指针。"""
+    base_ptrs = {
+        "00_Infrastructure/auto_pm/active_release.json": '{"release_id": "1.3.3-1359a6f"}\n',
+        "00_Infrastructure/auto_pm/previous_release.json": '{"release_id": "1.3.3-0000000"}\n',
+        "00_Infrastructure/auto_pm/deployment_manifest.json": '{"releases": {"1.3.3-1359a6f": {}}}\n',
+    }
+    base = commit(repo.root, base_ptrs, "seed live pointers")
+    git(repo.wt, "merge", "--quiet", "main")
+
+    # 1) 单改 active_release.json 企图静默切版必须被拒
+    commit(
+        repo.wt,
+        {"00_Infrastructure/auto_pm/active_release.json": '{"release_id": "9.9.9-rogue"}\n'},
+        f"rogue single pointer\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "不允许在普通合并中直接改写现役发布指针" in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / "00_Infrastructure/auto_pm/active_release.json").read_text(encoding="utf-8") == base_ptrs[
+        "00_Infrastructure/auto_pm/active_release.json"
+    ]
+
+    # 2) 同时改三份发布指针（与控制根干净磁盘不符）也必须被拒
+    commit(
+        repo.wt,
+        {
+            "00_Infrastructure/auto_pm/active_release.json": '{"release_id": "9.9.9-rogue"}\n',
+            "00_Infrastructure/auto_pm/previous_release.json": '{"release_id": "1.3.3-1359a6f"}\n',
+            "00_Infrastructure/auto_pm/deployment_manifest.json": '{"releases": {"9.9.9-rogue": {}}}\n',
+        },
+        f"rogue all three pointers\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "不允许在普通合并中直接改写现役发布指针" in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / "00_Infrastructure/auto_pm/active_release.json").read_text(encoding="utf-8") == base_ptrs[
+        "00_Infrastructure/auto_pm/active_release.json"
+    ]
+
+
+def test_single_file_record_branch_audit_tier_policy(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    """746 / 交接 §4.15: 不绑正式变更单、不删记录的单文件记录分支免审计；删除记录仍必须用户批准和独立审计。"""
+    rec = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-745.md"
+    commit(repo.wt, {rec: "| 变更状态 | completed |\n"}, f"docs(change): 补入库记录\n\n{CARD}")
+    plan = pm.plan_merge(repo.root, "w1")
+    assert plan.requires_audit is False
+    assert plan.user_paths == []
+    assert run(pm, repo.root, "merge", "w1") == 0
+    assert "audit" not in pm.read_log(repo.root)[-1]
+
+    # 删除该记录文件必须进入受保护路径（需用户批准与独立审计）
+    git(repo.wt, "merge", "--quiet", "main")
+    git(repo.wt, "rm", "--quiet", rec)
+    git(repo.wt, "commit", "-m", f"rm record\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "没有本卡的实施卡" in capsys.readouterr().out
+

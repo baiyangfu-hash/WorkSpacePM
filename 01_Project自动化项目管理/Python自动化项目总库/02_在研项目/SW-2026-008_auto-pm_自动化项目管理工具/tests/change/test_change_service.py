@@ -647,3 +647,127 @@ class TestProjectRootFromChangeFile:
 
         assert self._root(chg) is None
 
+
+class TestChg746Section5PathValidation:
+    """CHG-SCPT-2026-746: 批准前 §5.1 `<br>` 机读路径校验、§5.3 覆盖校验、模板示例与存量干跑。"""
+
+    def _prepare_under_review(
+        self, tmp_path: Path, section5_cell: str, *, extra_section5: str = ""
+    ) -> tuple[ChangeService, str, Path]:
+        project_id = "SW-2026-008"
+        project_path = tmp_path / project_id
+        project_path.mkdir(parents=True, exist_ok=True)
+        (project_path / ".copier-answers.yml").write_text(f"project_id: {project_id}\n", encoding="utf-8")
+        svc = ChangeService(str(tmp_path))
+        cr = svc.create_change_request(
+            project_id=project_id,
+            domain="SCPT",
+            business_nature="DEF",
+            impact_scope=["SYSTEM"],
+            applicant="baiyang",
+            background="746 路径校验测试背景",
+            necessity="746 路径校验测试必要性",
+        )
+        file_path = Path(cr.file_path)
+        text = file_path.read_text(encoding="utf-8")
+        text = text.replace("| 涉及文件/交付物 | （待填写） |", f"| 涉及文件/交付物 | {section5_cell} |", 1)
+        if extra_section5:
+            text = text.replace("## 6. 变更影响分析", f"{extra_section5}\n\n## 6. 变更影响分析", 1)
+        file_path.write_text(text, encoding="utf-8")
+        svc.transition_status(cr.change_number, "submitted", approver="baiyang", comment="submit", project_id=project_id)
+        svc.transition_status(cr.change_number, "under_review", approver="baiyang", comment="review", project_id=project_id)
+        return svc, cr.change_number, file_path
+
+    @pytest.mark.parametrize("target", ["approved", "conditionally_approved"])
+    def test_prose_section5_refused_before_approval(self, tmp_path: Path, target: str) -> None:
+        from auto_pm.domain.change.constants import TransitionGuardError
+
+        svc, chg, _ = self._prepare_under_review(tmp_path, "修改 AGENTS.md、roles/ 下的角色包与命令目录")
+        with pytest.raises(TransitionGuardError, match="§5\\.1"):
+            svc.transition_status(chg, target, approver="baiyang", comment="同意", project_id="SW-2026-008")
+
+    @pytest.mark.parametrize("target", ["approved", "conditionally_approved"])
+    def test_machine_readable_br_paths_pass_approval(self, tmp_path: Path, target: str) -> None:
+        svc, chg, _ = self._prepare_under_review(
+            tmp_path,
+            "AGENTS.md<br>roles/test-engineer/SKILL.md<br>01_Project自动化项目管理/a/b.py<br>templates/plc/{{ db_slot_1 }}.jinja",
+        )
+        updated = svc.transition_status(chg, target, approver="baiyang", comment="同意", project_id="SW-2026-008")
+        assert updated is not None and updated.status == target
+
+    def test_section5_must_cover_section5_3_paths_before_approval(self, tmp_path: Path) -> None:
+        from auto_pm.domain.change.constants import TransitionGuardError
+
+        s53 = (
+            "### 5.3 逐条删除/改义清单\n\n"
+            "| # | 文件与位置 | 变更 | 类型 | 含义是否改变 |\n"
+            "|---|---|---|---|---|\n"
+            "| 1 | `AGENTS.md` L25 | 改义 | 改义 | 是 |\n"
+            "| 2 | `roles/shared/refs/skill_coordination.md` 表 | 精简 | 删除正文 | 否 |\n"
+        )
+        svc, chg, file_path = self._prepare_under_review(tmp_path, "AGENTS.md", extra_section5=s53)
+        with pytest.raises(TransitionGuardError, match="§5\\.3"):
+            svc.transition_status(chg, "approved", approver="baiyang", comment="同意", project_id="SW-2026-008")
+
+        # 补全 §5.1 覆盖 §5.3 后通过
+        text = file_path.read_text(encoding="utf-8").replace(
+            "| 涉及文件/交付物 | AGENTS.md |",
+            "| 涉及文件/交付物 | AGENTS.md<br>roles/shared/refs/skill_coordination.md |",
+            1,
+        )
+        file_path.write_text(text, encoding="utf-8")
+        approved = svc.transition_status(chg, "approved", approver="baiyang", comment="同意", project_id="SW-2026-008")
+        assert approved is not None and approved.status == "approved"
+
+    def test_placeholder_with_section5_3_is_refused(self, tmp_path: Path) -> None:
+        from auto_pm.domain.change.constants import TransitionGuardError
+
+        s53 = "### 5.3 清单\n\n| # | 文件与位置 |\n|---|---|\n| 1 | `AGENTS.md` L1 |\n"
+        svc, chg, _ = self._prepare_under_review(tmp_path, "（待填写）", extra_section5=s53)
+        with pytest.raises(TransitionGuardError, match="§5\\.1"):
+            svc.transition_status(chg, "approved", approver="baiyang", comment="同意", project_id="SW-2026-008")
+
+    def test_generator_template_includes_br_path_example(self) -> None:
+        from auto_pm.domain.change.constants import ChangeRequest
+        from auto_pm.domain.change.generator import ChgGenerator
+
+        rendered = ChgGenerator().render(
+            ChangeRequest(
+                change_number="CHG-SCPT-2026-746",
+                project_id="SW-2026-008",
+                project_name="SW-2026-008",
+                domain="SCPT",
+                business_nature="DEF",
+                impact_scope=["LOCAL"],
+                applicant="baiyang",
+                background="背景",
+                necessity="必要性",
+            )
+        )
+        assert "<br>" in rendered and "涉及文件/交付物" in rendered
+
+    def test_dry_run_section5_paths_reports_buckets_read_only(self, tmp_path: Path) -> None:
+        project_id = "SW-2026-008"
+        project_path = tmp_path / project_id
+        project_path.mkdir(parents=True, exist_ok=True)
+        (project_path / ".copier-answers.yml").write_text(f"project_id: {project_id}\n", encoding="utf-8")
+        svc = ChangeService(str(tmp_path))
+        ok_cr = svc.create_change_request(project_id, "SCPT", "DEF", ["LOCAL"], "u", "ok", "ok")
+        svc.update_change_request(ok_cr.change_number, lookup_project_id=project_id, files=["AGENTS.md", "docs/a.md"])
+        prose_cr = svc.create_change_request(project_id, "SCPT", "DEF", ["LOCAL"], "u", "prose", "prose")
+        prose_path = Path(prose_cr.file_path)
+        prose_path.write_text(
+            prose_path.read_text(encoding="utf-8").replace("| 涉及文件/交付物 | （待填写） |", "| 涉及文件/交付物 | 改动若干文件 |", 1),
+            encoding="utf-8",
+        )
+        placeholder_cr = svc.create_change_request(project_id, "SCPT", "DEF", ["LOCAL"], "u", "ph", "ph")
+        before = prose_path.read_bytes()
+
+        report = svc.dry_run_section5_paths(project_id)
+        assert report["total"] == 3
+        assert report["counts"] == {"ok": 1, "placeholder": 1, "invalid": 1}
+        assert [item["change_number"] for item in report["invalid"]] == [prose_cr.change_number]
+        assert placeholder_cr.change_number in {item["change_number"] for item in report["placeholder"]}
+        assert prose_path.read_bytes() == before
+
+
