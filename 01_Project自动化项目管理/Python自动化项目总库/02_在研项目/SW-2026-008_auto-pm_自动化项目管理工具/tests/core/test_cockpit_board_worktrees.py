@@ -61,6 +61,11 @@ STATIONS = [
     _station("trae", "agent", "trae/702-ui", dirty=3),
     _station("gate-manual", "other", ""),
 ]
+# 747：目录在、Git 未登记的会话工位（收工位删到一半留下的空壳）：显示“清理残留”，不显示“收工位”
+RESIDUE = _station(
+    "trae-04d028", "agent", "", registered=False, checked=False,
+    broken="目录里没有 .git，已经不是工作树（多半是删到一半）；不要在里面跑 git，命令会落到上层的控制根；人工查看后再处理",
+)
 SWEEP = [
     {"target": "/w/.auto-pm/worktrees/claude-1b7302", "category": "agent", "remove": True, "reason": "已并进 main、干净"},
     {"target": "/w/.auto-pm/worktrees/gate-formal", "category": "other", "remove": True, "reason": "已并进 main、干净"},
@@ -142,8 +147,23 @@ def test_close_block_follows_the_command_in_order() -> None:
 def test_nothing_is_clickable_when_the_board_has_an_ai_marker_or_cannot_tell() -> None:
     for markers in (("CLAUDECODE",), None):
         reason = decisions.human_only_block(markers)
-        view = _view(human_block=reason)
+        view = _view(stations=[*STATIONS, RESIDUE], human_block=reason)
         assert reason and all(row.blocked == reason for row in view.rows)
+
+
+def test_an_orphan_station_offers_clean_residue_not_close() -> None:
+    view = _view(stations=[*STATIONS, RESIDUE])
+    row = _row(view, "trae-04d028")
+    assert row.action is not None and row.action.key == "clean_residue" and row.action.label == "清理残留"
+    assert row.action.args == ("worktree", "close", "trae-04d028")
+    assert row.blocked == ""
+    assert "Git 里没有" in row.warning and "收工位" not in row.action.label
+    # 名册外的未登记目录不是会话工位残留：仍走清理清单那一套，不冒充 worktree close
+    leftover = _station("leftover", "other", "", registered=False, checked=False, broken="目录里没有 .git")
+    other_view = _view(stations=[leftover], sweep=[])
+    other_row = _row(other_view, "leftover")
+    assert other_row.action is not None and other_row.action.key == "sweep_one"
+    assert other_row.blocked == "清理清单里没有这一项，判不了能不能清"
 
 
 def test_unread_commands_grey_the_buttons_instead_of_meaning_none() -> None:
@@ -155,7 +175,7 @@ def test_unread_commands_grey_the_buttons_instead_of_meaning_none() -> None:
 
 
 def test_every_command_the_page_can_run_is_on_the_policy_list() -> None:
-    view = _view()
+    view = _view(stations=[*STATIONS, RESIDUE])
     produced = [row.action.args for row in view.rows if row.action is not None]
     produced += [view.sweep_all.args] if view.sweep_all else []
     produced += [stations.reclaim_preview_args(), stations.reclaim_action(["x"]).args]

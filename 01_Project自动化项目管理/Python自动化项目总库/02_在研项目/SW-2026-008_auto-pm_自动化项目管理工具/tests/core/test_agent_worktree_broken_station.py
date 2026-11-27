@@ -256,3 +256,58 @@ def test_sweep_apply_pruning_gone_alias_station_clears_holder_and_presence(
     assert str(opened.path) not in _registered(lab)
     assert not holder.exists()
     assert list_presence(lab.root) == []
+
+
+# ── 747: close 原子化——目录在、Git 没登记的空壳（删到一半的残留） ---------------------------
+
+
+def test_close_cleans_an_empty_residue_directory_git_does_not_register(lab: Lab) -> None:
+    residue = lab.root / ".auto-pm" / "worktrees" / "claude-aaaaaa"
+    (residue / "empty-nested").mkdir(parents=True)
+
+    result = lab.service().close("claude-aaaaaa", fetch=False)
+
+    assert not residue.exists()
+    assert result.branch == "" and result.branch_deleted is False
+    assert "残留" in result.note and "已清掉" in result.note
+
+
+def test_close_refuses_a_residue_that_still_holds_files_and_says_how_to_remove_it(lab: Lab) -> None:
+    residue = lab.root / ".auto-pm" / "worktrees" / "claude-aaaaaa"
+    residue.mkdir(parents=True)
+    (residue / "notes.txt").write_text("keep me\n", encoding="utf-8")
+
+    with pytest.raises(StationRefusedError) as caught:
+        lab.service().close("claude-aaaaaa", fetch=False)
+
+    message = str(caught.value)
+    assert "残留" in message and "notes.txt" in message
+    assert ("Remove-Item" if os.name == "nt" else "rm -rf") in message
+    assert (residue / "notes.txt").is_file()
+
+
+def test_close_settles_a_half_removal_that_dropped_the_registration_and_left_an_empty_shell(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    station = finished_station(lab, "claude", "CARD-1")
+    lab.merge_on_github("claude/CARD-1")
+    subprocess.run(["git", "-C", str(lab.root), "fetch", "-q", "origin"], check=True, capture_output=True)
+    run_git = AgentWorktreeService._git
+
+    def stops_after_deregistering(
+        self: AgentWorktreeService, *args: str, **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ("worktree", "remove"):
+            shutil.rmtree(station)  # 文件删了
+            station.mkdir()  # 目录本身没删掉，留了个空壳
+            shutil.rmtree(lab.root / ".git" / "worktrees" / station.name)  # 登记也掉了
+            return subprocess.CompletedProcess(args, 1, "", "error: failed to delete directory")
+        return run_git(self, *args, **kwargs)
+
+    monkeypatch.setattr(AgentWorktreeService, "_git", stops_after_deregistering)
+
+    result = lab.service().close("claude", fetch=False)
+
+    assert not station.exists()
+    assert result.branch_deleted is True, "已并进 main 的本地分支照样应一起收掉"
+    assert "空目录" in result.note and "分支已删" in result.note
