@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -204,6 +205,24 @@ def session_id(environ: Mapping[str, str] | None = None) -> str:
     return ""
 
 
+def declared_pid(environ: Mapping[str, str] | None = None) -> int:
+    """调用方声明的长驻进程号：Claude 的 CLAUDE_PID 优先，其次 VS Code 系列（Trae/Cursor/VS Code）的 VSCODE_PID。
+
+    只认调用方自己报的：``os.getppid()`` 通常是个短命 shell，拿它判“对话还在不在”会把活着的对话判死。
+    0 = 不知道，兜底回收永远不据此判陈旧（D-76）。
+    """
+
+    env = os.environ if environ is None else environ
+    for key in ("CLAUDE_PID", "VSCODE_PID"):
+        try:
+            value = int(env.get(key, "0") or 0)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
 def session_alias(environ: Mapping[str, str] | None = None, *, base: str | None = None) -> str:
     """本对话的别名 ``<基名>-<6位十六进制>``；拿不到会话 ID 或基名不在名册里时返回空串（退回只用基名）。
 
@@ -253,12 +272,24 @@ def recorder() -> str:
 
 
 def ensure_session_id(control_root: str | Path) -> None:
-    """agent 调用却没有任何会话 ID 时，按父进程号生成一个并记住（同一个父进程的后续命令拿到同一个），写进 AUTO_PM_SESSION_ID。
+    """agent 调用却没有任何会话 ID 时，认一个稳定的身份并写进 AUTO_PM_SESSION_ID。
 
-    记在 ``.auto-pm/session-ids/<父进程号>.txt``；父进程号被复用的旧记录由回收时清理。用户自己的终端不生成。
+    先认 ``TRAE_CHAT_SESSION_ID``：Trae 每条命令的父进程号都不一样，按父进程号生成会让同一个对话的别名一路漂移
+    （`trae-c19ba3` → `trae-1c9fd5` → `trae-04d028`），自己反而收不了自己的工位。VS Code 系列（Cursor、VS Code）
+    的终端没有对话 ID，用 ``VSCODE_PID``：同一个窗口稳定、不同窗口不同。两样都没有才按父进程号生成并记在
+    ``.auto-pm/session-ids/<父进程号>.txt``（同一父进程的后续命令拿到同一个），父进程号被复用的旧记录由回收时清理。
+    用户自己的终端不生成。
     """
 
     if not caller_agent() or caller_agent() == _UNKNOWN_CALLER or session_id():
+        return
+    fixed = os.environ.get("TRAE_CHAT_SESSION_ID", "").strip()
+    if not fixed:
+        window = os.environ.get("VSCODE_PID", "").strip()
+        if window.isdigit() and int(window) > 0:
+            fixed = f"vscode-{window}"
+    if fixed:
+        os.environ["AUTO_PM_SESSION_ID"] = fixed
         return
     folder = Path(control_root) / ".auto-pm" / "session-ids"
     parent = os.getppid()
@@ -715,10 +746,12 @@ class AgentWorktreeService:
             self._notes_dir.mkdir(parents=True, exist_ok=True)
             note = {
                 "agent": agent,
-                "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
-                # D-76: only a pid the caller declared (CLAUDE_PID) identifies the conversation; ``os.getppid()`` is usually a
-                # short-lived shell, whose exit would make a live conversation look stale.  0 = unknown = never reclaimed.
-                "pid": int(os.environ.get("CLAUDE_PID", "0") or 0),
+                # 会话 ID 不绑死 Claude：AUTO_PM_SESSION_ID（Trae 的对话 ID 等由 ensure_session_id 写进来）优先。
+                "session_id": session_id(),
+                # D-76: only a pid the caller declared (CLAUDE_PID, or VSCODE_PID for the VS Code family) identifies the
+                # conversation; ``os.getppid()`` is usually a short-lived shell, whose exit would make a live conversation
+                # look stale.  0 = unknown = never reclaimed.
+                "pid": declared_pid(),
                 "title": os.environ.get("AUTO_PM_SESSION_TITLE", ""),
                 "opened_at": datetime.now(UTC).isoformat(),
                 "heartbeat_at": datetime.now(UTC).isoformat(),
@@ -889,7 +922,10 @@ class AgentWorktreeService:
             if silent is not None and silent * 3600 < min_interval_seconds:
                 return True
         note["heartbeat_at"] = datetime.now(UTC).isoformat()
-        pid = int(os.environ.get("CLAUDE_PID", "0") or 0)
+        sid = session_id()
+        if sid:
+            note["session_id"] = sid  # 老记录（Trae 之前记成空）顺手补上，身份就能核对
+        pid = declared_pid()
         if pid > 0:
             note["pid"] = pid
         try:
@@ -1164,6 +1200,9 @@ class AgentWorktreeService:
             raise StationRefusedError(f"工位 {path} 不能收：{_broken_reason(path)}")
         info = registered.get(path.resolve()) if path.exists() else None
         if info is None:
+            if path.exists():
+                # 747: 目录在、Git 里已经没登记（收工位删到一半的空壳）：空目录自动清，有内容就明确报残留。
+                return self._close_residue(agent, path)
             raise StationRefusedError(
                 f"{agent} 没有登记在 Git 里的工位（{path}）；用 `worktree list` 看现状"
             )
@@ -1178,6 +1217,53 @@ class AgentWorktreeService:
             )
         self._require_removable(station)
         return self._remove_station(station)
+
+    def _close_residue(self, agent: str, path: Path) -> CloseResult:
+        """目录在、Git 里没登记：空目录是删到一半的残留，清掉；有内容就不动，报清楚并给出人工清理命令（747）。"""
+
+        record: dict[str, object] = {
+            "agent": agent,
+            "via": "close",
+            "caller": recorder(),
+            "branch": "",
+            "head": "",
+            "path": str(path),
+            "rescue_ref": "",
+        }
+        try:
+            self._require_inside(path)
+            if not path.is_dir():
+                raise StationRefusedError(f"{path} 不是目录，不是工位；不动它，请人工看清这是什么")
+            self._require_no_live_lease(path)
+            try:
+                files = _files_under(path)
+            except OSError as error:
+                raise AgentWorktreeError(f"读不清残留目录 {path} 里有什么（{error}）；命令不删，请人工查看") from error
+            if files:
+                sample = "、".join(str(file.relative_to(path)) for file in files[:5])
+                more = "……" if len(files) > 5 else ""
+                raise StationRefusedError(
+                    f"工位 {path} 是残留：Git 里没有它的登记，目录里还有 {len(files)} 个文件（{sample}{more}），"
+                    f"命令不删有内容的目录；先看清里面还有什么，确认不要了，人工删：{_manual_remove_hint(path)}"
+                )
+            try:
+                shutil.rmtree(path)
+            except OSError as error:
+                raise AgentWorktreeError(f"清残留空目录失败：{error}；人工删：{_manual_remove_hint(path)}") from error
+        except Exception as error:  # noqa: BLE001 - any failure is logged, then re-raised unchanged
+            record.update(outcome="refused" if isinstance(error, StationRefusedError) else "failed", reason=str(error))
+            self._log_reclaim(record)
+            raise
+        self._clear_station_artifacts(agent)
+        self._clear_borrow(agent)
+        record["outcome"] = "removed"
+        self._log_reclaim(record)
+        return CloseResult(
+            path=path,
+            branch="",
+            branch_deleted=False,
+            note="Git 里没有这个工位的登记，目录已经空了（删到一半的残留），已清掉",
+        )
 
     # ── sweep ────────────────────────────────────────────────────────
 
@@ -1494,9 +1580,15 @@ class AgentWorktreeService:
             raise StationRefusedError(f"工位 {station.path} 上又有了没并进 main 的提交，不删")
         removed = self._git("worktree", "remove", str(station.path))
         if removed.returncode != 0:
-            # Windows can fail halfway ("拒绝访问") and leave a directory that is no longer a work tree.
+            # 747: Windows 会把目录删到一半再报错。目录已没或只剩空壳的，就地收干净（不丢任何提交）；
+            # 还有文件的一律不动，报清楚并给出人工清理命令，不留“登记删了、目录还在”的半状态。
+            settled = self._settle_failed_removal(station)
+            if settled is not None:
+                return settled
             leftover = _broken_reason(station.path)
             warning = f"。注意：{leftover}；用 `worktree list` 看现状，人工处理" if leftover else ""
+            if not station.path.exists() or not (station.path / ".git").exists():
+                warning += f"。确认不要了，人工删：{_manual_remove_hint(station.path)}"
             raise AgentWorktreeError(f"删工作树失败：{_detail(removed)}{warning}")
         self._clear_borrow(station.path.name)
         deleted = False
@@ -1515,6 +1607,42 @@ class AgentWorktreeService:
         return CloseResult(
             path=station.path, branch=station.branch, branch_deleted=deleted, note=note
         )
+
+    def _settle_failed_removal(self, station: Station) -> CloseResult | None:
+        """``git worktree remove`` 报错后，把已经删了一半的状态就地收干净；收不干净返回 None，由调用方报残留。
+
+        只认两种半删状态：目录已经没了，或目录还在但已经没有自己的 ``.git``（后面这种只有空目录才删）。
+        目录里还有文件的一律不动。清完登记、删掉已并进 main 的本地分支，和正常 close 的结果一致。
+        """
+
+        directory_gone = not station.path.exists()
+        git_link_gone = station.path.exists() and not (station.path / ".git").exists()
+        if not (directory_gone or git_link_gone):
+            return None
+        if self._git("worktree", "prune").returncode != 0 or self._registered(station.path):
+            return None
+        note = "目录已删，Git 里的登记也已清掉"
+        if station.path.exists():
+            try:
+                files = _files_under(station.path)
+            except OSError:
+                return None
+            if files:
+                return None
+            try:
+                shutil.rmtree(station.path)
+            except OSError:
+                return None
+            note = "目录已删，Git 里的登记也已清掉（删到一半的空目录一并清掉）"
+        deleted = False
+        if station.merged and station.branch:
+            try:
+                deleted = self._delete_local_branch(station.branch, require_merged=True)
+            except AgentWorktreeError:
+                deleted = False
+        self._clear_borrow(station.path.name)
+        note += "；本地分支已删" if deleted else "；分支保留"
+        return CloseResult(path=station.path, branch=station.branch, branch_deleted=deleted, note=note)
 
     def _remove_detached(self, station: Station) -> CloseResult:
         removed = self._git("worktree", "remove", str(station.path))
@@ -1808,6 +1936,26 @@ def _broken_reason(path: Path) -> str:
             "命令会落到上层的控制根；人工查看后再处理"
         )
     return ""
+
+
+def _files_under(path: Path) -> tuple[Path, ...]:
+    """目录里所有普通文件（空的子目录不算）；读不下去时抛 OSError，调用方按“读不清”处理，绝不当成空目录删掉。"""
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    found: list[Path] = []
+    for current, _dirs, names in os.walk(path, followlinks=False, onerror=fail):  # 和 _tree_size 一样不跟链接走
+        found.extend(Path(current) / name for name in names)
+    return tuple(found)
+
+
+def _manual_remove_hint(path: Path) -> str:
+    """给人手删残留目录的命令（命令自己不删有内容的目录，只把怎么删说清楚）。"""
+
+    if os.name == "nt":
+        return f"Remove-Item -LiteralPath '{path}' -Recurse -Force"
+    return f"rm -rf '{path}'"
 
 
 def _idle_seconds(path: Path) -> int | None:

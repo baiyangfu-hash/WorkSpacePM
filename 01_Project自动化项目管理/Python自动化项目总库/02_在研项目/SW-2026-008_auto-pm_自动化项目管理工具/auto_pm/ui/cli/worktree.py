@@ -321,7 +321,8 @@ def close_cmd(ctx: click.Context, agent: str, no_fetch: bool, shared: bool) -> N
         result = service.close(agent, fetch=not no_fetch)
     except AgentWorktreeError as error:
         _fail(error)
-    console.print(f"[green]已收工位[/green] {result.path}（分支 {result.branch}）：{result.note}")
+    branch = f"（分支 {result.branch}）" if result.branch else ""
+    console.print(f"[green]已收工位[/green] {result.path}{branch}：{result.note}")
 
 
 @worktree_group.command("release")

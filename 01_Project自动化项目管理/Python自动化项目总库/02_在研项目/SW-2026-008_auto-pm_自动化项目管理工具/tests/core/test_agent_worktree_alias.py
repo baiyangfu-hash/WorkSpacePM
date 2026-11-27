@@ -48,7 +48,16 @@ def _service(root: Path) -> AgentWorktreeService:
 
 @pytest.fixture
 def as_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("AUTO_PM_AGENT", "AUTO_PM_SESSION_ID", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID"):
+    for key in (
+        "AUTO_PM_AGENT",
+        "AUTO_PM_SESSION_ID",
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_PID",
+        "TRAE_CHAT_SESSION_ID",
+        "VSCODE_PID",
+    ):
         monkeypatch.delenv(key, raising=False)
     for key in [name for name in __import__("os").environ if name.upper().startswith("CODEX_")]:
         monkeypatch.delenv(key, raising=False)
@@ -317,6 +326,76 @@ def test_a_declared_claude_pid_is_recorded(tmp_path: Path, monkeypatch: pytest.M
     assert note["pid"] == 4242
 
 
+# --- 747: Trae 的对话 ID / VS Code 系列窗口进程号：非 Claude agent 的工位身份也稳定、可核对 ----------------------
+
+
+def _arm_session_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ensure_session_id 直接写 os.environ；先让 monkeypatch 记一笔，收尾时才会清掉。"""
+
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "placeholder")
+    monkeypatch.delenv("AUTO_PM_SESSION_ID")
+
+
+@pytest.fixture
+def as_trae(monkeypatch: pytest.MonkeyPatch, as_user: None) -> None:
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae:cn")
+
+
+def test_a_trae_conversation_keeps_one_alias_across_commands_and_records_its_chat_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_trae: None
+) -> None:
+    from auto_pm.application.core.agent_worktree_service import (
+        caller_alias,
+        ensure_session_id,
+        session_id,
+    )
+
+    root = _control_root(tmp_path)
+    monkeypatch.setenv("TRAE_CHAT_SESSION_ID", "6b07d46af16151ca23a5b3e5")
+    monkeypatch.setenv("VSCODE_PID", "25620")
+    _arm_session_env(monkeypatch)
+    assert session_id() == ""
+
+    ensure_session_id(root)  # 第一条命令：父进程号是临时 shell，不能拿它当会话
+    first = caller_alias()
+    assert first == "trae-6b07d4"
+
+    _arm_session_env(monkeypatch)  # 下一条命令是新进程，父进程号也换了
+    ensure_session_id(root)
+    assert caller_alias() == first
+    assert not (root / ".auto-pm" / "session-ids").exists(), "有对话 ID 就不该再按父进程号生成"
+
+    station = _service(root).open(first, "card1", fetch=False)
+    assert station.path.name == first
+    note = json.loads((root / ".auto-pm" / "station-holders" / f"{first}.json").read_text(encoding="utf-8"))
+    assert note["session_id"] == "6b07d46af16151ca23a5b3e5"
+    assert note["pid"] == 25620
+
+
+@pytest.mark.parametrize("base", ["cursor", "vscode"])
+def test_a_vscode_family_window_gets_a_stable_identity_and_a_checkable_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None, base: str
+) -> None:
+    from auto_pm.application.core.agent_worktree_service import caller_alias, ensure_session_id
+
+    root = _control_root(tmp_path)
+    monkeypatch.setenv("AUTO_PM_AGENT", base)
+    monkeypatch.setenv("VSCODE_PID", "4242")
+    _arm_session_env(monkeypatch)
+
+    ensure_session_id(root)
+    first = caller_alias()
+    assert first and base_agent(first) == base
+
+    _arm_session_env(monkeypatch)
+    ensure_session_id(root)
+    assert caller_alias() == first
+
+    _service(root).open(first, "card1", fetch=False)
+    note = json.loads((root / ".auto-pm" / "station-holders" / f"{first}.json").read_text(encoding="utf-8"))
+    assert note["session_id"] == "vscode-4242" and note["pid"] == 4242
+
+
 # --- D-77: a reused parent pid is a new conversation; records of dead parents are removed --------------------------------
 
 
@@ -415,7 +494,7 @@ def test_close_and_release_clear_presence_so_orient_does_not_report_ghost_sessio
     assert not (root / ".auto-pm" / "station-holders" / "claude-bbbbbb.json").exists()
 
 
-def test_close_clears_holder_and_presence_when_git_remove_fails_after_deleting_directory(
+def test_close_finishes_atomically_when_git_remove_fails_after_deleting_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_user: None
 ) -> None:
     import shutil
@@ -439,9 +518,9 @@ def test_close_clears_holder_and_presence_when_git_remove_fails_after_deleting_d
         return original_git(self, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(AgentWorktreeService, "_git", fails_after_rmdir)
-    with pytest.raises(AgentWorktreeError, match="删工作树失败"):
-        service.close("claude-aaaaaa", fetch=False)
+    result = service.close("claude-aaaaaa", fetch=False)
 
+    assert not station.path.exists() and "登记" in result.note
     assert not (root / ".auto-pm" / "station-holders" / "claude-aaaaaa.json").exists()
     assert list_presence(root) == []
 

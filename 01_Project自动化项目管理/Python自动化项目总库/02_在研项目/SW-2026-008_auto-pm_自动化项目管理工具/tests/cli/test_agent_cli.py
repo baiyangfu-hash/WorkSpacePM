@@ -19,7 +19,16 @@ from auto_pm.ui.cli.__main__ import cli
 from tests.git_support import git_out
 
 IDENTITY = ("-c", "user.name=Agent CLI Test", "-c", "user.email=agent-cli@example.invalid")
-MARKERS = ("AUTO_PM_AGENT", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
+MARKERS = (
+    "AUTO_PM_AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "AI_AGENT",
+    "AUTO_PM_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ID",
+    "TRAE_CHAT_SESSION_ID",
+    "VSCODE_PID",
+)
 USER = dict.fromkeys(MARKERS, "")  # 用户本人的终端：一个 agent 标记都没有
 
 
