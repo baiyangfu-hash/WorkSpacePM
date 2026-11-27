@@ -3,6 +3,8 @@
 读这个文件就知道页上每个按钮背后是哪条 ``main.py worktree …`` 命令：
 
 * 名册里的工位（``claude``、``claude-1b7302`` 这类，``worktree list`` 里 kind 是 agent）：“收工位”→ ``worktree close <名字>``；
+* 名册里、但 Git 里已经没登记的残留目录（``worktree list`` 里 registered=false，收工位删到一半的空壳）：
+  “清理残留”→ 同样跑 ``worktree close <名字>``，命令只清空目录，有内容就拒绝并给出人工清理命令（CHG-SCPT-2026-747）；
 * 名册外的目录（``gate-formal`` 这类，kind 是 other）和 run-plan 残留：``worktree close`` 不认这种名字（rc 2），
   只能“清理”→ ``worktree sweep --apply --only <目录名> --no-fetch``，而且要清理清单里这一项判了“可清”；
 * “清残留持有记录”→ 先跑 ``worktree reclaim --stale``（只列），列出来的再跑 ``worktree reclaim --stale --apply``；
@@ -46,6 +48,8 @@ UNKNOWN = "未知"
 
 CLOSE_SUMMARY = ("收这个工位：命令先查有没有未提交、未推送，都没有才收掉工位目录；分支已并进 main 的，本地分支一起收掉，"
                  "远程分支不动。有改动或没推送的命令会拒绝，什么都不动。")
+RESIDUE_SUMMARY = ("清理这个残留：Git 里已经没有这个工位的登记，目录还在（多半是收工位没删干净）。"
+                   "命令只清空目录；里面还有文件时拒绝，并给出人工清理命令。")
 SWEEP_ONE_SUMMARY = "清理这一个目录：命令再按清理清单的规矩判一遍（已并进 main、干净、不在保留名单），判可清才收掉，否则什么都不动。"
 SWEEP_ALL_SUMMARY = "清理清单里判了“可清”的全部项（工位目录和远程已删、已并进 main 的本地分支）；判了“保留”的不动，远程分支不动。"
 RECLAIM_SUMMARY = ("清残留持有记录：持有对话已经不在的会话工位先存一份救援引用再收目录（分支保留），"
@@ -253,7 +257,13 @@ def build_view(
         action: Action | None
         item: Mapping[str, Any] | None = by_path.get(str(row.get("path") or ""))
         warning = ""
-        if kind == "agent" or base_agent(name):
+        if row.get("registered") is False and (kind == "agent" or base_agent(name)):
+            warning = "Git 里没有登记这个工位：目录是收工位没删干净的残留；点了只清空目录，有内容时命令会拒绝并给出人工清理命令"
+            action = Action("clean_residue", "清理残留", RESIDUE_SUMMARY, ("worktree", "close", name), name, _facts(row))
+            blocked = human_block or (
+                f"目录名“{name[:40]}”里有命令行不认的字符，不运行" if not _NAME.fullmatch(name) else ""
+            )
+        elif kind == "agent" or base_agent(name):
             blocked = human_block or close_block(row, str(item.get("reason") or "") if item else "")
             action = Action("close", "收工位", CLOSE_SUMMARY, ("worktree", "close", name), name, _facts(row))
         else:

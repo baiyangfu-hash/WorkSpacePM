@@ -81,6 +81,7 @@ def _sandbox(root: Path, tmp_path: Path) -> Path:
     git(root, "worktree", "add", "-q", "-b", "trae/112-y", str(trae), "origin/main")
     git(trae, "push", "-q", "-u", "origin", "trae/112-y")
     (trae / "dirty.txt").write_text("没提交", encoding="utf-8")
+    (stations_dir / "cursor-abcdef").mkdir()  # 747：收工位删到一半的空壳，Git 里没有登记
     holders = root / ".auto-pm" / "station-holders"
     holders.mkdir(parents=True, exist_ok=True)
     old = (datetime.now(UTC) - timedelta(days=3)).isoformat()
@@ -108,7 +109,8 @@ class Screen:
         self.idle()
         self.window.page_buttons["worktrees"].click()
         self.idle()
-        expected = {"close:claude-1b7302", "close:trae", "sweep_one:gate-formal", "reclaim:", "registry:"}
+        expected = {"close:claude-1b7302", "close:trae", "clean_residue:cursor-abcdef", "sweep_one:gate-formal",
+                    "reclaim:", "registry:"}
 
         def controls_ready() -> None:
             missing = expected.difference(self.buttons())
@@ -161,7 +163,8 @@ class Screen:
 
     @staticmethod
     def _label(key: str) -> str:
-        return {"close": "收工位", "sweep_one": "清理", "reclaim": "清残留持有记录", "sweep_all": "清理全部可清项"}[key.split(":")[0]]
+        return {"close": "收工位", "clean_residue": "清理残留", "sweep_one": "清理", "reclaim": "清残留持有记录",
+                "sweep_all": "清理全部可清项"}[key.split(":")[0]]
 
     def reasons(self) -> dict[str, str]:
         return {label.property("blocked_reason"): label.text() for label in self.page.findChildren(QLabel)
@@ -192,7 +195,7 @@ def screen(tmp_path: Path, benchmark_tar: bytes, qtbot: Any, monkeypatch: pytest
 def test_close_a_station_clean_an_off_roster_dir_and_a_leftover_record_on_the_page(screen: Screen) -> None:
     stations_dir = screen.root / ".auto-pm" / "worktrees"
     screen.open()
-    assert set(screen.station_names()) == {"claude-1b7302", "gate-formal", "trae"}, screen.page.view.notes
+    assert set(screen.station_names()) == {"claude-1b7302", "gate-formal", "trae", "cursor-abcdef"}, screen.page.view.notes
     # trae 有未提交的改动：按钮灰着，旁边是命令自己的原话（清理清单里那一项的原因，和 worktree close 拒绝时同一句）
     assert not screen.buttons()["close:trae"].isEnabled()
     assert screen.reasons()["trae"].startswith("有未提交的改动"), screen.reasons()
@@ -200,6 +203,13 @@ def test_close_a_station_clean_an_off_roster_dir_and_a_leftover_record_on_the_pa
     receipt = screen.click_and_confirm("close:claude-1b7302")
     assert receipt.rc == 0, receipt.output
     assert not (stations_dir / "claude-1b7302").exists() and "claude-1b7302" not in screen.station_names()
+
+    # 747：Git 里没有登记的会话工位空壳显示“清理残留”，点了清掉空目录（不是“收工位”）
+    screen.qtbot.waitUntil(lambda: "clean_residue:cursor-abcdef" in screen.buttons(), timeout=10_000)
+    assert screen.buttons()["clean_residue:cursor-abcdef"].isEnabled()
+    receipt = screen.click_and_confirm("clean_residue:cursor-abcdef")
+    assert receipt.rc == 0, receipt.output
+    assert not (stations_dir / "cursor-abcdef").exists() and "cursor-abcdef" not in screen.station_names()
 
     receipt = screen.click_and_confirm("sweep_one:gate-formal")
     assert receipt.rc == 0, receipt.output
