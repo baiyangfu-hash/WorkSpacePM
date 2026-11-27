@@ -617,3 +617,59 @@ def test_defer_full_keeps_l1_local_with_capped_jobs_and_defers_l2_and_l3(
     assert l3_report.verdict == "UNVERIFIED"
     assert {"core", "infrastructure"} <= set(l3_report.recommended_groups)
 
+
+def test_release_pointer_and_handoff_records_pass_l1_precheck_and_fail_on_malformed_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """746: 发布指针与交接交换区 json/jsonl 走 L1 本地闭环且校验严格 UTF-8/JSON 结构；坏 JSON 必须 FAIL。"""
+    repo = tmp_path / "repo"
+    proj = repo / "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具"
+    (proj / "tests" / "tools").mkdir(parents=True)
+    (proj / "tests" / "infrastructure").mkdir(parents=True)
+    (proj / "tests" / "infrastructure" / "test_pm_handoff.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    real_rules = project_dir_in(_repo_root()) / "tests" / "tools" / "tier_core_list.json"
+    (proj / "tests" / "tools" / "tier_core_list.json").write_bytes(real_rules.read_bytes())
+    _git(repo, "init", "-q", "-b", "main")
+    (proj / "README.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+
+    ptrs = {
+        "00_Infrastructure/auto_pm/active_release.json": '{"release_id": "1.3.3-1359a6f"}\n',
+        "00_Infrastructure/auto_pm/previous_release.json": '{"release_id": "1.3.3-0000000"}\n',
+        "00_Infrastructure/auto_pm/deployment_manifest.json": '{"releases": {"1.3.3-1359a6f": {}}}\n',
+    }
+    for rel, body in ptrs.items():
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: sorted(ptrs))
+    ok_report = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "ok", defer_full=True)
+    assert ok_report.tier == "L1"
+    assert ok_report.full_gate_required is False
+    assert ok_report.outside_changes == []
+    assert ok_report.verdict == "PASS"
+    assert any(step.name == "records" and step.verdict == "PASS" for step in ok_report.steps)
+
+    # 坏 JSON 必须直接 FAIL
+    (repo / "00_Infrastructure/auto_pm/active_release.json").write_text("{broken", encoding="utf-8")
+    bad_report = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "bad", defer_full=True)
+    assert bad_report.verdict == "FAIL"
+    assert any(step.name == "records" and step.verdict == "FAIL" for step in bad_report.steps)
+
+    # 交接交换区 journal.jsonl：合法 L1 PASS，坏 JSONL FAIL
+    journal_rel = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/04_监控/交接交换区/journal.jsonl"
+    jpath = repo / journal_rel
+    jpath.parent.mkdir(parents=True, exist_ok=True)
+    jpath.write_text('{"schema":"local-handoff-event.v1","ts":"2026-11-27T00:00:00Z"}\n', encoding="utf-8")
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: [journal_rel])
+    h_ok = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "hok", defer_full=True)
+    assert h_ok.tier == "L1" and h_ok.full_gate_required is False and h_ok.verdict == "PASS"
+
+    jpath.write_text("not-json-line\n", encoding="utf-8")
+    h_bad = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "hbad", defer_full=True)
+    assert h_bad.verdict == "FAIL"
+    assert any(step.name == "records" and step.verdict == "FAIL" for step in h_bad.steps)
+
+

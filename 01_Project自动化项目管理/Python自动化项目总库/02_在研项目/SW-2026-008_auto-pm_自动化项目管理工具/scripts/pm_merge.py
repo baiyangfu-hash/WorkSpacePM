@@ -13,11 +13,15 @@
 1. 控制根停在 main；工位 ``.auto-pm/worktrees/<工位名>`` 已全部提交，main 是工位分支的祖先，
    分支上至少一个提交带 ``领卡占位: <卡号>`` 这一行。
 2. 改到“要你点头”那一类文件的（规则文件、PLC 项目文件、PLC 模板、本命令自己，以及删除或改名驾驶舱项目目录以外
-   的已入库文件），以及明确绑定变更单的分支，核对实施卡、变更单、实际路径和独立审计凭证。
-   审计绑定候选提交和当前 main。
+   的已入库文件），以及明确绑定变更单的分支，核对实施卡、变更单、实际路径、控制根与候选变更单一致性以及独立审计凭证。
+   审计绑定候选提交和当前 main，并比对真实作者会话（`.auto-pm/station-holders/<工位>.json`）与审计会话哈希（允许同窗口双会话，
+   拒绝同会话或无独立会话 ID 时的同窗口回退）。
+   不绑正式变更单、不删改受保护或记录类文件的单文件记录分支与纯现役发布指针同步分支（三份指针与本机现役逐字一致）免独立审计，
+   走本地 L1 校验与索引采纳，不改动控制根磁盘现役指针。
 3. GitHub 开启且可达时，``origin/main`` 必须已在本机 main 里；多机档无法对账时拒绝合并。
-4. 控制根同路径副本须与候选相符。控制根索引干净且候选完全避开控制根未提交的驾驶舱变更单、
-   台账以及合法的现役发布指针时，原样保留这些文件，合并前后核对摘要。其他无关未提交改动仍拒绝。
+4. 控制根同路径副本须与候选相符。控制根索引干净且候选避开控制根未提交的驾驶舱变更单、
+   台账以及合法的现役发布指针（或仅携带与本机逐字一致的同路径变更单/三份现役发布指针）时，原样保留未改动文件，合并前后核对摘要。
+   其他无关未提交改动仍拒绝。
 5. 适用的轻量自检与根目录检查通过。受保护改动、``--full-gate`` 或预检扩大为大范围选测时，
    核对驾驶舱持久任务里的全量门禁凭证。
 都过了才 ``git merge --no-ff``，在 ``.auto-pm/reports/local_merge/merge_log.jsonl`` 记一笔；“备份”“多机”档
@@ -83,6 +87,15 @@ AUDIT_SCHEMA = "local-merge-audit.v1"
 AUDIT_SESSION = re.compile(r"([a-z][a-z0-9]*)-([0-9a-f]{6})")
 STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
 CHANGE_FILES_ROW = re.compile(r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|", re.MULTILINE)
+SECTION5_HEADING_RE = re.compile(r"^##\s+5\s*[.、：:]", re.MULTILINE)
+NEXT_H2_RE = re.compile(r"^##\s+\d+\s*[.、：:]", re.MULTILINE)
+SECTION5_PLACEHOLDERS = frozenset(
+    {"（待填写）", "(待填写)", "待填写", "待补充", "（待补充）", "(待补充)", "无涉及文件记录", "-", "—"}
+)
+_SECTION5_FORBIDDEN_CHARS_RE = re.compile(r"[\s,，、;；。:：!！?？`\"'|\\*<>]")
+_COPIER_JINJA_TOKEN_RE = re.compile(r"\{\{\s*[A-Za-z_][A-Za-z0-9_.]*\s*\}\}")
+_SECTION5_ANNOTATION_RE = re.compile(r"\.[A-Za-z0-9]{1,12}[（(]")
+_ROOT_ASCII_PATH_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 CARD_TIER = re.compile(r"^>\s*档次[：:]\s*[*`\s]*(文档|测试|产品|核心)", re.MULTILINE)
 TIERS = {"文档": "docs", "测试": "tests", "产品": "product", "核心": "core"}
 APPROVED_STATES = frozenset(
@@ -228,13 +241,52 @@ def _same_ignoring_cr(a: bytes, b: bytes) -> bool:
     return a.replace(b"\r\n", b"\n") == b.replace(b"\r\n", b"\n")
 
 
+def _registry_change_dirs(root: Path, pid: str = "") -> list[Path] | None:
+    """优先从 workspace_registry.json 定位已登记项目的 ``01_变更单`` 目录，避免整仓扫描（CHG-746）。"""
+    registry_file = root / REGISTRY_PATH
+    if not registry_file.is_file():
+        return None
+    try:
+        data = json.loads(registry_file.read_text(encoding="utf-8-sig", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    projects = data.get("projects") if isinstance(data, dict) else None
+    if not isinstance(projects, list):
+        return None
+    dirs: list[Path] = []
+    for item in projects:
+        if not isinstance(item, dict):
+            continue
+        if pid and item.get("project_id") != pid:
+            continue
+        project_root = str(item.get("project_root", "")).replace("\\", "/").strip("/")
+        if not project_root:
+            continue
+        for folder in ("04_监控", "11_监控"):
+            chg_dir = root / project_root / folder / "01_变更管理" / "01_变更单"
+            if chg_dir.is_dir():
+                dirs.append(chg_dir)
+    return dirs
+
+
 def find_change_orders(root: Path, number: str, pid: str = "") -> list[Path]:
-    """在控制根里找变更单原件 ``<号>.md``（只看 ``01_变更单`` 下面；跳过 .git、发布副本、工位）。"""
+    """在控制根里找变更单原件 ``<号>.md``（优先按登记表窄扫 ``01_变更单``；无登记表时回退遍历）。"""
+    target_name = f"{number}.md"
+    scoped_dirs = _registry_change_dirs(root, pid)
+    if scoped_dirs is not None:
+        found: list[Path] = []
+        for chg_dir in scoped_dirs:
+            for folder, dirs, files in os.walk(chg_dir):
+                dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
+                if target_name in files:
+                    found.append(Path(folder) / target_name)
+        return found
+
     found = []
     for folder, dirs, files in os.walk(root):
         dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
-        if f"{number}.md" in files and "01_变更单" in Path(folder).parts:
-            path = Path(folder) / f"{number}.md"
+        if target_name in files and "01_变更单" in Path(folder).parts:
+            path = Path(folder) / target_name
             if not pid or pid in str(path):
                 found.append(path)
     return found
@@ -455,6 +507,7 @@ class Plan:
     preserved_governance: dict[str, str] = field(default_factory=dict)
     preserved_release_pointers: dict[str, str] = field(default_factory=dict)
     preserved_release_id: str = ""
+    pointer_sync: bool = False
 
     @property
     def requires_audit(self) -> bool:
@@ -619,6 +672,55 @@ def _check_card_tier(root: Path, text: str, base: str, sha: str) -> None:
         raise RefusedError(f"实施卡档次核验未过：{problems}")
 
 
+def _validate_approved_section5_paths(text: str, change: str) -> list[str]:
+    """核对已批准变更单的 §5.1 涉及文件/交付物为合法 `<br>` 分隔机读路径清单（CHG-746）。"""
+    target_text = text
+    sec5 = SECTION5_HEADING_RE.search(text)
+    if sec5:
+        after = text[sec5.end() :]
+        nxt = NEXT_H2_RE.search(after)
+        target_text = after[: nxt.start()] if nxt else after
+    row = CHANGE_FILES_ROW.search(target_text)
+    if not row:
+        raise RefusedError(
+            f"变更单 {change} 缺少 §5.1 涉及文件/交付物的机读路径清单（须用 <br> 分隔仓库相对路径）"
+        )
+    cell = row.group(1).strip()
+    if not cell or cell in SECTION5_PLACEHOLDERS:
+        raise RefusedError(
+            f"变更单 {change} 的 §5.1 涉及文件/交付物未填写有效的机读路径清单（当前为 {cell or '空'!r}）"
+        )
+    approved_paths: list[str] = []
+    for raw in cell.split("<br>"):
+        cleaned = raw.strip()
+        sanitized = _COPIER_JINJA_TOKEN_RE.sub("JINJA", cleaned)
+        bad = (
+            not cleaned
+            or cleaned in SECTION5_PLACEHOLDERS
+            or bool(_SECTION5_FORBIDDEN_CHARS_RE.search(sanitized))
+            or cleaned.startswith(("（", "(", "/"))
+            or bool(_SECTION5_ANNOTATION_RE.search(cleaned))
+        )
+        if not bad:
+            had_slash = "/" in cleaned
+            normalized = cleaned.rstrip("/")
+            segments = normalized.split("/") if normalized else []
+            if (
+                not normalized
+                or any(seg in ("", ".", "..") for seg in segments)
+                or (not had_slash and not _ROOT_ASCII_PATH_RE.fullmatch(normalized))
+            ):
+                bad = True
+            else:
+                approved_paths.append(normalized)
+        if bad:
+            raise RefusedError(
+                f"变更单 {change} 的 §5.1 涉及文件/交付物不是合法的机读路径清单（非法条目：{raw.strip()!r}）；"
+                "请用 <br> 分隔仓库相对路径"
+            )
+    return approved_paths
+
+
 def _check_card(
     git: Git, worktree: Path, base: str, sha: str, card: str, chgs: list[str],
     paths: list[str], pid: str, *, archive_existing: bool,
@@ -651,10 +753,24 @@ def _check_card(
     if len(approved) != 1:
         raise RefusedError("需有且仅有一张用户批准并写在本卡实施卡里的变更单；已完成的单不能开新活")
     change, order = approved[0]
+    try:
+        order_rel = order.resolve().relative_to(git.cwd.resolve()).as_posix()
+    except ValueError:
+        order_rel = ""
+    if order_rel:
+        cand_blob = _git_blob(git.cwd, sha, order_rel)
+        if cand_blob is not None:
+            if not _same_ignoring_cr(order.read_bytes(), cand_blob):
+                raise RefusedError(
+                    f"控制根与候选分支的变更单 {change} 内容不一致（不只差行尾），请先同步后再合并"
+                )
+        elif order_rel in paths:
+            raise RefusedError(f"控制根与候选分支的变更单 {change} 不一致（候选分支删除了该变更单）")
     if standard:
         allowed = _card_precheck(git, worktree, base, sha, path, pid, change)
-        row = CHANGE_FILES_ROW.search(order.read_text(encoding="utf-8", errors="replace"))
-        approved_paths = [item.strip().rstrip("/") for item in row[1].split("<br>")] if row else []
+        approved_paths = _validate_approved_section5_paths(
+            order.read_text(encoding="utf-8", errors="replace"), change
+        )
         outside_approval = _outside_scope(paths, approved_paths)
         if outside_approval:
             raise RefusedError(f"超出变更单 {change} 批准范围：" + "、".join(outside_approval[:10]))
@@ -737,13 +853,8 @@ def _governance_digest(root: Path, path: str) -> str:
     return _plain_file_digest(root, path, label="变更记录")
 
 
-def _preserve_release_pointers(root: Path, paths: Sequence[str]) -> tuple[dict[str, str], str]:
-    """Validate and snapshot live release pointers when ordinary merges avoid release paths."""
-    overlap = sorted(path for path in paths if _touches_release_area(path))
-    if overlap:
-        raise RefusedError(
-            "控制根有现役发布指针，候选不能同时改动发布文件；归档请使用 --archive-existing"
-        )
+def _validate_live_release_pointers(root: Path) -> tuple[dict[str, str], str]:
+    """Validate and snapshot live release pointers and active payload directory on disk."""
     digests = {
         path: _plain_file_digest(root, path, label="现役发布指针")
         for path in sorted(RELEASE_POINTERS)
@@ -782,6 +893,35 @@ def _preserve_release_pointers(root: Path, paths: Sequence[str]) -> tuple[dict[s
     return digests, release_id
 
 
+def _preserve_release_pointers(root: Path, paths: Sequence[str]) -> tuple[dict[str, str], str]:
+    """Validate and snapshot live release pointers when ordinary merges avoid release paths."""
+    overlap = sorted(path for path in paths if _touches_release_area(path))
+    if overlap:
+        raise RefusedError(
+            "控制根有现役发布指针，候选不能同时改动发布文件；归档请使用 --archive-existing"
+        )
+    return _validate_live_release_pointers(root)
+
+
+def _is_pointer_only_sync(paths: Sequence[str], copies: Sequence[str]) -> bool:
+    """True when candidate touches exactly the three live release pointers matching disk copies."""
+    return set(paths) == RELEASE_POINTERS and RELEASE_POINTERS.issubset(copies)
+
+
+def _check_pointer_only_sync(
+    root: Path, git: Git, base: str, sha: str, paths: Sequence[str], copies: Sequence[str]
+) -> str:
+    """Confirm pointer-only sync matches valid live pointers on disk without deletions or staged edits."""
+    if not _is_pointer_only_sync(paths, copies):
+        raise RefusedError("发布指针同步必须覆盖且只覆盖三份与本机现役相符的发布指针")
+    if git.run("diff", "--no-renames", "--diff-filter=D", "--name-only", base, sha, check=True).stdout:
+        raise RefusedError("发布指针同步不能删除或改名已有文件")
+    if not git.ok("diff", "--cached", "--quiet"):
+        raise RefusedError("控制根有已暂存内容，保留现场，不能同步发布指针")
+    _, release_id = _validate_live_release_pointers(root)
+    return release_id
+
+
 def _control_root_copies(
     root_git: Git, root: Path, sha: str, paths: list[str], *, archive_existing: bool = False
 ) -> ControlRootCopies:
@@ -818,17 +958,33 @@ def _control_root_copies(
                 for entry in pending.split("\0")
                 if len(entry) > 3 and _is_governance_record(entry[3:])
             }
-            overlap = sorted(
-                record for record in records
-                if any(
+            path_set = set(paths)
+            adopted_identical: set[str] = set()
+            overlap: list[str] = []
+            for record in sorted(records):
+                hits = any(
                     record == path or record.startswith(f"{path}/") or path.startswith(f"{record}/")
                     for path in paths
                 )
-            )
+                if not hits:
+                    continue
+                if record in path_set:
+                    local_rec = root / record
+                    cand_blob = _git_blob(root, sha, record)
+                    if (
+                        local_rec.is_file()
+                        and local_rec.resolve() == local_rec.absolute()
+                        and cand_blob is not None
+                        and _same_ignoring_cr(local_rec.read_bytes(), cand_blob)
+                    ):
+                        adopted_identical.add(record)
+                        continue
+                overlap.append(record)
             if overlap:
                 raise RefusedError("候选与控制根未提交的变更记录重叠：" + "、".join(overlap[:10]))
             preserved = {
-                path: _governance_digest(root, path) for path in sorted(records | set(unresolved_gov))
+                path: _governance_digest(root, path)
+                for path in sorted((records - adopted_identical) | set(unresolved_gov))
             }
         if unresolved_rel:
             preserved_rel, preserved_rel_id = _preserve_release_pointers(root, paths)
@@ -986,8 +1142,12 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
             raise RefusedError(f"需核对实施卡的变更（{scope}）：{exc}") from exc
     notes: list[str] = []
     copies = _control_root_copies(root_git, root, sha, paths, archive_existing=archive_existing)
+    pointer_sync = False
     if archive_existing:
         _check_release_archive(root, root_git, base, sha, paths, copies.replace)
+    elif _is_pointer_only_sync(paths, copies.replace):
+        _check_pointer_only_sync(root, root_git, base, sha, paths, copies.replace)
+        pointer_sync = True
     elif RELEASE_POINTERS.intersection(copies.replace):
         raise RefusedError("控制根有现役发布指针，归档请使用 --archive-existing")
     return Plan(
@@ -996,6 +1156,7 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
         preserved_governance=copies.preserved,
         preserved_release_pointers=copies.preserved_release_pointers,
         preserved_release_id=copies.preserved_release_id,
+        pointer_sync=pointer_sync,
     )
 
 
@@ -1156,6 +1317,9 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
         if plan.archive_existing:
             _check_release_archive(root, root_git, base, plan.sha, plan.paths, copies.replace)
             _archive_merge(merge_git, plan, base, title, "\n".join(body))
+        elif plan.pointer_sync:
+            _check_pointer_only_sync(root, root_git, base, plan.sha, plan.paths, copies.replace)
+            _archive_merge(merge_git, plan, base, title, "\n".join(body))
         else:
             _merge_existing_copies(root, plan, merge_git, title, "\n".join(body))
         merge_sha = root_git.rev("HEAD")
@@ -1175,6 +1339,7 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
                 same = False
             if not same:
                 release_pointer_drift.append(path)
+    adopted_mode = plan.archive_existing or plan.pointer_sync
     entry: dict[str, Any] = {
         "time": _now(),
         "branch": plan.branch,
@@ -1184,11 +1349,11 @@ def do_merge(root: Path, plan: Plan, gates: GateResult, mode: str) -> dict[str, 
         "chgs": plan.chgs,
         "user_paths": plan.user_paths,
         "gates": gates.lines,
-        "replaced": [] if plan.archive_existing else plan.replace,
+        "replaced": [] if adopted_mode else plan.replace,
         "mode": mode,
         "pushed": False,
     }
-    if plan.archive_existing:
+    if adopted_mode:
         entry["adopted"] = plan.replace
     if plan.audit is not None:
         entry["audit"] = plan.audit
@@ -1223,11 +1388,62 @@ def _audit_identity(root: Path, name: str, base: str, sha: str) -> dict[str, str
     }
 
 
-def _reviewer_is_independent(reviewer: str, owner: str, branch: str) -> bool:
+def _station_holder_note(root: Path, name: str) -> dict[str, Any]:
+    """读取工位持有人记录 `.auto-pm/station-holders/<工位名>.json`（不存在或损坏时返回空字典）。"""
+    path = root / ".auto-pm" / "station-holders" / f"{name}.json"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _session_digest(session: str) -> str:
+    cleaned = session.strip()
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest() if cleaned else ""
+
+
+def _author_session_id(root: Path, name: str) -> str:
+    holder = _station_holder_note(root, name)
+    sid = str(holder.get("session_id") or "").strip()
+    if sid:
+        return sid
+    pid = holder.get("pid")
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        return f"vscode-{pid}"
+    return ""
+
+
+def _resolve_reviewer_session() -> str:
+    """解析当前审计会话真实 ID：AUTO_PM_SESSION_ID → CLAUDE_CODE_SESSION_ID → TRAE_CHAT_SESSION_ID → VSCODE_PID。"""
+    for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID"):
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    window = os.getenv("VSCODE_PID", "").strip()
+    if window.isdigit() and int(window) > 0:
+        return f"vscode-{window}"
+    return ""
+
+
+def _reviewer_is_independent(
+    reviewer: str,
+    owner: str,
+    branch: str,
+    *,
+    reviewer_session_sha256: str = "",
+    author_session_sha256: str = "",
+) -> bool:
     review = AUDIT_SESSION.fullmatch(reviewer)
-    author = AUDIT_SESSION.fullmatch(owner)
     if review is None:
         return False
+    if author_session_sha256:
+        if not reviewer_session_sha256:
+            return False
+        return reviewer_session_sha256 != author_session_sha256
+    author = AUDIT_SESSION.fullmatch(owner)
     if author is not None:
         return review[2] != author[2]
     return review[1] != branch.partition("/")[0]
@@ -1248,7 +1464,15 @@ def audit_receipt(root: Path, name: str, plan: Plan) -> dict[str, Any]:
         raise RefusedError("独立审计凭证与当前 main、候选或工位不匹配")
     reviewer = receipt.get("reviewer")
     report = receipt.get("report")
-    if not isinstance(reviewer, str) or not _reviewer_is_independent(reviewer, name, plan.branch):
+    reviewer_session_sha256 = receipt.get("reviewer_session_sha256")
+    author_session_sha256 = _session_digest(_author_session_id(root, name))
+    if not isinstance(reviewer, str) or not _reviewer_is_independent(
+        reviewer,
+        name,
+        plan.branch,
+        reviewer_session_sha256=reviewer_session_sha256 if isinstance(reviewer_session_sha256, str) else "",
+        author_session_sha256=author_session_sha256,
+    ):
         raise RefusedError("独立审计必须来自另一会话")
     if (
         receipt.get("verdict") != "PASS"
@@ -1274,14 +1498,22 @@ def cmd_audit_record(
         if not base or not sha or base != git.rev(MAIN_REF) or sha != wt.rev("HEAD") or not branch:
             raise RefusedError("审计期间 main 或候选已变化，请核对新版本")
         agent = os.getenv("AUTO_PM_AGENT", "").split(":", 1)[0].strip().lower()
-        session = (os.getenv("AUTO_PM_SESSION_ID") or os.getenv("CLAUDE_CODE_SESSION_ID") or "").strip()
+        session = _resolve_reviewer_session()
         compact = session.lower().replace("-", "")
         tag = (
             compact[:6] if re.fullmatch(r"[0-9a-f]{6,}", compact)
             else hashlib.sha256(session.encode("utf-8")).hexdigest()[:6]
         )
         reviewer = f"{agent}-{tag}"
-        if not session or not _reviewer_is_independent(reviewer, name, branch):
+        reviewer_session_sha256 = _session_digest(session)
+        author_session_sha256 = _session_digest(_author_session_id(root, name))
+        if not session or not _reviewer_is_independent(
+            reviewer,
+            name,
+            branch,
+            reviewer_session_sha256=reviewer_session_sha256,
+            author_session_sha256=author_session_sha256,
+        ):
             raise RefusedError("请由另一审计会话登记，携带 AUTO_PM_AGENT 和实际会话 ID")
         report = report_file.read_text(encoding="utf-8", errors="replace")
         if base not in report or sha not in report:
@@ -1289,11 +1521,14 @@ def cmd_audit_record(
         receipt = {
             **_audit_identity(root, name, base, sha),
             "reviewer": reviewer,
+            "reviewer_session_sha256": reviewer_session_sha256,
             "verdict": verdict,
             "time": _now(),
             "report_sha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
             "report": report,
         }
+        if author_session_sha256:
+            receipt["author_session_sha256"] = author_session_sha256
         path = _audit_path(root, base, sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
@@ -1341,7 +1576,7 @@ def cmd_merge(root: Path, name: str, pid: str, full_gate: bool, *, archive_exist
             + "、".join(plan.chgs)
             + "；推到完成仍只有用户本人做"
         )
-    if plan.archive_existing:
+    if plan.archive_existing or plan.pointer_sync:
         print(f"已登记 {len(plan.replace)} 份本机副本，现役发布文件保留原样")
     elif plan.replace:
         print(
@@ -1675,7 +1910,7 @@ def _check_archive_safety_window(root: Path, git: Git, base: str) -> None:
             if not entry.is_dir() or entry.name.startswith("deploy-") or not (entry / ".git").exists():
                 continue
             wt_git = Git(entry)
-            if wt_git.run("status", "--porcelain=v1", "-z", "--untracked-files=all", check=True).stdout.strip():
+            if wt_git.run("status", "--porcelain=v1", "-z", "--untracked-files=normal", check=True).stdout.strip():
                 raise RefusedError(
                     f"当前存在活跃开发工位 {entry.name}（有未提交改动），"
                     "为避免推进 main 影响工位基线，已保留待入库"

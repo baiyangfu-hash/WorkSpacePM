@@ -708,3 +708,48 @@ def test_change_create_help_no_longer_offers_retrofit() -> None:
     result = CliRunner().invoke(cli, ["change", "create", "--help"])
     assert result.exit_code == 0, result.output
     assert "--retrofit" not in result.output
+
+
+@pytest.mark.cli
+def test_change_verify_section5_dry_run_reports_without_blocking(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """746: `change verify --section5-dry-run` 只报告存量 §5.1 路径合规情况，不阻断不修改文件。"""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    ok_chg = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", ok_chg, "--file", "a/b.py"], catch_exceptions=False
+    ).exit_code == 0
+    bad_chg = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    bad_path = next(tmp_path.rglob(f"{bad_chg}.md"))
+    bad_path.write_text(
+        bad_path.read_text(encoding="utf-8").replace("| 涉及文件/交付物 | （待填写） |", "| 涉及文件/交付物 | 修改全部核心模块 |", 1),
+        encoding="utf-8",
+    )
+
+    result = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "verify", "DJ-2026-CHG", "--section5-dry-run"], catch_exceptions=False
+    )
+    assert result.exit_code == 0, result.output
+    assert bad_chg in result.output and "无效/散文" in result.output
+
+
+@pytest.mark.cli
+def test_change_transition_approved_rejects_prose_section5(cli_runner: CliRunner, tmp_path: Path) -> None:
+    """746: CLI 批准散文 §5.1 变更单时退出码 1 并提示 §5.1 格式问题。"""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    chg = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    chg_path = next(tmp_path.rglob(f"{chg}.md"))
+    chg_path.write_text(
+        chg_path.read_text(encoding="utf-8").replace("| 涉及文件/交付物 | （待填写） |", "| 涉及文件/交付物 | 修改 A 和 B |", 1),
+        encoding="utf-8",
+    )
+    for st in ("submitted", "under_review"):
+        assert cli_runner.invoke(
+            cli, ["-w", str(tmp_path), "change", "transition", chg, "--to", st, "--approver", "u", "--comment", "c"],
+            catch_exceptions=False,
+        ).exit_code == 0
+    refused = cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "transition", chg, "--to", "approved", "--approver", "u", "--comment", "同意"]
+    )
+    assert refused.exit_code == 1
+    assert "§5.1" in refused.output
+
