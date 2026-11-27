@@ -642,3 +642,19 @@ def test_655_issues_page_who_filter_and_the_outside_entry(qapp: QApplication) ->
             page.set_view(bad)
     with pytest.raises(ValueError, match="旧账"):
         page.set_old("sometimes")
+
+
+def test_github_block_empty_state_requires_a_fresh_read(qapp: QApplication) -> None:
+    """只有真读完（fresh）才许断“没有 PR”；正在读数量待查；没读成未知（复测结论 2026-11-26）。"""
+    from cockpit_board.widgets.delivery import github_block
+
+    def texts(state: str, fresh: bool) -> list[str]:
+        github = vm.GithubVM(state, fresh, "标题", "数据截至：没读过", [], [], [])
+        frame = github_block(github, [], "没有开着的 PR。")
+        return [str(item.text()) for item in frame.findChildren(QLabel)]
+
+    assert "没有开着的 PR。" in texts("ok", True)
+    pending = texts("pending", False)
+    assert "正在读 GitHub，开着的 PR 数量待查……" in pending and "没有开着的 PR。" not in pending
+    stale = texts("offline", False)
+    assert "开着的 PR 待查（这次没读成）" in stale and "没有开着的 PR。" not in stale

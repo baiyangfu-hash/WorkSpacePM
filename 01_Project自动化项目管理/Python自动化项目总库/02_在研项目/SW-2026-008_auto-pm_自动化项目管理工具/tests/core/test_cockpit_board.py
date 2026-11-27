@@ -714,6 +714,18 @@ def test_unread_github_never_looks_like_zero_red_prs(tmp_path: Path) -> None:
         assert len(home.issue_notes) == 1 and "没检查" in home.issue_notes[0] and "不含" in home.issue_notes[0]
 
 
+def test_github_pending_is_shown_as_reading_not_disabled(tmp_path: Path) -> None:
+    """采集线程在跑（还没快照）显示“正在读”；只有不在读且没开采集才说“没开采集”（复测结论 2026-11-26）。"""
+    board = _issue_board(tmp_path)
+    home = vm.home_vm(board, OFFSET, online=None, use_git=False, github=None, github_pending=True)
+    assert home.github is not None
+    assert home.github.state == "pending" and not home.github.fresh and home.github.rows == []
+    assert "正在读 GitHub" in home.github.headline and home.github.as_of == "数据截至：没读过"
+    idle = vm.home_vm(board, OFFSET, online=None, use_git=False, github=None)
+    assert idle.github is not None and idle.github.state == "disabled"
+    assert "没开 GitHub 采集" in idle.github.headline
+
+
 def test_a_pr_whose_checks_could_not_be_read_is_named_not_counted_as_green(tmp_path: Path) -> None:
     board = _issue_board(tmp_path)
     snapshot = _snapshot([_pull(475, ["DJ-2026-101"], [("sw008-ci", "unknown")]), _pull(476, ["DJ-2026-101"], [("sw008-ci", "pass")])], "partial")

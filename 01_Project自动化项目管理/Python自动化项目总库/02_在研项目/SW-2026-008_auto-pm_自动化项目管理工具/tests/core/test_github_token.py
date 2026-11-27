@@ -330,13 +330,22 @@ def test_token_is_not_in_options_repr_logs_or_the_crash_report(
     )
 
     def exploding_fetch(url: str, headers: dict[str, str]) -> Any:
-        raise RuntimeError("读管道炸了")  # collect 只吞 GitHub 类异常；这种会一路抛出去，像真崩溃
+        raise RuntimeError("读管道炸了")  # collect() 兜底一切意外异常：变成 error 快照，不再打死采集线程（复测结论 2026-11-26）
 
     options.github_fetch = exploding_fetch
-    with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError):
-        app_module.load_github(options)
+    with caplog.at_level(logging.DEBUG):
+        snap = app_module.load_github(options)
     assert cache.get() == SENTINEL  # 令牌确实取到了、用上了
+    assert snap.state == "error" and any("读取出错" in e and "读管道炸了" in e for e in snap.errors)
+    assert SENTINEL not in repr(snap) and SENTINEL not in " ".join(snap.errors)
+    assert SENTINEL not in repr(options) and SENTINEL not in str(vars(options).keys())
+    assert SENTINEL not in caplog.text
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+
+    def boom() -> None:
+        raise RuntimeError("记状态炸了")  # collect 之外的真崩溃仍会一路抛出去：崩溃报告照样不许带出令牌
+
+    monkeypatch.setattr(cache, "accepted", boom)
     try:
         app_module.load_github(options)
     except RuntimeError:

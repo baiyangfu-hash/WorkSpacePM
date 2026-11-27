@@ -253,6 +253,7 @@ class CockpitWindow(QMainWindow):
         self.offset: timezone = options.offset
         self.board: pd.Board | None = None
         self.github: gh.Snapshot | None = None
+        self._github_pending = False  # GitHub 采集线程在跑：画面写“正在读”，不写“没开采集”（复测结论 2026-11-26）
         self.home_vm: vm.HomeVM | None = None
         self.online: bool | None = None if not options.no_net else False
         self.net_note: str = "" if not options.no_net else "按 --no-net 启动，没探测网络"
@@ -603,9 +604,12 @@ class CockpitWindow(QMainWindow):
         if not self.options.no_net:
             self.probe()
         if not self.options.no_github:
+            self._github_pending = True
             loader = GithubLoader(self.options, self)
             loader.loaded.connect(self._on_github)
+            loader.finished.connect(self._on_github_done)  # 兜底：线程没发 loaded 就结束时也要脱离“读取中”
             self._track(loader)
+            self._render()  # 账本已画过就立刻把下方块改成“正在读”，不等采集回来
 
     def _start(self, use_legacy: bool) -> None:
         loader = BoardLoader(self.options, use_legacy, self)
@@ -638,7 +642,14 @@ class CockpitWindow(QMainWindow):
 
     def _on_github(self, snapshot: gh.Snapshot | None) -> None:
         self.github = snapshot
+        self._github_pending = False
         self._render()
+
+    def _on_github_done(self) -> None:
+        # 兜底：线程没发 loaded 就结束（意料外的异常）时也要脱离“读取中”，不永久停在“正在读”
+        if self._github_pending:
+            self._github_pending = False
+            self._render()
 
     def probe(self) -> None:
         runner = ActionRunner(lambda: actions.probe_origin(self.options.root), self)
@@ -661,7 +672,7 @@ class CockpitWindow(QMainWindow):
             return
         board = self.board
         self.home_vm = vm.home_vm(board, self.offset, self.online, not self.options.no_git, self.github,
-                                  root=self.options.root)
+                                  root=self.options.root, github_pending=self._github_pending)
         now = board.generated_at
         gh_info = self._update_identity_ui()
         self.worktrees.set_context(self.home_vm.handoffs, [p.project_id for p in board.projects])

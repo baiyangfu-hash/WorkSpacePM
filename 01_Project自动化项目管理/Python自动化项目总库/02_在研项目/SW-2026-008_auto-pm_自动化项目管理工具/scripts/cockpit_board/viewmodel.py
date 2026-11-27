@@ -195,7 +195,7 @@ class PrRow:
 
 @dataclass
 class GithubVM:
-    state: str  # ok / partial / offline / rate_limited / auth / error / disabled
+    state: str  # ok / partial / offline / rate_limited / auth / error / disabled / pending（采集线程在跑，还没结果）
     fresh: bool
     headline: str
     as_of: str
@@ -679,6 +679,7 @@ GITHUB_HEADLINE = {
     "auth": "令牌不对或没给：下面全按“未知”显示",
     "error": "这次没读成：下面全按“未知”显示",
     "disabled": "没开 GitHub 采集",
+    "pending": "正在读 GitHub……",
 }
 
 
@@ -714,9 +715,11 @@ def pr_row(pull: gh.PullInfo, fresh: bool, as_of: str) -> PrRow:
     return PrRow(pull.number, pd._short(title, 70), pull.url, pull.author, projects, gate, ci, safety, audit, note, rules)
 
 
-def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone) -> GithubVM:
+def github_vm(snapshot: gh.Snapshot | None, now: datetime, offset: timezone, *, pending: bool = False) -> GithubVM:
     if snapshot is None:
-        return GithubVM("disabled", False, GITHUB_HEADLINE["disabled"], "数据截至：没读过", [], [],
+        # pending=True：采集线程在跑。写“正在读”，不写“没开采集”，也不给 0 个 PR 的空态（复测结论 2026-11-26）
+        state = "pending" if pending else "disabled"
+        return GithubVM(state, False, GITHUB_HEADLINE[state], "数据截至：没读过", [], [],
                         ["PR、门禁、安全签字都按“没检查”显示"])
     fresh = snapshot.fresh
     if snapshot.fetched_at is None:
@@ -1113,7 +1116,7 @@ def focus_of(decision: Decision, names: Mapping[str, str]) -> Focus:
 
 def home_vm(
     board: pd.Board, offset: timezone, online: bool | None, use_git: bool, github: gh.Snapshot | None = None,
-    *, root: Path | None = None,
+    *, root: Path | None = None, github_pending: bool = False,
 ) -> HomeVM:
     now = board.generated_at
     ledger_ok = board.ledger_note.startswith("账本只读")
@@ -1183,7 +1186,7 @@ def home_vm(
         rest=rest,
         activity=activity,
         notes=notes,
-        github=github_vm(github, now, offset),
+        github=github_vm(github, now, offset, pending=github_pending),
         extra_issues=extra_issues,
         issue_notes=github_issue_notes(github),
         loose_decisions=loose,
