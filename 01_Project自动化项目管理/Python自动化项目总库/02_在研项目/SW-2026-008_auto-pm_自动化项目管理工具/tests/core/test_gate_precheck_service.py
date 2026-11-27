@@ -672,4 +672,22 @@ def test_release_pointer_and_handoff_records_pass_l1_precheck_and_fail_on_malfor
     assert h_bad.verdict == "FAIL"
     assert any(step.name == "records" and step.verdict == "FAIL" for step in h_bad.steps)
 
+    # 恢复三份合法指针，验证单指针子集和指针+文档混改一律 fail-closed 走 L3（不返回 PASS）
+    for rel, body in ptrs.items():
+        (repo / rel).write_text(body, encoding="utf-8")
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: ["00_Infrastructure/auto_pm/active_release.json"])
+    single_rep = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "single", defer_full=True)
+    assert single_rep.tier == "L3"
+    assert single_rep.full_gate_required is True
+    assert single_rep.outside_changes == ["00_Infrastructure/auto_pm/active_release.json"]
+    assert single_rep.verdict == "UNVERIFIED"
+
+    readme_rel = "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/README.md"
+    monkeypatch.setattr(pre, "changed_files", lambda worktree, base: [*sorted(ptrs), readme_rel])
+    mixed_rep = PrecheckService(runner=_Recorder()).run(repo, base="main", out_dir=tmp_path / "mixed", defer_full=True)
+    assert mixed_rep.tier == "L3"
+    assert mixed_rep.full_gate_required is True
+    assert mixed_rep.outside_changes == sorted(ptrs)
+    assert mixed_rep.verdict == "UNVERIFIED"
+
 

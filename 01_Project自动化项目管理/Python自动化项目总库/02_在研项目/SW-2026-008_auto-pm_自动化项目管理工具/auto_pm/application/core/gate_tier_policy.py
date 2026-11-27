@@ -269,6 +269,20 @@ def is_l1_outside_record_path(path: str) -> bool:
     return normalized.casefold() in _L1_OUTSIDE_RECORD_FOLDED
 
 
+def is_complete_release_pointer_set(paths: Sequence[str]) -> bool:
+    """Return True only when ``paths`` covers all three release pointer files and nothing else."""
+    if not paths:
+        return False
+    folded: set[str] = set()
+    for raw in paths:
+        try:
+            normalized = _normalize_raw_posix(raw)
+        except ValueError:
+            return False
+        folded.add(normalized.casefold())
+    return folded == _L1_OUTSIDE_RECORD_FOLDED
+
+
 def is_l1_inside_record_path(path: str, project_prefix: str = "") -> bool:
     """Return True only for exact whitelisted in-project handoff exchange JSON/JSONL records."""
     try:
@@ -380,14 +394,24 @@ def classify_gate_tier(
                 rules_sha256=rules.sha256,
             )
 
-    if not changed_paths and outside_record_paths:
+    if outside_record_paths:
+        if changed_paths:
+            return _fail_closed(
+                "发布指针与项目内其他改动混改，强制 L3 全量门禁",
+                rules_sha256=rules.sha256,
+            )
+        if not is_complete_release_pointer_set(outside_record_paths):
+            return _fail_closed(
+                "仅改动部分发布指针（未完整覆盖三份现役发布指针），强制 L3 全量门禁",
+                rules_sha256=rules.sha256,
+            )
         return GateTierDecision(
             tier="L1",
             m2_tier="docs",
             recommended_groups=(),
             require_plugin=False,
             full_forced=False,
-            reasons=(f"仅记录类发布指针改动（{len(outside_record_paths)} 个），执行 L1 本地结构校验",),
+            reasons=(f"仅完整三份现役发布指针同步（{len(outside_record_paths)} 个），执行 L1 本地结构校验",),
             rules_sha256=rules.sha256,
         )
 
@@ -457,6 +481,12 @@ def classify_gate_tier(
                     l2_reasons.append(f"涉及总控屏入口脚本：{normalized}")
             if folded.endswith(".py") and folded not in L1_VERIFIED_PILOT_PATHS:
                 l2_reasons.append(f"尚未纳入一期 L1 已核实白名单：{normalized}")
+
+    if outside_record_paths and (
+        len(outside_record_paths) != len(changed_paths)
+        or not is_complete_release_pointer_set(outside_record_paths)
+    ):
+        l3_reasons.append("发布指针仅允许完整三份独立同步走 L1，单指针或与其他路径混改强制 L3 全量门禁")
 
     overall_m2 = max(m2_levels, key=_m2_rank) if m2_levels else "docs"
 

@@ -1515,16 +1515,17 @@ def test_audit_record_enforces_real_session_for_same_window_positive_and_negativ
     ) == 1
     assert "另一审计会话" in capsys.readouterr().out
 
-    # 2) 同窗口均无 chat ID、退回同一 VSCODE_PID 必须拒绝
-    _write_station_holder(repo.root, "trae-111111", session_id="vscode-9001", pid=9001)
-    monkeypatch.delenv("TRAE_CHAT_SESSION_ID", raising=False)
-    monkeypatch.setenv("AUTO_PM_AGENT", "trae")
-    monkeypatch.setenv("VSCODE_PID", "9001")
-    assert run(
-        pm, repo.root, "audit-record", "trae-111111", "--base", base,
-        "--candidate", candidate, "--verdict", "PASS", "--report", str(report),
-    ) == 1
-    assert "另一审计会话" in capsys.readouterr().out
+    # 2) 同窗口无 chat ID、退回同一 VSCODE_PID 必须拒绝（无论持有人同时记了 chat session_id 还是仅记了 vscode-<pid>）
+    for author_sid in ("vscode-9001", "trae-chat-session-aaa"):
+        _write_station_holder(repo.root, "trae-111111", session_id=author_sid, pid=9001)
+        monkeypatch.delenv("TRAE_CHAT_SESSION_ID", raising=False)
+        monkeypatch.setenv("AUTO_PM_AGENT", "trae")
+        monkeypatch.setenv("VSCODE_PID", "9001")
+        assert run(
+            pm, repo.root, "audit-record", "trae-111111", "--base", base,
+            "--candidate", candidate, "--verdict", "PASS", "--report", str(report),
+        ) == 1
+        assert "另一审计会话" in capsys.readouterr().out
 
     # 3) 同窗口双会话（同 VSCODE_PID=9001、同 trae 基名，但 TRAE_CHAT_SESSION_ID 不同）必须放行
     _write_station_holder(repo.root, "trae-111111", session_id="trae-chat-session-aaa", pid=9001)
@@ -1543,8 +1544,14 @@ def test_audit_record_enforces_real_session_for_same_window_positive_and_negativ
     verified = pm.audit_receipt(repo.root, "trae-111111", plan)
     assert verified["verdict"] == "PASS"
 
-    # 4) 篡改凭证去掉 reviewer_session_sha256 或改成作者会话哈希，audit_receipt 必须失败关闭
-    for bad_update in ({"reviewer_session_sha256": None}, {"reviewer_session_sha256": pm._session_digest("trae-chat-session-aaa")}):
+    # 4) 篡改凭证去掉 reviewer_session_sha256、改成空白/非法非64-hex串或改成作者会话/窗口 PID 哈希，audit_receipt 必须失败关闭
+    for bad_update in (
+        {"reviewer_session_sha256": None},
+        {"reviewer_session_sha256": "   "},
+        {"reviewer_session_sha256": "not-a-valid-sha256"},
+        {"reviewer_session_sha256": pm._session_digest("trae-chat-session-aaa")},
+        {"reviewer_session_sha256": pm._session_digest("vscode-9001")},
+    ):
         tampered = dict(saved)
         for k, v in bad_update.items():
             if v is None:
@@ -1660,8 +1667,51 @@ def test_pointer_only_sync_adopts_three_live_pointers_without_full_gate_or_audit
     assert set(entry["adopted"]) == set(pointer_bytes)
 
 
+def test_clean_control_root_refuses_direct_release_pointer_overwrite(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    """746 审计复核回归: 控制根干净时，普通分支不得改写任一或全部现役发布指针。"""
+    base_ptrs = {
+        "00_Infrastructure/auto_pm/active_release.json": '{"release_id": "1.3.3-1359a6f"}\n',
+        "00_Infrastructure/auto_pm/previous_release.json": '{"release_id": "1.3.3-0000000"}\n',
+        "00_Infrastructure/auto_pm/deployment_manifest.json": '{"releases": {"1.3.3-1359a6f": {}}}\n',
+    }
+    base = commit(repo.root, base_ptrs, "seed live pointers")
+    git(repo.wt, "merge", "--quiet", "main")
+
+    # 1) 单改 active_release.json 企图静默切版必须被拒
+    commit(
+        repo.wt,
+        {"00_Infrastructure/auto_pm/active_release.json": '{"release_id": "9.9.9-rogue"}\n'},
+        f"rogue single pointer\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "不允许在普通合并中直接改写现役发布指针" in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / "00_Infrastructure/auto_pm/active_release.json").read_text(encoding="utf-8") == base_ptrs[
+        "00_Infrastructure/auto_pm/active_release.json"
+    ]
+
+    # 2) 同时改三份发布指针（与控制根干净磁盘不符）也必须被拒
+    commit(
+        repo.wt,
+        {
+            "00_Infrastructure/auto_pm/active_release.json": '{"release_id": "9.9.9-rogue"}\n',
+            "00_Infrastructure/auto_pm/previous_release.json": '{"release_id": "1.3.3-1359a6f"}\n',
+            "00_Infrastructure/auto_pm/deployment_manifest.json": '{"releases": {"9.9.9-rogue": {}}}\n',
+        },
+        f"rogue all three pointers\n\n{CARD}",
+    )
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "不允许在普通合并中直接改写现役发布指针" in capsys.readouterr().out
+    assert rev(repo.root, "main") == base
+    assert (repo.root / "00_Infrastructure/auto_pm/active_release.json").read_text(encoding="utf-8") == base_ptrs[
+        "00_Infrastructure/auto_pm/active_release.json"
+    ]
+
+
 def test_single_file_record_branch_audit_tier_policy(
-    pm: ModuleType, repo: SimpleNamespace
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
 ) -> None:
     """746 / 交接 §4.15: 不绑正式变更单、不删记录的单文件记录分支免审计；删除记录仍必须用户批准和独立审计。"""
     rec = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-745.md"
@@ -1671,4 +1721,11 @@ def test_single_file_record_branch_audit_tier_policy(
     assert plan.user_paths == []
     assert run(pm, repo.root, "merge", "w1") == 0
     assert "audit" not in pm.read_log(repo.root)[-1]
+
+    # 删除该记录文件必须进入受保护路径（需用户批准与独立审计）
+    git(repo.wt, "merge", "--quiet", "main")
+    git(repo.wt, "rm", "--quiet", rec)
+    git(repo.wt, "commit", "-m", f"rm record\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "没有本卡的实施卡" in capsys.readouterr().out
 

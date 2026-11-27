@@ -87,8 +87,9 @@ AUDIT_SCHEMA = "local-merge-audit.v1"
 AUDIT_SESSION = re.compile(r"([a-z][a-z0-9]*)-([0-9a-f]{6})")
 STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
 CHANGE_FILES_ROW = re.compile(r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|", re.MULTILINE)
-SECTION5_HEADING_RE = re.compile(r"^##\s+5\s*[.、：:]", re.MULTILINE)
-NEXT_H2_RE = re.compile(r"^##\s+\d+\s*[.、：:]", re.MULTILINE)
+SECTION5_HEADING_RE = re.compile(r"^##\s+§?\s*5\s*[.、：:]", re.MULTILINE)
+NEXT_H2_RE = re.compile(r"^##\s+§?\s*\d+\s*[.、：:]", re.MULTILINE)
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 SECTION5_PLACEHOLDERS = frozenset(
     {"（待填写）", "(待填写)", "待填写", "待补充", "（待补充）", "(待补充)", "无涉及文件记录", "-", "—"}
 )
@@ -1148,8 +1149,11 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
     elif _is_pointer_only_sync(paths, copies.replace):
         _check_pointer_only_sync(root, root_git, base, sha, paths, copies.replace)
         pointer_sync = True
-    elif RELEASE_POINTERS.intersection(copies.replace):
-        raise RefusedError("控制根有现役发布指针，归档请使用 --archive-existing")
+    elif RELEASE_POINTERS.intersection(paths):
+        raise RefusedError(
+            "不允许在普通合并中直接改写现役发布指针（归档请使用 --archive-existing，"
+            "纯指针同步须精确覆盖三份与本机现役相符的发布指针）"
+        )
     return Plan(
         branch, sha, card, chgs, paths, user_paths, copies.replace, notes,
         archive_existing=archive_existing, base=base, formal_change=formal_change,
@@ -1405,15 +1409,17 @@ def _session_digest(session: str) -> str:
     return hashlib.sha256(cleaned.encode("utf-8")).hexdigest() if cleaned else ""
 
 
-def _author_session_id(root: Path, name: str) -> str:
+def _author_session_digests(root: Path, name: str) -> frozenset[str]:
+    """收集作者工位不可复用的真实会话摘要集合：同时纳入 session_id 与 pid>0 时的 vscode-<pid> 回退。"""
     holder = _station_holder_note(root, name)
+    digests: set[str] = set()
     sid = str(holder.get("session_id") or "").strip()
     if sid:
-        return sid
+        digests.add(_session_digest(sid))
     pid = holder.get("pid")
     if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
-        return f"vscode-{pid}"
-    return ""
+        digests.add(_session_digest(f"vscode-{pid}"))
+    return frozenset(digest for digest in digests if digest)
 
 
 def _resolve_reviewer_session() -> str:
@@ -1435,14 +1441,20 @@ def _reviewer_is_independent(
     *,
     reviewer_session_sha256: str = "",
     author_session_sha256: str = "",
+    author_session_digests: Sequence[str] | frozenset[str] = (),
 ) -> bool:
     review = AUDIT_SESSION.fullmatch(reviewer)
     if review is None:
         return False
+    forbidden = {d for d in author_session_digests if d}
     if author_session_sha256:
-        if not reviewer_session_sha256:
+        forbidden.add(author_session_sha256)
+    if forbidden:
+        if not isinstance(reviewer_session_sha256, str) or not _SHA256_HEX_RE.fullmatch(
+            reviewer_session_sha256
+        ):
             return False
-        return reviewer_session_sha256 != author_session_sha256
+        return reviewer_session_sha256 not in forbidden
     author = AUDIT_SESSION.fullmatch(owner)
     if author is not None:
         return review[2] != author[2]
@@ -1464,14 +1476,19 @@ def audit_receipt(root: Path, name: str, plan: Plan) -> dict[str, Any]:
         raise RefusedError("独立审计凭证与当前 main、候选或工位不匹配")
     reviewer = receipt.get("reviewer")
     report = receipt.get("report")
-    reviewer_session_sha256 = receipt.get("reviewer_session_sha256")
-    author_session_sha256 = _session_digest(_author_session_id(root, name))
+    has_session_digest = "reviewer_session_sha256" in receipt
+    raw_session_digest = receipt.get("reviewer_session_sha256")
+    if has_session_digest and (
+        not isinstance(raw_session_digest, str) or not _SHA256_HEX_RE.fullmatch(raw_session_digest)
+    ):
+        raise RefusedError("独立审计必须来自另一会话")
+    author_digests = _author_session_digests(root, name)
     if not isinstance(reviewer, str) or not _reviewer_is_independent(
         reviewer,
         name,
         plan.branch,
-        reviewer_session_sha256=reviewer_session_sha256 if isinstance(reviewer_session_sha256, str) else "",
-        author_session_sha256=author_session_sha256,
+        reviewer_session_sha256=raw_session_digest if isinstance(raw_session_digest, str) else "",
+        author_session_digests=author_digests,
     ):
         raise RefusedError("独立审计必须来自另一会话")
     if (
@@ -1506,19 +1523,19 @@ def cmd_audit_record(
         )
         reviewer = f"{agent}-{tag}"
         reviewer_session_sha256 = _session_digest(session)
-        author_session_sha256 = _session_digest(_author_session_id(root, name))
+        author_digests = _author_session_digests(root, name)
         if not session or not _reviewer_is_independent(
             reviewer,
             name,
             branch,
             reviewer_session_sha256=reviewer_session_sha256,
-            author_session_sha256=author_session_sha256,
+            author_session_digests=author_digests,
         ):
             raise RefusedError("请由另一审计会话登记，携带 AUTO_PM_AGENT 和实际会话 ID")
         report = report_file.read_text(encoding="utf-8", errors="replace")
         if base not in report or sha not in report:
             raise RefusedError("审计报告须写明核对过的 main 和候选完整提交号")
-        receipt = {
+        receipt: dict[str, Any] = {
             **_audit_identity(root, name, base, sha),
             "reviewer": reviewer,
             "reviewer_session_sha256": reviewer_session_sha256,
@@ -1527,8 +1544,8 @@ def cmd_audit_record(
             "report_sha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
             "report": report,
         }
-        if author_session_sha256:
-            receipt["author_session_sha256"] = author_session_sha256
+        if author_digests:
+            receipt["author_session_digests"] = sorted(author_digests)
         path = _audit_path(root, base, sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:

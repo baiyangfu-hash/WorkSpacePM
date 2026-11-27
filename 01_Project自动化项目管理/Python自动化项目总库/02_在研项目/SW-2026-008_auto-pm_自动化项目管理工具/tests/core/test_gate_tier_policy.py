@@ -214,3 +214,16 @@ def test_release_pointers_and_handoff_records_classify_as_l1_while_other_outside
     )
     assert extra_protected.tier == "L3" and extra_protected.full_forced is True
 
+    # 单指针子集或与项目内文档/代码混改一律 fail-closed 走 L3
+    single_ptr_outside = classify_gate_tier([], project=REPO_PROJECT, outside_changes=[pointers[0]])
+    assert single_ptr_outside.tier == "L3" and single_ptr_outside.full_forced is True
+
+    single_ptr_changed = classify_gate_tier([pointers[0]], project=REPO_PROJECT)
+    assert single_ptr_changed.tier == "L3" and single_ptr_changed.full_forced is True
+
+    for mixed_in_proj in ("README.md", "scripts/command_catalog.py", "auto_pm/application/foo.py"):
+        mixed_dec = classify_gate_tier([mixed_in_proj], project=REPO_PROJECT, outside_changes=pointers)
+        assert mixed_dec.tier == "L3" and mixed_dec.full_forced is True, mixed_in_proj
+        mixed_flat = classify_gate_tier([*pointers, mixed_in_proj], project=REPO_PROJECT)
+        assert mixed_flat.tier == "L3" and mixed_flat.full_forced is True, mixed_in_proj
+
