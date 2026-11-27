@@ -139,6 +139,19 @@ class TransitionGuardChecker:
             # pending_acceptance → accepting: 无额外门禁（PM-042 V2.2.0 第四章）
             pass
 
+        if target_status in ("approved", "conditionally_approved") and cr.sections:
+            section5 = cr.sections.get("5")
+            if section5 is None:
+                # 兼容仅含 §3 的精简测试夹具；完整变更单（含 §4 与 §8）删除 §5 仍拦截
+                if "4" in cr.sections and "8" in cr.sections:
+                    violations.append("缺少 §5 变更内容章节，批准前无法核对涉及文件/交付物")
+            else:
+                from auto_pm.domain.change.parser import validate_section5_paths
+
+                path_report = validate_section5_paths(section5)
+                if path_report.status == "invalid":
+                    violations.extend(path_report.errors)
+
         # completed 的门禁已提升至 transition_status 方法中作为参数级前置校验，
         # 不在此处重复检查，避免与参数级校验逻辑冲突。
 

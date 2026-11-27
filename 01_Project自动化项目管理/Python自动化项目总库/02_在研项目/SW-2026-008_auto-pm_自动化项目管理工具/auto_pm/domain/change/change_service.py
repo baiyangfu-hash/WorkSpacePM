@@ -42,7 +42,11 @@ from auto_pm.change.file_locator import ChangeFileLocator
 from auto_pm.change.guard_checker import TransitionGuardChecker
 from auto_pm.change.markdown_editor import ChangeMarkdownEditor
 from auto_pm.change.parser import ChgParser
-from auto_pm.change.path_resolver import find_ledger_file, get_or_create_ledger_file
+from auto_pm.change.path_resolver import (
+    find_ledger_file,
+    get_or_create_ledger_file,
+    scan_change_files,
+)
 from auto_pm.core.paths import PG_MONITORING_DIR
 from auto_pm.db.connection import DatabaseManager
 from auto_pm.db.repository import ChangeRequestRepository, ProjectRepository
@@ -1079,6 +1083,65 @@ class ChangeService:
 
         # 文件或 DB 任一删除成功即视为成功
         return file_deleted or db_deleted
+
+    def dry_run_section5_paths(
+        self, project_id: str, *, project_path: str | None = None
+    ) -> dict[str, Any]:
+        """只读扫描项目存量变更单的 §5.1 机读路径清单格式并按桶统计（CHG-SCPT-2026-746）。"""
+        from auto_pm.domain.change.parser import validate_section5_paths
+
+        resolved_path = project_path or self._locator.get_project_path(project_id)
+        if not resolved_path:
+            raise ValueError(f"项目不存在: {project_id}")
+
+        ok_items: list[dict[str, Any]] = []
+        placeholder_items: list[dict[str, Any]] = []
+        invalid_items: list[dict[str, Any]] = []
+
+        for file_path in sorted(scan_change_files(resolved_path)):
+            cr = self._parser.parse(file_path)
+            change_number = cr.change_number or Path(file_path).stem
+            section5 = cr.sections.get("5")
+            if section5 is None:
+                bucket = "invalid"
+                entry = {
+                    "change_number": change_number,
+                    "status": cr.status,
+                    "file_path": file_path,
+                    "section5_status": "invalid",
+                    "path_count": 0,
+                    "errors": ["缺少 §5 变更内容章节"],
+                }
+            else:
+                report = validate_section5_paths(section5)
+                bucket = report.status
+                entry = {
+                    "change_number": change_number,
+                    "status": cr.status,
+                    "file_path": file_path,
+                    "section5_status": report.status,
+                    "path_count": len(report.paths),
+                    "errors": list(report.errors),
+                }
+            if bucket == "ok":
+                ok_items.append(entry)
+            elif bucket == "placeholder":
+                placeholder_items.append(entry)
+            else:
+                invalid_items.append(entry)
+
+        return {
+            "project_id": project_id,
+            "total": len(ok_items) + len(placeholder_items) + len(invalid_items),
+            "counts": {
+                "ok": len(ok_items),
+                "placeholder": len(placeholder_items),
+                "invalid": len(invalid_items),
+            },
+            "ok": ok_items,
+            "placeholder": placeholder_items,
+            "invalid": invalid_items,
+        }
 
     # ── 向后兼容的委托方法（M3-Iter2 保留签名，内部委托给组合对象） ──
 

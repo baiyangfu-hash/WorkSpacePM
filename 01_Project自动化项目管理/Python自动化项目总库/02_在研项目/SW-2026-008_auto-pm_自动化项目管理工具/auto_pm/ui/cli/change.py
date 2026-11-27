@@ -488,27 +488,35 @@ def cmd_create(
 @click.argument("project_id")
 @click.option("--ledger-check", "ledger_check", is_flag=True, default=False,
               help="CHG-108 缺陷3: 对账门禁——校验变更单文件 vs 台账记录一致性，差异时报错退出")
-@click.option("--verbose", is_flag=True, help="提交跟踪警告列出全部文件（默认每类只列前 10 个）")
+@click.option(
+    "--section5-dry-run",
+    "section5_dry_run",
+    is_flag=True,
+    default=False,
+    help="CHG-746: 只读扫描项目存量变更单的 §5.1 机读路径清单格式并输出分类统计（不修改文件、不阻断）",
+)
+@click.option("--verbose", is_flag=True, help="提交跟踪警告或 §5.1 干跑列出全部明细（默认每类只列前 10/30 个）")
 @click.pass_context
 def cmd_verify(
     ctx: click.Context,
     project_id: str,
     ledger_check: bool,
+    section5_dry_run: bool,
     verbose: bool,
 ) -> None:
-    """变更单验证（CHG-108 缺陷 3：对账门禁）
+    """变更单验证（CHG-108 缺陷 3：对账门禁；CHG-746：§5.1 路径存量干跑）
 
     \b
     --ledger-check: 对账门禁，检测台账与 CHG 文件的一致性
       退出码 0 = 对账无差异，且所有变更单都已在 HEAD 提交里（门禁通过）
       退出码 1 = 项目不存在
       退出码 2 = 有差异（门禁失败，需用 ledger reconcile --fix 修复），或有变更单未提交（先提交再验证）
+    --section5-dry-run: 只读扫描存量变更单 §5.1 机读路径清单，不修改文件、不阻断（退出码 0）
     """
-    if not ledger_check:
-        console.print("[yellow]请指定验证项，目前支持: --ledger-check[/yellow]")
+    if not ledger_check and not section5_dry_run:
+        console.print("[yellow]请指定验证项，目前支持: --ledger-check / --section5-dry-run[/yellow]")
         ctx.exit(1)
 
-    from auto_pm.change.ledger_reconciler import LedgerReconciler
     from auto_pm.core.project_service import ProjectService
 
     app_ctx: AppContext = ctx.obj
@@ -517,6 +525,30 @@ def cmd_verify(
     if project_path is None:
         console.print(f"[red]错误: 项目不存在: {project_id}[/red]")
         ctx.exit(1)
+
+    if section5_dry_run:
+        change_svc = ChangeService(app_ctx.workspace_root)
+        dry_report = change_svc.dry_run_section5_paths(project_id, project_path=str(project_path))
+        counts = dry_report["counts"]
+        console.print()
+        console.print(f"[bold cyan]═══ 变更单 §5.1 机读路径存量干跑（只读）: {project_id} ═══[/bold cyan]")
+        console.print(
+            f"  总计: {dry_report['total']} | "
+            f"[green]合规: {counts['ok']}[/green] | "
+            f"[yellow]占位符: {counts['placeholder']}[/yellow] | "
+            f"[red]无效/散文: {counts['invalid']}[/red]"
+        )
+        invalid_items = dry_report["invalid"]
+        shown = invalid_items if verbose else invalid_items[:30]
+        for item in shown:
+            reasons = "；".join(item.get("errors") or [])
+            console.print(f"  - {item['change_number']} ({item['status']}): {reasons}")
+        if not verbose and len(invalid_items) > len(shown):
+            console.print(f"  [dim]... 其余 {len(invalid_items) - len(shown)} 条可用 --verbose 展开[/dim]")
+        if not ledger_check:
+            return
+
+    from auto_pm.change.ledger_reconciler import LedgerReconciler
 
     reconciler = LedgerReconciler()
     diff = reconciler.reconcile(project_path)

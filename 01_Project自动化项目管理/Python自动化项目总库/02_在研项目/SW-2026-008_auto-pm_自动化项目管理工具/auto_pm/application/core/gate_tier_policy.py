@@ -61,6 +61,24 @@ L1_VERIFIED_PILOT_PATHS: frozenset[str] = frozenset(
         "tests/infrastructure/test_command_catalog.py",
     }
 )
+# CHG-SCPT-2026-746: 精确记录类白名单（现役发布指针 + 交接交换区 JSON/JSONL）走 L1 本地结构校验，不触发 L3 全量门禁。
+L1_OUTSIDE_RECORD_PATHS: frozenset[str] = frozenset(
+    {
+        "00_Infrastructure/auto_pm/active_release.json",
+        "00_Infrastructure/auto_pm/previous_release.json",
+        "00_Infrastructure/auto_pm/deployment_manifest.json",
+    }
+)
+_L1_OUTSIDE_RECORD_FOLDED: frozenset[str] = frozenset(path.casefold() for path in L1_OUTSIDE_RECORD_PATHS)
+L1_INSIDE_RECORD_PATHS: frozenset[str] = frozenset(
+    {
+        "04_监控/交接交换区/focus.json",
+        "04_监控/交接交换区/journal.jsonl",
+        "11_监控/交接交换区/focus.json",
+        "11_监控/交接交换区/journal.jsonl",
+    }
+)
+_L1_INSIDE_RECORD_FOLDED: frozenset[str] = frozenset(path.casefold() for path in L1_INSIDE_RECORD_PATHS)
 
 _GROUP_PREFIX_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("auto_pm/contracts/", ("contracts",)),
@@ -242,6 +260,38 @@ def _strip_project_prefix(posix_path: str, project_prefix: str) -> str:
     return posix_path
 
 
+def is_l1_outside_record_path(path: str) -> bool:
+    """Return True only for exact whitelisted outside-project record files (live release pointers)."""
+    try:
+        normalized = _normalize_raw_posix(path)
+    except ValueError:
+        return False
+    return normalized.casefold() in _L1_OUTSIDE_RECORD_FOLDED
+
+
+def is_complete_release_pointer_set(paths: Sequence[str]) -> bool:
+    """Return True only when ``paths`` covers all three release pointer files and nothing else."""
+    if not paths:
+        return False
+    folded: set[str] = set()
+    for raw in paths:
+        try:
+            normalized = _normalize_raw_posix(raw)
+        except ValueError:
+            return False
+        folded.add(normalized.casefold())
+    return folded == _L1_OUTSIDE_RECORD_FOLDED
+
+
+def is_l1_inside_record_path(path: str, project_prefix: str = "") -> bool:
+    """Return True only for exact whitelisted in-project handoff exchange JSON/JSONL records."""
+    try:
+        normalized = _strip_project_prefix(_normalize_raw_posix(path), project_prefix)
+    except ValueError:
+        return False
+    return normalized.casefold() in _L1_INSIDE_RECORD_FOLDED
+
+
 def _m2_matches(rule: _M2Rule, normalized: str) -> bool:
     folded = normalized.casefold()
     pattern = rule.pattern.casefold()
@@ -319,7 +369,9 @@ def classify_gate_tier(
     if not changed_paths and not outside_changes:
         return _fail_closed("改动列表为空，fail-closed 走 L3 全量门禁", rules_sha256=rules.sha256)
 
+    outside_record_paths: list[str] = []
     if outside_changes:
+        blocking_outside: list[str] = []
         for outside_raw in outside_changes:
             try:
                 outside_posix = _normalize_raw_posix(outside_raw)
@@ -331,9 +383,35 @@ def classify_gate_tier(
                     f"命中受保护路径规则 {matched_pat}：{outside_posix}，强制 L3 全量门禁",
                     rules_sha256=rules.sha256,
                 )
-        sample = ", ".join(str(p) for p in outside_changes[:3])
-        return _fail_closed(
-            f"包含项目目录外改动（{sample}），强制 L3 全量门禁",
+            if outside_posix.casefold() in _L1_OUTSIDE_RECORD_FOLDED:
+                outside_record_paths.append(outside_posix)
+            else:
+                blocking_outside.append(outside_posix)
+        if blocking_outside:
+            sample = ", ".join(str(p) for p in blocking_outside[:3])
+            return _fail_closed(
+                f"包含项目目录外改动（{sample}），强制 L3 全量门禁",
+                rules_sha256=rules.sha256,
+            )
+
+    if outside_record_paths:
+        if changed_paths:
+            return _fail_closed(
+                "发布指针与项目内其他改动混改，强制 L3 全量门禁",
+                rules_sha256=rules.sha256,
+            )
+        if not is_complete_release_pointer_set(outside_record_paths):
+            return _fail_closed(
+                "仅改动部分发布指针（未完整覆盖三份现役发布指针），强制 L3 全量门禁",
+                rules_sha256=rules.sha256,
+            )
+        return GateTierDecision(
+            tier="L1",
+            m2_tier="docs",
+            recommended_groups=(),
+            require_plugin=False,
+            full_forced=False,
+            reasons=(f"仅完整三份现役发布指针同步（{len(outside_record_paths)} 个），执行 L1 本地结构校验",),
             rules_sha256=rules.sha256,
         )
 
@@ -343,6 +421,7 @@ def classify_gate_tier(
     affected_groups: set[str] = set()
     product_py_paths: list[str] = []
     test_py_paths: list[str] = []
+    inside_record_paths: list[str] = []
 
     for raw in changed_paths:
         try:
@@ -356,6 +435,15 @@ def classify_gate_tier(
             l3_reasons.append(f"命中额外受保护规则 {matched_pat}：{normalized}")
 
         folded = normalized.casefold()
+        if raw_posix.casefold() in _L1_OUTSIDE_RECORD_FOLDED:
+            outside_record_paths.append(raw_posix)
+            m2_levels.append("docs")
+            continue
+        if folded in _L1_INSIDE_RECORD_FOLDED:
+            inside_record_paths.append(normalized)
+            m2_levels.append("docs")
+            continue
+
         base_name = Path(normalized).name
         has_doc_ext = any(folded.endswith(ext) for ext in _DOC_EXTENSIONS)
 
@@ -394,6 +482,12 @@ def classify_gate_tier(
             if folded.endswith(".py") and folded not in L1_VERIFIED_PILOT_PATHS:
                 l2_reasons.append(f"尚未纳入一期 L1 已核实白名单：{normalized}")
 
+    if outside_record_paths and (
+        len(outside_record_paths) != len(changed_paths)
+        or not is_complete_release_pointer_set(outside_record_paths)
+    ):
+        l3_reasons.append("发布指针仅允许完整三份独立同步走 L1，单指针或与其他路径混改强制 L3 全量门禁")
+
     overall_m2 = max(m2_levels, key=_m2_rank) if m2_levels else "docs"
 
     if l3_reasons:
@@ -429,11 +523,16 @@ def classify_gate_tier(
             rules_sha256=rules.sha256,
         )
 
-    l1_reason = (
-        "仅文档改动（.md/.rst），执行 L1 轻量预检"
-        if not product_py_paths and not test_py_paths
-        else f"命中一期 L1 已核实白名单（产品 py {len(product_py_paths)} 个，测试 py {len(test_py_paths)} 个），满足 L1 本地闭环"
-    )
+    if not product_py_paths and not test_py_paths:
+        if outside_record_paths or inside_record_paths:
+            l1_reason = "仅记录类（JSON/JSONL）或文档改动，执行 L1 本地结构与轻量预检"
+        else:
+            l1_reason = "仅文档改动（.md/.rst），执行 L1 轻量预检"
+    else:
+        l1_reason = (
+            f"命中一期 L1 已核实白名单（产品 py {len(product_py_paths)} 个，"
+            f"测试 py {len(test_py_paths)} 个），满足 L1 本地闭环"
+        )
     return GateTierDecision(
         tier="L1",
         m2_tier=overall_m2,

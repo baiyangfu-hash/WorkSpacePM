@@ -207,6 +207,11 @@ class ChgGenerator:
 - **CROSS**: 改了电气,PLC和HMI都要跟着改
 - **SAFE**: 动了急停回路/安全继电器/SIL相关
 
+#### 如何填写 §5.1/§5.2 涉及文件/交付物?
+- 批准前须写明仓库相对路径清单，多条路径用 `<br>` 分隔（不要写散文描述、逗号、顿号或反引号），例如：
+  `01_Project自动化项目管理/.../scripts/pm_merge.py<br>01_Project自动化项目管理/.../tests/infrastructure/test_pm_merge.py`
+- 推荐使用 `main.py change edit <变更单号> --pid <项目号> --files-from <清单文件>` 写入，避免命令行截断或格式错误
+
 ### 12.2 参考资料
 | 资料名称 | 版本 | 来源 |
 |----------|------|------|
