@@ -13,6 +13,50 @@
 - 只修改工位内当前实施卡或占位声明覆盖的路径；遇到未声明脏文件、基线漂移或租约失效立即停下汇报。
 - 绝不在控制根直接编写业务代码或直接向控制根写交接交换区数据。
 
+## 本机收口（FLOW-002）
+
+- **项目体检**：`pm_flows.py checkup <项目编号>`，全程只读，进门后、动手前、交卷前各跑一次；每步都跑完，红了照原样报告。
+- **本机收口**：在工位分支提交，提交说明单独一行 `领卡占位: <卡号>`（“要你点头”类再写变更单号）；工位先 `git merge main`。在控制根跑 `pm_merge.py merge <工位名>`：它查分支、控制根副本、联网对账、实施卡、批准范围和独立审计；门禁由驾驶舱管理，合并执行 `gate precheck`，受保护改动还核对同一候选的 `gate start` 全量结果。都过了才合进 `main`。
+- 走变更单的改动合并前要有 AUD-001 独立审计；合并后 agent 把变更单推到 accepting，推到完成只有用户本人。
+- 当天一行告诉用户：合并了什么、合并提交号、怎么退（`git revert -m 1 <合并提交>`）。
+- 用户说“同意收工位”后才 `worktree close`。
+- 控制根 `main` 只由 `pm_merge.py merge` 改；同步用 `pm_merge.py sync`；本机钩子 `pm_merge.py install-hook`。`checkup` 的“本机合并对账”红了，由用户定留还是退，agent 不自己退。
+
+## 交卷到收口（走 Run 的卡）
+
+`pm_flows.py closeout <项目编号> --mission-id <卡号> [--done <停点名>]`，一步红就停：
+
+| 步 | 命令 | 谁来做 |
+|---|---|---|
+| 1 | `pm acceptance-scan --pid <项目编号>` | agent |
+| 2 | `pm control-root-status <项目编号>` | agent |
+| 3 | `pm verify --mission-id <卡号> --lease-wallet` | **停**：用户说“同意 <卡号> 交卷验证”后 agent 跑 |
+| 4 | `pm missions --pid <项目编号>` | agent |
+| 5 | `pm accept --mission-id <卡号>` | **停，只有用户本人批**：看板“确认验收”（验收和收口一步做完），或用户在自己的终端跑；用户在本机主对话里亲口说了验收，agent 带上那句话的位置再跑 |
+| 6 | `pm close --mission-id <卡号>` | **停**：用户说“同意 <卡号> 收口”后 agent 跑；看板已一步收口的跳过 |
+| 7 | `pr settle-scan <项目编号>` | agent；输出里有变更单号 |
+| 8 | `change transition <变更单号> --to completed --pid <项目编号>` | **停，只有用户本人批**：看板“决定”页点“推到完成”；没有按钮时用户在本机主对话里说“把 <变更单号> 推到完成”，agent 带上那句话的位置再跑 |
+| 9 | `ledger reconcile <项目编号>` | agent；不加 `--fix` |
+| 10 | `worktree close <你的名字>` | **停**：用户说“同意收工位”后 agent 跑 |
+
+停点：verify、accept、close、transition、worktree。`pm accept` 只记验收、停在 ACCEPTED，要再跑 `pm close` 才收口；一步收口只发生在看板“确认验收”按钮。
+
+## PR 线收口（只在“多机”档开 PR 时用）
+
+PR 经 CI 全绿、独立审计通过合进 `main` 之后跑 `pm_flows.py closeout-pr <项目编号> --chg <变更单号> --card <占位卡号> [--done <停点名>]`，一步红就停：
+
+| 步 | 命令 | 谁来做 |
+|---|---|---|
+| 1 | `pm control-root-status <项目编号>` | agent |
+| 2 | `pr settle-scan <项目编号>` | agent；退出码 1 只说明有等收口的卡，不算红 |
+| 3 | `change transition <变更单号> --to accepting --pid <项目编号>` | **停**：agent 依次推 implementing、pending_acceptance、accepting，不需要用户批 |
+| 4 | `change transition <变更单号> --to completed --pid <项目编号>` | **停，只有用户本人批**：同上表第 8 步 |
+| 5 | `ledger reconcile <项目编号>` | agent；不加 `--fix` |
+| 6 | `claim release <占位卡号>` | **停**：PR 已合并后 agent 跑 |
+| 7 | `worktree close <你的名字>` | **停**：用户说“同意收工位”后 agent 跑 |
+
+停点：accepting、transition、claim_release、worktree。变更单批准在开工前就要有：用户在看板“决定”页点“批准变更单”，或在本机主对话里说了同意，agent 带上那句话的位置再跑。
+
 ## 交接（单机 / 多机 / Run 三路分流）
 
 1. **单机日常（GitHub「关」/「备份」）**：在工位内使用 `SW8/scripts/pm_handoff.py` 的 `set-focus` 与 `log` 更新 `<项目>/{04|11}_监控/交接交换区/{focus.json,journal.jsonl}`，并用 `validate --require-exists` 验绿后随分支提交；注意 `.json/.jsonl` 改动在现行门禁分档下会触发 `L3`，适合与 `L3` 卡一起合入。
