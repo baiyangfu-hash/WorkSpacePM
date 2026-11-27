@@ -49,8 +49,12 @@ def _built_in_roster_after_each_test(monkeypatch: pytest.MonkeyPatch) -> Iterato
     for key in list(os.environ):
         if key in MARKERS or key.upper().startswith("CODEX_"):
             monkeypatch.delenv(key, raising=False)
+    # 本文件有测试直接 AGENT_ROSTER.use() 装源，绕过 use_ledger_roster 的“同一个根不重读”记忆；
+    # 先清记忆再复位（和生产 AgentRegistryService._refresh 同一写法），否则 thrower 泄漏到同 worker 的后续测试。
+    registry._ROSTER_ROOT.clear()
     use_ledger_roster(None)
     yield
+    registry._ROSTER_ROOT.clear()
     use_ledger_roster(None)
 
 
@@ -388,6 +392,29 @@ def test_an_unreadable_registry_makes_user_evidence_fail_closed(root: Path) -> N
     assert "读不出来" in problem, "读不出登记表时不能把凭据当成用户的"
     assert names_an_agent("2026-11-17T04:27:30Z")
     assert "不能是 agent" in user_evidence_problem("user-confirmation:claude-ok-2026"), "写着内置名字的照旧按 agent 拒"
+
+
+def test_a_directly_installed_source_survives_a_plain_use_ledger_roster_none() -> None:
+    """陷阱本体：记忆已是 [""] 时 use_ledger_roster(None) 早退，清不掉直接装的源。
+
+    漏了这一步，thrower 会留在进程级单例里，同 worker 后续走用户证据的检查（如 test_release_ledger）
+    被 _evidence_names 失败关闭误判成“登记表读不出来”。
+    """
+
+    service.AGENT_ROSTER.use(lambda: (_ for _ in ()).throw(OSError("disk gone")))
+    assert AGENT_ROSTER.read_failed
+    use_ledger_roster(None)
+    assert AGENT_ROSTER.read_failed, "没清记忆时早退：直接装的源清不掉"
+
+
+def test_clearing_the_roster_memo_forces_a_reset_of_a_directly_installed_source() -> None:
+    """回归护栏：夹具先 registry._ROSTER_ROOT.clear() 再 use_ledger_roster(None)，名册回到内置五个（同生产 _refresh 写法）。"""
+
+    service.AGENT_ROSTER.use(lambda: (_ for _ in ()).throw(OSError("disk gone")))
+    registry._ROSTER_ROOT.clear()
+    use_ledger_roster(None)
+    assert not AGENT_ROSTER.read_failed
+    assert dict(AGENT_ROSTER) == BUILTIN_ROSTER
 
 
 def test_unregister_is_refused_when_the_claim_table_cannot_be_read(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
