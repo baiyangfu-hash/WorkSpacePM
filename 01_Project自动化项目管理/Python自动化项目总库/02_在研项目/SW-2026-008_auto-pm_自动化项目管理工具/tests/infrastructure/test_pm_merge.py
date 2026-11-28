@@ -1778,7 +1778,9 @@ def test_750_archive_changes_uses_batched_tree_sha1_without_per_file_git_blob_ca
 
     def spy_git_blob(root: Path, ref: str, rel_path: str) -> bytes | None:
         blob_calls.append(rel_path)
-        return real_git_blob(root, ref, rel_path)
+        result = real_git_blob(root, ref, rel_path)
+        assert result is None or isinstance(result, bytes)
+        return result
 
     monkeypatch.setattr(pm, "_git_blob", spy_git_blob)
     plan = pm._collect_archive_plan(tmp_path, pm.Git(tmp_path), rev(tmp_path, "main"), "SW-2026-008", [])

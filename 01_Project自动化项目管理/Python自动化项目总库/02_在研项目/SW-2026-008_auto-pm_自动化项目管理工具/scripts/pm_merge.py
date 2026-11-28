@@ -85,7 +85,7 @@ STANDARD_CARD = re.compile(
 )
 AUDIT_SCHEMA = "local-merge-audit.v1"
 AUDIT_SESSION = re.compile(r"([a-z][a-z0-9]*)-([0-9a-f]{6})")
-STATE_LINE = re.compile(r"\|\s*变更状态\s*\|\s*([a-z_]+)\s*\|")
+STATE_LINE = re.compile(r"\|\s*(?:\*\*)?变更状态(?:\*\*)?\s*\|\s*([a-z_]+)\s*\|")
 CHANGE_FILES_ROW = re.compile(r"^\|\s*(?:\*\*)?涉及文件/交付物(?:\*\*)?\s*\|\s*([^|\n]*)\|", re.MULTILINE)
 SECTION5_HEADING_RE = re.compile(r"^##\s+§?\s*5\s*[.、：:]", re.MULTILINE)
 NEXT_H2_RE = re.compile(r"^##\s+§?\s*\d+\s*[.、：:]", re.MULTILINE)

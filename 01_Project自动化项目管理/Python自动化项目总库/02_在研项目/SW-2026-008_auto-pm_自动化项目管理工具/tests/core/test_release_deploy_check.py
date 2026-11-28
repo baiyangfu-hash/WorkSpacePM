@@ -512,9 +512,11 @@ def test_preflight_refuses_leftover_open_deploy_work_or_run_in_continuity_db(
     db = repo.root / ".auto-pm" / "continuity.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE work_items (work_id TEXT PRIMARY KEY, state TEXT NOT NULL)")
+        conn.execute(
+            "CREATE TABLE work_items (work_id TEXT PRIMARY KEY, subject_project_id TEXT NOT NULL, state TEXT NOT NULL)"
+        )
         conn.execute("CREATE TABLE run_items (run_id TEXT PRIMARY KEY, state TEXT NOT NULL)")
-        conn.execute("INSERT INTO work_items VALUES ('WORK-DEPLOY-1-3-3-OLD0001', 'IN_PROGRESS')")
+        conn.execute("INSERT INTO work_items VALUES ('WORK-DEPLOY-1-3-3-OLD0001', 'SW-2026-008', 'IN_PROGRESS')")
         conn.execute("INSERT INTO run_items VALUES ('RUN-DEPLOY-1-3-3-OLD0001', 'RUNNING')")
         conn.commit()
 
@@ -523,10 +525,22 @@ def test_preflight_refuses_leftover_open_deploy_work_or_run_in_continuity_db(
     assert not blocked.ok and conflict_check.status == rdc.FAIL
     assert "WORK-DEPLOY-1-3-3-OLD0001" in conflict_check.detail and "RUN-DEPLOY-1-3-3-OLD0001" in conflict_check.detail
 
-    # Once closed/cancelled, preflight passes cleanly
+    # Non-deploy active execution Work on SW-2026-008 also blocks preflight; unrelated project (SYS-2026-001) does not
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE work_items SET state='CLOSED'")
         conn.execute("UPDATE run_items SET state='CANCELLED'")
+        conn.execute("INSERT INTO work_items VALUES ('WORK-SYS-OTHER', 'SYS-2026-001', 'IN_PROGRESS')")
+        conn.execute("INSERT INTO work_items VALUES ('WORK-SW008-OTHER', 'SW-2026-008', 'IN_PROGRESS')")
+        conn.commit()
+
+    blocked_other = _happy(repo, tmp_path)
+    other_check = _by_name(blocked_other)["无残留发布冲突"]
+    assert not blocked_other.ok and other_check.status == rdc.FAIL
+    assert "WORK-SW008-OTHER" in other_check.detail and "WORK-SYS-OTHER" not in other_check.detail
+
+    # Once SW-2026-008 Work is parked (WAITING) / closed, preflight passes even with active SYS-2026-001 Work
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE work_items SET state='WAITING' WHERE work_id='WORK-SW008-OTHER'")
         conn.commit()
 
     clean = _happy(repo, tmp_path)

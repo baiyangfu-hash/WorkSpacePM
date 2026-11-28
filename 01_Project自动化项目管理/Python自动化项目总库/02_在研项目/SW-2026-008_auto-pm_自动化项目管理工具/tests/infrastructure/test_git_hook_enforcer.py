@@ -1310,11 +1310,21 @@ def test_750_cross_station_interlock_blocks_foreign_agent_and_logs_station_ops(
     (wt / "note.txt").write_text("hi\n", encoding="utf-8")
     _git(wt, "add", "note.txt")
 
-    for var in ("AUTO_PM_AGENT", "AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID", "CLAUDECODE", "AI_AGENT"):
+    for var in (
+        "AUTO_PM_AGENT",
+        "AUTO_PM_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        "TRAE_CHAT_SESSION_ID",
+        "VSCODE_PID",
+        "CLAUDECODE",
+        "AI_AGENT",
+    ):
         monkeypatch.delenv(var, raising=False)
 
-    # 1) Plain user terminal (no agent markers) -> allowed & logged
+    # 1) Plain user terminal (even inside VS Code with VSCODE_PID) -> allowed & logged as no-agent-marker
+    monkeypatch.setenv("VSCODE_PID", "9001")
     assert enforce_pre_commit(wt, control_root=ctrl) == 0
+    monkeypatch.delenv("VSCODE_PID", raising=False)
 
     # 2) Foreign agent session -> blocked & logged
     monkeypatch.setenv("AUTO_PM_AGENT", "antigravity")
@@ -1333,10 +1343,27 @@ def test_750_cross_station_interlock_blocks_foreign_agent_and_logs_station_ops(
     (wt.parent / ".borrowed-trae-111111.json").write_text(json.dumps({"by": "codex"}), encoding="utf-8")
     assert enforce_pre_commit(wt, control_root=ctrl) == 0
 
+    # 5) VS Code / Cursor owner relying on VSCODE_PID fallback (without AUTO_PM_SESSION_ID) -> same window allowed, other window blocked
+    cursor_wt = ctrl / ".auto-pm" / "worktrees" / "cursor-84b312"
+    _git(ctrl, "worktree", "add", "-q", "-b", "cursor/card-2", str(cursor_wt))
+    (holders / "cursor-84b312.json").write_text(
+        json.dumps({"agent": "cursor-84b312", "session_id": "vscode-9001"}), encoding="utf-8"
+    )
+    (cursor_wt / "c.txt").write_text("ok\n", encoding="utf-8")
+    _git(cursor_wt, "add", "c.txt")
+    monkeypatch.delenv("AUTO_PM_SESSION_ID", raising=False)
+    monkeypatch.setenv("AUTO_PM_AGENT", "cursor")
+    monkeypatch.setenv("VSCODE_PID", "9001")
+    assert enforce_pre_commit(cursor_wt, control_root=ctrl) == 0
+    monkeypatch.setenv("VSCODE_PID", "9002")
+    assert enforce_pre_commit(cursor_wt, control_root=ctrl) == 1
+    assert "禁止跨工位提交" in capsys.readouterr().out
+
     lines = (ctrl / ".auto-pm" / "logs" / "station-ops.jsonl").read_text(encoding="utf-8").splitlines()
     entries = [json.loads(line) for line in lines]
-    assert [e["outcome"] for e in entries] == ["allowed", "blocked", "allowed", "allowed"]
+    assert [e["outcome"] for e in entries] == ["allowed", "blocked", "allowed", "allowed", "allowed", "blocked"]
     assert entries[0]["actor"] == "no-agent-marker" and entries[1]["reason"] == "cross-station-mismatch"
+    assert entries[4]["reason"] == "owner" and entries[5]["reason"] == "cross-station-mismatch"
 
 
 def test_750_pre_commit_rejects_utf8_bom_and_bare_cr_in_governance_files(

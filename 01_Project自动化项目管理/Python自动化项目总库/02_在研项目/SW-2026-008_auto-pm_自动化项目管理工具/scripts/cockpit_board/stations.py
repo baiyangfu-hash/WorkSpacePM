@@ -230,8 +230,11 @@ def _station_op_warning(
     actor = str(last_op.get("actor") or "").strip()
     owner = str(last_op.get("owner") or name).strip()
     outcome = str(last_op.get("outcome") or "").strip()
+    reason = str(last_op.get("reason") or "").strip()
     if outcome == "blocked":
         return f"工位跨会话操作告警：最近被拦截操作者 {actor or UNKNOWN} ≠ 工位主人 {owner}"
+    if outcome == "allowed" and reason in {"owner", "user-terminal", "borrower"}:
+        return ""
     if actor and owner and actor != owner and actor != "no-agent-marker":
         return f"工位跨会话操作告警：最近操作者 {actor} ≠ 工位主人 {owner}"
     return ""

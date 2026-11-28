@@ -894,13 +894,17 @@ def _detect_station_actor() -> tuple[str, str, str]:
     generic = os.environ.get("AI_AGENT", "").strip().lower()
     if generic:
         found.add(re.split(r"[:_\-]", generic, maxsplit=1)[0])
+    agent = next(iter(found)) if len(found) == 1 else ("?" if len(found) > 1 else "")
     sid = ""
     for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID"):
         val = os.environ.get(key, "").strip()
         if val:
             sid = val
             break
-    agent = next(iter(found)) if len(found) == 1 else ("?" if len(found) > 1 else "")
+    if not sid and agent and agent != "?":
+        window = os.environ.get("VSCODE_PID", "").strip()
+        if window.isdigit() and int(window) > 0:
+            sid = f"vscode-{window}"
     if not agent and not sid:
         return "", "", "no-agent-marker"
     if sid:

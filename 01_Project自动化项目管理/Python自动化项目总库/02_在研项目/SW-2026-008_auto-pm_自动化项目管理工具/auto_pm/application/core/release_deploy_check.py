@@ -457,7 +457,7 @@ def _check_exact_trees(base: Path, ids: list[str], report: Preflight) -> None:
 
 
 def _check_deploy_conflicts(root: Path, report: Preflight) -> None:
-    """只读核查 continuity.db 是否存在未关闭的残留 WORK-DEPLOY-*/RUN-DEPLOY-*，避免切指针后被 pm orient 冲突自绊。"""
+    """只读核查 continuity.db 是否存在未关闭的残留发布任务或 SW-2026-008 其他活动 Work，避免切指针后自绊。"""
     db = root / ".auto-pm" / "continuity.db"
     if not db.is_file():
         report.add("无残留发布冲突", PASS, "本机账本未初始化（无残留发布任务）")
@@ -474,6 +474,7 @@ def _check_deploy_conflicts(root: Path, report: Preflight) -> None:
                 for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             }
             if "work_items" in tables:
+                work_cols = {row[1] for row in conn.execute("PRAGMA table_info(work_items)").fetchall()}
                 for work_id, state in conn.execute(
                     "SELECT work_id, state FROM work_items "
                     "WHERE work_id LIKE 'WORK-DEPLOY-%' "
@@ -482,6 +483,15 @@ def _check_deploy_conflicts(root: Path, report: Preflight) -> None:
                 ).fetchall():
                     if work_id != allowed_work:
                         conflicts.append(f"{work_id}({state})")
+                if "subject_project_id" in work_cols:
+                    for work_id, state in conn.execute(
+                        "SELECT work_id, state FROM work_items "
+                        "WHERE subject_project_id = 'SW-2026-008' "
+                        "AND state IN ('PLANNED', 'READY', 'IN_PROGRESS', 'BLOCKED', 'VERIFYING') "
+                        "ORDER BY work_id"
+                    ).fetchall():
+                        if work_id != allowed_work:
+                            conflicts.append(f"{work_id}({state})")
             if "run_items" in tables:
                 for run_id, state in conn.execute(
                     "SELECT run_id, state FROM run_items "
@@ -496,14 +506,15 @@ def _check_deploy_conflicts(root: Path, report: Preflight) -> None:
     except sqlite3.Error as exc:
         report.add("无残留发布冲突", UNVERIFIED, f"只读打开 continuity.db 失败：{exc}")
         return
-    if conflicts:
+    unique_conflicts = list(dict.fromkeys(conflicts))
+    if unique_conflicts:
         report.add(
             "无残留发布冲突",
             FAIL,
-            f"账本存在未关闭的残留发布任务：{'、'.join(conflicts[:6])}（切版后将触发 pm orient 冲突导致自绊回退，请先清理）",
+            f"账本存在冲突活动任务：{'、'.join(unique_conflicts[:6])}（切版后将触发 pm orient 冲突导致自绊回退，请先清理）",
         )
         return
-    report.add("无残留发布冲突", PASS, "无残留未关闭 WORK-DEPLOY / RUN-DEPLOY 任务")
+    report.add("无残留发布冲突", PASS, "无残留未关闭 WORK-DEPLOY / RUN-DEPLOY 或 SW-2026-008 冲突活动任务")
 
 
 def preflight(
