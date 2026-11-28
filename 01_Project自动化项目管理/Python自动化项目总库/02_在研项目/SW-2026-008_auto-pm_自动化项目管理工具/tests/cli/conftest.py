@@ -121,3 +121,17 @@ def python_project_factory(tmp_path: Path) -> Callable[..., Path]:
         return project_dir
 
     return _create
+
+
+@pytest.fixture(autouse=True)
+def _reset_ledger_roster_between_cli_tests() -> Generator[None, None, None]:
+    """防止某个 CLI 用例调用根入口把 AGENT_ROSTER 指向损坏账本后串味污染同 worker 后续用例。"""
+    from auto_pm.application.core import agent_registry
+
+    agent_registry._ROSTER_ROOT.clear()
+    agent_registry.use_ledger_roster(None)
+    try:
+        yield
+    finally:
+        agent_registry._ROSTER_ROOT.clear()
+        agent_registry.use_ledger_roster(None)
