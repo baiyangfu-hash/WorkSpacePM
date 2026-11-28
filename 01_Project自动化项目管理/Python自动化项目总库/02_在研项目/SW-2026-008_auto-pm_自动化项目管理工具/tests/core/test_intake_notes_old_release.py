@@ -11,11 +11,16 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -62,6 +67,84 @@ def _infrastructure() -> Path:
     pytest.fail("找不到 00_Infrastructure/auto_pm/active_release.json：这条测试要用仓库里的发布目录，不能跳过", pytrace=False)
 
 
+_PROJECT_PACKAGE_PREFIX = (
+    "01_Project自动化项目管理/Python自动化项目总库/02_在研项目/"
+    "SW-2026-008_auto-pm_自动化项目管理工具/auto_pm"
+)
+_MATERIALIZED_ROOT: Path | None = None
+_MATERIALIZED_CACHE: dict[tuple[str, str], Path] = {}
+
+
+def _materialize_release_from_git(infrastructure: Path, release_path: str) -> Path | None:
+    """Materialize ``auto_pm/`` from the release's Git ``source_commit`` when an untracked release folder is absent (TD-SW008-019)."""
+
+    global _MATERIALIZED_ROOT
+    manifest_path = infrastructure / "deployment_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        releases = json.loads(manifest_path.read_text(encoding="utf-8", errors="replace")).get("releases", {})
+    except (OSError, ValueError):
+        return None
+    entry = releases.get(release_path) if isinstance(releases, dict) else None
+    source_commit = str(entry.get("source_commit", "")).strip() if isinstance(entry, dict) else ""
+    if len(source_commit) < 7:
+        return None
+    repo_root = infrastructure.parent.parent
+    if not (repo_root / ".git").exists():
+        return None
+    resolved = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", f"{source_commit}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    full_commit = resolved.stdout.strip() if resolved.returncode == 0 else ""
+    if not full_commit:
+        return None
+    cache_key = (str(repo_root.resolve()), full_commit)
+    cached = _MATERIALIZED_CACHE.get(cache_key)
+    if cached is not None and (cached / "auto_pm" / "__main__.py").is_file():
+        return cached
+    archived = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo_root), "archive", "--format=tar", full_commit, "--", _PROJECT_PACKAGE_PREFIX],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if archived.returncode != 0 or not archived.stdout:
+        return None
+    if _MATERIALIZED_ROOT is None:
+        _MATERIALIZED_ROOT = Path(tempfile.mkdtemp(prefix="auto-pm-release-intake-"))
+        atexit.register(shutil.rmtree, _MATERIALIZED_ROOT, ignore_errors=True)
+    dest = _MATERIALIZED_ROOT / f"{release_path}-{full_commit[:12]}"
+    if dest.exists():
+        shutil.rmtree(dest, ignore_errors=True)
+    prefix = f"{_PROJECT_PACKAGE_PREFIX}/"
+    with tarfile.open(fileobj=io.BytesIO(archived.stdout), mode="r:") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            name = member.name.replace("\\", "/")
+            if not name.startswith(prefix):
+                continue
+            rel = Path(name.removeprefix(prefix))
+            if rel.is_absolute() or ".." in rel.parts:
+                continue
+            target = dest / "auto_pm" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            extracted = archive.extractfile(member)
+            if extracted is not None:
+                target.write_bytes(extracted.read())
+    if not (dest / "auto_pm" / "__main__.py").is_file():
+        return None
+    _MATERIALIZED_CACHE[cache_key] = dest
+    return dest
+
+
 def _release_dir(pointer: str) -> Path:
     infrastructure = _infrastructure()
     pointer_path = infrastructure / pointer
@@ -69,9 +152,13 @@ def _release_dir(pointer: str) -> Path:
         pytest.fail(f"发布指针 {pointer} 不存在：{pointer_path}", pytrace=False)
     release_path = str(json.loads(pointer_path.read_text(encoding="utf-8", errors="replace")).get("release_path", ""))
     release = infrastructure / "releases" / release_path
-    if not release_path or not (release / "auto_pm" / "__main__.py").is_file():
-        pytest.fail(f"发布指针 {pointer} 指向的发布目录不在或不完整：{release}", pytrace=False)
-    return release
+    if release_path and (release / "auto_pm" / "__main__.py").is_file():
+        return release
+    if release_path:
+        materialized = _materialize_release_from_git(infrastructure, release_path)
+        if materialized is not None:
+            return materialized
+    pytest.fail(f"发布指针 {pointer} 指向的发布目录不在或不完整：{release}", pytrace=False)
 
 
 def _has_notes(release: Path) -> bool:
@@ -312,3 +399,47 @@ def test_no_older_release_in_the_manifest_fails_with_the_reason_instead_of_skipp
     monkeypatch.setattr(sys.modules[__name__], "_infrastructure", lambda: infrastructure)
     with pytest.raises(pytest.fail.Exception, match="找不到有入箱、没有待整理记录"):
         _older_release()
+
+
+def test_an_untracked_pointed_release_is_materialized_from_git_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _git(tmp_path, "init")
+    pkg = tmp_path / _PROJECT_PACKAGE_PREFIX
+    pkg.mkdir(parents=True)
+    (pkg / "__main__.py").write_text("print('ok')\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "release source")
+    head = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+    release_id = f"1.3.3-{head[:7]}"
+    infrastructure = tmp_path / "00_Infrastructure" / "auto_pm"
+    infrastructure.mkdir(parents=True)
+    (infrastructure / "active_release.json").write_text(
+        json.dumps({"release_path": release_id}), encoding="utf-8"
+    )
+    (infrastructure / "previous_release.json").write_text(
+        json.dumps({"release_path": "1.3.3-deadbee"}), encoding="utf-8"
+    )
+    (infrastructure / "deployment_manifest.json").write_text(
+        json.dumps(
+            {
+                "releases": {
+                    release_id: {"source_commit": head},
+                    "1.3.3-deadbee": {"source_commit": "deadbee" + "0" * 33},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_infrastructure", lambda: infrastructure)
+
+    resolved = _release_dir("active_release.json")
+    assert (resolved / "auto_pm" / "__main__.py").is_file()
+    with pytest.raises(pytest.fail.Exception, match="发布目录不在或不完整"):
+        _release_dir("previous_release.json")

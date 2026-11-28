@@ -387,6 +387,82 @@ def test_the_real_release_records_of_this_repository_have_no_contradiction() -> 
     assert check_release_consistency(str(root))["failures"] == []
 
 
+def test_an_untracked_git_reproducible_release_without_folder_warns_instead_of_failing(tmp_path: Path) -> None:
+    import shutil
+
+    sha, tree = _commit(tmp_path)
+    renamed = f"1.3.3-{sha[:7]}"
+    _build(
+        tmp_path,
+        manifest={
+            OLD: {"source_commit": OLD_SHA},
+            renamed: {"source_commit": sha, "source_tree": tree},
+        },
+        annotations={
+            OLD: _annotation(OLD_SHA, "previous", rollback=True),
+            renamed: _annotation(sha, "active"),
+        },
+        active=renamed,
+    )
+    shutil.rmtree(tmp_path / BASE / "releases" / renamed)
+    result = check_release_consistency(str(tmp_path))
+    assert result["failures"] == [], result
+    assert result["status"] == "warn"
+    assert any(renamed in item and "TD-SW008-019" in item for item in result["warnings"])
+
+
+def test_a_missing_folder_with_bad_tree_or_unknown_commit_still_fails(tmp_path: Path) -> None:
+    import shutil
+
+    sha, _tree = _commit(tmp_path)
+    renamed = f"1.3.3-{sha[:7]}"
+    missing_unknown = "1.3.3-deadbee"
+    _build(
+        tmp_path,
+        manifest={
+            OLD: {"source_commit": OLD_SHA},
+            renamed: {"source_commit": sha, "source_tree": "0" * 40},
+            missing_unknown: {"source_commit": "deadbee" + "9" * 33},
+        },
+        annotations={
+            OLD: _annotation(OLD_SHA, "previous", rollback=True),
+            renamed: _annotation(sha, "active"),
+        },
+        active=renamed,
+    )
+    shutil.rmtree(tmp_path / BASE / "releases" / renamed)
+    shutil.rmtree(tmp_path / BASE / "releases" / missing_unknown)
+    result = check_release_consistency(str(tmp_path))
+    assert any(renamed in item and "没有它的目录" in item for item in result["failures"])
+    assert any(missing_unknown in item and "没有它的目录" in item for item in result["failures"])
+
+
+def test_a_tracked_release_folder_deleted_from_disk_still_fails(tmp_path: Path) -> None:
+    import shutil
+
+    sha, tree = _commit(tmp_path)
+    renamed = f"1.3.3-{sha[:7]}"
+    _build(
+        tmp_path,
+        manifest={
+            OLD: {"source_commit": OLD_SHA},
+            renamed: {"source_commit": sha, "source_tree": tree},
+        },
+        annotations={
+            OLD: _annotation(OLD_SHA, "previous", rollback=True),
+            renamed: _annotation(sha, "active"),
+        },
+        active=renamed,
+    )
+    env = ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid"]
+    rel_meta = (BASE / "releases" / renamed / "release_meta.json").as_posix()
+    subprocess.run(["git", "-C", str(tmp_path), "add", rel_meta], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), *env, "commit", "-q", "-m", "track release"], check=True)
+    shutil.rmtree(tmp_path / BASE / "releases" / renamed)
+    result = check_release_consistency(str(tmp_path))
+    assert any(renamed in item and "没有它的目录" in item for item in result["failures"])
+
+
 def test_the_doctor_command_exits_nonzero_on_a_contradiction(
     records: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

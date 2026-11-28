@@ -62,7 +62,7 @@ def _same_commit(left: str, right: str) -> bool:
 def _git(root: str, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", root, *args],
+            ["git", "-c", "core.fsmonitor=false", "-C", root, *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -73,6 +73,34 @@ def _git(root: str, *args: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _reproducible_from_git(root: str, release: str, record: Any) -> str | None:
+    """Return the full commit SHA when a manifest entry missing on disk is an untracked, Git-reproducible release (TD-SW008-019).
+
+    A clean checkout (such as CI or a fresh clone) does not carry untracked release payload directories under
+    ``00_Infrastructure/auto_pm/releases/<id>/``; if Git still holds the exact ``source_commit`` (and matching
+    ``source_tree`` when recorded) and the directory is not tracked in Git, the missing directory is a warning rather
+    than a contradiction.  Any non-Git root, missing/mismatched commit or tree, or deleted *tracked* payload still fails.
+    """
+
+    if not isinstance(record, dict):
+        return None
+    commit = _text(record.get("source_commit"))
+    if not _HEX.match(commit) or len(commit) < MIN_PREFIX:
+        return None
+    resolved = _git(root, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    if not resolved or not _FULL_SHA.match(resolved.lower()):
+        return None
+    tree = _text(record.get("source_tree"))
+    if tree:
+        actual_tree = _git(root, "rev-parse", "--verify", "--quiet", f"{resolved}^{{tree}}")
+        if not actual_tree or actual_tree.lower() != tree:
+            return None
+    tracked = _git(root, "ls-files", "--", f"00_Infrastructure/auto_pm/releases/{release}")
+    if tracked is None or tracked != "":
+        return None
+    return resolved.lower()
 
 
 def _corrections(entry: dict[str, Any]) -> list[dict[str, Any]]:
@@ -178,8 +206,18 @@ def check_release_consistency(root: str) -> dict[str, Any]:
     )
     for release in sorted(on_disk - set(releases)):
         failures.append(f"releases/{release} 有载荷目录，但 deployment_manifest.json 没有登记")
+    uninstalled_reproducible: list[str] = []
     for release in sorted(set(releases) - on_disk):
-        failures.append(f"deployment_manifest.json 登记了 {release}，但 releases/ 下没有它的目录")
+        reproducible_commit = _reproducible_from_git(root, release, releases.get(release))
+        if reproducible_commit is not None:
+            uninstalled_reproducible.append(f"{release}（{reproducible_commit[:12]}）")
+        else:
+            failures.append(f"deployment_manifest.json 登记了 {release}，但 releases/ 下没有它的目录")
+    if uninstalled_reproducible:
+        warnings.append(
+            f"deployment_manifest.json 登记的 {len(uninstalled_reproducible)} 个版本未在本检出安装载荷目录"
+            f"（未入库构建产物，可由源码提交重建，TD-SW008-019）：{'、'.join(uninstalled_reproducible)}"
+        )
 
     unannotated: list[str] = []
     short_only: list[str] = []
