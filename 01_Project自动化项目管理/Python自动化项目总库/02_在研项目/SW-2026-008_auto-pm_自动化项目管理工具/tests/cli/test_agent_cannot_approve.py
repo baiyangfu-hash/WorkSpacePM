@@ -184,3 +184,28 @@ def test_an_agent_with_evidence_still_meets_the_pin_when_one_is_committed(
     assert seen == ["change-approve"]
     assert "需要口令" in result.output  # type: ignore[attr-defined]
     assert untouched == []
+
+
+def test_resetting_ledger_roster_clears_prior_corrupt_ledger_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untouched: list[str]
+) -> None:
+    """前一用例指向损坏账本导致 AGENT_ROSTER 读失败后，清记忆并切回 None 即可恢复放行合法凭据。"""
+    from auto_pm.application.core import agent_registry
+
+    corrupt_root = tmp_path / "corrupt-root"
+    db_path = corrupt_root / ".auto-pm" / "continuity.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not a database")
+
+    monkeypatch.setenv("AUTO_PM_AGENT", "1")
+    agent_registry._ROSTER_ROOT.clear()
+    agent_registry.use_ledger_roster(corrupt_root)
+    poisoned = _approve(tmp_path, "--approval-evidence-ref", GOOD_EVIDENCE)
+    assert poisoned.exit_code != 0  # type: ignore[attr-defined]
+    assert "本机 AI 登记表读不出来" in poisoned.output  # type: ignore[attr-defined]
+
+    agent_registry._ROSTER_ROOT.clear()
+    agent_registry.use_ledger_roster(None)
+    recovered = _approve(tmp_path, "--approval-evidence-ref", GOOD_EVIDENCE)
+    assert "agent 会话" not in recovered.output  # type: ignore[attr-defined]
+    assert untouched  # 恢复后重新进入业务层校验
