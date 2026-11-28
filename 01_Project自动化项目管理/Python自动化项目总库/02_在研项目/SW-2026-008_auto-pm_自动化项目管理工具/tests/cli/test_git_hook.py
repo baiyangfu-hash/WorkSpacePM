@@ -848,3 +848,92 @@ def test_enforce_commit_msg_rejects_staged_blob_read_error(
     output = capsys.readouterr().out
     assert "暂存快照的 CHG/PID/台账证据" in output
     assert "blob unavailable" in output
+
+
+def test_installed_commit_msg_hook_allows_merge_and_squash_msg_in_primary_and_linked_worktree(
+    tmp_path: Path,
+) -> None:
+    """CHG-SCPT-2026-750 / #4: 主仓与 linked worktree 的 MERGE_MSG/SQUASH_MSG 放行，目录外路径仍拒。"""
+    repo = tmp_path / "merge-hook-repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "user.name", "hook fixture")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _write_hook_probe_launcher(repo)
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "baseline")
+
+    result = CliRunner().invoke(cli, ["-w", str(repo), "git-hook", "install"])
+    assert result.exit_code == 0, result.output
+    for hook_name in ("pre-commit", "commit-msg"):
+        (repo / ".git" / "hooks" / hook_name).chmod(0o755)
+    hook_text = (repo / ".git" / "hooks" / "commit-msg").read_text(encoding="utf-8")
+    for token in ("MERGE_MSG", "SQUASH_MSG"):
+        assert token in hook_text
+
+    # Primary worktree MERGE_MSG and SQUASH_MSG pass
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    env = os.environ.copy()
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    for name in ("MERGE_MSG", "SQUASH_MSG"):
+        msg = repo / ".git" / name
+        msg.write_text(f"primary {name}\n", encoding="utf-8")
+        proc = subprocess.run(
+            [*_git_hook_shell_command(), str(hook), f".git/{name}"],
+            cwd=repo,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    # Real linked worktree merge (Git passes .git/worktrees/<name>/MERGE_MSG)
+    linked = tmp_path / "linked-merge-wt"
+    _git(repo, "worktree", "add", "-b", "wt-branch", str(linked))
+    (repo / "main_side.txt").write_text("main\n", encoding="utf-8")
+    _git(repo, "add", "main_side.txt")
+    _git(repo, "commit", "--no-verify", "-m", "main move")
+    (linked / "wt_side.txt").write_text("wt\n", encoding="utf-8")
+    _git(linked, "add", "wt_side.txt")
+    _git(linked, "commit", "--no-verify", "-m", "wt move")
+
+    # Merge actual main branch tip into linked worktree so Git invokes commit-msg with MERGE_MSG
+    main_branch = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    merged = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "Merge main into linked", main_branch],
+        cwd=linked,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    assert merged.returncode == 0, merged.stderr
+
+    # External MERGE_MSG outside .git is still refused
+    outside = tmp_path / "MERGE_MSG"
+    outside.write_text("rogue\n", encoding="utf-8")
+    bad = subprocess.run(
+        [*_git_hook_shell_command(), str(hook), str(outside)],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    assert bad.returncode != 0
+    assert "outside Git metadata" in bad.stderr

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -90,7 +91,7 @@ class Preflight:
 def _git(root: Path, *args: str) -> str | None:
     try:
         done = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["git", "-C", str(root), *args],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -455,6 +456,56 @@ def _check_exact_trees(base: Path, ids: list[str], report: Preflight) -> None:
         report.add(f"发布 {release} 逐文件校验", PASS if good else FAIL, detail)
 
 
+def _check_deploy_conflicts(root: Path, report: Preflight) -> None:
+    """只读核查 continuity.db 是否存在未关闭的残留 WORK-DEPLOY-*/RUN-DEPLOY-*，避免切指针后被 pm orient 冲突自绊。"""
+    db = root / ".auto-pm" / "continuity.db"
+    if not db.is_file():
+        report.add("无残留发布冲突", PASS, "本机账本未初始化（无残留发布任务）")
+        return
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", report.release_id).strip("-").upper() if report.release_id else ""
+    allowed_work = f"WORK-DEPLOY-{slug}" if (report.resume_from and slug) else ""
+    allowed_run = f"RUN-DEPLOY-{slug}" if (report.resume_from and slug) else ""
+    conflicts: list[str] = []
+    try:
+        conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+            if "work_items" in tables:
+                for work_id, state in conn.execute(
+                    "SELECT work_id, state FROM work_items "
+                    "WHERE work_id LIKE 'WORK-DEPLOY-%' "
+                    "AND state NOT IN ('CLOSED', 'CANCELLED', 'ARCHIVED') "
+                    "ORDER BY work_id"
+                ).fetchall():
+                    if work_id != allowed_work:
+                        conflicts.append(f"{work_id}({state})")
+            if "run_items" in tables:
+                for run_id, state in conn.execute(
+                    "SELECT run_id, state FROM run_items "
+                    "WHERE run_id LIKE 'RUN-DEPLOY-%' "
+                    "AND state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED') "
+                    "ORDER BY run_id"
+                ).fetchall():
+                    if run_id != allowed_run:
+                        conflicts.append(f"{run_id}({state})")
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        report.add("无残留发布冲突", UNVERIFIED, f"只读打开 continuity.db 失败：{exc}")
+        return
+    if conflicts:
+        report.add(
+            "无残留发布冲突",
+            FAIL,
+            f"账本存在未关闭的残留发布任务：{'、'.join(conflicts[:6])}（切版后将触发 pm orient 冲突导致自绊回退，请先清理）",
+        )
+        return
+    report.add("无残留发布冲突", PASS, "无残留未关闭 WORK-DEPLOY / RUN-DEPLOY 任务")
+
+
 def preflight(
     root: Path, commit_spec: str, *, gate_verdict: Path | None = None, audit_signoff: Path | None = None
 ) -> Preflight:
@@ -467,6 +518,7 @@ def preflight(
     if report.commit:
         report.release_id = release_id_for(root, report.commit)
     check_release_slot(root, report)
+    _check_deploy_conflicts(root, report)
     ids = _check_pointers(base, report)
     _check_consistency(root, report)
     _check_exact_trees(base, ids, report)

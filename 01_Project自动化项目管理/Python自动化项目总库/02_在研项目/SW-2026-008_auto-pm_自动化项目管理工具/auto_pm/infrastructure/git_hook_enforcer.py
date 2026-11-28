@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from auto_pm.change.parser import ChgParser
@@ -38,6 +42,11 @@ _PROJECT_ID_ROW_PATTERN = re.compile(
     re.MULTILINE,
 )
 _VALID_CHANGE_STATUSES = change_status_guard.APPROVED_OR_LATER
+_CLOSED_CHANGE_STATUSES = frozenset({"completed", "closed"})
+_STATION_ALIAS_RE = re.compile(r"^([a-z][a-z0-9]*)-([0-9a-f]{6})$")
+_NON_AGENT_STATION_PREFIXES = ("deploy-", "run-plan-", "gate-")
+_STATION_OPS_LOG = Path(".auto-pm") / "logs" / "station-ops.jsonl"
+_HYGIENE_TEXT_SUFFIXES = (".md", ".json", ".jsonl")
 RELEASE_TREE_PREFIX = "00_Infrastructure/auto_pm/releases/"
 # FLOW-001“要你点头”那一类的规则文件：不按后缀豁免。
 # 规则文件清单与 reviews/tools/rules_approval_check.py 的 RULE_PATTERNS 同一份，
@@ -872,14 +881,177 @@ def _enforce_secret_scan(workspace_root: Path) -> int:
     return 1
 
 
+def _detect_station_actor() -> tuple[str, str, str]:
+    """Identify caller agent/session from environment markers; plain user terminals return ``no-agent-marker``."""
+    found: set[str] = set()
+    marker = os.environ.get("AUTO_PM_AGENT", "").strip()
+    if marker:
+        found.add(marker.split(":", 1)[0].strip().lower())
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
+        found.add("claude")
+    if any(k.upper().startswith("CODEX_") and v for k, v in os.environ.items()):
+        found.add("codex")
+    generic = os.environ.get("AI_AGENT", "").strip().lower()
+    if generic:
+        found.add(re.split(r"[:_\-]", generic, maxsplit=1)[0])
+    sid = ""
+    for key in ("AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            sid = val
+            break
+    agent = next(iter(found)) if len(found) == 1 else ("?" if len(found) > 1 else "")
+    if not agent and not sid:
+        return "", "", "no-agent-marker"
+    if sid:
+        compact = sid.lower().replace("-", "")
+        tag = (
+            compact[:6]
+            if re.fullmatch(r"[0-9a-f]{6,}", compact)
+            else hashlib.sha256(sid.encode("utf-8")).hexdigest()[:6]
+        )
+        base = agent if agent and agent != "?" else "agent"
+        return agent, sid, f"{base}-{tag}"
+    return agent, "", agent or "?"
+
+
+def _append_station_op(gov_root: Path, record: dict[str, object]) -> None:
+    """Best-effort append of a station operation record to ``.auto-pm/logs/station-ops.jsonl``."""
+    log_path = gov_root / _STATION_OPS_LOG
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        return
+
+
+def _read_json_dict(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8", errors="replace"))  # lenient-decode: 仅读取工位元数据
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _enforce_station_ownership(workspace_root: Path, control_root: Path | None) -> int:
+    """跨工位写互锁（CHG-SCPT-2026-750 / #3）：禁止异会话 AI 在别人工位提交，并记录 station-ops.jsonl。
+
+    用户本人无 agent 标记的终端始终放行并留痕；本会话、合法借用者、非 agent 临时工位（deploy-/gate-/run-plan-）放行。
+    """
+    if control_root is None:
+        return 0
+    try:
+        cand = workspace_root.resolve()
+        ctrl = control_root.resolve()
+    except OSError:
+        return 0
+    if cand == ctrl:
+        return 0
+    worktrees_dir = (ctrl / ".auto-pm" / "worktrees").resolve()
+    if cand.parent != worktrees_dir:
+        return 0
+    station = cand.name
+    if station.startswith(_NON_AGENT_STATION_PREFIXES):
+        return 0
+
+    holder = _read_json_dict(ctrl / ".auto-pm" / "station-holders" / f"{station}.json")
+    borrow = _read_json_dict(worktrees_dir / f".borrowed-{station}.json")
+    holder_sid = str(holder.get("session_id") or "").strip()
+    owner = str(holder.get("agent") or station).strip()
+    borrower = str(borrow.get("by") or "").strip()
+    agent, sid, actor = _detect_station_actor()
+
+    event: dict[str, object] = {
+        "time": datetime.now(UTC).isoformat(timespec="seconds"),
+        "op": "pre-commit",
+        "station": station,
+        "owner": owner,
+        "actor": actor,
+    }
+    if actor == "no-agent-marker":
+        event["outcome"] = "allowed"
+        event["reason"] = "user-terminal"
+        _append_station_op(ctrl, event)
+        return 0
+
+    alias_match = _STATION_ALIAS_RE.fullmatch(station)
+    if holder_sid:
+        owned = bool(sid) and sid == holder_sid
+    elif alias_match is not None:
+        owned = actor == station
+    else:
+        owned = bool(agent) and agent == station
+    borrowed = bool(borrower) and borrower in {actor, agent}
+
+    if owned or borrowed:
+        event["outcome"] = "allowed"
+        event["reason"] = "owner" if owned else "borrower"
+        _append_station_op(ctrl, event)
+        return 0
+
+    event["outcome"] = "blocked"
+    event["reason"] = "cross-station-mismatch"
+    _append_station_op(ctrl, event)
+    print("=" * 70)
+    print(f"❌ [auto-pm pre-commit] 物理拦截：禁止跨工位提交（工位 {station} 归属 {owner}，当前会话 {actor}）")
+    print(f"   工位路径: {cand}")
+    print("   处理：切回自己会话的工位再提交，或由用户/原持有人完成借用交接。")
+    print("=" * 70)
+    return 1
+
+
+def _is_encoding_hygiene_path(path: str) -> bool:
+    """需要执行 UTF-8 无 BOM 与无裸 CR 校验的治理、记录与核心配置文件。"""
+    normalised = path.replace("\\", "/")
+    lower = normalised.lower()
+    if change_status_guard.is_change_order_path(normalised):
+        return True
+    if not lower.endswith(_HYGIENE_TEXT_SUFFIXES):
+        return False
+    if "/01_变更管理/" in f"/{normalised}":
+        return True
+    if normalised in {"AGENTS.md", "CLAUDE.md"}:
+        return True
+    return normalised.startswith(("roles/", "00_Obsidian_Base", "00_Infrastructure/auto_pm/"))
+
+
+def _enforce_encoding_hygiene(workspace_root: Path, snapshot: StagedSnapshot) -> int:
+    """拒绝暂存含 UTF-8 BOM 或裸 CR（独立 \\r）的治理/记录文件（CHG-SCPT-2026-750 / #14）。"""
+    findings: list[str] = []
+    for entry in snapshot.entries:
+        if entry.deleted or not _is_encoding_hygiene_path(entry.path):
+            continue
+        try:
+            blob = _read_staged_blob(workspace_root, entry)
+        except Exception as exc:
+            print(f"❌ [auto-pm pre-commit] 物理拦截：读取暂存内容检查编码时失败: {entry.path}: {exc}")
+            return 1
+        if blob.startswith(b"\xef\xbb\xbf"):
+            findings.append(f"{entry.path}（含 UTF-8 BOM）")
+        if b"\r" in blob.replace(b"\r\n", b""):
+            findings.append(f"{entry.path}（含裸 CR 换行符）")
+    if not findings:
+        return 0
+    print("❌ [auto-pm pre-commit] 物理拦截：治理/记录文件禁止包含 UTF-8 BOM 或裸 CR 换行符：")
+    for item in findings[:10]:
+        print(f"   - {item}")
+    if len(findings) > 10:
+        print(f"   ... 共 {len(findings)} 处")
+    print("   处理：以无 BOM UTF-8（LF 或 CRLF）重新保存后重新暂存。")
+    return 1
+
+
 def enforce_pre_commit(
     workspace_root: Path,
     staged_snapshot: StagedSnapshot | None = None,
     control_root: Path | None = None,
 ) -> int:
-    """pre-commit 门禁：台账一致性（原有）、PLC 文档/代码一致性（V01D）、暂存区密钥扫描（TD-202）。
+    """pre-commit 门禁：工位属主互锁、台账一致性、PLC 文档/代码一致性、暂存区密钥扫描、忽略规则、编码卫生。
 
-    三项各自完整报告，任何一项不通过即拒绝提交。
+    各项各自完整报告，任何一项不通过即拒绝提交。
     """
     from auto_pm.infrastructure.plc_doc_hook import enforce_plc_docs
 
@@ -890,12 +1062,21 @@ def enforce_pre_commit(
     )
     if snapshot is None:
         return 1
+    station_code = _enforce_station_ownership(workspace_root, control_root)
     run_code = _enforce_no_open_run(workspace_root, control_root)
     ledger_code = _enforce_ledger_pre_commit(workspace_root, snapshot, control_root)
     plc_code = enforce_plc_docs(workspace_root, snapshot.paths)
     secret_code = _enforce_secret_scan(workspace_root)
     ignored_code = _enforce_ignored_additions(workspace_root)
-    return 1 if run_code != 0 or ledger_code != 0 or plc_code != 0 or secret_code != 0 or ignored_code != 0 else 0
+    hygiene_code = _enforce_encoding_hygiene(workspace_root, snapshot)
+    return (
+        1
+        if any(
+            code != 0
+            for code in (station_code, run_code, ledger_code, plc_code, secret_code, ignored_code, hygiene_code)
+        )
+        else 0
+    )
 
 
 def _enforce_no_open_run(workspace_root: Path, control_root: Path | None) -> int:
@@ -1135,6 +1316,31 @@ def _is_content_neutral_merge(cand_root: Path, snapshot: StagedSnapshot, prod_fi
         return False
 
 
+def _modified_closed_change_orders(cand_root: Path, snapshot: StagedSnapshot) -> list[str]:
+    """返回本次提交修改或删除的、在 HEAD 中已为 completed/closed 状态的变更单路径（CHG-SCPT-2026-750 / #6）。"""
+    if change_status_guard.replays_history(cand_root):
+        return []
+    hits: list[str] = []
+    for entry in snapshot.entries:
+        if not change_status_guard.is_change_order_path(entry.path):
+            continue
+        head_blob = change_status_guard.git_blob(cand_root, "HEAD", entry.path)
+        if head_blob is None:
+            continue
+        old_status = change_status_guard.status_of_bytes(head_blob, entry.path)
+        if old_status not in _CLOSED_CHANGE_STATUSES:
+            old_status = change_status_guard.explicit_status(change_status_guard.text_of(head_blob))
+        if old_status not in _CLOSED_CHANGE_STATUSES:
+            continue
+        if entry.deleted:
+            hits.append(entry.path)
+            continue
+        staged_blob = _read_staged_blob(cand_root, entry)
+        if _normalise_line_endings(staged_blob) != _normalise_line_endings(head_blob):
+            hits.append(entry.path)
+    return sorted(hits)
+
+
 def enforce_commit_msg(
     workspace_root: Path,
     commit_msg_file: Path,
@@ -1142,7 +1348,7 @@ def enforce_commit_msg(
     control_root: Path | None = None,
 ) -> int:
     """commit-msg 阶段拦截检查：
-    1. 暂存区包含“要你点头”那一类的生产代码（PLC、规则、钩子等），强制 Commit Message 绑定一个已批准变更单；
+    1. 暂存区包含“要你点头”那一类的生产代码（PLC、规则、钩子等）或修改已关闭变更单，强制 Commit Message 绑定一个已批准变更单；
     2. 其余生产代码（驾驶舱代码等“直接做”那一类）认 ``领卡占位: <卡号>`` 一行，不再要变更单；
     3. 在同一 index 快照内校验 CHG、PID、项目台账及其合法执行态。
 
@@ -1162,8 +1368,17 @@ def enforce_commit_msg(
     cand_root, gov_root = roots
     staged = list(snapshot.paths)
     prod_files = filter_production_files(staged)
+    try:
+        closed_chg_edits = _modified_closed_change_orders(cand_root, snapshot)
+    except Exception as exc:
+        print(
+            "❌ [auto-pm commit-msg] 物理拦截：核对已关闭变更单保护时出错，"
+            f"为防止绕过门禁已拒绝提交: {exc}"
+        )
+        return 1
 
-    if not prod_files or _is_content_neutral_merge(cand_root, snapshot, prod_files):
+    protected_targets = list(dict.fromkeys([*prod_files, *closed_chg_edits]))
+    if not protected_targets or _is_content_neutral_merge(cand_root, snapshot, protected_targets):
         # 纯文档/治理/会话提交，或没带进新内容的合并提交，豁免变更单号要求；但暂存的变更单状态仍要有流转依据
         return _enforce_staged_change_status(cand_root, gov_root, snapshot)
 
@@ -1186,18 +1401,24 @@ def enforce_commit_msg(
         )
         return 1
 
-    requires_change = any(is_protected_production_file(path) for path in prod_files)
+    requires_change = bool(closed_chg_edits) or any(is_protected_production_file(path) for path in prod_files)
     card_match = CARD_LINE.search(msg_content)
 
     if requires_change and not chg_matches:
         print("=" * 70)
-        print("❌ [auto-pm commit-msg] 物理拦截：检测到暂存区包含生产代码变更，但 Commit Message 未绑定变更单！")
-        print("📄 涉及生产文件:")
-        for pf in prod_files[:5]:
-            print(f"   - {pf}")
-        if len(prod_files) > 5:
-            print(f"   ... (共 {len(prod_files)} 个文件)")
-        print("\n👉 规程要求：生产代码提交必须显式注明合法变更单号，例如:")
+        if closed_chg_edits and not any(is_protected_production_file(p) for p in prod_files):
+            print("❌ [auto-pm commit-msg] 物理拦截：禁止在未绑定新批准变更单的情况下修改已关闭/已完成变更单！")
+            print("📄 涉及已关闭变更单:")
+            for cf in closed_chg_edits[:5]:
+                print(f"   - {cf}")
+        else:
+            print("❌ [auto-pm commit-msg] 物理拦截：检测到暂存区包含生产代码变更，但 Commit Message 未绑定变更单！")
+            print("📄 涉及生产文件:")
+            for pf in prod_files[:5]:
+                print(f"   - {pf}")
+            if len(prod_files) > 5:
+                print(f"   ... (共 {len(prod_files)} 个文件)")
+        print("\n👉 规程要求：受保护代码或已关闭变更单修订必须显式注明已批准变更单号，例如:")
         print("   feat(core): [CHG-SCPT-2026-170] 落地决策包与门禁护航机制")
         print("=" * 70)
         return 1
@@ -1220,7 +1441,16 @@ def enforce_commit_msg(
             gov_root,
             list(ProjectService(str(gov_root)).list_projects()),
         )
-        project_ids = _production_project_ids(snapshot, bindings)
+        prod_project_ids = _production_project_ids(snapshot, bindings) if prod_files else ()
+        closed_project_ids = tuple(
+            sorted(
+                {
+                    _binding_for_staged_file(_normalise_git_path(path), bindings).project_id
+                    for path in closed_chg_edits
+                }
+            )
+        )
+        project_ids = tuple(sorted(set(prod_project_ids) | set(closed_project_ids)))
         if len(project_ids) != 1:
             project_id_text = ", ".join(project_ids) or "无"
             raise StagedSnapshotError(f"暂存生产代码归属项目不唯一: {project_id_text}")
@@ -1264,6 +1494,12 @@ def enforce_commit_msg(
             print(
                 "❌ [auto-pm commit-msg] 物理拦截：变更单解析结果与暂存快照的"
                 " CHG/PID 关联不一致！"
+            )
+            return 1
+        if closed_chg_edits and cr.status in _CLOSED_CHANGE_STATUSES:
+            print(
+                f"❌ [auto-pm commit-msg] 物理拦截：修改已关闭/已完成变更单须绑定处于执行态的新批准变更单，"
+                f"不能沿用已关闭变更单 {chg_id}（当前状态 '{cr.status}'）！"
             )
             return 1
         if cr.status not in _VALID_CHANGE_STATUSES:

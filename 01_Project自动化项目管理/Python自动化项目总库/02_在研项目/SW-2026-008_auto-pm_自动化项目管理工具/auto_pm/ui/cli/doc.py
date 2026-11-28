@@ -96,11 +96,14 @@ def _check_project_links(workspace_root: Path, project_id: str) -> None:
         console.print(f"{escape(d.file)}:{d.line} 链接找不到：{escape(d.target)}", highlight=False)
     for name in report.unreadable:
         console.print(f"{escape(name)} 读不了（不是 UTF-8 也不是 GBK，或打不开），里面的链接没查", highlight=False)
+    for item in report.encoding_issues:
+        console.print(f"{escape(item)} 编码/换行不合规（禁止 UTF-8 BOM 或裸 CR）", highlight=False)
     if report.passed:
         console.print(f"[bold green]{project_id}：查了 {report.scanned} 份 .md，相对链接都找得到[/bold green]")
         return
+    enc_suffix = f"，编码/换行异常 {len(report.encoding_issues)} 份" if report.encoding_issues else ""
     console.print(
-        f"[bold red]{project_id}：查了 {report.scanned} 份 .md，死链 {len(report.dead)} 处，读不了 {len(report.unreadable)} 份[/bold red]"
+        f"[bold red]{project_id}：查了 {report.scanned} 份 .md，死链 {len(report.dead)} 处，读不了 {len(report.unreadable)} 份{enc_suffix}[/bold red]"
     )
     raise click.exceptions.Exit(1)
 

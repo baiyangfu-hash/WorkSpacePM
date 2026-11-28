@@ -753,3 +753,31 @@ def test_change_transition_approved_rejects_prose_section5(cli_runner: CliRunner
     assert refused.exit_code == 1
     assert "§5.1" in refused.output
 
+
+@pytest.mark.cli
+def test_change_transition_to_completed_prints_archive_changes_hint(
+    cli_runner: CliRunner, tmp_path: Path
+) -> None:
+    """CHG-SCPT-2026-750 / #7: 变更单流转到 completed 后输出受控归档命令提示。"""
+    _make_plc_project_for_change(tmp_path, "DJ-2026-CHG")
+    chg = _create_change_via_cli(cli_runner, tmp_path, "DJ-2026-CHG")
+    assert cli_runner.invoke(
+        cli, ["-w", str(tmp_path), "change", "edit", chg, "--file", "a/b.py"], catch_exceptions=False
+    ).exit_code == 0
+    for st in ("submitted", "under_review", "approved", "implementing", "pending_acceptance", "accepting"):
+        res = cli_runner.invoke(
+            cli, ["-w", str(tmp_path), "change", "transition", chg, "--to", st, "--approver", "u", "--comment", "ok"],
+            catch_exceptions=False,
+        )
+        assert res.exit_code == 0, res.output
+    done = cli_runner.invoke(
+        cli,
+        [
+            "-w", str(tmp_path), "change", "transition", chg,
+            "--to", "completed", "--approver", "u", "--verification-conclusion", "全部通过",
+        ],
+        catch_exceptions=False,
+    )
+    assert done.exit_code == 0, done.output
+    assert "archive-changes" in done.output and f"DJ-2026-CHG --chg {chg} --dry-run" in done.output
+

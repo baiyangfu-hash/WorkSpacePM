@@ -477,3 +477,44 @@ def test_the_cockpit_identity_ignores_the_output_of_a_failed_process(tmp_path: P
     good_looking = json.dumps({"context": {"configured_release_id": NEW, "effective_release_id": NEW}, "conflicts": []})
 
     assert rw.cockpit_identity(tmp_path, run=lambda argv, cwd: (3, good_looking)) == {}
+
+
+def test_cleanup_station_removes_only_clean_detached_deploy_worktree_on_main(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-750: 只回收干净、分离 HEAD 且在 main 上的 deploy-* 临时工位；脏目录/分支/非 deploy-* 绝不动。"""
+    import subprocess as sp
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.invalid"),
+        ("config", "user.name", "t"),
+    ):
+        sp.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (repo / "a.txt").write_text("hi\n", encoding="utf-8")
+    sp.run(["git", "-C", str(repo), "add", "a.txt"], check=True, capture_output=True)
+    sp.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True, capture_output=True)
+
+    port = rw.CockpitLedgerPort(repo, run=lambda _a: (0, ""), changes=FakeChanges({}), store=FakeStore())
+    wt_dir = repo / ".auto-pm" / "worktrees"
+    wt_dir.mkdir(parents=True)
+
+    # 1) Clean detached deploy-* worktree on main -> removed
+    clean_deploy = wt_dir / "deploy-1.3.3-abcdef0"
+    port.ensure_station(clean_deploy)
+    assert clean_deploy.is_dir()
+    assert port.cleanup_station(clean_deploy) == "station cleanup"
+    assert not clean_deploy.exists()
+
+    # 2) Dirty deploy-* worktree -> kept
+    dirty_deploy = wt_dir / "deploy-1.3.3-dirty00"
+    port.ensure_station(dirty_deploy)
+    (dirty_deploy / "untracked.tmp").write_text("x\n", encoding="utf-8")
+    assert port.cleanup_station(dirty_deploy) == ""
+    assert dirty_deploy.is_dir()
+
+    # 3) Non-deploy-* agent worktree -> kept
+    other_wt = wt_dir / "trae-111111"
+    sp.run(["git", "-C", str(repo), "worktree", "add", "--detach", str(other_wt), "HEAD"], check=True, capture_output=True)
+    assert port.cleanup_station(other_wt) == ""
+    assert other_wt.is_dir()

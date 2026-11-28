@@ -102,6 +102,7 @@ TIERS = {"文档": "docs", "测试": "tests", "产品": "product", "核心": "co
 APPROVED_STATES = frozenset(
     {"approved", "conditionally_approved", "implementing", "pending_acceptance", "accepting"}
 )
+CLOSED_STATES = frozenset({"completed", "closed"})
 HOOK_NAME = "reference-transaction"
 HOOK_MARK = "pm_merge.py install-hook"
 GIT_TIMEOUT = 120
@@ -158,7 +159,7 @@ class Git:
         self, *args: str, timeout: int = GIT_TIMEOUT, check: bool = False
     ) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            ["git", *args],
+            ["git", "-c", "core.fsmonitor=false", *args],
             cwd=self.cwd,
             env=self.env,
             capture_output=True,
@@ -560,6 +561,34 @@ def removed_outside_cockpit(git: Git, base: str, tip: str) -> list[str]:
         if not (COCKPIT_PREFIX and path.startswith(COCKPIT_PREFIX))
         or any(fnmatch.fnmatchcase(path, pattern) for pattern in RECORD_PATTERNS)
     )
+
+
+def modified_closed_records(git: Git, base: str, tip: str) -> list[str]:
+    """修改或删除在 ``base`` 中已处于 completed/closed 状态的变更单原件：算“要你点头”（CHG-SCPT-2026-750 / #6）。"""
+    raw = git.run(
+        "diff", "--name-status", "-z", "--no-renames", "--diff-filter=MD", base, tip, check=True
+    ).stdout
+    parts = [part for part in raw.split("\0") if part]
+    hits: list[str] = []
+    for index in range(0, len(parts) - 1, 2):
+        status, path = parts[index], parts[index + 1]
+        if status not in ("M", "D"):
+            continue
+        if "/01_变更单/" not in f"/{path}" or not CHANGE_FILE_RE.fullmatch(Path(path).name):
+            continue
+        base_blob = _git_blob(git.cwd, base, path)
+        if base_blob is None:
+            continue
+        match = STATE_LINE.search(base_blob.decode("utf-8", errors="replace"))
+        if not match or match.group(1) not in CLOSED_STATES:
+            continue
+        if status == "D":
+            hits.append(path)
+            continue
+        tip_blob = _git_blob(git.cwd, tip, path)
+        if tip_blob is None or not _same_ignoring_cr(base_blob, tip_blob):
+            hits.append(path)
+    return sorted(hits)
 
 
 def card_files(git: Git, tip: str, card: str, pid: str) -> tuple[list[str], list[str]]:
@@ -1126,6 +1155,9 @@ def plan_merge(root: Path, name: str, pid: str = "", *, archive_existing: bool =
     user_paths = [path for path in paths if needs_user(path)]
     user_paths += [
         path for path in removed_outside_cockpit(root_git, base, sha) if path not in user_paths
+    ]
+    user_paths += [
+        path for path in modified_closed_records(root_git, base, sha) if path not in user_paths
     ]
     chgs: list[str] = []
     if user_paths or formal_change:
@@ -1964,13 +1996,75 @@ def _check_archive_safety_window(root: Path, git: Git, base: str) -> None:
 
 def _git_blob(root: Path, ref: str, rel_path: str) -> bytes | None:
     done = subprocess.run(
-        ["git", "cat-file", "blob", f"{ref}:{rel_path}"],
+        ["git", "-c", "core.fsmonitor=false", "cat-file", "blob", f"{ref}:{rel_path}"],
         cwd=root,
         capture_output=True,
         check=False,
         timeout=GIT_TIMEOUT,
     )
     return done.stdout if done.returncode == 0 else None
+
+
+def _git_blob_sha1(data: bytes) -> str:
+    """计算与 Git 对象库一致的 blob SHA-1（零子进程开销）。"""
+    header = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(header + data).hexdigest()
+
+
+def _git_tree_blobs(root: Path, ref: str, prefix: str) -> dict[str, str]:
+    """一次 ``git ls-tree -r -z`` 获取指定目录下全部入库文件的 ``{rel_path: blob_oid}``。"""
+    done = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "ls-tree", "-r", "-z", ref, "--", prefix],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        timeout=GIT_TIMEOUT,
+    )
+    if done.returncode != 0:
+        return {}
+    blobs: dict[str, str] = {}
+    for entry in done.stdout.split(b"\0"):
+        if not entry or b"\t" not in entry:
+            continue
+        meta, raw_path = entry.split(b"\t", 1)
+        parts = meta.decode("ascii", errors="replace").split()
+        if len(parts) == 3 and parts[1] == "blob":
+            blobs[raw_path.decode("utf-8", errors="replace")] = parts[2]
+    return blobs
+
+
+def _git_blobs_batch(root: Path, oids: Sequence[str]) -> dict[str, bytes]:
+    """一次 ``git cat-file --batch`` 批量读取差异 blob 原文，替代逐文件起子进程。"""
+    unique = list(dict.fromkeys(oid for oid in oids if oid))
+    if not unique:
+        return {}
+    payload = ("\n".join(unique) + "\n").encode("ascii")
+    done = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "cat-file", "--batch"],
+        cwd=root,
+        input=payload,
+        capture_output=True,
+        check=False,
+        timeout=GIT_TIMEOUT,
+    )
+    if done.returncode != 0:
+        return {}
+    out = done.stdout
+    pos = 0
+    total = len(out)
+    result: dict[str, bytes] = {}
+    while pos < total:
+        nl = out.find(b"\n", pos)
+        if nl < 0:
+            break
+        header = out[pos:nl].decode("ascii", errors="replace")
+        pos = nl + 1
+        parts = header.split()
+        if len(parts) == 3 and parts[1] == "blob" and parts[2].isdigit():
+            size = int(parts[2])
+            result[parts[0]] = out[pos : pos + size]
+            pos += size + 1  # skip trailing LF
+    return result
 
 
 def _index_table_bounds(lines: Sequence[str]) -> tuple[int, int, int] | None:
@@ -2177,13 +2271,41 @@ def _collect_archive_plan(
     _, base_rows_map = _ledger_entries(base_ledger_text)
     _, local_rows_map = _ledger_entries(local_ledger_text)
 
-    selected: list[str] = []
+    chg_dir_rel = chg_dir.relative_to(root).as_posix()
+    tree_oids = _git_tree_blobs(root, base, chg_dir_rel)
+    disk_bytes_cache: dict[str, bytes] = {}
+    ambiguous_oids: list[str] = []
+    ambiguous_chgs: set[str] = set()
+    chg_needs_map: dict[str, bool] = {}
+
     for chg in candidates:
         path, rel, _ = disk_chgs[chg]
-        local_rows = local_rows_map.get(chg, [])
+        base_oid = tree_oids.get(rel)
+        if base_oid is None:
+            chg_needs_map[chg] = True
+            continue
         disk_bytes = path.read_bytes()
-        main_blob = _git_blob(root, base, rel)
-        chg_needs = main_blob is None or not _same_ignoring_cr(disk_bytes, main_blob)
+        disk_bytes_cache[chg] = disk_bytes
+        lf_bytes = disk_bytes.replace(b"\r\n", b"\n")
+        if _git_blob_sha1(disk_bytes) == base_oid or _git_blob_sha1(lf_bytes) == base_oid:
+            chg_needs_map[chg] = False
+        else:
+            ambiguous_chgs.add(chg)
+            ambiguous_oids.append(base_oid)
+
+    batch_blobs = _git_blobs_batch(root, ambiguous_oids)
+    for chg in ambiguous_chgs:
+        _, rel, _ = disk_chgs[chg]
+        base_oid = tree_oids.get(rel, "")
+        main_blob = batch_blobs.get(base_oid)
+        if main_blob is None:
+            main_blob = _git_blob(root, base, rel)
+        chg_needs_map[chg] = main_blob is None or not _same_ignoring_cr(disk_bytes_cache[chg], main_blob)
+
+    selected: list[str] = []
+    for chg in candidates:
+        local_rows = local_rows_map.get(chg, [])
+        chg_needs = chg_needs_map[chg]
         ledger_needs = base_rows_map.get(chg) != local_rows
         if chg_needs or ledger_needs:
             if len(local_rows) != 1 or not _is_completed_ledger_row(local_rows[0]):
@@ -2208,9 +2330,12 @@ def _collect_archive_plan(
     blobs: dict[str, bytes] = {}
     for chg in selected:
         path, rel, _ = disk_chgs[chg]
-        normalized = path.read_bytes().replace(b"\r\n", b"\n")
-        main_blob = _git_blob(root, base, rel)
-        if main_blob is None or main_blob != normalized:
+        raw = disk_bytes_cache.get(chg)
+        if raw is None:
+            raw = path.read_bytes()
+        normalized = raw.replace(b"\r\n", b"\n")
+        base_oid = tree_oids.get(rel)
+        if base_oid is None or _git_blob_sha1(normalized) != base_oid:
             blobs[rel] = normalized
     projected_bytes = projected_ledger.encode("utf-8")
     if base_ledger_bytes is None or base_ledger_bytes != projected_bytes:

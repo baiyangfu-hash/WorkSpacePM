@@ -106,3 +106,20 @@ def test_l07_a_new_template_project_passes(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["-w", str(tmp_path), "doc", "check", "--project", PID])
     assert result.exit_code == 0, result.output
     assert "相对链接都找得到" in result.output
+
+
+def test_l08_bom_and_bare_cr_are_reported_and_fail_doc_check(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-750 / #14: 含 UTF-8 BOM 或裸 CR 的 .md 文档被检出并使 doc check 退出码 1。"""
+    project = _project(tmp_path)
+    (project / "README.md").write_text("# 正常文档\n", encoding="utf-8")
+    (project / "带BOM.md").write_bytes(b"\xef\xbb\xbf# BOM\n")
+    (project / "裸CR.md").write_bytes(b"line1\rline2\n")
+
+    report = dead_links(project)
+    assert not report.passed
+    assert any("带BOM.md" in item and "UTF-8 BOM" in item for item in report.encoding_issues)
+    assert any("裸CR.md" in item and "裸 CR" in item for item in report.encoding_issues)
+
+    result = CliRunner().invoke(cli, ["-w", str(tmp_path), "doc", "check", "--project", PID])
+    assert result.exit_code == 1, result.output
+    assert "UTF-8 BOM" in result.output and "裸 CR" in result.output and "编码/换行异常 2 份" in result.output

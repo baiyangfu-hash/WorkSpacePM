@@ -216,6 +216,27 @@ def _facts(row: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
     )
 
 
+def _station_op_warning(
+    name: str,
+    note: Mapping[str, Any],
+    ops: Mapping[str, Mapping[str, Any]] | None,
+) -> str:
+    """最近一次工位提交操作不是工位主人（或被跨工位互锁拒绝）时返回告警文案。"""
+    last_op = (ops or {}).get(name)
+    if last_op is None and isinstance(note.get("_last_op"), Mapping):
+        last_op = note["_last_op"]
+    if not isinstance(last_op, Mapping):
+        return ""
+    actor = str(last_op.get("actor") or "").strip()
+    owner = str(last_op.get("owner") or name).strip()
+    outcome = str(last_op.get("outcome") or "").strip()
+    if outcome == "blocked":
+        return f"工位跨会话操作告警：最近被拦截操作者 {actor or UNKNOWN} ≠ 工位主人 {owner}"
+    if actor and owner and actor != owner and actor != "no-agent-marker":
+        return f"工位跨会话操作告警：最近操作者 {actor} ≠ 工位主人 {owner}"
+    return ""
+
+
 def build_view(
     stations: Sequence[Mapping[str, Any]] | None,
     sweep_items: Sequence[Mapping[str, Any]] | None,
@@ -227,6 +248,7 @@ def build_view(
     long_runs: Sequence[Mapping[str, Any]] | None = None,
     handoffs: Mapping[str, local_data.ProjectHandoff] | None = None,
     known_pids: Sequence[str] = (),
+    station_ops: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> StationsView:
     """拼一页：每个工位一行、清理清单每项一行。``None``＝那条命令没读到：对应的按钮全灰，写明原因，不当成“没有”。
 
@@ -287,6 +309,9 @@ def build_view(
                 blocked = f"目录名“{name[:40]}”里有命令行不认的字符，不运行"
             else:
                 blocked = ""
+        op_warning = _station_op_warning(name, note, station_ops)
+        if op_warning:
+            warning = f"{warning}；{op_warning}" if warning else op_warning
         resolved_proj = project_of(claim.get("paths") or ()) if claim else ""
         if not resolved_proj:
             resolved_proj = local_data.resolve_station_project(branch, card, None, handoffs, known_pids)
@@ -323,19 +348,44 @@ def build_view(
     return view
 
 
+def read_station_ops(root: Path | None) -> dict[str, dict[str, Any]]:
+    """读取 ``.auto-pm/logs/station-ops.jsonl`` 中每个工位的最后一条操作记录（只读，坏行跳过）。"""
+    found: dict[str, dict[str, Any]] = {}
+    log_path = (root / ".auto-pm" / "logs" / "station-ops.jsonl") if root is not None else None
+    if log_path is None or not log_path.is_file():
+        return found
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return found
+    for raw in lines:
+        if not raw.strip():
+            continue
+        try:
+            item = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            station = str(item.get("station") or "").strip()
+            if station:
+                found[station] = item
+    return found
+
+
 def read_holders(root: Path | None) -> dict[str, dict[str, Any]]:
     """``.auto-pm/station-holders/<名字>.json``：谁开的会话工位、对话标题、最后心跳（只读；读不了的跳过，页上写“未知”）。"""
     found: dict[str, dict[str, Any]] = {}
     folder = (root / ".auto-pm" / "station-holders") if root is not None else None
-    if folder is None or not folder.is_dir():
-        return found
-    for entry in sorted(folder.glob("*.json")):
-        try:
-            loaded = json.loads(entry.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(loaded, dict):
-            found[entry.stem] = loaded
+    if folder is not None and folder.is_dir():
+        for entry in sorted(folder.glob("*.json")):
+            try:
+                loaded = json.loads(entry.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(loaded, dict):
+                found[entry.stem] = loaded
+    for station, last_op in read_station_ops(root).items():
+        found.setdefault(station, {})["_last_op"] = last_op
     return found
 
 

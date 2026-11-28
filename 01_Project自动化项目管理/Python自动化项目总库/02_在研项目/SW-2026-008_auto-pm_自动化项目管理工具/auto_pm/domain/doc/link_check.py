@@ -74,6 +74,10 @@ def _read(path: Path) -> str | None:
         data = path.read_bytes()
     except OSError:
         return None
+    return _decode_bytes(data)
+
+
+def _decode_bytes(data: bytes) -> str | None:
     for encoding in ("utf-8-sig", "gbk"):
         try:
             return data.decode(encoding)
@@ -82,39 +86,62 @@ def _read(path: Path) -> str | None:
     return None
 
 
+def _encoding_problems(data: bytes, relative: str) -> list[str]:
+    """检测 UTF-8 BOM 与裸 CR（独立 \\r）换行符异常。"""
+    problems: list[str] = []
+    if data.startswith(b"\xef\xbb\xbf"):
+        problems.append(f"{relative}（含 UTF-8 BOM）")
+    if b"\r" in data.replace(b"\r\n", b""):
+        problems.append(f"{relative}（含裸 CR 换行符）")
+    return problems
+
+
 @dataclass
 class LinkCheckReport:
-    """查过的 .md 文件数、死链、读不了的文件（读不了不算通过，要报出来）。"""
+    """查过的 .md 文件数、死链、读不了的文件、编码/换行异常（任一非空都不通过）。"""
 
     scanned: int = 0
     dead: list[DeadLink] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
+    encoding_issues: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
-        return not self.dead and not self.unreadable
+        return not self.dead and not self.unreadable and not self.encoding_issues
 
 
 def dead_links(project_root: Path | str) -> LinkCheckReport:
-    """扫一个项目目录；死链按文件、行号排好。"""
+    """扫一个项目目录；死链按文件、行号排好，同时检查 UTF-8 BOM 与裸 CR 换行符。"""
     root = Path(project_root)
     scanned = 0
     dead: list[DeadLink] = []
     unreadable: list[str] = []
+    encoding_issues: list[str] = []
     for folder, subfolders, files in os.walk(root):
         subfolders[:] = sorted(d for d in subfolders if not skips_folder(d))
         for name in sorted(files):
             if not name.lower().endswith(".md"):
                 continue
             path = Path(folder) / name
-            text = _read(path)
+            relative = path.relative_to(root).as_posix()
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                unreadable.append(relative)
+                continue
+            encoding_issues.extend(_encoding_problems(raw, relative))
+            text = _decode_bytes(raw)
             if text is None:
-                unreadable.append(path.relative_to(root).as_posix())
+                unreadable.append(relative)
                 continue
             scanned += 1
-            relative = path.relative_to(root).as_posix()
             for number, target in links_of(text):
                 part = _file_part(target)
                 if part and not (path.parent / part).exists():
                     dead.append(DeadLink(file=relative, line=number, target=target))
-    return LinkCheckReport(scanned=scanned, dead=dead, unreadable=unreadable)
+    return LinkCheckReport(
+        scanned=scanned,
+        dead=dead,
+        unreadable=unreadable,
+        encoding_issues=encoding_issues,
+    )

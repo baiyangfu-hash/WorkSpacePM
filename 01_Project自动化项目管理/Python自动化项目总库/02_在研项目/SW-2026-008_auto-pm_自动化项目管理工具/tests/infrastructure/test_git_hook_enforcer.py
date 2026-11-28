@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -1280,3 +1281,124 @@ def test_td115_preflight_entry_refuses_when_the_ignore_scan_hangs(
     result = _ignore_preflight(cand, ctrl, msg)
     assert result.exit_code != 0
     assert "忽略规则扫描失败" in result.output and "超时回执" in result.output
+
+
+# ---- CHG-SCPT-2026-750: #3 跨工位写互锁 / #6 已关闭变更单保护 / #14 UTF-8 BOM 与裸 CR 校验 ----
+
+
+def test_750_cross_station_interlock_blocks_foreign_agent_and_logs_station_ops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#3: 异会话 agent 在别人工位提交被物理拦截并写 station-ops.jsonl；主人/借用者/用户终端放行。"""
+    ctrl = tmp_path / "ctrl"
+    ctrl.mkdir()
+    _git(ctrl, "init", "-q", "-b", "main")
+    _git(ctrl, "config", "user.email", "t@example.invalid")
+    _git(ctrl, "config", "user.name", "t")
+    (ctrl / "README.md").write_text("# root\n", encoding="utf-8")
+    _git(ctrl, "add", "README.md")
+    _git(ctrl, "commit", "-qm", "base")
+
+    wt = ctrl / ".auto-pm" / "worktrees" / "trae-111111"
+    wt.parent.mkdir(parents=True)
+    _git(ctrl, "worktree", "add", "-q", "-b", "trae/card-1", str(wt))
+    holders = ctrl / ".auto-pm" / "station-holders"
+    holders.mkdir(parents=True)
+    (holders / "trae-111111.json").write_text(
+        json.dumps({"agent": "trae-111111", "session_id": "session-owner-111"}), encoding="utf-8"
+    )
+    (wt / "note.txt").write_text("hi\n", encoding="utf-8")
+    _git(wt, "add", "note.txt")
+
+    for var in ("AUTO_PM_AGENT", "AUTO_PM_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TRAE_CHAT_SESSION_ID", "CLAUDECODE", "AI_AGENT"):
+        monkeypatch.delenv(var, raising=False)
+
+    # 1) Plain user terminal (no agent markers) -> allowed & logged
+    assert enforce_pre_commit(wt, control_root=ctrl) == 0
+
+    # 2) Foreign agent session -> blocked & logged
+    monkeypatch.setenv("AUTO_PM_AGENT", "antigravity")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "session-other-999")
+    assert enforce_pre_commit(wt, control_root=ctrl) == 1
+    assert "禁止跨工位提交" in capsys.readouterr().out
+
+    # 3) Owner session -> allowed
+    monkeypatch.setenv("AUTO_PM_AGENT", "trae")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "session-owner-111")
+    assert enforce_pre_commit(wt, control_root=ctrl) == 0
+
+    # 4) Explicit borrower -> allowed
+    monkeypatch.setenv("AUTO_PM_AGENT", "codex")
+    monkeypatch.setenv("AUTO_PM_SESSION_ID", "session-borrow-222")
+    (wt.parent / ".borrowed-trae-111111.json").write_text(json.dumps({"by": "codex"}), encoding="utf-8")
+    assert enforce_pre_commit(wt, control_root=ctrl) == 0
+
+    lines = (ctrl / ".auto-pm" / "logs" / "station-ops.jsonl").read_text(encoding="utf-8").splitlines()
+    entries = [json.loads(line) for line in lines]
+    assert [e["outcome"] for e in entries] == ["allowed", "blocked", "allowed", "allowed"]
+    assert entries[0]["actor"] == "no-agent-marker" and entries[1]["reason"] == "cross-station-mismatch"
+
+
+def test_750_pre_commit_rejects_utf8_bom_and_bare_cr_in_governance_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#14: 暂存带 UTF-8 BOM 或裸 CR 的治理/规则文件被 pre-commit 拒绝，无 BOM 正常 UTF-8 放行。"""
+    cand, ctrl, _msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    (cand / "AGENTS.md").write_bytes(b"\xef\xbb\xbf# rules\n")
+    _git(cand, "add", "AGENTS.md")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 1
+    assert "UTF-8 BOM" in capsys.readouterr().out
+
+    (cand / "AGENTS.md").write_bytes(b"# rules\rline2\n")
+    _git(cand, "add", "AGENTS.md")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 1
+    assert "裸 CR" in capsys.readouterr().out
+
+    (cand / "AGENTS.md").write_bytes(b"# rules\nline2\n")
+    _git(cand, "add", "AGENTS.md")
+    assert enforce_pre_commit(cand, control_root=ctrl) == 0
+
+
+def test_750_commit_msg_blocks_modifying_completed_change_order_without_new_active_chg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#6: HEAD 中已为 completed 的变更单不得在短名分支或沿用自身单号时被修改；绑定新批准变更单才放行。"""
+    cand, ctrl, msg = _make_dual_root_fixture(
+        tmp_path, candidate_has_staged_code=False, candidate_ledger_clean=True
+    )
+    closed_rel = "01_Project/SW-2026-008/04_监控/01_变更管理/01_变更单/CHG-SCPT/CHG-SCPT-2026-001.md"
+    closed_text = (
+        "# 变更单\n\n## 3. 变更基本信息\n\n### 3.0 编号与项目\n| 字段 | 内容 |\n|---|---|\n"
+        "| 变更编号 | CHG-SCPT-2026-001 |\n| 项目编号 | SW-2026-008 |\n\n"
+        "### 3.4 申请信息\n| 字段 | 内容 |\n|---|---|\n| 变更状态 | completed |\n\n"
+        "## 4. 变更原因\n历史归档\n\n## 8. 变更审批\n| 角色 | 审批结果 |\n|---|---|\n| 老板 | 同意 |\n"
+    )
+    for root in (ctrl, cand):
+        target = root / closed_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(closed_text, encoding="utf-8")
+    ledger = ctrl / "01_Project/SW-2026-008/04_监控/01_变更管理/02_变更记录/01_版本变更台账.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8") + "| CHG-SCPT-2026-001 | completed |\n",
+        encoding="utf-8",
+    )
+    _git(cand, "add", closed_rel)
+    _git(cand, "commit", "--no-verify", "-qm", "seed completed chg")
+
+    # Tamper with already-completed CHG on a short-name commit (no CHG ID) -> refused
+    (cand / closed_rel).write_text(closed_text + "\n<!-- tampered -->\n", encoding="utf-8")
+    _git(cand, "add", closed_rel)
+    msg.write_text("docs: tweak history\n\n领卡占位: short-name-card\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "已关闭/已完成变更单" in capsys.readouterr().out
+
+    # Citing the already-completed CHG itself -> still refused
+    msg.write_text("docs: [CHG-SCPT-2026-001] self edit\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 1
+    assert "已关闭/已完成变更单" in capsys.readouterr().out
+
+    # Binding a new active approved CHG (CHG-SCPT-2026-346) -> allowed
+    msg.write_text("docs: [CHG-SCPT-2026-346] authorised revision\n", encoding="utf-8")
+    assert enforce_commit_msg(cand, msg, control_root=ctrl) == 0

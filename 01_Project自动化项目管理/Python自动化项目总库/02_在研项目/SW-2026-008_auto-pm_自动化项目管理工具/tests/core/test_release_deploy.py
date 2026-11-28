@@ -352,3 +352,27 @@ def test_a_deploy_error_without_the_flag_counts_as_moved() -> None:
     """A new raise that forgets ``pointers_moved`` errs towards "look at the pointers" (audit §3.2 item 3)."""
 
     assert rd.DeployError("anything").pointers_moved is True
+
+
+def test_successful_deploy_cleans_station_after_receipt_and_swallows_cleanup_errors(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-750: 成功收口写回执后尽力回收临时部署工位；回退不回收；回收异常不推翻已成功的发版。"""
+    ops, ledger = FakeOps(), FakeLedger()
+    plan = _plan(tmp_path / "ok")
+    result = _run(tmp_path / "ok", ops, ledger, plan=plan)
+    assert ledger.cleaned_stations == [plan.station]
+    assert "station cleanup" in result.steps
+
+    # Rollback must NOT clean station (books stay open)
+    ops_rb, ledger_rb = FakeOps(), FakeLedger()
+    with pytest.raises(rd.DeployError, match="已回退"):
+        _run(tmp_path / "rb", ops_rb, ledger_rb, checks=_checks(bad={"identity"}))
+    assert ledger_rb.cleaned_stations == []
+
+    # Cleanup error must NOT fail an already closed deploy
+    class _BrokenCleanupLedger(FakeLedger):
+        def cleanup_station(self, path: Path) -> str:
+            raise OSError("locked by antivirus")
+
+    ops_err, ledger_err = FakeOps(), _BrokenCleanupLedger()
+    res_err = _run(tmp_path / "err", ops_err, ledger_err)
+    assert Path(res_err.receipt).is_file() and "station cleanup" not in res_err.steps

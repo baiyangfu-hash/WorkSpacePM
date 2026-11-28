@@ -655,6 +655,12 @@ def cmd_transition(
         console.print(f"  新状态: {STATUS_LABELS.get(cr.status, cr.status)}")
         if cr.file_path:
             console.print(f"  文件: {cr.file_path}")
+        if cr.status == "completed":
+            console.print(
+                "  [dim]提示: 已完成变更单可通过受控归档同步进 main（先干跑核对）："
+                "python 01_Project自动化项目管理/Python自动化项目总库/02_在研项目/SW-2026-008_auto-pm_自动化项目管理工具/scripts/pm_merge.py "
+                f"archive-changes {cr.project_id} --chg {cr.change_number} --dry-run[/dim]"
+            )
     except ValueError as e:
         console.print(f"[red]流转失败: {e}[/red]")
         ctx.exit(1)

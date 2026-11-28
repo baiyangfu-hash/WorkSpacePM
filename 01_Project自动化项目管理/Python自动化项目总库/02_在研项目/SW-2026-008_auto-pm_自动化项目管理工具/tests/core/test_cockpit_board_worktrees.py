@@ -623,3 +623,24 @@ def test_worktrees_page_records_and_renders_collection_timestamp(qapp: QApplicat
         if label.property("collected_at") == expected
     ]
     assert stamps == [f"数据采集时间：{expected}"]
+
+
+def test_station_ops_surfaces_cross_session_warning_without_warning_on_owner_or_user(tmp_path: Path) -> None:
+    """CHG-SCPT-2026-750 / #3: station-ops.jsonl 中异会话操作在看板产生告警，主人与用户终端不误报。"""
+    logs_dir = tmp_path / ".auto-pm" / "logs"
+    logs_dir.mkdir(parents=True)
+    ops_records = [
+        {"station": "claude-1b7302", "owner": "claude-1b7302", "actor": "trae-999999", "outcome": "blocked"},
+        {"station": "codex", "owner": "codex", "actor": "codex", "outcome": "allowed"},
+        {"station": "trae", "owner": "trae", "actor": "no-agent-marker", "outcome": "allowed"},
+    ]
+    (logs_dir / "station-ops.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in ops_records) + "\n",
+        encoding="utf-8",
+    )
+    holders = stations.read_holders(tmp_path)
+    view = _view(holders=holders)
+    assert "trae-999999" in _row(view, "claude-1b7302").warning
+    assert "跨会话操作告警" in _row(view, "claude-1b7302").warning
+    assert _row(view, "codex").warning == ""
+    assert _row(view, "trae").warning == ""

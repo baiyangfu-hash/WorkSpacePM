@@ -501,3 +501,33 @@ def test_status_finds_the_receipt_the_real_deploy_writes(repo: Repo) -> None:
     written = release_ledger.write_receipt(plan, change_id="CHG-SCPT-2026-1", backup="b", entry_sha256="e", checks_sha256="c", rollback_command="r")
 
     assert rdc.status(repo.root)["last_receipt"] == str(written)
+
+
+def test_preflight_refuses_leftover_open_deploy_work_or_run_in_continuity_db(
+    repo: Repo, tmp_path: Path
+) -> None:
+    """CHG-SCPT-2026-750: 账本存在未关闭的残留 WORK-DEPLOY-*/RUN-DEPLOY-* 时，切版前 preflight 必须直接 FAIL。"""
+    import sqlite3
+
+    db = repo.root / ".auto-pm" / "continuity.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE work_items (work_id TEXT PRIMARY KEY, state TEXT NOT NULL)")
+        conn.execute("CREATE TABLE run_items (run_id TEXT PRIMARY KEY, state TEXT NOT NULL)")
+        conn.execute("INSERT INTO work_items VALUES ('WORK-DEPLOY-1-3-3-OLD0001', 'IN_PROGRESS')")
+        conn.execute("INSERT INTO run_items VALUES ('RUN-DEPLOY-1-3-3-OLD0001', 'RUNNING')")
+        conn.commit()
+
+    blocked = _happy(repo, tmp_path)
+    conflict_check = _by_name(blocked)["无残留发布冲突"]
+    assert not blocked.ok and conflict_check.status == rdc.FAIL
+    assert "WORK-DEPLOY-1-3-3-OLD0001" in conflict_check.detail and "RUN-DEPLOY-1-3-3-OLD0001" in conflict_check.detail
+
+    # Once closed/cancelled, preflight passes cleanly
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE work_items SET state='CLOSED'")
+        conn.execute("UPDATE run_items SET state='CANCELLED'")
+        conn.commit()
+
+    clean = _happy(repo, tmp_path)
+    assert clean.ok and _by_name(clean)["无残留发布冲突"].status == rdc.PASS

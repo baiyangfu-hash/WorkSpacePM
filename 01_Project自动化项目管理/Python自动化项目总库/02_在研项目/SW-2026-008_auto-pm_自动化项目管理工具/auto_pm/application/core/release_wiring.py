@@ -134,13 +134,21 @@ class CockpitLedgerPort:
     """``LedgerPort`` over the real cockpit: reads in-process (read-only), writes by subprocess."""
 
     def __init__(
-        self, control_root: Path, *, run: Runner, changes: ChangeReader, store: ContinuityReader, station_opener: Callable[[Path], None] | None = None,
+        self,
+        control_root: Path,
+        *,
+        run: Runner,
+        changes: ChangeReader,
+        store: ContinuityReader,
+        station_opener: Callable[[Path], None] | None = None,
+        station_cleaner: Callable[[Path], str] | None = None,
     ) -> None:
         self._root = Path(control_root)
         self._run = run
         self._changes = changes
         self._store = store
         self._open_station = station_opener or self._git_worktree
+        self._clean_station = station_cleaner or self._remove_deploy_worktree
 
     def cli(self, *args: str) -> str:
         code, output = self._run(args)
@@ -191,13 +199,61 @@ class CockpitLedgerPort:
             return
         self._open_station(Path(path))
 
+    def cleanup_station(self, path: Path) -> str:
+        """Best-effort removal of the clean detached ``deploy-<release_id>`` worktree after books close."""
+        return self._clean_station(Path(path))
+
     def _git_worktree(self, path: Path) -> None:
         done = subprocess.run(  # noqa: S603, S607 - fixed argv, no shell
-            ["git", "-C", str(self._root), "worktree", "add", "--detach", str(path), "HEAD"], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=COMMAND_TIMEOUT_SECONDS, check=False,  # lenient-decode: 只展示失败原因
+            ["git", "-c", "core.fsmonitor=false", "-C", str(self._root), "worktree", "add", "--detach", str(path), "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",  # lenient-decode: 只展示失败原因
+            timeout=COMMAND_TIMEOUT_SECONDS, check=False,
         )
         if done.returncode != 0:
             raise LedgerError(f"建不出部署工位 {path}：{done.stderr.strip()[-200:]}")
+
+    def _remove_deploy_worktree(self, path: Path) -> str:
+        """Remove a clean detached ``deploy-*`` worktree under ``.auto-pm/worktrees`` whose HEAD is on ``main``."""
+        worktrees_root = (self._root / ".auto-pm" / "worktrees").resolve()
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return ""
+        if resolved.parent != worktrees_root or not resolved.name.startswith("deploy-") or not (resolved / ".git").exists():
+            return ""
+        code, status_out = run_process(
+            ["git", "-c", "core.fsmonitor=false", "status", "--porcelain", "--untracked-files=all"],
+            resolved,
+        )
+        if code != 0 or status_out.strip():
+            return ""
+        sym_code, _ = run_process(
+            ["git", "-c", "core.fsmonitor=false", "symbolic-ref", "--quiet", "HEAD"],
+            resolved,
+        )
+        if sym_code == 0:
+            return ""  # attached branch: never remove automatically
+        head_code, head_out = run_process(
+            ["git", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "HEAD"],
+            resolved,
+        )
+        head_sha = head_out.strip()
+        if head_code != 0 or not head_sha:
+            return ""
+        anc_code, _ = run_process(
+            ["git", "-c", "core.fsmonitor=false", "merge-base", "--is-ancestor", head_sha, "refs/heads/main"],
+            self._root,
+        )
+        if anc_code != 0:
+            return ""
+        rm_code, _ = run_process(
+            ["git", "-c", "core.fsmonitor=false", "worktree", "remove", str(resolved)],
+            self._root,
+        )
+        if rm_code != 0:
+            return ""
+        run_process(["git", "-c", "core.fsmonitor=false", "worktree", "prune"], self._root)
+        return "station cleanup"
 
 
 class ReleaseOpsAdapter:

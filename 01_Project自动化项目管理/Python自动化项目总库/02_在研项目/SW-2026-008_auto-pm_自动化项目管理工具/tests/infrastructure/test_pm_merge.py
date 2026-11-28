@@ -1729,3 +1729,60 @@ def test_single_file_record_branch_audit_tier_policy(
     assert run(pm, repo.root, "merge", "w1") == 1
     assert "没有本卡的实施卡" in capsys.readouterr().out
 
+
+def test_750_modifying_already_completed_change_order_escalates_to_user_paths(
+    pm: ModuleType, repo: SimpleNamespace, capsys: Any
+) -> None:
+    """CHG-SCPT-2026-750 / #6: 已在 main 中为 completed 的变更单被短名分支修改时，必须升级到 user_paths。"""
+    rec = f"{pm.GOVERNANCE_DIR}01_变更单/CHG-SCPT/CHG-SCPT-2026-740.md"
+    commit(repo.root, {rec: "| 变更状态 | completed |\n正文 v1\n"}, "seed completed chg")
+    git(repo.wt, "merge", "--quiet", "main")
+
+    commit(repo.wt, {rec: "| 变更状态 | completed |\n正文被篡改 v2\n"}, f"docs: tamper\n\n{CARD}")
+    assert run(pm, repo.root, "merge", "w1") == 1
+    assert "需核对实施卡的变更" in capsys.readouterr().out
+
+
+def test_750_archive_changes_uses_batched_tree_sha1_without_per_file_git_blob_calls(
+    pm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CHG-SCPT-2026-750 / #5: archive-changes 批量扫描 20 张已同步变更单时不再逐文件调用 _git_blob。"""
+    chg_dir, ledger, _proj = _setup_archive_project(tmp_path, "SW-2026-008")
+    git(tmp_path, "init", "-q", "-b", "main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "t")
+    rows = []
+    for idx in range(1, 21):
+        chg = f"CHG-SCPT-2026-{idx:03d}"
+        (chg_dir / f"{chg}.md").write_text(f"| 变更状态 | completed |\n# {chg}\n", encoding="utf-8")
+        rows.append(f"| {idx} | [{chg}](../01_变更单/CHG-SCPT/{chg}.md) | SCPT | DEF | 已完成 |")
+    ledger.write_text(
+        "# 台账\n\n## 变更单索引\n\n| 序号 | 变更编号 | 领域 | 性质 | 状态 |\n|---|---|---|---|---|\n"
+        + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-qm", "seed 20 completed chgs")
+
+    # Add 1 new completed CHG on disk (not yet in main)
+    new_chg = "CHG-SCPT-2026-021"
+    (chg_dir / f"{new_chg}.md").write_text(f"| 变更状态 | completed |\n# {new_chg}\n", encoding="utf-8")
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        + f"| 21 | [{new_chg}](../01_变更单/CHG-SCPT/{new_chg}.md) | SCPT | DEF | 已完成 |\n",
+        encoding="utf-8",
+    )
+
+    blob_calls: list[str] = []
+    real_git_blob = pm._git_blob
+
+    def spy_git_blob(root: Path, ref: str, rel_path: str) -> bytes | None:
+        blob_calls.append(rel_path)
+        return real_git_blob(root, ref, rel_path)
+
+    monkeypatch.setattr(pm, "_git_blob", spy_git_blob)
+    plan = pm._collect_archive_plan(tmp_path, pm.Git(tmp_path), rev(tmp_path, "main"), "SW-2026-008", [])
+    assert plan.selected == [new_chg]
+    # Only the single ledger file was fetched via _git_blob; none of the 21 CHGs triggered per-file _git_blob!
+    assert len(blob_calls) == 1 and blob_calls[0].endswith("01_版本变更台账.md")
+

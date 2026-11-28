@@ -199,6 +199,14 @@ def deploy(
         raise DeployError(f"已切换且自检通过，但收口没完成；命令行目前没有续做入口（重跑会被预检的“发布槽位空闲”拒绝），请人工收口，备份和证据目录见 .auto-pm/reports/release-deploy-<发布号>/：{error}", pointers_moved=True) from error
     steps.extend(closed.steps)
     receipt = write_receipt(plan, change_id=books.change_id, backup=str(backup), entry_sha256=entry_sha, checks_sha256=checks_sha, rollback_command=rollback_command)
+    cleanup = getattr(ledger, "cleanup_station", None)
+    if callable(cleanup):
+        try:
+            cleaned = cleanup(plan.station)
+        except Exception:  # noqa: BLE001 - best-effort cleanup after closed books & receipt must never fail the deploy
+            cleaned = ""
+        if cleaned:
+            steps.append(str(cleaned))
     return DeployResult(plan.release_id, books.change_id, str(backup), str(receipt), {n: d for n, (_g, d) in results.items()}, steps)
 
 

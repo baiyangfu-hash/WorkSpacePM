@@ -190,7 +190,7 @@ if [ ! -r "$MSG_FILE" ]; then
     exit 1
 fi
 case "$MSG_FILE" in
-    "$GIT_COMMON_DIR/COMMIT_EDITMSG"|"$GIT_COMMON_DIR"/worktrees/*/COMMIT_EDITMSG) ;;
+    "$GIT_COMMON_DIR/COMMIT_EDITMSG"|"$GIT_COMMON_DIR/MERGE_MSG"|"$GIT_COMMON_DIR/SQUASH_MSG"|"$GIT_COMMON_DIR"/worktrees/*/COMMIT_EDITMSG|"$GIT_COMMON_DIR"/worktrees/*/MERGE_MSG|"$GIT_COMMON_DIR"/worktrees/*/SQUASH_MSG) ;;
     *)
         echo "[auto-pm commit-msg] message file is outside Git metadata: $MSG_FILE" >&2
         exit 1

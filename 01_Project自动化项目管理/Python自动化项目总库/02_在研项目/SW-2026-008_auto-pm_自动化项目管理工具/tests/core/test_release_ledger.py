@@ -25,6 +25,7 @@ class FakeLedger:
         self.run: str | None = None
         self.checkpoints: set[str] = set()
         self.stations: list[Path] = []
+        self.cleaned_stations: list[Path] = []
         self.crash_at = crash_at
         self.created = 0
         self.references: dict[str, str] = {}
@@ -78,6 +79,10 @@ class FakeLedger:
 
     def ensure_station(self, path: Path) -> None:
         self.stations.append(path)
+
+    def cleanup_station(self, path: Path) -> str:
+        self.cleaned_stations.append(path)
+        return "station cleanup"
 
     def verbs(self) -> list[str]:
         return [" ".join(c[:3]) for c in self.commands]
