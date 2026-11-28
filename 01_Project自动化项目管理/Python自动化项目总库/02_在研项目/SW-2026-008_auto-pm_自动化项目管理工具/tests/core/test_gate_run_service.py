@@ -987,3 +987,28 @@ def test_d235_a_group_that_was_not_lowered_gets_a_log_with_no_note(tmp_path: Pat
     assert gate.default_runner([sys.executable, "-c", "print('hello')"], tmp_path, gate.child_environment(), log, 60) == 0
 
     assert log.read_text(encoding="utf-8").splitlines() == ["hello"]
+
+
+def test_mid_run_summary_reports_running_verdict_while_judge_dir_stays_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _clean_repo(monkeypatch)
+    observed: list[tuple[str, str, bool, int]] = []
+    mid_run_judged: list[str] = []
+
+    def inspect_mid_run(name: str) -> None:
+        raw = json.loads((tmp_path / gate.SUMMARY_FILE).read_text(encoding="utf-8"))
+        observed.append((name, str(raw["verdict"]), bool(raw["complete"]), len(raw["results"])))
+        if len(observed) == 1:
+            # Before all groups finish, the file itself says RUNNING, but read-only judge_dir still fails closed
+            mid_run_judged.append(GateRunService().judge_dir(tmp_path).verdict)
+
+    summary = GateRunService(runner=_Recorder(on_group=inspect_mid_run)).run(repo, tmp_path)
+
+    assert summary.verdict == "PASS" and summary.complete is True
+    assert observed and all(verdict == "RUNNING" and not complete for _, verdict, complete, _ in observed)
+    assert observed[0][3] == 0  # written before the first group finishes
+    assert observed[-1][3] == len(GROUPS) - 1  # still RUNNING while the last group runs
+    assert mid_run_judged == ["FAIL"]
+    final_disk = json.loads((tmp_path / gate.SUMMARY_FILE).read_text(encoding="utf-8"))
+    assert final_disk["verdict"] == "PASS" and final_disk["complete"] is True

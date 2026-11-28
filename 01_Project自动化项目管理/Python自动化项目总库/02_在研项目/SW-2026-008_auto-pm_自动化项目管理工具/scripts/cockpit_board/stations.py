@@ -107,6 +107,7 @@ class StationsView:
     sweep_all: Action | None = None
     sweep_all_blocked: str = ""  # 整批清理会连名册外目录一起清：有长任务在跑时灰着，写这句
     notes: list[str] = field(default_factory=list)
+    collected_at: str = ""
 
 
 def base_agent(name: str) -> str:
@@ -232,7 +233,7 @@ def build_view(
     ``human_block`` 非空＝看板进程带 AI 标记（或认不出），所有按钮灰着，写这句。
     """
 
-    view = StationsView()
+    view = StationsView(collected_at=now.isoformat(timespec="seconds"))
     by_card = {str(c.get("card")): c for c in (claims or ()) if c.get("status", "active") == "active" and c.get("card")}
     by_path: dict[str, Mapping[str, Any]] = {}
     for entry in sweep_items or ():

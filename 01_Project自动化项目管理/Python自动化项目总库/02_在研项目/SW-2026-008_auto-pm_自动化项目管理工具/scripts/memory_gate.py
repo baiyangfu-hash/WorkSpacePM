@@ -730,10 +730,11 @@ class Gate:
 
     def alert(self, headline: str, body: str, *, loud: bool) -> None:
         stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
+        resume_cmd = _resume_all_command()
         text = (
             f"{headline}\n\n{body}\n\n"
             "说明：总闸只是暂停了进程（没有杀），目的是止涨；暂停不会让已提交内存下降，内存要等任务结束或你处理后才回落。\n"
-            "手动解冻全部：python -B scripts\\memory_gate.py resume-all\n"
+            f"手动解冻全部（管理员 PowerShell）：{resume_cmd}\n"
         )
         with contextlib.suppress(OSError):
             (self.dir / f"ALERT-{stamp}.txt").write_text(text, encoding="utf-8")
@@ -981,7 +982,11 @@ class Gate:
             headline += "【注意：系统没有接受暂停，进程可能仍在运行】"
         if relocked:
             headline = f"同一棵树在解冻后 {RELOCK_SECONDS:.0f} 秒内再次触发，已冻结并锁定、不再自动解冻：" + headline
-        self.alert(headline, f"原因：{reason}\n恢复：确认原因后运行 resume-all；锁定的树不会自动解冻。", loud=relocked)
+        self.alert(
+            headline,
+            f"原因：{reason}\n恢复：确认原因后在管理员 PowerShell 运行：{_resume_all_command()}（锁定的树不会自动解冻）。",
+            loud=relocked,
+        )
 
     def _hot(self, state: dict[str, Any], now: float, committed: float, procs: dict[int, Proc]) -> None:
         self._armed = None
@@ -1037,7 +1042,7 @@ class Gate:
                 entry["renotified_at"] = now
                 self.alert(
                     f"仍冻结着（已锁定）：{entry['root_name']}（PID {entry['root']}）的进程树，没有人处理；总闸不会自动解冻",
-                    f"原因：{entry['reason']}\n确认后在管理员 PowerShell 运行 resume-all。",
+                    f"原因：{entry['reason']}\n恢复：确认后在管理员 PowerShell 运行：{_resume_all_command()}",
                     loud=True,
                 )
 
@@ -1137,7 +1142,7 @@ def run_forever(
                 gate.alert(
                     "内存总闸收到 STOP，但读不了状态文件，没有解冻任何进程",
                     f"{error}\n已每 {poll:g} 秒重试 {waited:g} 秒仍读不了。上次读得到状态时已冻结的进程树根 PID（可能仍在冻结）：{known}。\n"
-                    "请稍后手动运行：python -B scripts\\memory_gate.py resume-all（读得了时才会解冻）。",
+                    f"请稍后在管理员 PowerShell 运行：{_resume_all_command()}（读得了时才会解冻）。",
                     loud=True,
                 )
                 return
@@ -1155,10 +1160,28 @@ def install_root() -> Path | None:
     return root if (root / MANIFEST_FILE).exists() else None
 
 
-def default_state_dir() -> Path:
-    """Installed: ``<install root>\\state`` (only SYSTEM and Administrators can write there).  A development checkout: ``~/.auto-pm/memory-gate``."""
+def installed_memory_gate_root() -> Path | None:
+    """When invoked from a repo checkout on Windows, locate the installed ``%ProgramFiles%\\AutoPM\\MemoryGate`` root if present."""
 
-    root = install_root()
+    if sys.platform != "win32":
+        return None
+    candidate = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "AutoPM" / "MemoryGate"
+    return candidate if (candidate / MANIFEST_FILE).exists() else None
+
+
+def _resume_all_command() -> str:
+    """Exact copy-pasteable elevated PowerShell command to thaw every frozen process tree."""
+
+    root = install_root() or installed_memory_gate_root()
+    if root is not None:
+        return f'& "{root / "python" / "python.exe"}" -I -S -B "{root / "scripts" / "memory_gate.py"}" resume-all'
+    return "python -B scripts\\memory_gate.py resume-all"
+
+
+def default_state_dir() -> Path:
+    """Installed (or repo checkout when an installation exists on Windows): ``<install root>\\state``; otherwise ``~/.auto-pm/memory-gate``."""
+
+    root = install_root() or installed_memory_gate_root()
     return root / "state" if root is not None else Path.home() / ".auto-pm" / "memory-gate"
 
 
@@ -1375,7 +1398,7 @@ def cmd_status(state_dir: Path, integrity: str = "") -> int:
     host = Host()
     now_gib = host.committed_gib()
     thresholds = resolve_thresholds(host.commit_limit_gib())
-    root = install_root()
+    root = install_root() or installed_memory_gate_root()
     installed_bundle = ""
     if root is not None:
         with contextlib.suppress(OSError, ValueError, StateUnreadableError, AttributeError):
@@ -1437,10 +1460,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         return cmd_status(state_dir, integrity)
     if args.command == "resume-all":
+        resume_cmd = _resume_all_command()
         try:
             count = real_gate(state_dir).resume_all()
         except StateUnreadableError as error:
-            print(f"没有解冻任何进程：读不了状态文件 {state_dir / STATE_FILE}\n{error}\n稍后重新运行：python -B scripts\\memory_gate.py resume-all", file=sys.stderr)  # noqa: T201
+            print(f"没有解冻任何进程：读不了状态文件 {state_dir / STATE_FILE}\n{error}\n稍后在管理员 PowerShell 重新运行：{resume_cmd}", file=sys.stderr)  # noqa: T201
+            return 2
+        except PermissionError as error:
+            print(
+                f"没有解冻任何进程：当前终端没有写状态目录 {state_dir} 的权限（{error}）。\n"
+                f"请用管理员 PowerShell 运行：{resume_cmd}",
+                file=sys.stderr,
+            )  # noqa: T201
             return 2
         print(f"已解冻 {count} 个进程")
         return 0

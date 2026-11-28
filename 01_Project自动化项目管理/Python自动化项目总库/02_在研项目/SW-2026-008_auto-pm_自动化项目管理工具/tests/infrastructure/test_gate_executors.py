@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -196,3 +198,78 @@ def test_local_executor_rejects_l2_candidate(tmp_path: Path) -> None:
     attempt, _ = GateTaskStore(tmp_path).reserve(l2.key, "local")
     res = executor.launch(attempt, l2)
     assert res.state == "failed" and "L3" in res.detail
+
+
+def test_local_inspect_reports_live_group_progress_from_gate_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = gate_task_service.LocalGateExecutor(tmp_path)
+    attempt, _ = GateTaskStore(tmp_path).reserve("candidate", "local")
+    candidate = GateCandidate("a" * 40, "b" * 40, "c" * 40, "d" * 64, "gate-full-v1")
+    folder = tmp_path / ".auto-pm/reports/gate-tasks" / attempt.id
+    folder.mkdir(parents=True)
+    (folder / "task.json").write_text("{}", encoding="utf-8")
+    payload = {"runner_alive": True, "current_step": "groups"}
+    monkeypatch.setattr(
+        executor, "_runner", lambda *args: subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+    )
+
+    # Without evidence summary yet, falls back to "groups"
+    assert executor.inspect(attempt, candidate).detail == "groups"
+
+    evidence = folder / "evidence"
+    evidence.mkdir()
+    (evidence / "gate_summary.json").write_text(
+        json.dumps({
+            "verdict": "RUNNING",
+            "complete": False,
+            "groups_run": ["plc", "contracts", "application", "core"],
+            "results": {
+                "plc": {"verdict": "PASS"},
+                "contracts": {"verdict": "PASS"},
+            },
+        }),
+        encoding="utf-8",
+    )
+    obs = executor.inspect(attempt, candidate)
+    assert obs.state == "running"
+    assert obs.detail == "groups (2/4 已完成，2 通过；进行中：application)"
+
+
+def test_local_preflight_checks_memory_budget_for_four_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree = tmp_path / "wt"
+    lock_file = worktree / gate_task_service.LOCK
+    lock_file.parent.mkdir(parents=True)
+    lock_file.write_text("pytest==8.0.0\n", encoding="utf-8")
+    plugin = tmp_path / "lsp.vsix"
+    plugin.write_bytes(b"lsp")
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0))
+    monkeypatch.setattr(gate_task_service, "sha256_file", lambda _p: gate_task_service.LSP_SHA256)
+    monkeypatch.setattr(gate_task_service, "find_on_path", lambda _cmd: "go")
+
+    def fake_run(_root: Path, argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        if "freeze" in argv:
+            return subprocess.CompletedProcess(argv, 0, "pytest==8.0.0\n", "")
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    monkeypatch.setattr(gate_task_service, "run_command", fake_run)
+
+    low_mem = gate_task_service.LocalGateExecutor(
+        tmp_path, worktree, plugin, available_memory=lambda: 6 * 2**30
+    )
+    low_msg = low_mem._preflight()
+    assert "内存不足" in low_msg and "11.0 GiB" in low_msg and "6.0 GiB" in low_msg
+
+    unknown_mem = gate_task_service.LocalGateExecutor(
+        tmp_path, worktree, plugin, available_memory=lambda: None
+    )
+    assert "无法读取本机可用物理内存" in unknown_mem._preflight()
+
+    ok_mem = gate_task_service.LocalGateExecutor(
+        tmp_path, worktree, plugin, available_memory=lambda: 12 * 2**30
+    )
+    assert ok_mem._preflight() == ""

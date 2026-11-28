@@ -275,6 +275,10 @@ class WorktreesPage(c.ReadPage):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(theme.SPACE)
         lay.addWidget(c.section("项目总线与 AI 工位", "按所属项目挂载工位舱（claims → focus.json → 分支编号解析）；按钮灰着时旁边写着差哪一条"))
+        if self.view.collected_at:
+            stamp = c.label(f"数据采集时间：{self.view.collected_at}", "small")
+            stamp.setProperty("collected_at", self.view.collected_at)
+            lay.addWidget(stamp)
         if self.human_block:
             lay.addWidget(c.label(self.human_block, "small"))
         for note in self.view.notes:
