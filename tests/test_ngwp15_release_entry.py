@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -247,22 +248,58 @@ def test_operational_release_payloads_are_git_byte_opaque() -> None:
         assert value == "unset", f"{actual_path}: release payload must be -text"
 
 
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _primary_control_root() -> Path:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(WORKSPACE_ROOT), "-c", "core.fsmonitor=false", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+        common_dir = result.stdout.strip()
+        if common_dir:
+            return Path(common_dir).resolve().parent
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return WORKSPACE_ROOT
+
+
 def test_operational_release_worktree_and_index_blobs_match_manifest() -> None:
+    control_root = _primary_control_root()
     for release_id, files in _operational_release_files():
         release_prefix = f"00_Infrastructure/auto_pm/releases/{release_id}"
         expected_paths = {
             f"{release_prefix}/{relative}": expected
             for relative, expected in files.items()
         }
+        assert expected_paths
+        assert all(isinstance(digest, str) and _SHA256_HEX.fullmatch(digest) for digest in expected_paths.values())
         index_entries = _index_entries(release_prefix)
-        assert set(index_entries) == set(expected_paths)
-        blobs = _read_git_blobs(set(index_entries.values()))
+        if index_entries:
+            assert set(index_entries) == set(expected_paths)
+            blobs = _read_git_blobs(set(index_entries.values()))
 
-        for relative_path, expected_sha256 in expected_paths.items():
-            worktree_bytes = (WORKSPACE_ROOT / relative_path).read_bytes()
-            index_bytes = blobs[index_entries[relative_path]]
-            assert hashlib.sha256(worktree_bytes).hexdigest() == expected_sha256
-            assert hashlib.sha256(index_bytes).hexdigest() == expected_sha256
+            for relative_path, expected_sha256 in expected_paths.items():
+                worktree_bytes = (WORKSPACE_ROOT / relative_path).read_bytes()
+                index_bytes = blobs[index_entries[relative_path]]
+                assert hashlib.sha256(worktree_bytes).hexdigest() == expected_sha256
+                assert hashlib.sha256(index_bytes).hexdigest() == expected_sha256
+            continue
+
+        # 方案 A（TD-SW008-019）：现役载荷目录不入 Git 索引，仅存在控制根磁盘；在控制根/本地工位核对全部 616 文件 SHA-256。
+        local_dir = control_root / release_prefix
+        if local_dir.is_dir():
+            disk_entries = {
+                f"{release_prefix}/{path.relative_to(local_dir).as_posix()}": hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in local_dir.rglob("*")
+                if path.is_file()
+            }
+            assert disk_entries == expected_paths
 
 
 def test_root_entry_has_no_parent_auto_pm_import() -> None:
