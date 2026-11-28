@@ -689,7 +689,9 @@ class GateRunService:
             project_dir=str(project),
             manifest_sha256=manifest_sha256(),
             groups_run=[g.name for g in selected],
+            verdict="RUNNING",
         )
+        self._write(out_dir, summary)
         for group in selected:
             available = self._available_memory() if group.parallel else None
             group_jobs = jobs_for_memory(jobs, available) if group.parallel else jobs

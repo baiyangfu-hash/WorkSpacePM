@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,11 +21,13 @@ from auto_pm.application.core.gate_run_service import (
     GateRunService,
     child_environment,
     manifest_sha256,
+    memory_for_jobs,
     project_dir_in,
     pytest_counts,
     sha256_file,
 )
 from auto_pm.application.core.gate_tier_policy import ALL_GATE_GROUPS, classify_gate_tier
+from auto_pm.infrastructure import memory_preflight
 from auto_pm.infrastructure.executable_lookup import find_on_path
 from auto_pm.infrastructure.gate_executors import run_command
 from auto_pm.infrastructure.gate_task_store import GateAttempt, GateTaskStore
@@ -36,6 +39,7 @@ TERMINAL = {"failed", "stopped", "unavailable", "passed"}
 LSP_SHA256 = "690f0c692350956416d6b2768f48a1daa119dd6c5b55c6b25bb6fa19f4951985"
 WORKFLOW = "gate-full.yml"
 LOCK = Path("00_Infrastructure/auto_pm/environment/requirements-lock-py312-win.txt")
+LOCAL_FULL_GATE_JOBS = 4
 
 
 def git(path: Path, *args: str) -> str:
@@ -566,11 +570,57 @@ class GitHubGateExecutor:
             raise GateRunError("GitHub 未确认停止请求，请查任务状态")
 
 
+def _default_available_memory() -> int | None:
+    snapshot = memory_preflight.read_commit()
+    return None if snapshot is None else snapshot.available
+
+
+def _running_step_detail(folder: Path, current_step: str) -> str:
+    """Enrich static ``groups`` step with live per-group progress from ``evidence/gate_summary.json``."""
+    if current_step != "groups":
+        return current_step
+    summary_path = folder / "evidence" / SUMMARY_FILE
+    if not summary_path.is_file():
+        return current_step
+    try:
+        summary = _json_file(summary_path)
+    except (OSError, ValueError):
+        return current_step
+    groups_run = summary.get("groups_run")
+    results = summary.get("results")
+    if not isinstance(groups_run, list) or not groups_run or not isinstance(results, dict):
+        return current_step
+    total = len(groups_run)
+    done = sum(1 for name in groups_run if name in results)
+    passed = sum(
+        1
+        for name in groups_run
+        if isinstance(results.get(name), dict) and results[name].get("verdict") == "PASS"
+    )
+    failed = done - passed
+    next_group = next((str(name) for name in groups_run if name not in results), "")
+    parts = [f"{done}/{total} 已完成", f"{passed} 通过"]
+    if failed:
+        parts.append(f"{failed} 失败")
+    progress = "，".join(parts)
+    if next_group:
+        return f"groups ({progress}；进行中：{next_group})"
+    return f"groups ({progress})"
+
+
 class LocalGateExecutor:
-    def __init__(self, root: Path, worktree: Path | None = None, plugin: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        worktree: Path | None = None,
+        plugin: Path | None = None,
+        *,
+        available_memory: Callable[[], int | None] | None = None,
+    ) -> None:
         self.root = root
         self.worktree = worktree
         self.plugin = plugin
+        self._available_memory = available_memory or _default_available_memory
 
     def _folder(self, attempt: GateAttempt) -> Path:
         return self.root / ".auto-pm/reports/gate-tasks" / attempt.id
@@ -600,6 +650,15 @@ class LocalGateExecutor:
             return "离线 Python 依赖未按候选锁定表安装"
         if run_command(self.root, [sys.executable, "-m", "pip", "check"]).returncode:
             return "离线 Python 依赖一致性检查失败"
+        needed = memory_for_jobs(LOCAL_FULL_GATE_JOBS)
+        avail = self._available_memory()
+        if avail is None:
+            return f"无法读取本机可用物理内存，拒绝启动 {LOCAL_FULL_GATE_JOBS} 路本机全量门禁（请优先使用云端 GitHub 门禁）"
+        if avail < needed:
+            return (
+                f"本机可用物理内存不足：{LOCAL_FULL_GATE_JOBS} 路本机全量门禁需要至少 {needed / 2**30:.1f} GiB，"
+                f"当前仅剩 {avail / 2**30:.1f} GiB（请关闭占用内存较大的程序，或优先使用云端 GitHub 门禁）"
+            )
         return ""
 
     def launch(self, attempt: GateAttempt, candidate: GateCandidate) -> Observation:
@@ -632,7 +691,7 @@ class LocalGateExecutor:
                         "name": "groups",
                         "cwd": str(self.root),
                         "argv": [sys.executable, "-B", str(self.root / "main.py"), "gate", "run",
-                                 "--worktree", str(worktree), "--out", str(evidence), "--jobs", "4"],
+                                 "--worktree", str(worktree), "--out", str(evidence), "--jobs", str(LOCAL_FULL_GATE_JOBS)],
                         "timeout_s": 36000,
                         "stop_on_fail": True,
                     },
@@ -667,7 +726,8 @@ class LocalGateExecutor:
                 raise GateRunError("计划任务状态不可读")
             status = json.loads(result.stdout)
             if status.get("runner_alive"):
-                return Observation("running", attempt.id, str(status.get("current_step") or "正在收尾"))
+                step = str(status.get("current_step") or "正在收尾")
+                return Observation("running", attempt.id, _running_step_detail(folder, step))
             if status.get("result") == "STOPPED":
                 return Observation("stopped", attempt.id, str(status.get("reason") or "已停止"))
             if status.get("result") == "DONE":

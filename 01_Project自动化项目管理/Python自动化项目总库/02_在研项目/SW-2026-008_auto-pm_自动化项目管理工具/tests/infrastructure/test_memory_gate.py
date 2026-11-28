@@ -1335,3 +1335,55 @@ def test_d168_the_writer_and_the_gate_agree_on_the_record_format_the_limits_and_
     assert pre.arm("nonsense", start=start) is None
     monkeypatch.setattr(pre, "ARM_SEARCH_LEVELS", 1)  # a CI runner's home may hold an .auto-pm further up: look only at the start and its parent
     assert pre.arm("pm-verify", start=tmp_path / "no-auto-pm-here" / "f.py") is None
+
+
+def test_default_state_dir_prefers_installed_program_files_layout_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed = tmp_path / "AutoPM" / "MemoryGate"
+    installed.mkdir(parents=True)
+    monkeypatch.setattr(mg.sys, "platform", "win32")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setattr(mg, "install_root", lambda: None)
+
+    assert mg.installed_memory_gate_root() is None
+    assert mg.default_state_dir() == Path.home() / ".auto-pm" / "memory-gate"
+
+    (installed / mg.MANIFEST_FILE).write_text('{"files": {}}', encoding="utf-8")
+    assert mg.installed_memory_gate_root() == installed
+    assert mg.default_state_dir() == installed / "state"
+    cmd = mg._resume_all_command()
+    assert str(installed / "python" / "python.exe") in cmd
+    assert str(installed / "scripts" / "memory_gate.py") in cmd
+    assert "resume-all" in cmd
+
+
+def test_freeze_notice_and_permission_error_show_exact_admin_resume_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    installed = tmp_path / "ProgramFiles" / "AutoPM" / "MemoryGate"
+    installed.mkdir(parents=True)
+    (installed / mg.MANIFEST_FILE).write_text('{"files": {}}', encoding="utf-8")
+    monkeypatch.setattr(mg.sys, "platform", "win32")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "ProgramFiles"))
+    monkeypatch.setattr(mg, "install_root", lambda: None)
+
+    w = _trae_world()
+    gate = w.gate(tmp_path / "state")
+    _warm(w, gate)
+    _leak(w, gate, 41.0)
+    assert w.notices
+    notice_body = w.notices[0][1]
+    assert "管理员 PowerShell" in notice_body
+    assert "memory_gate.py" in notice_body and "resume-all" in notice_body
+
+    class _DeniedGate:
+        def resume_all(self) -> int:
+            raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(mg, "real_gate", lambda _dir: _DeniedGate())
+    rc = mg.main(["resume-all", "--state-dir", str(tmp_path / "state")])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "管理员 PowerShell" in err
+    assert "memory_gate.py" in err and "resume-all" in err

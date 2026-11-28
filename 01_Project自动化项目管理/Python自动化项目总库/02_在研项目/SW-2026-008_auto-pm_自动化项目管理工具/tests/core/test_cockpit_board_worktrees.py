@@ -608,3 +608,18 @@ def test_page_shows_registered_ai_roster_from_ledger_and_refreshes_on_register(q
         label.text() for label in page.findChildren(QLabel)
     ]
     assert [r.rc for r in page.receipts] == [0]
+
+
+def test_worktrees_page_records_and_renders_collection_timestamp(qapp: QApplication) -> None:
+    expected = NOW.isoformat(timespec="seconds")
+    view = _view()
+    assert view.collected_at == expected
+
+    page = _page()
+    assert page.view.collected_at == expected
+    stamps = [
+        label.text()
+        for label in page.findChildren(QLabel)
+        if label.property("collected_at") == expected
+    ]
+    assert stamps == [f"数据采集时间：{expected}"]
